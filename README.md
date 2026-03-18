@@ -1,5 +1,9 @@
 # @amplitude/ai
 
+[![npm version](https://img.shields.io/npm/v/%40amplitude/ai)](https://www.npmjs.com/package/@amplitude/ai)
+[![CI](https://github.com/amplitude/Amplitude-AI-Node/actions/workflows/test.yml/badge.svg)](https://github.com/amplitude/Amplitude-AI-Node/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Agent analytics for [Amplitude](https://amplitude.com). Track every LLM call as events in your Amplitude project, then build funnels, cohorts, and retention charts across AI and product behavior.
 
 ```bash
@@ -71,7 +75,9 @@ One call auto-detects and patches every installed provider (OpenAI, Anthropic, A
 - [API Reference](#api-reference)
 - [For AI Coding Agents](#for-ai-coding-agents)
 - [For Python SDK Migrators](#for-python-sdk-migrators)
-- [Reporting Issues](#reporting-issues)
+- [Need Help?](#need-help)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Installation
 
@@ -2083,9 +2089,23 @@ const search = tool(async (args: { query: string }) => db.search(args.query), {
 });
 ```
 
-## Reporting Issues
+## Need Help?
 
-Found a bug or have a feature request? File an issue on the public tracker:
-
-- **JavaScript/TypeScript SDK issues**: [github.com/amplitude/Amplitude-TypeScript/issues](https://github.com/amplitude/Amplitude-TypeScript/issues) (use the `amplitude-ai` label)
+- **Bug reports and feature requests**: [Open an issue](https://github.com/amplitude/Amplitude-AI-Node/issues)
 - **General questions**: [Amplitude Support](https://help.amplitude.com)
+- **Python SDK**: Looking for the Python version? See [amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)
+
+## Contributing
+
+Contributions are welcome! Please open an issue first to discuss what you'd like to change, then submit a pull request.
+
+1. Fork the repository
+2. Create your branch (`git checkout -b my-feature`)
+3. Install dependencies (`pnpm install`)
+4. Make your changes and add tests
+5. Ensure all tests pass (`pnpm run test:coverage`) and TypeScript compiles (`pnpm run test:typescript`)
+6. Submit a pull request
+
+## License
+
+[MIT](LICENSE)
