@@ -1,0 +1,186 @@
+{
+  "name": "@amplitude/ai",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
+  "keywords": [
+    "amplitude",
+    "ai",
+    "llm",
+    "analytics",
+    "tracking",
+    "openai",
+    "anthropic"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amplitude/Amplitude-AI-Node.git"
+  },
+  "homepage": "https://github.com/amplitude/Amplitude-AI-Node#readme",
+  "bugs": {
+    "url": "https://github.com/amplitude/Amplitude-AI-Node/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./bound-agent": "./dist/bound-agent.js",
+    "./cli/doctor": "./dist/cli/doctor.js",
+    "./cli/init": "./dist/cli/init.js",
+    "./cli/providers": "./dist/cli/providers.js",
+    "./cli/status": "./dist/cli/status.js",
+    "./client": "./dist/client.js",
+    "./config": "./dist/config.js",
+    "./context": "./dist/context.js",
+    "./core/constants": "./dist/core/constants.js",
+    "./core/enrichments": "./dist/core/enrichments.js",
+    "./core/privacy": "./dist/core/privacy.js",
+    "./core/tracking": "./dist/core/tracking.js",
+    "./decorators": "./dist/decorators.js",
+    "./exceptions": "./dist/exceptions.js",
+    "./integrations/anthropic-tools": "./dist/integrations/anthropic-tools.js",
+    "./integrations/crewai": "./dist/integrations/crewai.js",
+    "./integrations/langchain": "./dist/integrations/langchain.js",
+    "./integrations/llamaindex": "./dist/integrations/llamaindex.js",
+    "./integrations/openai-agents": "./dist/integrations/openai-agents.js",
+    "./integrations/opentelemetry": "./dist/integrations/opentelemetry.js",
+    "./internals": "./dist/internals.js",
+    "./mcp": "./dist/mcp/index.js",
+    "./mcp/contract": "./dist/mcp/contract.js",
+    "./mcp/patterns": "./dist/mcp/patterns.js",
+    "./mcp/server": "./dist/mcp/server.js",
+    "./mcp/validate-file": "./dist/mcp/validate-file.js",
+    "./middleware": "./dist/middleware.js",
+    "./patching": "./dist/patching.js",
+    "./propagation": "./dist/propagation.js",
+    "./providers/anthropic": "./dist/providers/anthropic.js",
+    "./providers/azure-openai": "./dist/providers/azure-openai.js",
+    "./providers/base": "./dist/providers/base.js",
+    "./providers/bedrock": "./dist/providers/bedrock.js",
+    "./providers/gemini": "./dist/providers/gemini.js",
+    "./providers/mistral": "./dist/providers/mistral.js",
+    "./providers/openai": "./dist/providers/openai.js",
+    "./register": "./dist/register.js",
+    "./session": "./dist/session.js",
+    "./tenant": "./dist/tenant.js",
+    "./testing": "./dist/testing.js",
+    "./types": "./dist/types.js",
+    "./utils/costs": "./dist/utils/costs.js",
+    "./utils/debug": "./dist/utils/debug.js",
+    "./utils/logger": "./dist/utils/logger.js",
+    "./utils/model-tiers": "./dist/utils/model-tiers.js",
+    "./utils/providers": "./dist/utils/providers.js",
+    "./utils/resolve-module": "./dist/utils/resolve-module.js",
+    "./utils/streaming": "./dist/utils/streaming.js",
+    "./utils/tokens": "./dist/utils/tokens.js",
+    "./wrappers": "./dist/wrappers.js",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "amplitude-ai": "./bin/amplitude-ai.mjs",
+    "amplitude-ai-completions": "./bin/amplitude-ai-completions.mjs",
+    "amplitude-ai-doctor": "./bin/amplitude-ai-doctor.mjs",
+    "amplitude-ai-init": "./bin/amplitude-ai-init.mjs",
+    "amplitude-ai-instrument": "./bin/amplitude-ai-instrument.mjs",
+    "amplitude-ai-mcp": "./bin/amplitude-ai-mcp.mjs",
+    "amplitude-ai-register-catalog": "./bin/amplitude-ai-register-catalog.mjs",
+    "amplitude-ai-status": "./bin/amplitude-ai-status.mjs"
+  },
+  "files": [
+    "AGENTS.md",
+    "dist",
+    "bin",
+    "data",
+    "llms.txt",
+    "llms-full.txt",
+    "mcp.schema.json",
+    ".cursor/skills/instrument-with-amplitude-ai/SKILL.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "check:generated": "node scripts/generate-agent-docs.mjs --check",
+    "clean": "rimraf dist",
+    "generate:agent-docs": "node scripts/generate-agent-docs.mjs",
+    "lint": "eslint --cache --ext .js,.jsx,.ts,.tsx --quiet . && biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
+    "lint:fix": "eslint --fix --ext .js,.jsx,.ts,.tsx . --cache && biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
+    "test": "vitest",
+    "test:changed": "vitest run --changed${VITEST_CHANGED_BASE:+=$VITEST_CHANGED_BASE}",
+    "test:coverage": "vitest run --coverage",
+    "test:packaged": "pnpm run build && vitest run test/packaged-dist-smoke.test.ts",
+    "test:typescript": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "devDependencies": {
+    "@amplitude/analytics-node": "1.3.5",
+    "@biomejs/biome": "1.9.4",
+    "@modelcontextprotocol/sdk": "1.16.0",
+    "@types/node": "^25.5.0",
+    "@typescript-eslint/eslint-plugin": "8.29.1",
+    "@typescript-eslint/parser": "8.29.1",
+    "@vitest/coverage-v8": "4.0.14",
+    "eslint": "8.57.0",
+    "openai": "^5.23.2",
+    "rimraf": "5.0.5",
+    "tsdown": "0.18.4",
+    "typescript": "5.9.3",
+    "vitest": "4.0.14"
+  },
+  "peerDependencies": {
+    "@amplitude/analytics-node": ">=1.3.0",
+    "@anthropic-ai/sdk": ">=0.29.0 <1.0.0",
+    "@aws-sdk/client-bedrock-runtime": ">=3.0.0 <4.0.0",
+    "@google/generative-ai": ">=0.21.0 <1.0.0",
+    "@mistralai/mistralai": ">=1.3.6 <2.0.0",
+    "@pydantic/genai-prices": ">=0.0.1",
+    "js-tiktoken": ">=1.0.0",
+    "openai": ">=4.0.0 <7.0.0",
+    "tiktoken": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@amplitude/analytics-node": {
+      "optional": false
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@aws-sdk/client-bedrock-runtime": {
+      "optional": true
+    },
+    "@google/generative-ai": {
+      "optional": true
+    },
+    "@mistralai/mistralai": {
+      "optional": true
+    },
+    "@pydantic/genai-prices": {
+      "optional": true
+    },
+    "js-tiktoken": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "tiktoken": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "@modelcontextprotocol/sdk": "1.16.0",
+    "zod": "3.25.76"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+    ]
+  },
+  "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017"
+}

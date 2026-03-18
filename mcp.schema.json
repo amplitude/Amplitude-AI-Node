@@ -1,0 +1,18 @@
+{
+  "generated": true,
+  "package": "@amplitude/ai",
+  "version": "0.1.0",
+  "prompt": "instrument_app",
+  "tools": [
+    "get_event_schema",
+    "get_integration_pattern",
+    "validate_setup",
+    "suggest_instrumentation",
+    "validate_file",
+    "search_docs"
+  ],
+  "resources": [
+    "amplitude-ai://event-schema",
+    "amplitude-ai://integration-patterns"
+  ]
+}

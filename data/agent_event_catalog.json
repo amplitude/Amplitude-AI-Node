@@ -1,0 +1,1277 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "generated_at": "2026-03-17T17:32:06.752295+00:00",
+    "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
+    "category": "Agent Analytics"
+  },
+  "events": [
+    {
+      "event_type": "[Agent] User Message",
+      "description": "Fired when a user sends a message to an AI agent. Captures session/trace/turn context, message content (via $llm_message chunking), implicit feedback signals (regeneration, edit), and file attachments. The entry point for user-initiated AI interactions.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Message ID",
+          "type": "string",
+          "description": "Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Component Type",
+          "type": "string",
+          "description": "Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Locale",
+          "type": "string",
+          "description": "User locale (e.g., 'en-US')."
+        },
+        {
+          "name": "[Amplitude] Session Replay ID",
+          "type": "string",
+          "description": "Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay."
+        },
+        {
+          "name": "[Agent] Is Regeneration",
+          "type": "boolean",
+          "description": "Whether the user requested the AI regenerate a previous response."
+        },
+        {
+          "name": "[Agent] Is Edit",
+          "type": "boolean",
+          "description": "Whether the user edited a previous message and resubmitted."
+        },
+        {
+          "name": "[Agent] Edited Message ID",
+          "type": "string",
+          "description": "The message_id of the original message that was edited (links the edit to the original)."
+        },
+        {
+          "name": "[Agent] Has Attachments",
+          "type": "boolean",
+          "description": "Whether this message includes file attachments (uploads, images, etc.)."
+        },
+        {
+          "name": "[Agent] Attachment Types",
+          "type": "string",
+          "description": "Distinct attachment types (e.g., 'pdf', 'image', 'csv'). Serialized JSON array.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Attachment Count",
+          "type": "number",
+          "description": "Number of file attachments included with this message."
+        },
+        {
+          "name": "[Agent] Total Attachment Size Bytes",
+          "type": "number",
+          "description": "Total size of all attachments in bytes."
+        },
+        {
+          "name": "[Agent] Attachments",
+          "type": "string",
+          "description": "Serialized JSON array of attachment metadata (type, name, size_bytes, mime_type). Only metadata, never file content."
+        },
+        {
+          "name": "[Agent] Message Labels",
+          "type": "string",
+          "description": "Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] AI Response",
+      "description": "Fired when an AI agent generates a response. Captures model, provider, latency, TTFB, token breakdowns (input/output/reasoning/cache), cache-aware cost, finish reason, reasoning content, system prompt, model configuration, copy signal, and model tier. The primary event for LLM performance and cost analytics.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Message ID",
+          "type": "string",
+          "description": "Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Component Type",
+          "type": "string",
+          "description": "Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Model Name",
+          "type": "string",
+          "description": "LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Provider",
+          "type": "string",
+          "description": "LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Latency Ms",
+          "type": "number",
+          "description": "Total wall-clock latency in milliseconds for this operation.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Is Error",
+          "type": "boolean",
+          "description": "Whether this event represents an error condition.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Error Message",
+          "type": "string",
+          "description": "Error message text when Is Error is true."
+        },
+        {
+          "name": "[Agent] Locale",
+          "type": "string",
+          "description": "User locale (e.g., 'en-US')."
+        },
+        {
+          "name": "[Agent] Span Kind",
+          "type": "string",
+          "description": "Classification of the span type for OTEL bridge compatibility."
+        },
+        {
+          "name": "[Amplitude] Session Replay ID",
+          "type": "string",
+          "description": "Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay."
+        },
+        {
+          "name": "[Agent] TTFB Ms",
+          "type": "number",
+          "description": "Time to first byte/token in milliseconds. Measures perceived responsiveness for streaming."
+        },
+        {
+          "name": "[Agent] Input Tokens",
+          "type": "number",
+          "description": "Number of input/prompt tokens consumed by this LLM call."
+        },
+        {
+          "name": "[Agent] Output Tokens",
+          "type": "number",
+          "description": "Number of output/completion tokens generated by this LLM call."
+        },
+        {
+          "name": "[Agent] Total Tokens",
+          "type": "number",
+          "description": "Total tokens consumed (input + output)."
+        },
+        {
+          "name": "[Agent] Reasoning Tokens",
+          "type": "number",
+          "description": "Tokens consumed by reasoning/thinking (o1, o3, extended thinking models)."
+        },
+        {
+          "name": "[Agent] Cache Read Tokens",
+          "type": "number",
+          "description": "Input tokens served from the provider's prompt cache (cheaper rate). Used for cache-aware cost calculation."
+        },
+        {
+          "name": "[Agent] Cache Creation Tokens",
+          "type": "number",
+          "description": "Input tokens that created new prompt cache entries."
+        },
+        {
+          "name": "[Agent] Cost USD",
+          "type": "number",
+          "description": "Estimated cost in USD for this LLM call. Cache-aware when cache token counts are provided."
+        },
+        {
+          "name": "[Agent] Finish Reason",
+          "type": "string",
+          "description": "Why the model stopped generating: 'stop', 'end_turn', 'tool_use', 'length', 'content_filter', etc."
+        },
+        {
+          "name": "[Agent] Tool Calls",
+          "type": "string",
+          "description": "Serialized JSON array of tool call requests made by the AI in this response."
+        },
+        {
+          "name": "[Agent] Has Reasoning",
+          "type": "boolean",
+          "description": "Whether the AI response included reasoning/thinking content."
+        },
+        {
+          "name": "[Agent] Reasoning Content",
+          "type": "string",
+          "description": "The AI's reasoning/thinking content (when available and content_mode permits)."
+        },
+        {
+          "name": "[Agent] System Prompt",
+          "type": "string",
+          "description": "The system prompt used for this LLM call (when content_mode permits). Chunked for long prompts."
+        },
+        {
+          "name": "[Agent] System Prompt Length",
+          "type": "number",
+          "description": "Character length of the system prompt."
+        },
+        {
+          "name": "[Agent] Temperature",
+          "type": "number",
+          "description": "Temperature parameter used for this LLM call."
+        },
+        {
+          "name": "[Agent] Max Output Tokens",
+          "type": "number",
+          "description": "Maximum output tokens configured for this LLM call."
+        },
+        {
+          "name": "[Agent] Top P",
+          "type": "number",
+          "description": "Top-p (nucleus sampling) parameter used for this LLM call."
+        },
+        {
+          "name": "[Agent] Is Streaming",
+          "type": "boolean",
+          "description": "Whether this response was generated via streaming."
+        },
+        {
+          "name": "[Agent] Prompt ID",
+          "type": "string",
+          "description": "Identifier for the prompt template or version used."
+        },
+        {
+          "name": "[Agent] Was Copied",
+          "type": "boolean",
+          "description": "Whether the user copied this AI response content. An implicit positive quality signal."
+        },
+        {
+          "name": "[Agent] Was Cached",
+          "type": "boolean",
+          "description": "Whether this response was served from a semantic/full-response cache (distinct from token-level prompt caching)."
+        },
+        {
+          "name": "[Agent] Model Tier",
+          "type": "string",
+          "description": "Model tier classification: 'fast' (GPT-4o-mini, Haiku, Flash), 'standard' (GPT-4o, Sonnet, Pro), or 'reasoning' (o1, o3, DeepSeek-R1). Auto-inferred from model name."
+        },
+        {
+          "name": "[Agent] Has Attachments",
+          "type": "boolean",
+          "description": "Whether this AI response includes generated attachments (images, charts, files)."
+        },
+        {
+          "name": "[Agent] Attachment Types",
+          "type": "string",
+          "description": "Distinct attachment types in this AI response. Serialized JSON array.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Attachment Count",
+          "type": "number",
+          "description": "Number of attachments generated by the AI in this response."
+        },
+        {
+          "name": "[Agent] Total Attachment Size Bytes",
+          "type": "number",
+          "description": "Total size of all AI-generated attachments in bytes."
+        },
+        {
+          "name": "[Agent] Attachments",
+          "type": "string",
+          "description": "Serialized JSON array of AI-generated attachment metadata."
+        },
+        {
+          "name": "[Agent] Message Labels",
+          "type": "string",
+          "description": "Serialized JSON array of MessageLabel objects attached to this AI response."
+        },
+        {
+          "name": "[Agent] Message Label Map",
+          "type": "string",
+          "description": "Serialized JSON map of label key to value for quick lookup."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Tool Call",
+      "description": "Fired when an AI agent invokes a tool or function. Captures tool name, input/output (serialized JSON, respects content_mode), latency, success status, and error details. Use to identify which tools are most frequently used, slowest, and most error-prone.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Component Type",
+          "type": "string",
+          "description": "Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Latency Ms",
+          "type": "number",
+          "description": "Total wall-clock latency in milliseconds for this operation.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Is Error",
+          "type": "boolean",
+          "description": "Whether this event represents an error condition.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Error Message",
+          "type": "string",
+          "description": "Error message text when Is Error is true."
+        },
+        {
+          "name": "[Agent] Locale",
+          "type": "string",
+          "description": "User locale (e.g., 'en-US')."
+        },
+        {
+          "name": "[Agent] Span Kind",
+          "type": "string",
+          "description": "Classification of the span type for OTEL bridge compatibility."
+        },
+        {
+          "name": "[Amplitude] Session Replay ID",
+          "type": "string",
+          "description": "Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay."
+        },
+        {
+          "name": "[Agent] Invocation ID",
+          "type": "string",
+          "description": "Unique identifier for this tool invocation (UUID). Used to link tool calls to parent messages.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Tool Name",
+          "type": "string",
+          "description": "Name of the tool/function that was invoked (e.g., 'search_docs', 'web_search').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Tool Success",
+          "type": "boolean",
+          "description": "Whether the tool call completed successfully.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Tool Input",
+          "type": "string",
+          "description": "Serialized JSON of the tool's input arguments. Only sent when content_mode='full'."
+        },
+        {
+          "name": "[Agent] Tool Output",
+          "type": "string",
+          "description": "Serialized JSON of the tool's output/return value. Only sent when content_mode='full'."
+        },
+        {
+          "name": "[Agent] Parent Message ID",
+          "type": "string",
+          "description": "The message_id of the user message that triggered this tool call. Links the tool call into the event graph."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Embedding",
+      "description": "Fired when a vector embedding operation is performed. Captures model, provider, latency, input tokens, vector dimensions, and cost. Used for RAG pipeline analytics.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Component Type",
+          "type": "string",
+          "description": "Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Model Name",
+          "type": "string",
+          "description": "LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Provider",
+          "type": "string",
+          "description": "LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Latency Ms",
+          "type": "number",
+          "description": "Total wall-clock latency in milliseconds for this operation.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Span ID",
+          "type": "string",
+          "description": "Unique identifier for this embedding operation (UUID).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Input Tokens",
+          "type": "number",
+          "description": "Number of input tokens processed by the embedding model."
+        },
+        {
+          "name": "[Agent] Embedding Dimensions",
+          "type": "number",
+          "description": "Dimensionality of the output embedding vector."
+        },
+        {
+          "name": "[Agent] Cost USD",
+          "type": "number",
+          "description": "Estimated cost in USD for this embedding operation."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Span",
+      "description": "Fired for a generic pipeline operation such as vector search, rerank, guardrails, or any custom step. Captures span name, input/output state (serialized JSON), latency, and parent span hierarchy. Enables pipeline step analysis and latency attribution.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Latency Ms",
+          "type": "number",
+          "description": "Total wall-clock latency in milliseconds for this operation.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Is Error",
+          "type": "boolean",
+          "description": "Whether this event represents an error condition.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Error Message",
+          "type": "string",
+          "description": "Error message text when Is Error is true."
+        },
+        {
+          "name": "[Agent] Span ID",
+          "type": "string",
+          "description": "Unique identifier for this span (UUID).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Span Name",
+          "type": "string",
+          "description": "Name of the operation (e.g., 'rag_pipeline', 'vector_search', 'rerank').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Parent Span ID",
+          "type": "string",
+          "description": "Span ID of the parent span for nested pipeline steps."
+        },
+        {
+          "name": "[Agent] Input State",
+          "type": "string",
+          "description": "Serialized JSON of the span's input state. Only sent when content_mode='full'."
+        },
+        {
+          "name": "[Agent] Output State",
+          "type": "string",
+          "description": "Serialized JSON of the span's output state. Only sent when content_mode='full'."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Session End",
+      "description": "Fired when a session is explicitly closed by the SDK (via track_session_end() or Session context manager exit). Can carry optional enrichments and abandonment tracking. Triggers server-side enrichment when content_mode='full'.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Enrichments",
+          "type": "string",
+          "description": "Serialized JSON of SessionEnrichments (topic classifications, rubric scores, outcome, flags). Attached when enrichments are provided at session close."
+        },
+        {
+          "name": "[Agent] Abandonment Turn",
+          "type": "number",
+          "description": "Turn ID of the last user message that received an AI response before the user left. Low values (e.g., 1) strongly signal first-response dissatisfaction."
+        },
+        {
+          "name": "[Agent] Session Idle Timeout Minutes",
+          "type": "number",
+          "description": "Custom idle timeout for this session (default 30 min). Tells the server how long to wait before auto-closing."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Session Enrichment",
+      "description": "Fired when a customer provides structured session classifications via track_session_enrichment(). Used with content_mode='customer_enriched' for teams who run their own classifiers. Distinct from the server-generated [Agent] Session Evaluation. Contains serialized SessionEnrichments (topics, rubrics, outcome, flags) as a single JSON property.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Enrichments",
+          "type": "string",
+          "description": "Serialized JSON of SessionEnrichments: topic_classifications, rubrics, overall_outcome, quality_score, sentiment_score, boolean flags, agent chain metadata, and message labels.",
+          "is_required": true
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Score",
+      "description": "Quality signal attached to a message or session. Covers user feedback (source='user', e.g., thumbs up/down), automated evals (source='ai', e.g., LLM-as-judge), human annotations (source='reviewer'), and server-generated rubric scores. All quality signals share this event type, enabling unified queries across signal sources.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Trace ID",
+          "type": "string",
+          "description": "Identifies one user-message-to-AI-response cycle within a session."
+        },
+        {
+          "name": "[Agent] Turn ID",
+          "type": "number",
+          "description": "Monotonically increasing counter for event ordering within a session."
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston')."
+        },
+        {
+          "name": "[Agent] Parent Agent ID",
+          "type": "string",
+          "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+        },
+        {
+          "name": "[Agent] Env",
+          "type": "string",
+          "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] SDK Version",
+          "type": "string",
+          "description": "Version of the amplitude-ai SDK that produced this event.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Runtime",
+          "type": "string",
+          "description": "SDK runtime: 'python' or 'node'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Score Name",
+          "type": "string",
+          "description": "Name of the score (e.g., 'user-feedback', 'task_completion', 'accuracy', 'groundedness').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Score Value",
+          "type": "number",
+          "description": "Numeric score value. Binary (0/1), continuous (0.0-1.0), or rating scale (1-5).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Target ID",
+          "type": "string",
+          "description": "The message_id or session_id being scored.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Target Type",
+          "type": "string",
+          "description": "What is being scored: 'message' or 'session'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluation Source",
+          "type": "string",
+          "description": "Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Comment",
+          "type": "string",
+          "description": "Optional text explanation for the score (respects content_mode)."
+        },
+        {
+          "name": "[Agent] Taxonomy Version",
+          "type": "string",
+          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id)."
+        },
+        {
+          "name": "[Agent] Evaluated At",
+          "type": "number",
+          "description": "Epoch milliseconds when this enrichment/evaluation was computed."
+        },
+        {
+          "name": "[Agent] Score Label",
+          "type": "string",
+          "description": "Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Session Evaluation",
+      "description": "Fired once per enriched session by the server-side enrichment pipeline. Contains session-level facts: overall outcome, turn count, boolean flags (has_task_failure, has_negative_feedback, has_technical_failure, has_data_quality_issues), cost, and behavioral patterns. Enables cohorts like 'users with 3+ task failures in 30 days'.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluation Source",
+          "type": "string",
+          "description": "Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Taxonomy Version",
+          "type": "string",
+          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluated At",
+          "type": "number",
+          "description": "Epoch milliseconds when this enrichment/evaluation was computed.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Overall Outcome",
+          "type": "string",
+          "description": "Session outcome classification: 'success', 'partial_success', 'failure', 'abandoned', 'response_provided', etc.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Turn Count",
+          "type": "number",
+          "description": "Number of conversation turns in this session.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Session Total Tokens",
+          "type": "number",
+          "description": "Total LLM tokens consumed across all turns in this session."
+        },
+        {
+          "name": "[Agent] Session Avg Latency Ms",
+          "type": "number",
+          "description": "Average AI response latency in milliseconds across the session."
+        },
+        {
+          "name": "[Agent] Request Complexity",
+          "type": "string",
+          "description": "Complexity classification of the user's request: 'simple', 'moderate', 'complex', or 'ambiguous'."
+        },
+        {
+          "name": "[Agent] Has Task Failure",
+          "type": "boolean",
+          "description": "Whether the agent failed to complete the user's request.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Has Negative Feedback",
+          "type": "boolean",
+          "description": "Whether the user expressed dissatisfaction during the session.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Has Technical Failure",
+          "type": "boolean",
+          "description": "Whether technical errors occurred (tool timeouts, API failures, etc.).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Has Data Quality Issues",
+          "type": "boolean",
+          "description": "Whether the AI output had data quality problems (wrong data, hallucinations, etc.).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Models Used",
+          "type": "string",
+          "description": "LLM models used in this session. JSON array of strings.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Root Agent Name",
+          "type": "string",
+          "description": "Entry-point agent in multi-agent flows."
+        },
+        {
+          "name": "[Agent] Agent Chain Depth",
+          "type": "number",
+          "description": "Number of agents in the delegation chain."
+        },
+        {
+          "name": "[Agent] Task Failure Type",
+          "type": "string",
+          "description": "Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete')."
+        },
+        {
+          "name": "[Agent] Technical Error Count",
+          "type": "number",
+          "description": "Count of technical errors that occurred during the session."
+        },
+        {
+          "name": "[Agent] Error Categories",
+          "type": "string",
+          "description": "Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Behavioral Patterns",
+          "type": "string",
+          "description": "Detected behavioral anti-patterns (e.g., 'retry_storm', 'clarification_loop', 'early_abandonment'). JSON array of strings.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Session Cost USD",
+          "type": "number",
+          "description": "Total LLM cost in USD for this AI session (aggregated from per-message costs)."
+        },
+        {
+          "name": "[Agent] Enrichment Cost USD",
+          "type": "number",
+          "description": "Cost in USD of running the enrichment pipeline's LLM inference for this session. Distinct from the session's own LLM cost."
+        },
+        {
+          "name": "[Agent] Quality Score",
+          "type": "number",
+          "description": "Overall quality score (0.0-1.0) computed by the enrichment pipeline for this session."
+        },
+        {
+          "name": "[Agent] Sentiment Score",
+          "type": "number",
+          "description": "User sentiment score (0.0-1.0) inferred from the conversation by the enrichment pipeline."
+        },
+        {
+          "name": "[Agent] Task Failure Reason",
+          "type": "string",
+          "description": "Explanation of why the task failed when has_task_failure is true (e.g., 'chart data source unavailable')."
+        },
+        {
+          "name": "[Agent] Agent Chain",
+          "type": "string",
+          "description": "Serialized JSON array of agent IDs representing the delegation chain in multi-agent flows.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Project ID",
+          "type": "string",
+          "description": "Amplitude project ID that owns the AI session being evaluated."
+        },
+        {
+          "name": "[Agent] Has User Feedback",
+          "type": "boolean",
+          "description": "Whether the session received explicit user feedback (thumbs up/down, rating).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] User Score",
+          "type": "number",
+          "description": "Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true."
+        },
+        {
+          "name": "[Agent] Agent Version",
+          "type": "string",
+          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Topic Classification",
+      "description": "Fired once per topic model per session by the server-side enrichment pipeline. A session with 3 topic models (e.g., query_intent, product_area, error_domain) produces 3 of these events. Property names are always the same; the topic model name goes in the value. Enables funnels like 'AI session about charts -> Chart Created'.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Customer Org ID",
+          "type": "string",
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluation Source",
+          "type": "string",
+          "description": "Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Taxonomy Version",
+          "type": "string",
+          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluated At",
+          "type": "number",
+          "description": "Epoch milliseconds when this enrichment/evaluation was computed.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Topic",
+          "type": "string",
+          "description": "Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Selection Mode",
+          "type": "string",
+          "description": "Whether this topic model uses 'single' (MECE) or 'multiple' (multi-label) selection.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Primary",
+          "type": "string",
+          "description": "Primary classification value (e.g., 'charts', 'billing_issues')."
+        },
+        {
+          "name": "[Agent] Secondary",
+          "type": "string",
+          "description": "Secondary classifications for multi-label topics. JSON array of strings.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Subcategories",
+          "type": "string",
+          "description": "Subcategories for finer classification within the primary topic (e.g., 'TREND_ANALYSIS', 'WRONG_EVENT'). JSON array of strings.",
+          "is_array_type": true
+        }
+      ]
+    }
+  ]
+}

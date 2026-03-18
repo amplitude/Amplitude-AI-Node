@@ -1,0 +1,49 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Dry run (build only, don't publish)"
+        required: true
+        default: "true"
+
+jobs:
+  publish:
+    name: Build and publish @amplitude/ai
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Type check
+        run: pnpm run test:typescript
+
+      - name: Run tests
+        run: pnpm run test:coverage
+
+      - name: Publish to npm
+        if: >
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.dryRun == 'false')
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,28 @@
+<!-- GENERATED FILE: do not edit manually -->
+# llms.txt
+package=@amplitude/ai
+version=0.1.0
+
+[mcp.tools]
+get_event_schema
+get_integration_pattern
+validate_setup
+suggest_instrumentation
+validate_file
+search_docs
+
+[mcp.resources]
+amplitude-ai://event-schema
+amplitude-ai://integration-patterns
+
+[events]
+[Agent] AI Response
+[Agent] Embedding
+[Agent] Score
+[Agent] Session End
+[Agent] Session Enrichment
+[Agent] Session Evaluation
+[Agent] Span
+[Agent] Tool Call
+[Agent] Topic Classification
+[Agent] User Message
