@@ -63,7 +63,7 @@ describe('StreamingAccumulator', () => {
 
     const smallDelay = () => {
       const start = Date.now();
-      while (Date.now() - start < 5) {}
+      while (Date.now() - start < 5) { /* busy-wait */ }
     };
     smallDelay();
 

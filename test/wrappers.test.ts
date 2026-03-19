@@ -40,7 +40,7 @@ describe('wrap', () => {
 
   it('wrap() with OpenAI client throws or returns AmpOpenAI (depends on SDK install)', (): void => {
     try {
-      require('openai');
+      require('openai'); // eslint-disable-line @typescript-eslint/no-require-imports
       // If openai is installed, we'd need a real instance — just verify the import path works
       expect(typeof wrap).toBe('function');
     } catch {
@@ -54,7 +54,7 @@ describe('wrap', () => {
 
   it('wrap() with Anthropic client throws or returns AmpAnthropic (depends on SDK install)', (): void => {
     try {
-      require('@anthropic-ai/sdk');
+      require('@anthropic-ai/sdk'); // eslint-disable-line @typescript-eslint/no-require-imports
       expect(typeof wrap).toBe('function');
     } catch {
       const fakeAnthropic = {

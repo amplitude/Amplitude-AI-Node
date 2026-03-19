@@ -14,7 +14,6 @@ import {
   PROP_PARENT_AGENT_ID,
   PROP_SESSION_ID,
   PROP_SESSION_REPLAY_ID,
-  PROP_TRACE_ID,
   PROP_TURN_ID,
 } from '../src/core/constants.js';
 import { SessionEnrichments } from '../src/core/enrichments.js';

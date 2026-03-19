@@ -5,12 +5,11 @@
 import type { PrivacyConfig } from '../core/privacy.js';
 import { trackUserMessage } from '../core/tracking.js';
 import { getDefaultPropagateContext, injectContext } from '../propagation.js';
-import {
-  resolveAmplitude,
-  type AmplitudeLike,
-  type AmplitudeOrAI,
-  type AnthropicResponse,
-  type TrackFn,
+import type {
+  AmplitudeLike,
+  AmplitudeOrAI,
+  AnthropicResponse,
+  TrackFn,
 } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
