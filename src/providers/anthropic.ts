@@ -401,6 +401,7 @@ export class WrappedMessages {
         context: ctx.context,
         env: ctx.env,
         groups: ctx.groups,
+        eventProperties: ctx.eventProperties,
         privacyConfig: this._privacyConfig,
       });
     }

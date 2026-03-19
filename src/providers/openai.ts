@@ -439,6 +439,7 @@ export class WrappedCompletions {
         context: ctx.context,
         env: ctx.env,
         groups: ctx.groups,
+        eventProperties: ctx.eventProperties,
         privacyConfig: this._privacyConfig,
       });
     }
@@ -738,6 +739,7 @@ export class WrappedResponses {
         context: ctx.context,
         env: ctx.env,
         groups: ctx.groups,
+        eventProperties: ctx.eventProperties,
         privacyConfig: this._privacyConfig,
       });
     }

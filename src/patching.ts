@@ -8,6 +8,10 @@
 import type { AmplitudeAI } from './client.js';
 import { getActiveContext } from './context.js';
 import {
+  PROP_IDLE_TIMEOUT_MINUTES,
+  PROP_SESSION_REPLAY_ID,
+} from './core/constants.js';
+import {
   _AnthropicModule,
   ANTHROPIC_AVAILABLE,
 } from './providers/anthropic.js';
@@ -1527,12 +1531,28 @@ function _contextExtras(ctx: {
   agentVersion?: string | null;
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
+  idleTimeoutMinutes?: number | null;
+  deviceId?: string | null;
+  browserSessionId?: string | null;
 }): Record<string, unknown> {
-  return {
+  const extras: Record<string, unknown> = {
     parentAgentId: ctx.parentAgentId ?? undefined,
     customerOrgId: ctx.customerOrgId ?? undefined,
     agentVersion: ctx.agentVersion ?? undefined,
     context: ctx.context ?? undefined,
     groups: ctx.groups ?? undefined,
   };
+
+  const ep: Record<string, unknown> = {};
+  if (ctx.idleTimeoutMinutes != null) {
+    ep[PROP_IDLE_TIMEOUT_MINUTES] = ctx.idleTimeoutMinutes;
+  }
+  if (ctx.deviceId && ctx.browserSessionId) {
+    ep[PROP_SESSION_REPLAY_ID] = `${ctx.deviceId}/${ctx.browserSessionId}`;
+  }
+  if (Object.keys(ep).length > 0) {
+    extras.eventProperties = ep;
+  }
+
+  return extras;
 }

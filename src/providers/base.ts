@@ -126,6 +126,7 @@ export abstract class BaseAIProvider {
       context: opts.context,
       env: opts.env,
       groups: opts.groups,
+      eventProperties: opts.eventProperties,
     });
 
     return trackAiMessage({
@@ -142,6 +143,7 @@ export abstract class BaseAIProvider {
       context: merged.context ?? opts.context,
       env: merged.env ?? opts.env,
       groups: merged.groups ?? opts.groups,
+      eventProperties: merged.eventProperties ?? opts.eventProperties,
       privacyConfig: this._privacyConfig,
     });
   }
