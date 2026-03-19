@@ -39,17 +39,26 @@ One call auto-detects and patches every installed provider (OpenAI, Anthropic, A
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [Current Limitations](#current-limitations)
+  - [Is this for me?](#is-this-for-me)
+  - [Why this SDK?](#why-this-sdk)
+  - [What you can build](#what-you-can-build)
 - [Choose Your Integration Tier](#choose-your-integration-tier)
   - [Support matrix](#support-matrix)
   - [Parity and runtime limitations](#parity-and-runtime-limitations)
 - [Core Concepts](#core-concepts)
+  - [User Identity](#user-identity)
+  - [Session](#session)
 - [Configuration](#configuration)
+- [Context Dict Conventions](#context-dict-conventions)
 - [Privacy & Content Control](#privacy--content-control)
 - [Cache-Aware Cost Tracking](#cache-aware-cost-tracking)
+- [Semantic Cache Tracking](#semantic-cache-tracking)
 - [Model Tier Classification](#model-tier-classification)
 - [Provider Wrappers](#provider-wrappers)
 - [Streaming Tracking](#streaming-tracking)
 - [Attachment Tracking](#attachment-tracking)
+- [Implicit Feedback](#implicit-feedback)
 - [tool() and observe() HOFs](#tool-and-observe-hofs)
 - [Scoring Patterns](#scoring-patterns)
 - [Enrichments](#enrichments)
@@ -57,6 +66,8 @@ One call auto-detects and patches every installed provider (OpenAI, Anthropic, A
 - [Patching (Zero-Code Instrumentation)](#patching-zero-code-instrumentation)
 - [Auto-Instrumentation CLI](#auto-instrumentation-cli)
 - [Integrations](#integrations)
+- [Data Flow](#data-flow)
+- [Which Integration Should I Use?](#which-integration-should-i-use)
 - [Integration Patterns](#integration-patterns)
 - [Serverless Environments](#serverless-environments)
 - [Error Handling and Reliability](#error-handling-and-reliability)
@@ -151,6 +162,49 @@ The zero-code / CLI setup gives you cost, latency, token counts, and error track
 | + `sessionId`        | Session grouping, enrichment, behavioral patterns |
 
 Adding `userId` is one option per call. Adding session context is `session.run()`. See [Session](#session) and [Choose Your Integration Tier](#choose-your-integration-tier).
+
+### Current Limitations
+
+| Area | Status |
+| ---- | ------ |
+| Runtime | Node.js only (no browser). Python SDK available separately ([amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)). |
+| Zero-code patching | OpenAI, Anthropic, Azure OpenAI, Gemini, Mistral, Bedrock (Converse/ConverseStream only). |
+| CrewAI | Python-only; the Node.js export throws `ProviderError` by design. Use LangChain or OpenTelemetry integrations instead. |
+| OTEL scope filtering | Not yet supported (Python SDK has `allowed_scopes`/`blocked_scopes`). |
+| Streaming cost tracking | Automatic for OpenAI and Anthropic. Manual token counts required for other providers' streamed responses. |
+
+### Is this for me?
+
+**Yes, if** you're building an AI-powered feature (chatbot, copilot, agent, RAG pipeline) and you want to measure how it impacts real user behavior. AI events land in the same Amplitude project as your product events, so you can build funnels from "user asks a question" to "user converts," create cohorts of users with low AI quality scores, and measure retention without stitching data across tools.
+
+**Already using an LLM observability tool?** Keep it. The [OTEL bridge](#opentelemetry) adds Amplitude as a second destination in one line. Your existing traces stay, and you get product analytics on top.
+
+### Why this SDK?
+
+Most AI observability tools give you traces. This SDK gives you **per-turn events that live in your product analytics** so you can:
+
+- Build funnels from "user opens chat" through "AI responds" to "user converts"
+- Create cohorts of users with low AI quality scores and measure their 7-day retention
+- Answer "is this AI feature helping or hurting?" without moving data between tools
+
+The structural difference is the event model. Trace-centric tools typically produce spans per LLM call. This SDK produces **one event per conversation turn** with 40+ properties: model, tokens, cost, latency, reasoning, implicit feedback signals (regeneration, copy, abandonment), cache breakdowns, agent hierarchy, and experiment context. Each event is independently queryable in Amplitude's charts, cohorts, funnels, and retention analysis.
+
+**Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
+
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code.
+
+**Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
+
+**Cache-aware cost tracking.** Pass `cacheReadTokens` and `cacheCreationTokens` for accurate blended costs. Without this breakdown, naive cost calculation can overestimate by 2-5x for cache-heavy workloads.
+
+### What you can build
+
+Once AI events are in Amplitude alongside your product events:
+
+- **Cohorts.** "Users who had 3+ task failures in the last 30 days." "Users with low task completion scores." Target them with Guides, measure churn impact.
+- **Funnels.** "AI session about charts -> Chart Created." "Sign Up -> First AI Session -> Conversion." Measure whether AI drives feature adoption and onboarding.
+- **Retention.** Do users with successful AI sessions retain better than those with failures? Segment retention curves by `[Agent] Overall Outcome` or task completion score.
+- **Agent analytics.** Compare quality, cost, and failure rate across agents in one chart. Identify which agent in a multi-agent chain introduced a failure.
 
 ## Choose Your Integration Tier
 
@@ -328,6 +382,42 @@ const tenant = ai.tenant('org-456', { env: 'production' });
 const agent = tenant.agent('support-bot', { userId: 'user-123' });
 ```
 
+### User Identity
+
+User identity flows through the **session**, **per-call**, or **middleware** -- not at agent creation or patch time. This keeps the agent reusable across users.
+
+**Via sessions** (recommended): pass `userId` when opening a session:
+
+```typescript
+const agent = ai.agent('support-bot', { env: 'production' });
+const session = agent.session({ userId: 'user-42' });
+
+await session.run(async (s) => {
+  s.trackUserMessage('Hello');
+  // userId inherited from session context
+});
+```
+
+**Per-call**: pass `userId` on each tracking call (useful with the zero-code tier):
+
+```typescript
+agent.trackUserMessage('Hello', {
+  userId: 'user-42',
+  sessionId: 'sess-1',
+});
+```
+
+**Via middleware**: `createAmplitudeAIMiddleware` extracts user identity from the request (see [Middleware](#middleware)):
+
+```typescript
+app.use(
+  createAmplitudeAIMiddleware({
+    amplitudeAI: ai,
+    userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+  }),
+);
+```
+
 ### Session
 
 Async context manager using `AsyncLocalStorage`. Use `session.run()` to execute a callback within session context; session end is tracked automatically on exit:
@@ -345,9 +435,34 @@ Start a new trace within an ongoing session to group related operations:
 ```typescript
 await session.run(async (s) => {
   const traceId = s.newTrace();
-  // All subsequent tracking calls inherit this traceId
   s.trackUserMessage('Follow-up question');
   s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs);
+});
+```
+
+For sessions where gaps between messages may exceed 30 minutes (e.g., coding assistants, support agents waiting on customer replies), pass `idleTimeoutMinutes` so Amplitude knows the session is still active:
+
+```typescript
+const session = agent.session({
+  userId: 'user-123',
+  idleTimeoutMinutes: 240, // expect up to 4-hour gaps
+});
+```
+
+Without this, sessions with long idle periods may be closed and evaluated prematurely. The default is 30 minutes.
+
+**Link to Session Replay**: If your frontend uses Amplitude's [Session Replay](https://www.docs.developers.amplitude.com/session-replay/), pass the browser's `deviceId` and `browserSessionId` to link AI sessions to browser recordings:
+
+```typescript
+const session = agent.session({
+  userId: 'user-123',
+  deviceId: req.headers['x-amp-device-id'],
+  browserSessionId: req.headers['x-amp-session-id'],
+});
+
+await session.run(async (s) => {
+  s.trackUserMessage('What is retention?');
+  // All events now carry [Amplitude] Session Replay ID = deviceId/browserSessionId
 });
 ```
 
@@ -423,6 +538,58 @@ const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
 | `validate`                | Enable strict validation of required fields                                                                 |
 | `onEventCallback`         | Callback invoked after every tracked event `(event, statusCode, message) => void`                           |
 | `propagateContext`        | Enable cross-service context propagation                                                                    |
+
+## Context Dict Conventions
+
+The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unknown>` that is JSON-serialized and attached to every event as `[Agent] Context`. This is the recommended way to add segmentation dimensions without requiring new global properties.
+
+**Recommended keys:**
+
+| Key | Example Values | Use Case |
+| --- | --- | --- |
+| `agent_type` | `"planner"`, `"executor"`, `"retriever"`, `"router"` | Filter/group analytics by agent role in multi-agent systems. |
+| `experiment_variant` | `"control"`, `"treatment-v2"`, `"prompt-rewrite-a"` | Segment AI sessions by A/B test variant. Compare quality scores, abandonment rates, or cost across experiment arms. |
+| `feature_flag` | `"new-rag-pipeline"`, `"reasoning-model-enabled"` | Track which feature flags were active during the session. |
+| `surface` | `"chat"`, `"search"`, `"copilot"`, `"email-draft"` | Identify which UI surface or product area triggered the AI interaction. |
+| `prompt_revision` | `"v7"`, `"abc123"`, `"2026-02-15"` | Track which prompt version was used. Detect prompt regression when combined with `agentVersion`. |
+| `deployment_region` | `"us-east-1"`, `"eu-west-1"` | Segment by deployment region for latency analysis or compliance tracking. |
+| `canary_group` | `"canary"`, `"stable"` | Identify canary vs. stable deployments for progressive rollout monitoring. |
+
+**Example:**
+
+```typescript
+const agent = ai.agent('support-bot', {
+  userId: 'u1',
+  agentVersion: '4.2.0',
+  context: {
+    agent_type: 'executor',
+    experiment_variant: 'reasoning-enabled',
+    surface: 'chat',
+    feature_flag: 'new-rag-pipeline',
+    prompt_revision: 'v7',
+  },
+});
+
+// All events from this agent (and its sessions, child agents, and provider
+// wrappers) will include [Agent] Context with these keys.
+```
+
+**Context merging in child agents:**
+
+```typescript
+const parent = ai.agent('orchestrator', {
+  context: { experiment_variant: 'treatment', surface: 'chat' },
+});
+const child = parent.child('researcher', {
+  context: { agent_type: 'retriever' },
+});
+// child context = { experiment_variant: 'treatment', surface: 'chat', agent_type: 'retriever' }
+// Child keys override parent keys; parent keys absent from the child are preserved.
+```
+
+**Querying in Amplitude:** The `[Agent] Context` property is a JSON string. Use Amplitude's JSON property parsing to extract individual keys for charts, cohorts, and funnels. For example, group by `[Agent] Context.agent_type` to see metrics by agent role.
+
+> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Evaluation`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
 
 ## Privacy & Content Control
 
@@ -547,6 +714,18 @@ s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
   totalCostUsd: 0.0034,
 });
 ```
+
+## Semantic Cache Tracking
+
+Track full-response semantic cache hits (distinct from token-level prompt caching above):
+
+```typescript
+s.trackAiMessage(cachedResponse.content, 'gpt-4o', 'openai', latencyMs, {
+  wasCached: true, // served from Redis/semantic cache
+});
+```
+
+Maps to `[Agent] Was Cached`. Enables "cache hit rate" charts and cost optimization analysis. Only emitted when `true`; omitted (not `false`) when the response was not cached.
 
 ## Model Tier Classification
 
@@ -759,6 +938,42 @@ s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
+## Implicit Feedback
+
+Track behavioral signals that indicate whether a response met the user's need, without requiring explicit ratings:
+
+```typescript
+// User asks a question
+s.trackUserMessage('How do I create a funnel?');
+
+// AI responds — user copies the answer (positive signal)
+s.trackAiMessage('To create a funnel, go to...', 'gpt-4o', 'openai', latencyMs, {
+  wasCopied: true,
+});
+
+// User regenerates (negative signal — first response wasn't good enough)
+s.trackUserMessage('How do I create a funnel?', {
+  isRegeneration: true,
+});
+
+// User edits their question (refining intent)
+s.trackUserMessage('How do I create a conversion funnel for signups?', {
+  isEdit: true,
+  editedMessageId: originalMsgId, // links the edit to the original
+});
+```
+
+Track abandonment at session end — a low `abandonmentTurn` (e.g., 1) strongly signals first-response dissatisfaction:
+
+```typescript
+agent.trackSessionEnd({
+  sessionId: 'sess-1',
+  abandonmentTurn: 1, // user left after first AI response
+});
+```
+
+These signals map to `[Agent] Was Copied`, `[Agent] Is Regeneration`, `[Agent] Is Edit`, `[Agent] Edited Message ID`, and `[Agent] Abandonment Turn`. Use them in Amplitude to build quality dashboards without requiring user surveys.
+
 ## tool() and observe() HOFs
 
 ### tool()
@@ -908,6 +1123,78 @@ agent.trackSessionEnrichment(enrichments, {
 });
 ```
 
+### End-to-End Example: `customer_enriched` Mode
+
+This mode is for teams that run their own evaluation pipeline (or can't send message content to Amplitude) but still want rich session-level analytics. Here's a complete workflow:
+
+```typescript
+import {
+  AIConfig,
+  AmplitudeAI,
+  ContentMode,
+  MessageLabel,
+  RubricScore,
+  SessionEnrichments,
+  TopicClassification,
+} from '@amplitude/ai';
+
+// 1. Configure: no content sent to Amplitude
+const ai = new AmplitudeAI({
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+  config: new AIConfig({
+    contentMode: ContentMode.CUSTOMER_ENRICHED,
+  }),
+});
+
+const agent = ai.agent('support-bot', { agentVersion: '2.1.0' });
+
+// 2. Run the conversation — content is NOT sent (metadata only)
+const session = agent.session({ userId: 'user-42' });
+const { sessionId, messageIds } = await session.run(async (s) => {
+  const msgIds: string[] = [];
+  msgIds.push(s.trackUserMessage('Why was I charged twice?'));
+  msgIds.push(
+    s.trackAiMessage(
+      aiResponse.content,
+      'gpt-4o',
+      'openai',
+      latencyMs,
+    ),
+  );
+  return { sessionId: s.sessionId, messageIds: msgIds };
+});
+
+// 3. Run your eval pipeline on the raw messages (e.g., your own LLM judge)
+const evalResults = await myEvalPipeline(conversationHistory);
+
+// 4. Ship enrichments back to Amplitude
+const enrichments = new SessionEnrichments({
+  qualityScore: evalResults.quality,
+  sentimentScore: evalResults.sentiment,
+  overallOutcome: evalResults.outcome,
+  topicClassifications: {
+    'billing': new TopicClassification({
+      topic: 'billing-dispute',
+      confidence: 0.92,
+    }),
+  },
+  rubricScores: [
+    new RubricScore({ name: 'accuracy', score: 4, maxScore: 5 }),
+    new RubricScore({ name: 'helpfulness', score: 5, maxScore: 5 }),
+  ],
+  messageLabels: {
+    [messageIds[0]]: [
+      new MessageLabel({ key: 'intent', value: 'billing-dispute', confidence: 0.94 }),
+    ],
+  },
+  customMetadata: { eval_model: 'gpt-4o-judge-v2' },
+});
+
+agent.trackSessionEnrichment(enrichments, { sessionId });
+```
+
+This produces the same Amplitude event properties as Amplitude's built-in server-side enrichment (topics, rubrics, outcomes, message labels), but sourced from your pipeline. Use it when compliance requires zero-content transmission, or when you need custom evaluation logic beyond what the built-in enrichment provides.
+
 ### Available Enrichment Fields
 
 - **Quality & Sentiment**: `qualityScore`, `sentimentScore`
@@ -924,7 +1211,11 @@ agent.trackSessionEnrichment(enrichments, {
 
 ### Message Labels
 
-Attach classification labels to individual messages within a session:
+Attach classification labels to individual messages within a session. Labels are flexible key-value pairs for filtering and segmentation in Amplitude.
+
+**Common use cases:** routing tags (`flow`, `surface`), classifier output (`intent`, `sentiment`, `toxicity`), business context (`tier`, `plan`).
+
+**Inline labels** (at tracking time):
 
 ```typescript
 import { MessageLabel } from '@amplitude/ai';
@@ -944,6 +1235,29 @@ s.trackUserMessage('I want to cancel my subscription', {
   ],
 });
 ```
+
+**Retrospective labels** (after the session, from a background pipeline):
+
+When classifier results arrive after the session ends, attach them via `SessionEnrichments.messageLabels`, keyed by the `messageId` returned from tracking calls:
+
+```typescript
+import { MessageLabel, SessionEnrichments } from '@amplitude/ai';
+
+const enrichments = new SessionEnrichments({
+  messageLabels: {
+    [userMsgId]: [
+      new MessageLabel({ key: 'intent', value: 'cancellation', confidence: 0.94 }),
+    ],
+    [aiMsgId]: [
+      new MessageLabel({ key: 'quality', value: 'good', confidence: 0.91 }),
+    ],
+  },
+});
+
+agent.trackSessionEnrichment(enrichments, { sessionId: 'sess-abc123' });
+```
+
+Labels are emitted as `[Agent] Message Labels` on the event. In Amplitude, filter or group by label key/value to build charts like "messages by intent" or "sessions where flow=onboarding".
 
 ## Debug and Dry-Run Modes
 
@@ -1139,17 +1453,66 @@ const handler = new AmplitudeCallbackHandler({
 
 ### OpenTelemetry
 
-```typescript
-import { AmplitudeAgentExporter, AmplitudeGenAIExporter } from '@amplitude/ai';
+Two exporters add Amplitude as a destination alongside your existing trace backend (Datadog, Honeycomb, Jaeger, etc.):
 
-// Exporters for OTLP-compatible pipelines
+```typescript
+import {
+  AmplitudeAgentExporter,
+  AmplitudeGenAIExporter,
+} from '@amplitude/ai';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import {
+  BatchSpanProcessor,
+  SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
+
+const provider = new NodeTracerProvider();
+
+// GenAI exporter — converts gen_ai.* spans into Amplitude AI events
+provider.addSpanProcessor(
+  new BatchSpanProcessor(
+    new AmplitudeGenAIExporter({
+      apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+    }),
+  ),
+);
+
+// Agent exporter — converts agent.* spans into Amplitude session events
+provider.addSpanProcessor(
+  new SimpleSpanProcessor(
+    new AmplitudeAgentExporter({
+      apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+    }),
+  ),
+);
+
+provider.register();
 ```
 
-Spans with `gen_ai.provider.name` or `gen_ai.system` are treated as GenAI spans; other spans are ignored.
+Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are processed; all other spans are silently ignored. This means it's safe to add the exporter to a pipeline that produces mixed (GenAI + HTTP + DB) spans.
 
-**What the OTEL bridge maps:** model (prefers `gen_ai.response.model`), provider, tokens (input/output/total), cache tokens (`gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`), cache-aware cost, latency, temperature, top_p, max_output_tokens, finish reason, errors, user messages (from `gen_ai.input.messages`).
+**Attribute mapping reference:**
+
+| OTEL Span Attribute | Amplitude Event Property | Notes |
+| --- | --- | --- |
+| `gen_ai.response.model` / `gen_ai.request.model` | `[Agent] Model` | Response model preferred |
+| `gen_ai.system` / `gen_ai.provider.name` | `[Agent] Provider` | |
+| `gen_ai.usage.input_tokens` | `[Agent] Input Tokens` | |
+| `gen_ai.usage.output_tokens` | `[Agent] Output Tokens` | |
+| `gen_ai.usage.total_tokens` | `[Agent] Total Tokens` | Derived if not present |
+| `gen_ai.usage.cache_read.input_tokens` | `[Agent] Cache Read Tokens` | |
+| `gen_ai.usage.cache_creation.input_tokens` | `[Agent] Cache Creation Tokens` | |
+| `gen_ai.request.temperature` | `[Agent] Temperature` | |
+| `gen_ai.request.top_p` | `[Agent] Top P` | |
+| `gen_ai.request.max_output_tokens` | `[Agent] Max Output Tokens` | |
+| `gen_ai.response.finish_reasons` | `[Agent] Finish Reason` | |
+| `gen_ai.input.messages` | `[Agent] LLM Message` | Only if content mode allows |
+| Span duration | `[Agent] Latency Ms` | |
+| Span status ERROR | `[Agent] Is Error`, `[Agent] Error Message` | |
 
 **Not available via OTEL (use native wrappers):** reasoning content/tokens, TTFB, streaming detection, implicit feedback, file attachments, event graph linking (parent_message_id).
+
+**When to use OTEL vs. native wrappers:** If you already have `@opentelemetry/instrumentation-openai` or similar producing GenAI spans, the OTEL bridge gives you Amplitude analytics with zero code changes. For richer tracking (implicit feedback, streaming metrics, attachments), use the native `wrapOpenAI()`/`wrapAnthropic()` wrappers alongside OTEL.
 
 ### LlamaIndex
 
@@ -1179,6 +1542,73 @@ import { AmplitudeCrewAIHooks } from '@amplitude/ai';
 ```
 
 In Node.js, `AmplitudeCrewAIHooks` throws a `ProviderError` by design. Use LangChain or OpenTelemetry integrations instead.
+
+## Data Flow
+
+How events flow from your application to Amplitude charts:
+
+```
+Your Application
+├── wrapOpenAI() / wrapAnthropic()     ─── auto-emits ──┐
+├── session.trackUserMessage()         ─── manual ──────┤
+├── session.trackAiMessage()           ─── manual ──────┤
+├── agent.trackToolCall()              ─── manual ──────┤
+├── agent.trackSessionEnrichment()     ─── manual ──────┤
+└── OTEL exporter (AmplitudeGenAI...)  ─── bridge ──────┤
+                                                        │
+                              AmplitudeAI client ◄──────┘
+                                   │
+                                   ├── validate (if enabled)
+                                   ├── apply middleware chain
+                                   ├── batch events
+                                   │
+                                   ▼
+                           Amplitude HTTP API
+                                   │
+                     ┌─────────────┴──────────────┐
+                     │                            │
+            Amplitude Charts               LLM Enrichment
+            (immediate querying)           Pipeline (async)
+                                                  │
+                                                  ▼
+                                        [Agent] Session Evaluation
+                                        [Agent] Score events
+                                        (topic, rubric, outcome)
+```
+
+**Key points:**
+- All paths converge at the `AmplitudeAI` client, which batches and sends events.
+- Events are available for charting within seconds of ingestion.
+- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Evaluation` and `[Agent] Score`.
+- With `contentMode: 'customer_enriched'`, the enrichment pipeline is skipped — you provide your own enrichments via `trackSessionEnrichment()`.
+
+## Which Integration Should I Use?
+
+Start here and pick the first tier that satisfies your analytics needs:
+
+```
+                      Do you need per-user analytics
+                      (funnels, cohorts, retention)?
+                              │
+                    ┌─── No ──┴── Yes ──┐
+                    │                   │
+              Tier 0: Zero-Code     Do you need session
+              (CLI auto-patch)      grouping & enrichment?
+              Cost, latency,              │
+              tokens, errors.     ┌─ No ──┴── Yes ──┐
+                                  │                 │
+                           Tier 1: Events      Do you control
+                           Per-call tracking   the LLM call site?
+                           + userId                  │
+                                           ┌── Yes ──┴── No ──┐
+                                           │                  │
+                                    Tier 2: Sessions    Tier 3: OTEL Bridge
+                                    session.run()       Add exporter to
+                                    Full enrichment     existing OTEL pipeline
+                                    Implicit feedback   Limited to OTEL attrs
+```
+
+**Rule of thumb:** If you own the LLM call site, start with **Tier 2** (sessions). If you don't (e.g., a third-party framework exports OTEL spans), use **Tier 3** (OTEL bridge). If you just want aggregate cost monitoring without user analytics, **Tier 0** (zero-code) is ready in 60 seconds.
 
 ## Integration Patterns
 
