@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   EVENT_AI_RESPONSE,
@@ -47,7 +49,8 @@ describe('constants', () => {
   });
 
   it('has correct SDK metadata', () => {
-    expect(SDK_VERSION).toBe('0.1.0');
+    const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
+    expect(SDK_VERSION).toBe(pkg.version);
     expect(SDK_RUNTIME).toBe('node');
   });
 });
