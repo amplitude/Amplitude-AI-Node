@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   EVENT_EMBEDDING,
-  EVENT_SESSION_END,
   EVENT_USER_MESSAGE,
   PROP_PARENT_AGENT_ID,
   PROP_TRACE_ID,

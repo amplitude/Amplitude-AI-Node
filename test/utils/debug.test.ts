@@ -29,6 +29,7 @@ import {
 import { formatDebugLine, formatDryRunLine } from '../../src/utils/debug.js';
 
 function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
   return str.replace(/\x1b\[[0-9;]*m/g, '');
 }
 

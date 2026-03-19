@@ -6,7 +6,6 @@ import type { PrivacyConfig } from '../core/privacy.js';
 import { trackUserMessage } from '../core/tracking.js';
 import { getDefaultPropagateContext, injectContext } from '../propagation.js';
 import {
-  resolveAmplitude,
   type AmplitudeLike,
   type AmplitudeOrAI,
   type AnthropicResponse,

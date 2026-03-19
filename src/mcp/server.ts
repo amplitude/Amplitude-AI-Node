@@ -373,7 +373,7 @@ const createServer = (): McpServer => {
               {
                 query,
                 total: selected.length,
-                results: selected.map(({ priority, ...rest }) => rest),
+                results: selected.map(({ priority: _priority, ...rest }) => rest),
               },
               null,
               2,

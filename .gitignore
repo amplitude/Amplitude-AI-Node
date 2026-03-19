@@ -18,6 +18,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Lint cache
+.eslintcache
+
 # Environment
 .env
 .env.local

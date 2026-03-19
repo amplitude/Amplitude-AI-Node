@@ -3,7 +3,7 @@ import {
   runWithContext,
   SessionContext,
 } from '@amplitude/ai';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   EVENT_AI_RESPONSE,
   EVENT_SCORE,
@@ -11,14 +11,12 @@ import {
   EVENT_TOOL_CALL,
   EVENT_USER_MESSAGE,
   PROP_AGENT_ID,
-  PROP_CUSTOMER_ORG_ID,
   PROP_ENV,
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_PARENT_AGENT_ID,
   PROP_SESSION_ID,
   PROP_SESSION_REPLAY_ID,
   PROP_TRACE_ID,
-  PROP_TURN_ID,
 } from '../src/core/constants.js';
 import { tool, ToolCallTracker } from '../src/decorators.js';
 import { applySessionContext } from '../src/providers/base.js';

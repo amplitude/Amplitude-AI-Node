@@ -12,7 +12,7 @@ module.exports = {
   ],
   rules: {
     '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     'no-console': 'warn',
   },
   ignorePatterns: ['dist/', 'coverage/', 'node_modules/', '*.mjs'],

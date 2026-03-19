@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  EVENT_AI_RESPONSE,
   EVENT_SESSION_END,
   EVENT_SESSION_ENRICHMENT,
   PROP_AGENT_ID,
