@@ -40,6 +40,8 @@ export interface ProviderTrackOptions {
   agentId?: string | null;
   parentAgentId?: string | null;
   customerOrgId?: string | null;
+  agentVersion?: string | null;
+  context?: Record<string, unknown> | null;
   env?: string | null;
   groups?: Record<string, unknown> | null;
   eventProperties?: Record<string, unknown> | null;
@@ -68,6 +70,8 @@ export function applySessionContext(
     if (!result.agentId) result.agentId = ctx.agentId;
     if (!result.parentAgentId) result.parentAgentId = ctx.parentAgentId;
     if (!result.customerOrgId) result.customerOrgId = ctx.customerOrgId;
+    if (!result.agentVersion) result.agentVersion = ctx.agentVersion;
+    if (!result.context) result.context = ctx.context;
     if (!result.env) result.env = ctx.env;
     if (!result.groups) result.groups = ctx.groups;
 
@@ -118,6 +122,8 @@ export abstract class BaseAIProvider {
       agentId: opts.agentId,
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
+      agentVersion: opts.agentVersion,
+      context: opts.context,
       env: opts.env,
       groups: opts.groups,
     });
@@ -132,6 +138,8 @@ export abstract class BaseAIProvider {
       agentId: merged.agentId ?? opts.agentId,
       parentAgentId: merged.parentAgentId ?? opts.parentAgentId,
       customerOrgId: merged.customerOrgId ?? opts.customerOrgId,
+      agentVersion: merged.agentVersion ?? opts.agentVersion,
+      context: merged.context ?? opts.context,
       env: merged.env ?? opts.env,
       groups: merged.groups ?? opts.groups,
       privacyConfig: this._privacyConfig,
@@ -206,6 +214,8 @@ export class SimpleStreamingTracker {
       agentId: overrides.agentId,
       parentAgentId: overrides.parentAgentId,
       customerOrgId: overrides.customerOrgId,
+      agentVersion: overrides.agentVersion,
+      context: overrides.context,
       env: overrides.env,
       groups: overrides.groups,
     });
