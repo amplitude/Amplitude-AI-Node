@@ -17,6 +17,7 @@ import { StreamingAccumulator } from '../utils/streaming.js';
 import {
   applySessionContext,
   BaseAIProvider,
+  contextFields,
   type ProviderTrackOptions,
 } from './base.js';
 
@@ -169,17 +170,12 @@ export class WrappedMessages {
       }
 
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName,
         provider: 'anthropic',
         responseContent: String(firstTextBlock?.text ?? ''),
         reasoningContent: extracted.reasoning,
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: normalizedInput || undefined,
         outputTokens: usage?.output_tokens,
         cacheReadInputTokens: cacheRead || undefined,
@@ -199,15 +195,11 @@ export class WrappedMessages {
     } catch (error) {
       const latencyMs = performance.now() - startTime;
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: String(requestParams.model ?? 'unknown'),
         provider: 'anthropic',
         responseContent: '',
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
@@ -319,16 +311,11 @@ export class WrappedMessages {
       }
 
       this._trackFn({
-        userId: sessionCtx.userId ?? 'unknown',
+        ...contextFields(sessionCtx),
         modelName,
         provider: 'anthropic',
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
-        sessionId: sessionCtx.sessionId,
-        traceId: sessionCtx.traceId,
-        turnId: sessionCtx.turnId ?? undefined,
-        agentId: sessionCtx.agentId,
-        env: sessionCtx.env,
         inputTokens: streamNormalizedInput || undefined,
         outputTokens: state.outputTokens,
         cacheReadInputTokens: streamCacheRead || undefined,

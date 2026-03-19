@@ -7,7 +7,7 @@ import type { AmplitudeOrAI, MistralChatResponse, TrackFn } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
-import { applySessionContext, BaseAIProvider } from './base.js';
+import { applySessionContext, BaseAIProvider, contextFields } from './base.js';
 
 const _resolved = tryRequire('@mistralai/mistralai');
 export const MISTRAL_AVAILABLE = _resolved != null;
@@ -117,16 +117,11 @@ export class WrappedChat {
       }
 
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName,
         provider: 'mistral',
         responseContent: extractMistralContent(choice?.message?.content),
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: usage?.prompt_tokens,
         outputTokens: usage?.completion_tokens,
         totalTokens: usage?.total_tokens,
@@ -145,15 +140,11 @@ export class WrappedChat {
       const latencyMs = performance.now() - startTime;
 
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: String(params.model ?? 'unknown'),
         provider: 'mistral',
         responseContent: '',
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
@@ -182,15 +173,11 @@ export class WrappedChat {
       return this._wrapStream(response as AsyncIterable<unknown>, params, ctx);
     } catch (error) {
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: String(params.model ?? 'unknown'),
         provider: 'mistral',
         responseContent: '',
         latencyMs: performance.now() - startTime,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
         isStreaming: true,
@@ -229,7 +216,25 @@ export class WrappedChat {
           (delta?.tool_calls as Array<Record<string, unknown>> | undefined) ??
           (message?.tool_calls as Array<Record<string, unknown>> | undefined);
         if (Array.isArray(toolCalls)) {
-          for (const call of toolCalls) accumulator.addToolCall(call);
+          for (const call of toolCalls) {
+            const idx = call.index as number | undefined;
+            const id = call.id as string | undefined;
+            const fn = call.function as Record<string, unknown> | undefined;
+            if (idx != null && id && fn?.name != null) {
+              accumulator.setToolCallAt(idx, {
+                type: 'function',
+                id,
+                function: {
+                  name: fn.name,
+                  arguments: ((fn.arguments as string) ?? ''),
+                },
+              });
+            } else if (idx != null && fn?.arguments) {
+              accumulator.appendToolCallArgs(idx, fn.arguments as string);
+            } else {
+              accumulator.addToolCall(call);
+            }
+          }
         }
 
         const finishReason = choices?.[0]?.finish_reason;
@@ -267,16 +272,11 @@ export class WrappedChat {
       }
 
       this._trackFn({
-        userId: sessionCtx.userId ?? 'unknown',
+        ...contextFields(sessionCtx),
         modelName,
         provider: 'mistral',
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
-        sessionId: sessionCtx.sessionId,
-        traceId: sessionCtx.traceId,
-        turnId: sessionCtx.turnId ?? undefined,
-        agentId: sessionCtx.agentId,
-        env: sessionCtx.env,
         inputTokens: state.inputTokens,
         outputTokens: state.outputTokens,
         totalTokens: state.totalTokens,
