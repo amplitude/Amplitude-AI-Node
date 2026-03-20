@@ -75,8 +75,10 @@ export function applySessionContext(
     if (!result.env) result.env = ctx.env;
     if (!result.groups) result.groups = ctx.groups;
 
-    const turnId = ctx.nextTurnId();
-    if (turnId != null && result.turnId == null) result.turnId = turnId;
+    if (result.turnId == null) {
+      const turnId = ctx.nextTurnId();
+      if (turnId != null) result.turnId = turnId;
+    }
 
     const existingEp = result.eventProperties as Record<string, unknown> | null;
     const ep = existingEp != null ? { ...existingEp } : {};
@@ -96,6 +98,44 @@ export function applySessionContext(
   }
 
   return result as unknown as ProviderTrackOptions & { userId: string };
+}
+
+/**
+ * Extract all context fields from a resolved ProviderTrackOptions into a
+ * flat object suitable for spreading into _trackFn() / _track() calls.
+ * Ensures all 13 context fields propagate consistently.
+ */
+export type TrackContextFields = Pick<
+  TrackCallOptions,
+  | 'userId'
+  | 'sessionId'
+  | 'traceId'
+  | 'turnId'
+  | 'agentId'
+  | 'parentAgentId'
+  | 'customerOrgId'
+  | 'agentVersion'
+  | 'context'
+  | 'env'
+  | 'groups'
+  | 'eventProperties'
+>;
+
+export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
+  return {
+    userId: ctx.userId ?? 'unknown',
+    sessionId: ctx.sessionId,
+    traceId: ctx.traceId,
+    turnId: ctx.turnId ?? undefined,
+    agentId: ctx.agentId,
+    parentAgentId: ctx.parentAgentId,
+    customerOrgId: ctx.customerOrgId,
+    agentVersion: ctx.agentVersion,
+    context: ctx.context,
+    env: ctx.env,
+    groups: ctx.groups,
+    eventProperties: ctx.eventProperties,
+  };
 }
 
 export abstract class BaseAIProvider {
@@ -195,7 +235,7 @@ export class SimpleStreamingTracker {
     const state = this.accumulator.getState();
 
     return this._trackFn({
-      userId: overrides.userId ?? 'unknown',
+      ...contextFields(overrides),
       modelName: this._modelName,
       provider: this._providerName,
       responseContent: state.content,
@@ -210,16 +250,6 @@ export class SimpleStreamingTracker {
       toolCalls: state.toolCalls.length > 0 ? state.toolCalls : null,
       providerTtfbMs: state.ttfbMs,
       isStreaming: true,
-      sessionId: overrides.sessionId,
-      traceId: overrides.traceId,
-      turnId: overrides.turnId ?? undefined,
-      agentId: overrides.agentId,
-      parentAgentId: overrides.parentAgentId,
-      customerOrgId: overrides.customerOrgId,
-      agentVersion: overrides.agentVersion,
-      context: overrides.context,
-      env: overrides.env,
-      groups: overrides.groups,
     });
   }
 }

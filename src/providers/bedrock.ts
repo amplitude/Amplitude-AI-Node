@@ -9,7 +9,7 @@ import type { AmplitudeOrAI, BedrockConverseResponse } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
-import { applySessionContext, BaseAIProvider } from './base.js';
+import { applySessionContext, BaseAIProvider, contextFields } from './base.js';
 
 const _resolved = tryRequire('@aws-sdk/client-bedrock-runtime');
 export const BEDROCK_AVAILABLE = _resolved != null;
@@ -74,6 +74,7 @@ export class Bedrock extends BaseAIProvider {
             outputTokens: extracted.outputTokens,
             cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
             cacheCreationInputTokens: extracted.cacheWriteTokens ?? 0,
+            defaultProvider: 'bedrock',
           });
         } catch {
           // cost calculation is best-effort
@@ -82,16 +83,11 @@ export class Bedrock extends BaseAIProvider {
 
       const ctx = applySessionContext();
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: modelId,
         provider: 'bedrock',
         responseContent: extracted.text,
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: extracted.inputTokens,
         outputTokens: extracted.outputTokens,
         totalTokens: extracted.totalTokens,
@@ -112,15 +108,11 @@ export class Bedrock extends BaseAIProvider {
       const ctx = applySessionContext();
 
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: modelId,
         provider: 'bedrock',
         responseContent: '',
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
@@ -159,19 +151,15 @@ export class Bedrock extends BaseAIProvider {
 
       return {
         ...response,
-        stream: this._wrapConverseStream(modelId, params, stream),
+        stream: this._wrapConverseStream(modelId, params, stream, ctx),
       };
     } catch (error) {
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: modelId,
         provider: 'bedrock',
         responseContent: '',
         latencyMs: performance.now() - startTime,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
         isStreaming: true,
@@ -188,10 +176,10 @@ export class Bedrock extends BaseAIProvider {
     modelId: string,
     params: Record<string, unknown>,
     stream: AsyncIterable<unknown>,
+    ctx: ReturnType<typeof applySessionContext>,
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
     accumulator.model = modelId;
-    const ctx = applySessionContext();
 
     try {
       for await (const rawEvent of stream) {
@@ -236,6 +224,8 @@ export class Bedrock extends BaseAIProvider {
           inputTokens: usage?.inputTokens as number | undefined,
           outputTokens: usage?.outputTokens as number | undefined,
           totalTokens: usage?.totalTokens as number | undefined,
+          cacheReadTokens: usage?.cacheReadInputTokens as number | undefined,
+          cacheCreationTokens: usage?.cacheWriteInputTokens as number | undefined,
         });
 
         yield rawEvent;
@@ -255,6 +245,9 @@ export class Bedrock extends BaseAIProvider {
             modelName,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
+            cacheReadInputTokens: state.cacheReadTokens ?? 0,
+            cacheCreationInputTokens: state.cacheCreationTokens ?? 0,
+            defaultProvider: 'bedrock',
           });
         } catch {
           // cost calculation is best-effort
@@ -262,16 +255,11 @@ export class Bedrock extends BaseAIProvider {
       }
 
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName,
         provider: 'bedrock',
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: state.inputTokens,
         outputTokens: state.outputTokens,
         totalTokens: state.totalTokens,

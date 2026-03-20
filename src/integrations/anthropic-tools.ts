@@ -116,6 +116,7 @@ export class AmplitudeToolLoop {
             outputTokens: usage.output_tokens,
             cacheReadInputTokens: cacheRead,
             cacheCreationInputTokens: cacheCreation,
+            defaultProvider: 'anthropic',
           });
           if (cost > 0) costUsd = cost;
         } catch {

@@ -26,6 +26,7 @@ import { StreamingAccumulator } from '../utils/streaming.js';
 import {
   applySessionContext,
   BaseAIProvider,
+  contextFields,
   type ProviderTrackOptions,
 } from './base.js';
 
@@ -211,6 +212,7 @@ export class WrappedCompletions {
             outputTokens: usage.completion_tokens,
             reasoningTokens: reasoningTokens ?? 0,
             cacheReadInputTokens: cachedTokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
@@ -218,16 +220,11 @@ export class WrappedCompletions {
       }
 
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName,
         provider: this._providerName,
         responseContent: String(choice?.message?.content ?? ''),
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: usage?.prompt_tokens,
         outputTokens: usage?.completion_tokens,
         totalTokens: usage?.total_tokens,
@@ -247,15 +244,11 @@ export class WrappedCompletions {
     } catch (error) {
       const latencyMs = performance.now() - startTime;
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: String(requestParams.model ?? 'unknown'),
         provider: this._providerName,
         responseContent: '',
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
@@ -310,7 +303,23 @@ export class WrappedCompletions {
           | undefined;
         if (Array.isArray(deltaToolCalls)) {
           for (const call of deltaToolCalls) {
-            accumulator.addToolCall(call);
+            const idx = call.index as number | undefined;
+            const id = call.id as string | undefined;
+            const fn = call.function as Record<string, unknown> | undefined;
+            if (idx != null && id && fn?.name != null) {
+              accumulator.setToolCallAt(idx, {
+                type: 'function',
+                id,
+                function: {
+                  name: fn.name,
+                  arguments: ((fn.arguments as string) ?? ''),
+                },
+              });
+            } else if (idx != null && fn?.arguments) {
+              accumulator.appendToolCallArgs(idx, fn.arguments as string);
+            } else {
+              accumulator.addToolCall(call);
+            }
           }
         }
 
@@ -361,6 +370,7 @@ export class WrappedCompletions {
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
             cacheReadInputTokens: state.cacheReadTokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
@@ -368,16 +378,11 @@ export class WrappedCompletions {
       }
 
       this._trackFn({
-        userId: sessionCtx.userId ?? 'unknown',
+        ...contextFields(sessionCtx),
         modelName,
         provider: this._providerName,
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
-        sessionId: sessionCtx.sessionId,
-        traceId: sessionCtx.traceId,
-        turnId: sessionCtx.turnId ?? undefined,
-        agentId: sessionCtx.agentId,
-        env: sessionCtx.env,
         inputTokens: state.inputTokens,
         outputTokens: state.outputTokens,
         totalTokens: state.totalTokens,
@@ -517,6 +522,7 @@ export class WrappedResponses {
             inputTokens: usage.input_tokens,
             outputTokens: usage.output_tokens,
             reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
@@ -524,16 +530,11 @@ export class WrappedResponses {
       }
 
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName,
         provider: this._providerName,
         responseContent: responseText,
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: usage?.input_tokens,
         outputTokens: usage?.output_tokens,
         totalTokens: usage?.total_tokens,
@@ -552,15 +553,11 @@ export class WrappedResponses {
     } catch (error) {
       const latencyMs = performance.now() - startTime;
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: String(requestParams.model ?? 'unknown'),
         provider: this._providerName,
         responseContent: '',
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
@@ -600,15 +597,11 @@ export class WrappedResponses {
       );
     } catch (error) {
       this._trackFn({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: String(requestParams.model ?? 'unknown'),
         provider: this._providerName,
         responseContent: '',
         latencyMs: performance.now() - startTime,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
         isStreaming: true,
@@ -668,22 +661,18 @@ export class WrappedResponses {
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
         }
       }
       this._trackFn({
-        userId: sessionCtx.userId ?? 'unknown',
+        ...contextFields(sessionCtx),
         modelName: String(accumulator.model ?? params.model ?? 'unknown'),
         provider: this._providerName,
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
-        sessionId: sessionCtx.sessionId,
-        traceId: sessionCtx.traceId,
-        turnId: sessionCtx.turnId ?? undefined,
-        agentId: sessionCtx.agentId,
-        env: sessionCtx.env,
         inputTokens: state.inputTokens,
         outputTokens: state.outputTokens,
         totalTokens: state.totalTokens,

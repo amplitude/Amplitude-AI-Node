@@ -2,7 +2,7 @@
 
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.1.1
+Package: `@amplitude/ai` v0.1.2
 
 ## Install
 
@@ -13,6 +13,7 @@ Package: `@amplitude/ai` v0.1.1
 - Need zero-code coverage: use `patch()`.
 - Already have a provider client: use `wrap()` or provider wrappers.
 - Need user/session lineage: use `ai.agent(...).session(...)`.
+- Multiple agents collaborating: use `session.runAs(childAgent, fn)` for automatic identity propagation.
 - Need tool telemetry: use `tool()`.
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 
@@ -21,6 +22,7 @@ Package: `@amplitude/ai` v0.1.1
 - zero-code patching
 - wrap-openai
 - bound-agent-session
+- multi-agent-runas
 - tool-decorator
 - express-middleware
 

@@ -154,6 +154,10 @@ export class AmplitudeTracingProcessor {
       usage.output_tokens ?? usage.completion_tokens ?? null,
     );
     const totalTokens = this._safeNumber(usage.total_tokens ?? null);
+    const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+    const cachedTokens = this._safeNumber(
+      promptDetails?.cached_tokens ?? promptDetails?.cachedTokens ?? null,
+    ) ?? 0;
     let costUsd: number | undefined;
     if (model !== 'unknown' && inputTokens != null && outputTokens != null) {
       try {
@@ -161,6 +165,8 @@ export class AmplitudeTracingProcessor {
           modelName: model,
           inputTokens,
           outputTokens,
+          cacheReadInputTokens: cachedTokens,
+          defaultProvider: inferProvider(model),
         });
         if (cost > 0) costUsd = cost;
       } catch {
