@@ -29,8 +29,10 @@ wrap(azureClient, ai) → AzureOpenAI wrapper
 Create a bound agent for user/session lineage.
 ```
 const agent = ai.agent('my-agent', { userId: 'u1' })
+const child = agent.child('sub-agent')
 const session = agent.session({ sessionId: 's1' })
 await session.run(async (s) => { ... })
+await s.runAs(child, async (cs) => { ... })  // delegate to child agent
 ```
 
 ### tool(fn, options) / tool(options)(fn)
@@ -101,6 +103,20 @@ await session.run(async () => { /* LLM calls tracked automatically */ });
 ```typescript
 import { createAmplitudeAIMiddleware } from '@amplitude/ai';
 app.use(createAmplitudeAIMiddleware());
+```
+
+### 6. Multi-agent orchestration with session.runAs()
+```typescript
+const orchestrator = ai.agent('orchestrator', { userId: 'u1' });
+const researcher = orchestrator.child('researcher');
+const session = orchestrator.session({ sessionId: 's1' });
+await session.run(async (s) => {
+  // Provider calls inside runAs are automatically tagged with the child's agentId
+  const result = await s.runAs(researcher, async (cs) => {
+    return openai.chat.completions.create({ model: 'gpt-4o', messages: [...] });
+  });
+});
+// runAs shares sessionId, traceId, turn counter; does NOT emit Session End
 ```
 
 ## MCP Tools

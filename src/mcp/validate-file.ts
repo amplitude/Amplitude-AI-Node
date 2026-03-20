@@ -89,6 +89,7 @@ export function analyzeFileInstrumentation(source: string): FileAnalysis {
   const hasSessionContext =
     /\.session\s*\(/.test(source) ||
     /\bsession\.run\s*\(/.test(source) ||
+    /\.runAs\s*\(/.test(source) ||
     /\bcreateAmplitudeAIMiddleware\s*\(/.test(source);
 
   const hasAmplitudeImport =

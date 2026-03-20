@@ -7,7 +7,7 @@
 
 import type { AmplitudeAI } from '../client.js';
 import { getActiveContext } from '../context.js';
-import { calculateCost } from '../utils/costs.js';
+import { calculateCost, inferProvider } from '../utils/costs.js';
 
 export interface LlamaIndexHandlerOptions {
   amplitudeAI: AmplitudeAI;
@@ -75,6 +75,9 @@ export class AmplitudeLlamaIndexHandler {
           modelName: normalized.model,
           inputTokens: normalized.inputTokens,
           outputTokens: normalized.outputTokens,
+          cacheReadInputTokens: normalized.cacheReadTokens,
+          cacheCreationInputTokens: normalized.cacheCreationTokens,
+          defaultProvider: inferProvider(normalized.model),
         });
         if (cost > 0) costUsd = cost;
       } catch {
@@ -165,6 +168,8 @@ function _normalizeLlamaLlmResponse(response: unknown): {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
 } {
   const resp =
     response != null && typeof response === 'object'
@@ -176,15 +181,41 @@ function _normalizeLlamaLlmResponse(response: unknown): {
     (typeof message?.content === 'string' ? (message.content as string) : '') ??
     '';
   const usage = (resp.usage as Record<string, unknown> | undefined) ?? {};
+  const outputTokens = _toNumber(
+    resp.outputTokens ?? usage.output_tokens ?? usage.completion_tokens,
+  );
+
+  // OpenAI format: prompt_tokens is total (includes cached)
+  const promptTokens = _toNumber(usage.prompt_tokens);
+  if (promptTokens != null) {
+    const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+    const cached = _toNumber(details?.cached_tokens) ?? 0;
+    return {
+      content,
+      model: String(resp.model ?? message?.model ?? 'unknown'),
+      inputTokens: _toNumber(resp.inputTokens) ?? promptTokens,
+      outputTokens,
+      cacheReadTokens: cached,
+      cacheCreationTokens: 0,
+    };
+  }
+
+  // Anthropic format: input_tokens is non-cached only; normalize to total
+  const rawInput = _toNumber(usage.input_tokens);
+  const cacheRead = _toNumber(usage.cache_read_input_tokens) ?? 0;
+  const cacheCreation = _toNumber(usage.cache_creation_input_tokens) ?? 0;
+  const hasCacheTokens = cacheRead > 0 || cacheCreation > 0;
+  const totalInput = rawInput != null && hasCacheTokens
+    ? rawInput + cacheRead + cacheCreation
+    : _toNumber(resp.inputTokens) ?? rawInput;
+
   return {
     content,
     model: String(resp.model ?? message?.model ?? 'unknown'),
-    inputTokens: _toNumber(
-      resp.inputTokens ?? usage.input_tokens ?? usage.prompt_tokens,
-    ),
-    outputTokens: _toNumber(
-      resp.outputTokens ?? usage.output_tokens ?? usage.completion_tokens,
-    ),
+    inputTokens: totalInput,
+    outputTokens,
+    cacheReadTokens: cacheRead,
+    cacheCreationTokens: cacheCreation,
   };
 }
 

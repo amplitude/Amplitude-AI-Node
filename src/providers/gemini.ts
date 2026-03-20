@@ -74,6 +74,7 @@ export class Gemini extends BaseAIProvider {
             modelName: model,
             inputTokens: extracted.inputTokens,
             outputTokens: extracted.outputTokens,
+            defaultProvider: 'google',
           });
         } catch {
           // cost calculation is best-effort
@@ -240,6 +241,7 @@ export class Gemini extends BaseAIProvider {
             modelName: model,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
+            defaultProvider: 'google',
           });
         } catch {
           // cost calculation is best-effort

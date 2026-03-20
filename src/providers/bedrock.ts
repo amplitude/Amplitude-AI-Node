@@ -74,6 +74,7 @@ export class Bedrock extends BaseAIProvider {
             outputTokens: extracted.outputTokens,
             cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
             cacheCreationInputTokens: extracted.cacheWriteTokens ?? 0,
+            defaultProvider: 'bedrock',
           });
         } catch {
           // cost calculation is best-effort
@@ -246,6 +247,7 @@ export class Bedrock extends BaseAIProvider {
             outputTokens: state.outputTokens,
             cacheReadInputTokens: state.cacheReadTokens ?? 0,
             cacheCreationInputTokens: state.cacheCreationTokens ?? 0,
+            defaultProvider: 'bedrock',
           });
         } catch {
           // cost calculation is best-effort

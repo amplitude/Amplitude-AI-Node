@@ -46,6 +46,7 @@ Package: \`${packageJson.name}\` v${packageJson.version}
 - Need zero-code coverage: use \`patch()\`.
 - Already have a provider client: use \`wrap()\` or provider wrappers.
 - Need user/session lineage: use \`ai.agent(...).session(...)\`.
+- Multiple agents collaborating: use \`session.runAs(childAgent, fn)\` for automatic identity propagation.
 - Need tool telemetry: use \`tool()\`.
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 
@@ -54,6 +55,7 @@ Package: \`${packageJson.name}\` v${packageJson.version}
 - zero-code patching
 - wrap-openai
 - bound-agent-session
+- multi-agent-runas
 - tool-decorator
 - express-middleware
 
@@ -162,8 +164,10 @@ wrap(azureClient, ai) → AzureOpenAI wrapper
 Create a bound agent for user/session lineage.
 \`\`\`
 const agent = ai.agent('my-agent', { userId: 'u1' })
+const child = agent.child('sub-agent')
 const session = agent.session({ sessionId: 's1' })
 await session.run(async (s) => { ... })
+await s.runAs(child, async (cs) => { ... })  // delegate to child agent
 \`\`\`
 
 ### tool(fn, options) / tool(options)(fn)
@@ -234,6 +238,20 @@ await session.run(async () => { /* LLM calls tracked automatically */ });
 \`\`\`typescript
 import { createAmplitudeAIMiddleware } from '@amplitude/ai';
 app.use(createAmplitudeAIMiddleware());
+\`\`\`
+
+### 6. Multi-agent orchestration with session.runAs()
+\`\`\`typescript
+const orchestrator = ai.agent('orchestrator', { userId: 'u1' });
+const researcher = orchestrator.child('researcher');
+const session = orchestrator.session({ sessionId: 's1' });
+await session.run(async (s) => {
+  // Provider calls inside runAs are automatically tagged with the child's agentId
+  const result = await s.runAs(researcher, async (cs) => {
+    return openai.chat.completions.create({ model: 'gpt-4o', messages: [...] });
+  });
+});
+// runAs shares sessionId, traceId, turn counter; does NOT emit Session End
 \`\`\`
 
 ## MCP Tools
