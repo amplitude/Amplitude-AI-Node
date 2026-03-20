@@ -133,6 +133,57 @@ export class Session {
     }
   }
 
+  /**
+   * Run a callback as a child agent within this session.
+   *
+   * Provider wrappers automatically pick up the child agent's identity
+   * (`agentId`, `parentAgentId`) while sharing this session's `sessionId`,
+   * `traceId`, and turn counter. No `[Agent] Session End` is emitted.
+   *
+   * @example
+   * ```typescript
+   * const child = parentAgent.child('researcher');
+   * await session.run(async (s) => {
+   *   const result = await s.runAs(child, async (cs) => {
+   *     // provider wrappers see agentId='researcher'
+   *     return openai.chat.completions.create({ ... });
+   *   });
+   * });
+   * ```
+   */
+  async runAs<T>(
+    childAgent: BoundAgent,
+    fn: (session: Session) => T | Promise<T>,
+  ): Promise<T> {
+    const childSession = new Session(childAgent, {
+      sessionId: this.sessionId,
+      userId: this.userId,
+      deviceId: this.deviceId,
+      browserSessionId: this.browserSessionId,
+    });
+    childSession.traceId = this.traceId;
+    const ctx = childSession._buildSessionContext();
+    return await _sessionStorage.run(ctx, () => fn(childSession));
+  }
+
+  /**
+   * Synchronous version of {@link runAs}.
+   */
+  runAsSync<T>(
+    childAgent: BoundAgent,
+    fn: (session: Session) => T,
+  ): T {
+    const childSession = new Session(childAgent, {
+      sessionId: this.sessionId,
+      userId: this.userId,
+      deviceId: this.deviceId,
+      browserSessionId: this.browserSessionId,
+    });
+    childSession.traceId = this.traceId;
+    const ctx = childSession._buildSessionContext();
+    return _sessionStorage.run(ctx, () => fn(childSession));
+  }
+
   private _autoEnd(): void {
     try {
       const endOpts: SessionEndOpts = {

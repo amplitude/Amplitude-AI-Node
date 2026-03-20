@@ -1693,44 +1693,64 @@ await session.run(async (s) => {
 
 ### Pattern C: Multi-Agent Orchestration
 
-For architectures where a parent agent delegates to specialized child agents. Each child inherits context from the parent:
+For architectures where a parent agent delegates to specialized child agents. Use `session.runAs()` to automatically propagate the child agent's identity to **both** manual tracking calls and provider wrappers:
 
 ```typescript
 const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY!, amplitude: ai });
+
 const orchestrator = ai.agent('orchestrator', {
   userId: 'user-123',
   env: 'production',
 });
-
 const researcher = orchestrator.child('researcher');
 const writer = orchestrator.child('writer');
-const reviewer = orchestrator.child('reviewer');
 
 const session = orchestrator.session({ userId: 'user-123' });
 
 await session.run(async (s) => {
   s.trackUserMessage('Write a blog post about TypeScript generics');
 
-  // Research phase
-  const researchResult = await doResearch(researcher, s);
+  // Research phase — provider calls automatically tagged with agentId='researcher'
+  const researchResult = await s.runAs(researcher, async (rs) => {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'Research TypeScript generics' }],
+    });
+    return completion.choices[0].message.content;
+  });
 
-  // Writing phase
-  const draft = await writeDraft(writer, s, researchResult);
+  // Writing phase — provider calls automatically tagged with agentId='writer'
+  const draft = await s.runAs(writer, async (ws) => {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: `Write a post using: ${researchResult}` }],
+    });
+    return completion.choices[0].message.content;
+  });
 
-  // Review phase
-  const finalPost = await reviewDraft(reviewer, s, draft);
-
-  s.trackAiMessage(finalPost, 'gpt-4o', 'openai', totalLatencyMs, {
+  s.trackAiMessage(draft ?? '', 'gpt-4o', 'openai', totalLatencyMs, {
     inputTokens: totalInput,
     outputTokens: totalOutput,
   });
 });
 
-// Each child agent's events include:
-// [Agent] Agent ID = "researcher" | "writer" | "reviewer"
-// [Agent] Parent Agent ID = "orchestrator"
-// [Agent] Agent Chain (on enrichments) = ["orchestrator", "researcher", "writer", "reviewer"]
+// Events emitted:
+//   [Agent] User Message     → agentId='orchestrator'
+//   [Agent] AI Response       → agentId='researcher',  parentAgentId='orchestrator'
+//   [Agent] AI Response       → agentId='writer',      parentAgentId='orchestrator'
+//   [Agent] AI Response       → agentId='orchestrator'
+//   [Agent] Session End       → agentId='orchestrator'  (one session end, not per-child)
 ```
+
+**How `runAs` works:**
+
+- Shares the parent session's `sessionId`, `traceId`, and turn counter
+- Overrides `agentId` and `parentAgentId` in `AsyncLocalStorage` for the callback's duration
+- Provider wrappers automatically read the child's identity — no `amplitudeOverrides` needed
+- Does **not** emit `[Agent] Session End` (the child operates within the parent session)
+- Restores the parent context when the callback completes, even on errors
+- Supports nesting: `s.runAs(child, (cs) => cs.runAs(grandchild, ...))`
 
 ## Serverless Environments
 

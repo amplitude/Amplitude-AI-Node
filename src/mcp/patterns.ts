@@ -44,6 +44,14 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
     snippet:
       'import { createAmplitudeAIMiddleware } from "@amplitude/ai";\napp.use(createAmplitudeAIMiddleware());',
   },
+  {
+    id: 'multi-agent-runas',
+    title: 'Multi-agent orchestration with session.runAs()',
+    whenToUse:
+      'Parent agent delegates sub-tasks to child agents. Provider wrappers automatically pick up the child agent identity.',
+    snippet:
+      'const orchestrator = ai.agent("orchestrator", { userId: "u1" });\nconst researcher = orchestrator.child("researcher");\nconst session = orchestrator.session({ sessionId: "s1" });\nawait session.run(async (s) => {\n  const result = await s.runAs(researcher, async (cs) => {\n    return openai.chat.completions.create({ model: "gpt-4o", messages: [...] });\n  });\n});',
+  },
 ];
 
 const getIntegrationPatterns = (): IntegrationPattern[] =>
