@@ -10,9 +10,19 @@ const PROVIDER_PATTERNS: Array<[RegExp, string]> = [
   [/^deepseek/i, 'deepseek'],
 ];
 
-export function inferProviderFromModel(modelName: string): string {
+/**
+ * Try to infer provider from model name patterns.
+ * Returns undefined if no pattern matches (unlike the public API which defaults to 'openai').
+ */
+export function tryInferProviderFromModel(
+  modelName: string,
+): string | undefined {
   for (const [pattern, provider] of PROVIDER_PATTERNS) {
     if (pattern.test(modelName)) return provider;
   }
-  return 'openai';
+  return undefined;
+}
+
+export function inferProviderFromModel(modelName: string): string {
+  return tryInferProviderFromModel(modelName) ?? 'openai';
 }

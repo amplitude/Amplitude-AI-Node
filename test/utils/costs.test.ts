@@ -82,21 +82,45 @@ describe('getGenaiPriceLookupCandidates', () => {
     const candidates = getGenaiPriceLookupCandidates(
       'bedrock:anthropic.claude-sonnet-4-6',
     );
-    expect(candidates).toContain('claude-sonnet-4-6');
-    expect(candidates).toContain('anthropic.claude-sonnet-4-6');
-    expect(candidates).toContain('bedrock:anthropic.claude-sonnet-4-6');
+    const models = candidates.map((c) => c.model);
+    expect(models).toContain('claude-sonnet-4-6');
+    expect(models).toContain('anthropic.claude-sonnet-4-6');
   });
 
   it('returns single candidate for already-normalized model', (): void => {
     const candidates = getGenaiPriceLookupCandidates('gpt-4o');
-    expect(candidates).toEqual(['gpt-4o']);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.model).toBe('gpt-4o');
   });
 
-  it('normalizes cross-region bedrock model', (): void => {
+  it('normalizes cross-region bedrock model via dot-stripping', (): void => {
     const candidates = getGenaiPriceLookupCandidates(
       'us.anthropic.claude-sonnet-4-6',
+      'bedrock',
     );
-    expect(candidates).toContain('claude-sonnet-4-6');
+    const models = candidates.map((c) => c.model);
+    expect(models).toContain('anthropic.claude-sonnet-4-6');
+    expect(models).toContain('claude-sonnet-4-6');
+  });
+
+  it('handles future unknown region/vendor without code changes', (): void => {
+    const candidates = getGenaiPriceLookupCandidates(
+      'sa-east-1.newvendor.some-model-v3',
+      'bedrock',
+    );
+    const models = candidates.map((c) => c.model);
+    expect(models).toContain('newvendor.some-model-v3');
+    expect(models).toContain('some-model-v3');
+  });
+
+  it('adds regional/global prefixes for bedrock models', (): void => {
+    const candidates = getGenaiPriceLookupCandidates(
+      'anthropic.claude-sonnet-4-6',
+      'bedrock',
+    );
+    const models = candidates.map((c) => c.model);
+    expect(models).toContain('regional.anthropic.claude-sonnet-4-6');
+    expect(models).toContain('global.anthropic.claude-sonnet-4-6');
   });
 });
 
@@ -237,6 +261,16 @@ describe('calculateCost', () => {
       defaultProvider: 'bedrock',
     });
     expect(result).toBeGreaterThan(0);
+  });
+
+  it('defaultProvider takes effect for unrecognized models', (): void => {
+    const candidates = getGenaiPriceLookupCandidates(
+      'xai-grok-3',
+      'xai',
+    );
+    const providerIds = candidates.map((c) => c.providerId);
+    expect(providerIds).toContain('xai');
+    expect(providerIds).not.toContain('openai');
   });
 
   // ------ Reasoning tokens NOT double-counted ------

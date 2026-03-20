@@ -62,7 +62,10 @@ export class AmplitudeCallbackHandler {
       ? serialized.id.find(
           (v) =>
             typeof v === 'string' &&
-            (v.includes('gpt') || v.includes('claude') || v.includes('gemini')),
+            // Accept any id segment that looks like a model name: contains a
+            // digit (version) or a dot (vendor.model).  Avoids hardcoding
+            // specific model families that would need updating over time.
+            (/\d/.test(v) || v.includes('.')),
         )
       : undefined;
     const modelName = String(
