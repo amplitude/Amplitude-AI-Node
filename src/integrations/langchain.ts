@@ -116,14 +116,8 @@ export class AmplitudeCallbackHandler {
     const modelName = String(
       llmOutput?.modelName ?? modelFromStart ?? 'unknown',
     );
-    const inputTokens = _safeNumber(
-      usage?.promptTokens ?? usage?.prompt_tokens ?? usage?.input_tokens,
-    );
-    const outputTokens = _safeNumber(
-      usage?.completionTokens ??
-        usage?.completion_tokens ??
-        usage?.output_tokens,
-    );
+    const { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens } =
+      _extractLangchainUsage(usage);
 
     let costUsd: number | undefined;
     if (
@@ -136,6 +130,8 @@ export class AmplitudeCallbackHandler {
           modelName,
           inputTokens,
           outputTokens,
+          cacheReadInputTokens: cacheReadTokens,
+          cacheCreationInputTokens: cacheCreationTokens,
           defaultProvider: inferProvider(modelName),
         });
         if (cost > 0) costUsd = cost;
@@ -255,6 +251,36 @@ export function createAmplitudeCallback(
 
 function _safeNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
+}
+
+function _extractLangchainUsage(usage: Record<string, unknown> | undefined): {
+  inputTokens: number | undefined;
+  outputTokens: number | undefined;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+} {
+  if (!usage) {
+    return { inputTokens: undefined, outputTokens: undefined, cacheReadTokens: 0, cacheCreationTokens: 0 };
+  }
+
+  const outputTokens = _safeNumber(
+    usage.completionTokens ?? usage.completion_tokens ?? usage.output_tokens,
+  );
+
+  // OpenAI format: promptTokens / prompt_tokens (already total, includes cached)
+  const promptTokens = _safeNumber(usage.promptTokens ?? usage.prompt_tokens);
+  if (promptTokens != null) {
+    const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+    const cached = _safeNumber(details?.cached_tokens ?? details?.cachedTokens) ?? 0;
+    return { inputTokens: promptTokens, outputTokens, cacheReadTokens: cached, cacheCreationTokens: 0 };
+  }
+
+  // Anthropic format: input_tokens is non-cached only; normalize to total
+  const rawInput = _safeNumber(usage.input_tokens);
+  const cacheRead = _safeNumber(usage.cache_read_input_tokens) ?? 0;
+  const cacheCreation = _safeNumber(usage.cache_creation_input_tokens) ?? 0;
+  const totalInput = rawInput != null ? rawInput + cacheRead + cacheCreation : undefined;
+  return { inputTokens: totalInput, outputTokens, cacheReadTokens: cacheRead, cacheCreationTokens: cacheCreation };
 }
 
 function _extractLangchainText(generation: unknown): string {
