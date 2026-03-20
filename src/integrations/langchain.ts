@@ -8,7 +8,7 @@
 import type { AmplitudeAI } from '../client.js';
 import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
-import { calculateCost } from '../utils/costs.js';
+import { calculateCost, inferProvider } from '../utils/costs.js';
 
 export interface CallbackHandlerOptions {
   amplitudeAI: AmplitudeAI;
@@ -129,7 +129,12 @@ export class AmplitudeCallbackHandler {
       outputTokens != null
     ) {
       try {
-        const cost = calculateCost({ modelName, inputTokens, outputTokens });
+        const cost = calculateCost({
+          modelName,
+          inputTokens,
+          outputTokens,
+          defaultProvider: inferProvider(modelName),
+        });
         if (cost > 0) costUsd = cost;
       } catch {
         // cost calculation is best-effort

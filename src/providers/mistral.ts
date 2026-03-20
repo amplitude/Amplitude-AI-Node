@@ -110,6 +110,7 @@ export class WrappedChat {
             modelName,
             inputTokens: usage.prompt_tokens,
             outputTokens: usage.completion_tokens,
+            defaultProvider: 'mistral',
           });
         } catch {
           // cost calculation is best-effort
@@ -265,6 +266,7 @@ export class WrappedChat {
             modelName,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
+            defaultProvider: 'mistral',
           });
         } catch {
           // cost calculation is best-effort

@@ -17,7 +17,7 @@ export function stripProviderPrefix(modelName: string): string {
 
 function normalizeBedrockModel(modelName: string): string {
   const match = modelName.match(
-    /(?:us\.|eu\.|ap\.)?(?:anthropic|meta|mistral|amazon|cohere)\.(.*)/,
+    /(?:us\.|eu\.|apac?\.|jp\.|au\.|ca\.|global\.|us-gov\.)?(?:anthropic|meta|mistral|amazon|cohere|ai21|stability|writer|twelvelabs|deepseek|nvidia)\.(.*)/,
   );
   return match?.[1] ?? modelName;
 }
@@ -52,38 +52,66 @@ function safeInt(value: unknown): number {
   return 0;
 }
 
+/**
+ * Calculate cost for an LLM call using genai-prices.
+ *
+ * IMPORTANT CONTRACT:
+ * - `inputTokens` MUST be the TOTAL input token count (including cached tokens).
+ *    For Anthropic: raw input_tokens + cache_read + cache_creation.
+ *    For OpenAI: prompt_tokens already includes cached_tokens.
+ * - `outputTokens` MUST be the TOTAL output token count (including reasoning tokens).
+ *    For OpenAI: completion_tokens already includes reasoning_tokens.
+ *    Do NOT pass reasoning tokens separately and then add them here.
+ * - `cacheReadInputTokens` and `cacheCreationInputTokens` are SUBSETS of inputTokens,
+ *    used only for differential pricing (cached tokens are cheaper).
+ * - `reasoningTokens` is IGNORED for cost calculation — it exists only for backward
+ *    compatibility. Reasoning tokens are already included in outputTokens.
+ */
 export function calculateCost(options: {
   modelName: string;
   inputTokens: number;
   outputTokens: number;
+  /** @deprecated Ignored — reasoning tokens are already included in outputTokens. */
   reasoningTokens?: number;
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
+  defaultProvider?: string;
 }): number {
   const {
     modelName,
     inputTokens,
     outputTokens,
-    reasoningTokens = 0,
     cacheReadInputTokens = 0,
     cacheCreationInputTokens = 0,
+    defaultProvider,
   } = options;
 
   if (genaiPrices != null) {
     try {
       const prices = genaiPrices as Record<string, unknown>;
-      if (typeof prices.calculateCost === 'function') {
+      if (typeof prices.calcPrice === 'function') {
         const stripped = stripProviderPrefix(modelName);
         const normalized = normalizeBedrockModel(stripped);
-        const cost = prices.calculateCost({
-          model: normalized,
-          inputTokens: safeInt(inputTokens),
-          outputTokens: safeInt(outputTokens),
-          reasoningTokens: safeInt(reasoningTokens),
-          cacheReadInputTokens: safeInt(cacheReadInputTokens),
-          cacheCreationInputTokens: safeInt(cacheCreationInputTokens),
-        }) as number | null;
-        return cost ?? 0;
+
+        const usage = {
+          input_tokens: safeInt(inputTokens),
+          output_tokens: safeInt(outputTokens),
+          cache_read_tokens: safeInt(cacheReadInputTokens),
+          cache_write_tokens: safeInt(cacheCreationInputTokens),
+        };
+
+        const priceOptions: Record<string, unknown> = {};
+        if (defaultProvider && defaultProvider !== 'bedrock') {
+          priceOptions.providerId = defaultProvider;
+        }
+
+        const result = (prices.calcPrice as Function)(
+          usage,
+          normalized,
+          Object.keys(priceOptions).length > 0 ? priceOptions : undefined,
+        ) as { total_price?: number } | null;
+
+        return result?.total_price ?? 0;
       }
     } catch {
       // Fall through to 0

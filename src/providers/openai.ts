@@ -212,6 +212,7 @@ export class WrappedCompletions {
             outputTokens: usage.completion_tokens,
             reasoningTokens: reasoningTokens ?? 0,
             cacheReadInputTokens: cachedTokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
@@ -369,6 +370,7 @@ export class WrappedCompletions {
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
             cacheReadInputTokens: state.cacheReadTokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
@@ -517,6 +519,7 @@ export class WrappedResponses {
             inputTokens: usage.input_tokens,
             outputTokens: usage.output_tokens,
             reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort
@@ -655,6 +658,7 @@ export class WrappedResponses {
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
+            defaultProvider: 'openai',
           });
         } catch {
           // cost calculation is best-effort

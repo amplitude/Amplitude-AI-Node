@@ -161,6 +161,7 @@ export class AmplitudeTracingProcessor {
           modelName: model,
           inputTokens,
           outputTokens,
+          defaultProvider: inferProvider(model),
         });
         if (cost > 0) costUsd = cost;
       } catch {

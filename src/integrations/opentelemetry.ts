@@ -179,6 +179,10 @@ export class AmplitudeAgentExporter {
           outputTokens,
           cacheReadInputTokens: cacheReadTokens ?? 0,
           cacheCreationInputTokens: cacheCreationTokens ?? 0,
+          defaultProvider:
+            providerName && providerName !== 'unknown'
+              ? providerName
+              : undefined,
         });
         if (computed > 0) costUsd = computed;
       } catch {

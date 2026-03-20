@@ -7,7 +7,7 @@
 
 import type { AmplitudeAI } from '../client.js';
 import { getActiveContext } from '../context.js';
-import { calculateCost } from '../utils/costs.js';
+import { calculateCost, inferProvider } from '../utils/costs.js';
 
 export interface LlamaIndexHandlerOptions {
   amplitudeAI: AmplitudeAI;
@@ -75,6 +75,7 @@ export class AmplitudeLlamaIndexHandler {
           modelName: normalized.model,
           inputTokens: normalized.inputTokens,
           outputTokens: normalized.outputTokens,
+          defaultProvider: inferProvider(normalized.model),
         });
         if (cost > 0) costUsd = cost;
       } catch {

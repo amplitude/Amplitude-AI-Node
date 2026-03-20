@@ -163,6 +163,7 @@ export class WrappedMessages {
             outputTokens: usage.output_tokens,
             cacheReadInputTokens: cacheRead,
             cacheCreationInputTokens: cacheCreation,
+            defaultProvider: 'anthropic',
           });
         } catch {
           // cost calculation is best-effort
@@ -304,6 +305,7 @@ export class WrappedMessages {
             outputTokens: state.outputTokens,
             cacheReadInputTokens: streamCacheRead,
             cacheCreationInputTokens: streamCacheCreation,
+            defaultProvider: 'anthropic',
           });
         } catch {
           // cost calculation is best-effort

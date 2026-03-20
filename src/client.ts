@@ -277,6 +277,7 @@ export class AmplitudeAI {
           reasoningTokens: opts.reasoningTokens ?? 0,
           cacheReadInputTokens: opts.cacheReadTokens ?? 0,
           cacheCreationInputTokens: opts.cacheCreationTokens ?? 0,
+          defaultProvider: opts.provider || undefined,
         });
       } catch {
         // cost calculation is best-effort
