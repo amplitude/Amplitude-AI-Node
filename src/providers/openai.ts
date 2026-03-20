@@ -440,8 +440,11 @@ export class WrappedCompletions {
         agentId: ctx.agentId,
         parentAgentId: ctx.parentAgentId,
         customerOrgId: ctx.customerOrgId,
+        agentVersion: ctx.agentVersion,
+        context: ctx.context,
         env: ctx.env,
         groups: ctx.groups,
+        eventProperties: ctx.eventProperties,
         privacyConfig: this._privacyConfig,
       });
     }
@@ -721,8 +724,11 @@ export class WrappedResponses {
         agentId: ctx.agentId,
         parentAgentId: ctx.parentAgentId,
         customerOrgId: ctx.customerOrgId,
+        agentVersion: ctx.agentVersion,
+        context: ctx.context,
         env: ctx.env,
         groups: ctx.groups,
+        eventProperties: ctx.eventProperties,
         privacyConfig: this._privacyConfig,
       });
     }
