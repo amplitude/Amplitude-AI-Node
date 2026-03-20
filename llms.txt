@@ -10,6 +10,9 @@ validate_setup
 suggest_instrumentation
 validate_file
 search_docs
+scan_project
+generate_verify_test
+instrument_file
 
 [mcp.resources]
 amplitude-ai://event-schema

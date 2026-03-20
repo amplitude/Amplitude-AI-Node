@@ -28,7 +28,7 @@ Package: `@amplitude/ai` v0.2.1
 
 ## MCP Surface
 
-- Tools: `get_event_schema`, `get_integration_pattern`, `validate_setup`, `suggest_instrumentation`, `validate_file`, `search_docs`
+- Tools: `get_event_schema`, `get_integration_pattern`, `validate_setup`, `suggest_instrumentation`, `validate_file`, `search_docs`, `scan_project`, `generate_verify_test`, `instrument_file`
 - Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`
 - Prompt: `instrument_app`
 

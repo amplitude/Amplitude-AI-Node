@@ -19,6 +19,9 @@ describe('agent-dx contract', (): void => {
       suggestInstrumentation: 'suggest_instrumentation',
       validateFile: 'validate_file',
       searchDocs: 'search_docs',
+      scanProject: 'scan_project',
+      generateVerifyTest: 'generate_verify_test',
+      instrumentFile: 'instrument_file',
     });
   });
 
@@ -105,6 +108,9 @@ describe('agent-dx contract', (): void => {
       'suggest_instrumentation',
       'validate_file',
       'search_docs',
+      'scan_project',
+      'generate_verify_test',
+      'instrument_file',
     ]);
     expect(schema.resources).toEqual([
       'amplitude-ai://event-schema',

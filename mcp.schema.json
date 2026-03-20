@@ -9,7 +9,10 @@
     "validate_setup",
     "suggest_instrumentation",
     "validate_file",
-    "search_docs"
+    "search_docs",
+    "scan_project",
+    "generate_verify_test",
+    "instrument_file"
   ],
   "resources": [
     "amplitude-ai://event-schema",

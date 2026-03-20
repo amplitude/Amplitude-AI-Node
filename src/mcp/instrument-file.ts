@@ -68,7 +68,18 @@ function addSessionWrapping(
 ): string {
   let result = source;
 
-  if (!result.includes("from '" + bootstrapImportPath + "'") &&
+  const importFromPath = new RegExp(
+    `import\\s*\\{([^}]*)\\}\\s*from\\s*['"]${bootstrapImportPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`,
+  );
+  const existingImportMatch = importFromPath.exec(result);
+  if (existingImportMatch) {
+    const existingNames = existingImportMatch[1] ?? '';
+    const importedNames = existingNames.split(',').map(s => s.trim());
+    if (!importedNames.includes('ai')) {
+      const newNames = existingNames.trim() ? `ai, ${existingNames.trim()}` : 'ai';
+      result = result.replace(existingImportMatch[0], `import { ${newNames} } from '${bootstrapImportPath}'`);
+    }
+  } else if (!result.includes("from '" + bootstrapImportPath + "'") &&
       !result.includes('from "' + bootstrapImportPath + '"')) {
     result = `import { ai } from '${bootstrapImportPath}';\n` + result;
   }

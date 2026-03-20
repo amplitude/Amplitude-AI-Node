@@ -109,6 +109,8 @@ const ASSISTANTS_API_RE = /\.beta\.(?:threads|assistants)\./;
 
 const LANGGRAPH_DEPS = ['@langchain/langgraph'];
 
+const MULTI_AGENT_CODE_RE = /\.child\s*\(|\.runAs\s*\(|\.runAsSync\s*\(/;
+
 const ROUTE_HANDLER_RE =
   /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b|app\.\s*(?:get|post|put|delete)\s*\(|router\./;
 
@@ -243,6 +245,7 @@ export function scanProject(rootPath: string): ScanResult {
   let hasVercelAiSdkUsage = false;
   let hasEdgeRuntime = false;
   let hasAssistantsApi = false;
+  let hasMultiAgentCodePatterns = false;
 
   const agents: ScanResult['agents'] = [];
   const filesWithCallSites = new Set<string>();
@@ -265,6 +268,7 @@ export function scanProject(rootPath: string): ScanResult {
     if (VERCEL_AI_SDK_RE.test(content)) hasVercelAiSdkUsage = true;
     if (EDGE_RUNTIME_RE.test(content)) hasEdgeRuntime = true;
     if (ASSISTANTS_API_RE.test(content)) hasAssistantsApi = true;
+    if (MULTI_AGENT_CODE_RE.test(content)) hasMultiAgentCodePatterns = true;
     if (/\.wrap\s*\(/.test(content) && analysis.has_amplitude_import) {
       globalHasWrappers = true;
     }
@@ -310,6 +314,21 @@ export function scanProject(rootPath: string): ScanResult {
     }
   }
 
+  // Cross-file wrapper propagation: when a wrapper is defined in one file
+  // (e.g., ai.ts) and used in another (e.g., route.ts), per-file analysis
+  // can't see the connection. If we know wrappers exist globally, upgrade
+  // uninstrumented agents that use the same provider.
+  if (globalHasWrappers && globalHasAmplitudeImport) {
+    for (const agent of agents) {
+      if (!agent.is_instrumented) {
+        agent.is_instrumented = true;
+        const delta = agent.call_sites;
+        uninstrumentedCallSites -= delta;
+        instrumentedCallSites += delta;
+      }
+    }
+  }
+
   // Multi-agent signals
   const multipleFilesWithCalls = filesWithCallSites.size > 1;
   const hasAgentFrameworkDeps = agentFrameworks.length > 0;
@@ -320,7 +339,7 @@ export function scanProject(rootPath: string): ScanResult {
   const multipleProviders = allProviders.size > 1;
 
   const isMultiAgent =
-    multipleFilesWithCalls || hasAgentFrameworkDeps || multipleProviders;
+    multipleFilesWithCalls || hasAgentFrameworkDeps || multipleProviders || hasMultiAgentCodePatterns;
 
   // Message queue deps (cross-service signal)
   const messageQueueDeps = MESSAGE_QUEUE_DEPS.filter((dep) =>
@@ -395,6 +414,14 @@ export function scanProject(rootPath: string): ScanResult {
       'LangGraph detected. LLM calls within LangGraph are captured via the LangChain ' +
       'AmplitudeCallbackHandler, but graph orchestration events (node transitions, checkpoints, ' +
       'human-in-the-loop) are not yet instrumented.',
+    );
+  }
+
+  if (globalHasAmplitudeImport && globalHasWrappers && globalHasSessionContext) {
+    recommendations.push(
+      'Project already has @amplitude/ai instrumentation with wrappers and session context. ' +
+      'No re-instrumentation needed. Consider upgrading contentMode tiers, adding scoring, ' +
+      'or expanding multi-agent coverage if applicable.',
     );
   }
 

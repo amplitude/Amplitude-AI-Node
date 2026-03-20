@@ -19,6 +19,9 @@ const toolNames = [
   'suggest_instrumentation',
   'validate_file',
   'search_docs',
+  'scan_project',
+  'generate_verify_test',
+  'instrument_file',
 ];
 
 const resources = ['amplitude-ai://event-schema', 'amplitude-ai://integration-patterns'];

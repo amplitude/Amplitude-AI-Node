@@ -132,15 +132,23 @@ export function analyzeFileInstrumentation(source: string): FileAnalysis {
 
   const callSites: CallSite[] = [];
   const lines = source.split('\n');
+  const assistantsApiRe = /\.beta\.(?:threads|assistants)\./;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     for (const { pattern, receiverRe, provider, api } of llmPatterns) {
       pattern.lastIndex = 0;
       if (pattern.test(line)) {
+        let effectiveProvider = provider;
+        let effectiveApi = api;
+        // .messages.create on an Assistants API chain is OpenAI, not Anthropic
+        if (provider === 'anthropic' && assistantsApiRe.test(line)) {
+          effectiveProvider = 'openai-assistants';
+          effectiveApi = 'beta.threads.messages.create';
+        }
         const rm = receiverRe ? line.match(receiverRe) : null;
         const receiver = rm?.[1] ?? '';
         const instrumented = hasPatch || wrappedClients.has(receiver);
-        callSites.push({ line: i + 1, provider, api, instrumented });
+        callSites.push({ line: i + 1, provider: effectiveProvider, api: effectiveApi, instrumented });
       }
     }
   }
