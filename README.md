@@ -715,6 +715,15 @@ s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
+> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may return `$0` until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
+>
+> ```typescript
+> import { enableLivePriceUpdates } from '@amplitude/ai';
+> enableLivePriceUpdates(); // fetches latest prices from genai-prices GitHub repo hourly
+> ```
+>
+> This makes periodic HTTPS requests to `raw.githubusercontent.com` (~26 KB each). Only enable in environments where outbound network access is permitted.
+
 ## Semantic Cache Tracking
 
 Track full-response semantic cache hits (distinct from token-level prompt caching above):
