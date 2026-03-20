@@ -163,6 +163,8 @@ The zero-code / CLI setup gives you cost, latency, token counts, and error track
 
 Adding `userId` is one option per call. Adding session context is `session.run()`. See [Session](#session) and [Choose Your Integration Tier](#choose-your-integration-tier).
 
+> **Tip:** Call `enableLivePriceUpdates()` at startup so cost tracking stays accurate when new models are released. See [Cost Tracking](#cost-tracking).
+
 ### Current Limitations
 
 | Area | Status |
@@ -191,7 +193,9 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
 
-**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code.
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Score` events with rubric scores, `[Agent] Topic Classification` events with category labels, and `[Agent] Session Evaluation` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
+
+**Quality signals from every source in one event type.** User thumbs up/down (`source: 'user'`), automated rubric scores from the enrichment pipeline (`source: 'ai'`), and reviewer assessments (`source: 'reviewer'`) all produce `[Agent] Score` events differentiated by `[Agent] Evaluation Source`. One chart shows all three side by side. Filter by source or view them together. Filter by `[Agent] Agent ID` for per-agent quality attribution.
 
 **Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
 
@@ -205,6 +209,60 @@ Once AI events are in Amplitude alongside your product events:
 - **Funnels.** "AI session about charts -> Chart Created." "Sign Up -> First AI Session -> Conversion." Measure whether AI drives feature adoption and onboarding.
 - **Retention.** Do users with successful AI sessions retain better than those with failures? Segment retention curves by `[Agent] Overall Outcome` or task completion score.
 - **Agent analytics.** Compare quality, cost, and failure rate across agents in one chart. Identify which agent in a multi-agent chain introduced a failure.
+
+### How quality measurement works
+
+The SDK captures quality signals at three layers, from most direct to most comprehensive:
+
+**1. Explicit user feedback** — Instrument thumbs up/down, star ratings, or CSAT scores via [`trackScore()`](#scoring-patterns). Each call produces an `[Agent] Score` event with `source: 'user'`:
+
+```typescript
+ai.trackScore({
+  userId: 'u1', name: 'user-feedback', value: 1,
+  targetId: aiMessageId, targetType: 'message', source: 'user',
+});
+```
+
+**2. Implicit behavioral signals** — The SDK auto-tracks behavioral proxies for quality on every turn, with zero additional instrumentation:
+
+| Signal | Property | Event | Interpretation |
+|--------|----------|-------|----------------|
+| Copy | `[Agent] Was Copied` | `[Agent] AI Response` | User copied the output — positive |
+| Regeneration | `[Agent] Is Regeneration` | `[Agent] User Message` | User asked for a redo — negative |
+| Edit | `[Agent] Is Edit` | `[Agent] User Message` | User refined their prompt — friction |
+| Abandonment | `[Agent] Abandonment Turn` | `[Agent] Session End` | User left after N turns — potential failure |
+
+**3. Automated server-side evaluation** — When `contentMode: 'full'`, Amplitude's enrichment pipeline runs LLM-as-judge evaluators on every session after it closes. No eval code to write or maintain:
+
+| Rubric | What it measures | Scale |
+|--------|-----------------|-------|
+| `task_completion` | Did the agent accomplish what the user asked? | 0–2 |
+| `response_quality` | Was the response clear, accurate, and helpful? | 0–2 |
+| `user_satisfaction` | Did the user seem satisfied based on conversation signals? | 0–2 |
+| `agent_confusion` | Did the agent misunderstand or go off track? | 0–2 |
+
+Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure` (agent failed to deliver), `data_quality_issues`, and `behavioral_patterns` (clarification loops, topic drift). All results are emitted as `[Agent] Score` events with `source: 'ai'`.
+
+**All three layers use the same `[Agent] Score` event type**, differentiated by `[Agent] Evaluation Source` (`'user'`, `'ai'`, or `'reviewer'`). One chart shows user feedback alongside automated evals. No joins, no separate tables.
+
+## What You Set vs What You Get
+
+| You set | Where it comes from | What you unlock |
+|---|---|---|
+| API key | Amplitude project settings | Events reach Amplitude |
+| userId | Your auth layer (JWT, session cookie, API token) | Per-user analytics, cohorts, retention |
+| agentId | Your choice (e.g. `'chat-handler'`) | Per-agent cost, latency, quality dashboards |
+| sessionId | Your conversation/thread/ticket ID | Multi-turn analysis, session enrichment, quality scores |
+| *description* | *Your choice (e.g. `'Handles support queries via GPT-4o'`)* | *Human-readable agent registry from event streams* |
+| *contentMode + redactPii* | *Config (defaults work)* | *Server enrichment (automatic), PII scrubbing* |
+| *model, tokens, cost* | *Auto-captured by provider wrappers* | *Cost analytics, latency monitoring* |
+| parentAgentId | Auto via `child()`/`runAs()` | Multi-agent hierarchy |
+| env, agentVersion, context | Your deploy pipeline | Segmentation, regression detection |
+
+*Italicized rows require zero developer effort — they're automatic or have sensible defaults.*
+
+**The minimum viable setup is 4 fields**: API key, userId, agentId, sessionId.
+Everything else is either automatic or a progressive enhancement.
 
 ## Choose Your Integration Tier
 
@@ -354,23 +412,30 @@ const ai = new AmplitudeAI({ amplitude: existingAmplitudeClient });
 
 ### BoundAgent
 
-Agent with pre-bound defaults (`agentId`, `userId`, `env`, etc.). Use `agent()` to create:
+Agent with pre-bound defaults (`agentId`, `description`, `userId`, `env`, etc.). Use `agent()` to create:
 
 ```typescript
 const agent = ai.agent('support-bot', {
+  description: 'Handles customer support queries via OpenAI GPT-4o',
   userId: 'user-123',
   env: 'production',
   customerOrgId: 'org-456',
 });
 ```
 
-Child agents inherit context from their parent and automatically set `parentAgentId`:
+Child agents inherit context (including `description`) from their parent and automatically set `parentAgentId`:
 
 ```typescript
-const orchestrator = ai.agent('orchestrator', { userId: 'user-123' });
+const orchestrator = ai.agent('orchestrator', {
+  description: 'Routes queries to specialized child agents',
+  userId: 'user-123',
+});
 const researcher = orchestrator.child('researcher');
-const writer = orchestrator.child('writer');
+const writer = orchestrator.child('writer', {
+  description: 'Drafts responses using retrieved context',
+});
 // researcher.parentAgentId === 'orchestrator'
+// researcher inherits orchestrator's description; writer has its own
 ```
 
 ### TenantHandle
@@ -560,6 +625,7 @@ The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unk
 ```typescript
 const agent = ai.agent('support-bot', {
   userId: 'u1',
+  description: 'Handles customer support queries via OpenAI GPT-4o',
   agentVersion: '4.2.0',
   context: {
     agent_type: 'executor',
@@ -1155,7 +1221,10 @@ const ai = new AmplitudeAI({
   }),
 });
 
-const agent = ai.agent('support-bot', { agentVersion: '2.1.0' });
+const agent = ai.agent('support-bot', {
+  description: 'Handles support conversations in metadata-only mode',
+  agentVersion: '2.1.0',
+});
 
 // 2. Run the conversation — content is NOT sent (metadata only)
 const session = agent.session({ userId: 'user-42' });

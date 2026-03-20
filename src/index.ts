@@ -12,6 +12,10 @@ export type {
   ScoreOpts,
 } from './bound-agent.js';
 export { Session } from './session.js';
+export type { SessionOptions } from './session.js';
+
+// Serverless detection
+export { isServerless } from './serverless.js';
 export { TenantHandle } from './tenant.js';
 
 // Config
@@ -98,6 +102,7 @@ export {
   PROP_CUSTOMER_ORG_ID,
   PROP_AGENT_VERSION,
   PROP_AGENT_DESCRIPTION,
+  PROP_MESSAGE_SOURCE,
   PROP_CONTEXT,
   PROP_SPAN_ID,
   PROP_SPAN_NAME,
@@ -192,6 +197,9 @@ export {
   MCP_PROMPTS,
   GENERATED_FILES,
 } from './mcp/contract.js';
+export { generateVerifyTest } from './mcp/generate-verify-test.js';
+export { instrumentFile } from './mcp/instrument-file.js';
+export type { InstrumentFileOptions } from './mcp/instrument-file.js';
 
 // Propagation
 export { injectContext, extractContext } from './propagation.js';

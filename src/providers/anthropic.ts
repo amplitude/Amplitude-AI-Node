@@ -383,6 +383,7 @@ export class WrappedMessages {
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
         turnId: ctx.turnId ?? undefined,
+        messageSource: ctx.parentAgentId ? 'agent' : 'user',
         agentId: ctx.agentId,
         parentAgentId: ctx.parentAgentId,
         customerOrgId: ctx.customerOrgId,

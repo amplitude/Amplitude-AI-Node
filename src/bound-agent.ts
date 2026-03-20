@@ -279,6 +279,7 @@ export class BoundAgent {
       userId?: string | null;
       deviceId?: string | null;
       browserSessionId?: string | null;
+      autoFlush?: boolean;
     } = {},
   ): Session {
     return new Session(this, opts);

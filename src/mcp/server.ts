@@ -11,6 +11,9 @@ import {
   MCP_TOOLS,
 } from './contract.js';
 import { getIntegrationPatterns } from './patterns.js';
+import { generateVerifyTest } from './generate-verify-test.js';
+import { instrumentFile } from './instrument-file.js';
+import { type ScanResult, scanProject } from './scan-project.js';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
 type EventSchema = {
@@ -380,6 +383,102 @@ const createServer = (): McpServer => {
             ),
           },
         ],
+      };
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.scanProject,
+    {
+      title: 'Scan Project',
+      description:
+        'Scan a project directory to detect framework, LLM providers, agents, and call sites. Returns a structured discovery report for the instrument-with-amplitude-ai skill.',
+      inputSchema: {
+        root_path: z
+          .string()
+          .describe('Absolute path to the project root directory'),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
+    async (args: any) => {
+      const rootPath =
+        typeof args?.root_path === 'string' ? args.root_path : '';
+      const result = scanProject(rootPath);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.generateVerifyTest,
+    {
+      title: 'Generate Verify Test',
+      description:
+        'Generate a vitest verification test from a scan_project result. The test exercises all discovered agents in dry-run mode using MockAmplitudeAI.',
+      inputSchema: {
+        scan_result: z
+          .string()
+          .describe('JSON string of the scan_project result'),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
+    async (args: any) => {
+      const raw =
+        typeof args?.scan_result === 'string' ? args.scan_result : '{}';
+      const parsed = JSON.parse(raw) as ScanResult;
+      const testCode = generateVerifyTest(parsed);
+      return {
+        content: [{ type: 'text' as const, text: testCode }],
+      };
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.instrumentFile,
+    {
+      title: 'Instrument File',
+      description:
+        'Apply instrumentation transforms to a source file. Returns the instrumented source code.',
+      inputSchema: {
+        source: z.string().describe('Source code of the file'),
+        file_path: z.string().describe('Path to the file (for context)'),
+        tier: z.enum(['quick_start', 'standard', 'advanced']),
+        bootstrap_import_path: z
+          .string()
+          .describe('Import path for the amplitude bootstrap module'),
+        agent_id: z.string().describe('Agent ID to use'),
+        description: z
+          .string()
+          .optional()
+          .describe('Agent description'),
+        providers: z
+          .array(z.string())
+          .describe('Provider names used in this file'),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
+    async (args: any) => {
+      const result = instrumentFile({
+        source: typeof args?.source === 'string' ? args.source : '',
+        filePath: typeof args?.file_path === 'string' ? args.file_path : '',
+        tier: args?.tier ?? 'standard',
+        bootstrapImportPath:
+          typeof args?.bootstrap_import_path === 'string'
+            ? args.bootstrap_import_path
+            : '@/lib/amplitude',
+        agentId: typeof args?.agent_id === 'string' ? args.agent_id : 'agent',
+        description:
+          typeof args?.description === 'string' ? args.description : null,
+        providers: Array.isArray(args?.providers) ? args.providers : [],
+      });
+      return {
+        content: [{ type: 'text' as const, text: result }],
       };
     },
   );

@@ -15,6 +15,7 @@ import {
 import { ConfigurationError } from './exceptions.js';
 import { patchedProviders } from './patching.js';
 import { setDefaultPropagateContext } from './propagation.js';
+import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
 import type {
   AmplitudeClientLike,
@@ -26,6 +27,29 @@ import { formatDebugLine, formatDryRunLine } from './utils/debug.js';
 import { tryRequire } from './utils/resolve-module.js';
 
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
+
+// Global set of AmplitudeAI instances for the unflushed-events exit warning.
+const _activeInstances = new Set<AmplitudeAI>();
+let _exitHookRegistered = false;
+
+function _registerExitHook(): void {
+  if (_exitHookRegistered) return;
+  _exitHookRegistered = true;
+
+  process.on('beforeExit', () => {
+    if (!isServerless()) return;
+    for (const instance of _activeInstances) {
+      if (instance._trackCountSinceFlush > 0) {
+        console.warn(
+          `⚠️  AmplitudeAI: ${instance._trackCountSinceFlush} event(s) were tracked but ` +
+            'never flushed. In serverless environments, call `await ai.flush()` before ' +
+            'your handler returns, or use session.run() which auto-flushes by default.',
+        );
+        break; // one warning is enough
+      }
+    }
+  });
+}
 
 /**
  * Main Amplitude AI client for tracking LLM interactions.
@@ -51,6 +75,8 @@ export class AmplitudeAI {
   protected _config: AIConfig;
   protected _privacyConfig: PrivacyConfig;
   protected _sessionTurnCounters: Map<string, number> = new Map();
+  /** @internal Tracks events since last flush() — used by the exit warning. */
+  _trackCountSinceFlush = 0;
 
   constructor(options: {
     amplitude?: AmplitudeClientLike;
@@ -89,6 +115,19 @@ export class AmplitudeAI {
     ) {
       this._installTrackHook();
     }
+
+    this._installTrackCounter();
+    _activeInstances.add(this);
+    _registerExitHook();
+  }
+
+  private _installTrackCounter(): void {
+    const originalTrack = this._amplitude.track.bind(this._amplitude);
+    const self = this;
+    this._amplitude.track = (event: AmplitudeEvent) => {
+      self._trackCountSinceFlush++;
+      return originalTrack(event);
+    };
   }
 
   private _installTrackHook(): void {
@@ -177,6 +216,7 @@ export class AmplitudeAI {
     traceId?: string | null;
     turnId?: number | null;
     messageId?: string | null;
+    messageSource?: string | null;
     agentId?: string | null;
     parentAgentId?: string | null;
     customerOrgId?: string | null;
@@ -201,6 +241,7 @@ export class AmplitudeAI {
       traceId: opts.traceId,
       turnId: effectiveTurnId,
       messageId: opts.messageId,
+      messageSource: opts.messageSource ?? 'user',
       agentId: opts.agentId,
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
@@ -691,10 +732,13 @@ export class AmplitudeAI {
   }
 
   flush(): unknown {
+    this._trackCountSinceFlush = 0;
     return this._amplitude.flush();
   }
 
   shutdown(): void {
+    _activeInstances.delete(this);
+    this._trackCountSinceFlush = 0;
     if (this._ownsClient) {
       this._amplitude.shutdown?.();
     }

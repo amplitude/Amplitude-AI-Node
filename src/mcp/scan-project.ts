@@ -1,0 +1,310 @@
+import {
+  readFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
+import { join, relative, basename, dirname } from 'node:path';
+import { analyzeFileInstrumentation } from './validate-file.js';
+
+export interface ScanResult {
+  project_name: string | null;
+  runtime: 'node';
+  language: 'typescript' | 'javascript';
+  framework: string | null;
+  providers: string[];
+  agent_frameworks: string[];
+  package_manager: string | null;
+  existing_instrumentation: {
+    has_amplitude_ai: boolean;
+    has_patch: boolean;
+    has_wrappers: boolean;
+    has_session_context: boolean;
+  };
+  agents: Array<{
+    inferred_id: string;
+    file: string;
+    call_sites: number;
+    is_instrumented: boolean;
+    is_route_handler: boolean;
+    inferred_description: string | null;
+  }>;
+  total_call_sites: number;
+  instrumented_call_sites: number;
+  uninstrumented_call_sites: number;
+  is_multi_agent: boolean;
+  recommended_tier: 'quick_start' | 'standard' | 'advanced';
+}
+
+const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx']);
+const SKIP_DIRS = new Set([
+  'node_modules',
+  'dist',
+  '.next',
+  '.git',
+  '__tests__',
+  'test',
+]);
+const MAX_DEPTH = 5;
+
+const FRAMEWORK_DEPS: Array<[string, string]> = [
+  ['next', 'nextjs'],
+  ['express', 'express'],
+  ['fastify', 'fastify'],
+  ['hono', 'hono'],
+  ['@remix-run/node', 'remix'],
+];
+
+const PROVIDER_DEPS = [
+  'openai',
+  '@anthropic-ai/sdk',
+  '@google/generative-ai',
+  '@aws-sdk/client-bedrock-runtime',
+  '@mistralai/mistralai',
+];
+
+const AGENT_FRAMEWORK_DEPS = [
+  'langchain',
+  '@langchain/core',
+  'llamaindex',
+  '@openai/agents',
+  'crewai',
+];
+
+const ROUTE_HANDLER_RE =
+  /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b|app\.\s*(?:get|post|put|delete)\s*\(|router\./;
+
+function collectSourceFiles(
+  dir: string,
+  rootPath: string,
+  depth: number,
+): string[] {
+  if (depth > MAX_DEPTH) return [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (SKIP_DIRS.has(entry)) continue;
+    const fullPath = join(dir, entry);
+    let stat;
+    try {
+      stat = statSync(fullPath);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      files.push(...collectSourceFiles(fullPath, rootPath, depth + 1));
+    } else if (stat.isFile()) {
+      const ext = entry.slice(entry.lastIndexOf('.'));
+      if (SOURCE_EXTENSIONS.has(ext)) {
+        files.push(fullPath);
+      }
+    }
+  }
+  return files;
+}
+
+function inferAgentId(filePath: string): string {
+  const base = basename(filePath).replace(/\.[^.]+$/, '');
+  if (base === 'route' || base === 'index') {
+    const parentDir = basename(dirname(filePath));
+    return parentDir || base;
+  }
+  return base;
+}
+
+function inferDescription(
+  filePath: string,
+  isRouteHandler: boolean,
+): string | null {
+  const agentId = inferAgentId(filePath);
+  if (isRouteHandler) {
+    return `Route handler agent: ${agentId}`;
+  }
+  if (/agent|worker|service/i.test(filePath)) {
+    return `Background agent: ${agentId}`;
+  }
+  return null;
+}
+
+function readPackageJson(
+  rootPath: string,
+): {
+  name: string | null;
+  allDeps: Set<string>;
+} {
+  const pkgPath = join(rootPath, 'package.json');
+  if (!existsSync(pkgPath)) {
+    return { name: null, allDeps: new Set() };
+  }
+  try {
+    const raw = readFileSync(pkgPath, 'utf8');
+    const pkg = JSON.parse(raw) as Record<string, unknown>;
+    const name = typeof pkg.name === 'string' ? pkg.name : null;
+    const deps = (pkg.dependencies ?? {}) as Record<string, string>;
+    const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
+    const allDeps = new Set([...Object.keys(deps), ...Object.keys(devDeps)]);
+    return { name, allDeps };
+  } catch {
+    return { name: null, allDeps: new Set() };
+  }
+}
+
+export function scanProject(rootPath: string): ScanResult {
+  const { name: projectName, allDeps } = readPackageJson(rootPath);
+
+  // Detect framework
+  let framework: string | null = null;
+  for (const [dep, label] of FRAMEWORK_DEPS) {
+    if (allDeps.has(dep)) {
+      framework = label;
+      break;
+    }
+  }
+
+  // Detect LLM providers
+  const providers = PROVIDER_DEPS.filter((dep) => allDeps.has(dep));
+
+  // Detect agent frameworks
+  const agentFrameworks = AGENT_FRAMEWORK_DEPS.filter((dep) =>
+    allDeps.has(dep),
+  );
+
+  // Detect package manager
+  let packageManager: string | null = null;
+  if (existsSync(join(rootPath, 'pnpm-lock.yaml'))) {
+    packageManager = 'pnpm';
+  } else if (existsSync(join(rootPath, 'yarn.lock'))) {
+    packageManager = 'yarn';
+  } else if (existsSync(join(rootPath, 'package-lock.json'))) {
+    packageManager = 'npm';
+  }
+
+  // Detect TypeScript
+  const isTypeScript = existsSync(join(rootPath, 'tsconfig.json'));
+
+  // Detect existing Amplitude instrumentation from deps
+  const hasAmplitudeAiDep = allDeps.has('@amplitude/ai');
+
+  // Walk source files and analyze
+  const sourceFiles = collectSourceFiles(rootPath, rootPath, 0);
+
+  let totalCallSites = 0;
+  let instrumentedCallSites = 0;
+  let uninstrumentedCallSites = 0;
+  let globalHasPatch = false;
+  let globalHasWrappers = false;
+  let globalHasSessionContext = false;
+  let globalHasAmplitudeImport = hasAmplitudeAiDep;
+
+  const agents: ScanResult['agents'] = [];
+  const filesWithCallSites = new Set<string>();
+  const providerImportsPerFile = new Map<string, Set<string>>();
+
+  for (const filePath of sourceFiles) {
+    let content: string;
+    try {
+      content = readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+
+    const analysis = analyzeFileInstrumentation(content);
+    if (analysis.has_amplitude_import) globalHasAmplitudeImport = true;
+    if (analysis.has_session_context) globalHasSessionContext = true;
+
+    if (/\bpatch\s*\(\s*\{/.test(content)) globalHasPatch = true;
+    if (/\.wrap\s*\(/.test(content) && analysis.has_amplitude_import) {
+      globalHasWrappers = true;
+    }
+    if (
+      /new\s+(?:OpenAI|Anthropic|Gemini|AzureOpenAI|Bedrock|Mistral)\s*\(/.test(
+        content,
+      ) &&
+      /\bamplitude\s*:/.test(content)
+    ) {
+      globalHasWrappers = true;
+    }
+
+    // Track provider imports per file for multi-agent signal
+    const fileProviders = new Set<string>();
+    for (const site of analysis.call_sites) {
+      fileProviders.add(site.provider);
+    }
+    if (fileProviders.size > 0) {
+      const relPath = relative(rootPath, filePath);
+      providerImportsPerFile.set(relPath, fileProviders);
+    }
+
+    if (analysis.total_call_sites > 0) {
+      const relPath = relative(rootPath, filePath);
+      filesWithCallSites.add(relPath);
+
+      totalCallSites += analysis.total_call_sites;
+      instrumentedCallSites += analysis.instrumented;
+      uninstrumentedCallSites += analysis.uninstrumented;
+
+      const isRouteHandler = ROUTE_HANDLER_RE.test(content);
+      const inferredId = inferAgentId(filePath);
+      const allInstrumented = analysis.uninstrumented === 0;
+
+      agents.push({
+        inferred_id: inferredId,
+        file: relPath,
+        call_sites: analysis.total_call_sites,
+        is_instrumented: allInstrumented,
+        is_route_handler: isRouteHandler,
+        inferred_description: inferDescription(filePath, isRouteHandler),
+      });
+    }
+  }
+
+  // Multi-agent signals
+  const multipleFilesWithCalls = filesWithCallSites.size > 1;
+  const hasAgentFrameworkDeps = agentFrameworks.length > 0;
+  const allProviders = new Set<string>();
+  for (const provSet of providerImportsPerFile.values()) {
+    for (const p of provSet) allProviders.add(p);
+  }
+  const multipleProviders = allProviders.size > 1;
+
+  const isMultiAgent =
+    multipleFilesWithCalls || hasAgentFrameworkDeps || multipleProviders;
+
+  // Recommended tier
+  let recommendedTier: ScanResult['recommended_tier'];
+  if (isMultiAgent) {
+    recommendedTier = 'advanced';
+  } else if (totalCallSites > 0) {
+    recommendedTier = 'standard';
+  } else {
+    recommendedTier = 'quick_start';
+  }
+
+  return {
+    project_name: projectName,
+    runtime: 'node',
+    language: isTypeScript ? 'typescript' : 'javascript',
+    framework,
+    providers,
+    agent_frameworks: agentFrameworks,
+    package_manager: packageManager,
+    existing_instrumentation: {
+      has_amplitude_ai: globalHasAmplitudeImport,
+      has_patch: globalHasPatch,
+      has_wrappers: globalHasWrappers,
+      has_session_context: globalHasSessionContext,
+    },
+    agents,
+    total_call_sites: totalCallSites,
+    instrumented_call_sites: instrumentedCallSites,
+    uninstrumented_call_sites: uninstrumentedCallSites,
+    is_multi_agent: isMultiAgent,
+    recommended_tier: recommendedTier,
+  };
+}

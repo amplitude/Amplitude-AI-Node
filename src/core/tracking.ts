@@ -53,6 +53,7 @@ import {
   PROP_MAX_OUTPUT_TOKENS,
   PROP_MESSAGE_ID,
   PROP_MESSAGE_LABELS,
+  PROP_MESSAGE_SOURCE,
   PROP_MODEL_NAME,
   PROP_MODEL_TIER,
   PROP_OUTPUT_STATE,
@@ -173,6 +174,7 @@ export interface TrackUserMessageOptions {
   isEdit?: boolean;
   editedMessageId?: string | null;
   attachments?: Attachment[] | null;
+  messageSource?: string | null;
   labels?: MessageLabel[] | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
@@ -212,6 +214,7 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
+  if (opts.messageSource) properties[PROP_MESSAGE_SOURCE] = opts.messageSource;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
 

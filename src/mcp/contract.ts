@@ -7,6 +7,9 @@ export const MCP_TOOLS = {
   suggestInstrumentation: 'suggest_instrumentation',
   validateFile: 'validate_file',
   searchDocs: 'search_docs',
+  scanProject: 'scan_project',
+  generateVerifyTest: 'generate_verify_test',
+  instrumentFile: 'instrument_file',
 } as const;
 
 export const MCP_RESOURCES = {
