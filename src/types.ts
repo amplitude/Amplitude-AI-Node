@@ -421,8 +421,11 @@ export interface TrackCallOptions {
   agentId?: string | null;
   parentAgentId?: string | null;
   customerOrgId?: string | null;
+  agentVersion?: string | null;
+  context?: Record<string, unknown> | null;
   env?: string | null;
   groups?: Record<string, unknown> | null;
+  eventProperties?: Record<string, unknown> | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
   totalTokens?: number | null;

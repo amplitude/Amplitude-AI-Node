@@ -5,7 +5,7 @@
 import type { PrivacyConfig } from '../core/privacy.js';
 import { getDefaultPropagateContext } from '../propagation.js';
 import type { AmplitudeOrAI } from '../types.js';
-import { BaseAIProvider } from './base.js';
+import { BaseAIProvider, type ProviderTrackOptions } from './base.js';
 import {
   _OpenAIModule,
   OPENAI_AVAILABLE,
@@ -30,8 +30,8 @@ export class AzureOpenAI extends BaseAIProvider {
   private _propagateContext: boolean;
   readonly chat: {
     completions: {
-      create: (params: Record<string, unknown>) => Promise<unknown>;
-      parse: (params: Record<string, unknown>) => Promise<unknown>;
+      create: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions) => Promise<unknown>;
+      parse: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions) => Promise<unknown>;
     };
   };
 
@@ -81,10 +81,10 @@ export class AzureOpenAI extends BaseAIProvider {
 
     this.chat = {
       completions: {
-        create: (params: Record<string, unknown>): Promise<unknown> =>
-          wrappedCompletions.create(params),
-        parse: (params: Record<string, unknown>): Promise<unknown> =>
-          wrappedCompletions.parse(params),
+        create: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions): Promise<unknown> =>
+          wrappedCompletions.create(params, amplitudeOverrides),
+        parse: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions): Promise<unknown> =>
+          wrappedCompletions.parse(params, amplitudeOverrides),
       },
     };
   }

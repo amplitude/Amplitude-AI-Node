@@ -71,6 +71,24 @@ export class StreamingAccumulator {
     this.toolCalls.push(toolCall);
   }
 
+  setToolCallAt(index: number, toolCall: Record<string, unknown>): void {
+    while (this.toolCalls.length <= index) {
+      this.toolCalls.push({});
+    }
+    this.toolCalls[index] = toolCall;
+  }
+
+  appendToolCallArgs(index: number, args: string): void {
+    if (index < this.toolCalls.length && this.toolCalls[index]) {
+      const fn = this.toolCalls[index].function as
+        | Record<string, unknown>
+        | undefined;
+      if (fn) {
+        fn.arguments = ((fn.arguments as string) ?? '') + args;
+      }
+    }
+  }
+
   setError(message: string): void {
     this.isError = true;
     this.errorMessage = message;

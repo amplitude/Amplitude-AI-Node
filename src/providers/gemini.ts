@@ -7,7 +7,7 @@ import type { AmplitudeOrAI, GeminiResponse } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
-import { applySessionContext, BaseAIProvider } from './base.js';
+import { applySessionContext, BaseAIProvider, contextFields } from './base.js';
 
 const _resolved = tryRequire('@google/generative-ai');
 export const GEMINI_AVAILABLE = _resolved != null;
@@ -82,16 +82,11 @@ export class Gemini extends BaseAIProvider {
 
       const ctx = applySessionContext();
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: model,
         provider: 'gemini',
         responseContent: extracted.text,
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: extracted.inputTokens,
         outputTokens: extracted.outputTokens,
         totalTokens: extracted.totalTokens,
@@ -113,15 +108,11 @@ export class Gemini extends BaseAIProvider {
       const ctx = applySessionContext();
 
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: model,
         provider: 'gemini',
         responseContent: '',
         latencyMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
@@ -164,19 +155,15 @@ export class Gemini extends BaseAIProvider {
 
       return {
         ...streamResponse,
-        stream: this._wrapStream(model, params, stream, finalResponse),
+        stream: this._wrapStream(model, params, stream, finalResponse, ctx),
       };
     } catch (error) {
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: model,
         provider: 'gemini',
         responseContent: '',
         latencyMs: performance.now() - startTime,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        env: ctx.env,
         isError: true,
         errorMessage: error instanceof Error ? error.message : String(error),
         isStreaming: true,
@@ -193,10 +180,10 @@ export class Gemini extends BaseAIProvider {
     model: string,
     params: Record<string, unknown>,
     stream: AsyncIterable<unknown>,
-    finalResponse?: Promise<unknown>,
+    finalResponse: Promise<unknown> | undefined,
+    ctx: ReturnType<typeof applySessionContext>,
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
-    const ctx = applySessionContext();
 
     try {
       for await (const chunk of stream) {
@@ -232,7 +219,10 @@ export class Gemini extends BaseAIProvider {
           if (extractedFinal.finishReason != null) {
             accumulator.finishReason = String(extractedFinal.finishReason);
           }
-          if (Array.isArray(extractedFinal.functionCalls)) {
+          if (
+            Array.isArray(extractedFinal.functionCalls) &&
+            accumulator.toolCalls.length === 0
+          ) {
             for (const fc of extractedFinal.functionCalls) {
               accumulator.addToolCall(fc);
             }
@@ -257,16 +247,11 @@ export class Gemini extends BaseAIProvider {
       }
 
       this._track({
-        userId: ctx.userId ?? 'unknown',
+        ...contextFields(ctx),
         modelName: model,
         provider: 'gemini',
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
-        sessionId: ctx.sessionId,
-        traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
         inputTokens: state.inputTokens,
         outputTokens: state.outputTokens,
         totalTokens: state.totalTokens,
