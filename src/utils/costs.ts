@@ -13,6 +13,54 @@ import { tryRequire } from './resolve-module.js';
 
 const genaiPrices = tryRequire('@pydantic/genai-prices');
 
+let _livePricesEnabled = false;
+
+/**
+ * Opt in to background price updates from the genai-prices GitHub repo.
+ *
+ * Call once at application startup (e.g. after `AmplitudeAI` init) to fetch
+ * the latest pricing data periodically. This ensures new model pricing is
+ * available within days of being added to the genai-prices repository,
+ * instead of waiting for an npm package release.
+ *
+ * This makes outbound HTTPS requests to raw.githubusercontent.com.
+ * Only enable in environments where outbound network access is permitted.
+ *
+ * @param intervalMs - refresh interval in milliseconds (default: 1 hour)
+ */
+export function enableLivePriceUpdates(intervalMs = 3_600_000): void {
+  if (_livePricesEnabled || genaiPrices == null) return;
+  _livePricesEnabled = true;
+
+  const prices = genaiPrices as Record<string, unknown>;
+  if (typeof prices.updatePrices !== 'function') return;
+
+  const doUpdate = () => {
+    try {
+      (prices.updatePrices as (cb: (ctx: {
+        remoteDataUrl: string;
+        setProviderData: (data: unknown) => void;
+      }) => void) => void)(
+        async ({ remoteDataUrl, setProviderData }) => {
+          try {
+            const resp = await fetch(remoteDataUrl);
+            if (resp.ok) {
+              setProviderData(await resp.json());
+            }
+          } catch {
+            // Network errors are non-fatal — bundled data still works
+          }
+        },
+      );
+    } catch {
+      // Best-effort
+    }
+  };
+
+  doUpdate();
+  setInterval(doUpdate, intervalMs).unref?.();
+}
+
 export function stripProviderPrefix(modelName: string): string {
   const colonIdx = modelName.indexOf(':');
   return colonIdx >= 0 ? modelName.slice(colonIdx + 1) : modelName;
@@ -41,17 +89,21 @@ export function getGenaiPriceLookupCandidates(
   defaultProvider?: string,
 ): Array<{ model: string; providerId?: string }> {
   const stripped = stripProviderPrefix(modelName);
-  const inferred = tryInferProviderFromModel(stripped) ?? defaultProvider;
+  const inferred = defaultProvider ?? tryInferProviderFromModel(stripped);
 
   const isBedrock =
     inferred === 'bedrock' ||
     defaultProvider === 'bedrock' ||
     modelName.startsWith('bedrock:');
-  const providerId = isBedrock ? undefined : inferred;
+  const providerId = isBedrock ? 'aws' : inferred;
 
   const candidates: Array<{ model: string; providerId?: string }> = [
     { model: stripped, providerId },
   ];
+  // For Bedrock, also try without provider for globally-matched models (e.g. Claude)
+  if (isBedrock) {
+    candidates.push({ model: stripped, providerId: undefined });
+  }
 
   // For any model with dot-separated segments (e.g. vendor.model, region.vendor.model),
   // progressively strip prefixes. This is safe: iteration stops at the first price hit.
@@ -60,7 +112,7 @@ export function getGenaiPriceLookupCandidates(
     const parts = stripped.split('.');
     for (let i = 1; i < parts.length; i++) {
       const sub = parts.slice(i).join('.');
-      candidates.push({ model: sub, providerId: undefined });
+      candidates.push({ model: sub, providerId });
       candidates.push({ model: sub });
     }
 

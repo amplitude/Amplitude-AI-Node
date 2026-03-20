@@ -294,3 +294,4 @@ export {
   TIER_REASONING,
 } from './utils/model-tiers.js';
 export { inferProviderFromModel } from './utils/providers.js';
+export { enableLivePriceUpdates } from './utils/costs.js';
