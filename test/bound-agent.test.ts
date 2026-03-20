@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EVENT_SESSION_END,
   EVENT_TOOL_CALL,
+  PROP_AGENT_DESCRIPTION,
   PROP_AGENT_ID,
   PROP_CUSTOMER_ORG_ID,
   PROP_ENV,
@@ -56,6 +57,61 @@ describe('BoundAgent', () => {
       });
 
       expect(mock.events[0].event_properties?.[PROP_ENV]).toBe('production');
+    });
+  });
+
+  describe('description field', () => {
+    it('propagates description through agent to events', (): void => {
+      const mock = createMock();
+      const agent = mock.agent('chatbot', {
+        userId: 'u1',
+        description: 'Customer support chatbot',
+      });
+      agent.trackUserMessage('Hello', { sessionId: 's1' });
+      agent.trackAiMessage('Hi', 'gpt-4o', 'openai', 100, { sessionId: 's1' });
+
+      for (const event of mock.events) {
+        expect(event.event_properties?.[PROP_AGENT_DESCRIPTION]).toBe(
+          'Customer support chatbot',
+        );
+      }
+    });
+
+    it('inherits description in child agents', (): void => {
+      const mock = createMock();
+      const parent = mock.agent('orchestrator', {
+        userId: 'u1',
+        description: 'Main orchestrator',
+      });
+      const child = parent.child('worker');
+
+      child.trackUserMessage('From child', { sessionId: 's1' });
+      const ep = mock.events[0].event_properties!;
+      expect(ep[PROP_AGENT_DESCRIPTION]).toBe('Main orchestrator');
+    });
+
+    it('allows child to override description', (): void => {
+      const mock = createMock();
+      const parent = mock.agent('orchestrator', {
+        userId: 'u1',
+        description: 'Main orchestrator',
+      });
+      const child = parent.child('worker', {
+        description: 'Specialized worker',
+      });
+
+      child.trackUserMessage('From child', { sessionId: 's1' });
+      const ep = mock.events[0].event_properties!;
+      expect(ep[PROP_AGENT_DESCRIPTION]).toBe('Specialized worker');
+    });
+
+    it('omits description property when not set', (): void => {
+      const mock = createMock();
+      const agent = mock.agent('chatbot', { userId: 'u1' });
+      agent.trackUserMessage('Hello', { sessionId: 's1' });
+
+      const ep = mock.events[0].event_properties!;
+      expect(ep[PROP_AGENT_DESCRIPTION]).toBeUndefined();
     });
   });
 

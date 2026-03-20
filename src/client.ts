@@ -181,6 +181,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     isRegeneration?: boolean;
@@ -204,6 +205,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       isRegeneration: opts.isRegeneration,
@@ -252,6 +254,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     isError?: boolean;
@@ -320,6 +323,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       isError: opts.isError,
@@ -351,6 +355,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     errorMessage?: string | null;
@@ -374,6 +379,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       errorMessage: opts.errorMessage,
@@ -398,6 +404,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
@@ -419,6 +426,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       eventProperties: opts.eventProperties,
@@ -443,6 +451,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
@@ -465,6 +474,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       eventProperties: opts.eventProperties,
@@ -487,6 +497,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     abandonmentTurn?: number | null;
@@ -505,6 +516,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       abandonmentTurn: opts.abandonmentTurn,
@@ -526,6 +538,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
@@ -542,6 +555,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       eventProperties: opts.eventProperties,
@@ -569,6 +583,7 @@ export class AmplitudeAI {
     parentAgentId?: string | null;
     customerOrgId?: string | null;
     agentVersion?: string | null;
+    description?: string | null;
     context?: Record<string, unknown> | null;
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
@@ -590,6 +605,7 @@ export class AmplitudeAI {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       eventProperties: opts.eventProperties,
@@ -609,6 +625,7 @@ export class AmplitudeAI {
       parentAgentId?: string | null;
       customerOrgId?: string | null;
       agentVersion?: string | null;
+      description?: string | null;
       context?: Record<string, unknown> | null;
       env?: string | null;
       sessionId?: string | null;

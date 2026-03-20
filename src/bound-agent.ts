@@ -57,6 +57,7 @@ const CONTEXT_FIELDS = [
   'parentAgentId',
   'customerOrgId',
   'agentVersion',
+  'description',
   'context',
   'env',
   'sessionId',
@@ -76,6 +77,7 @@ export class BoundAgent {
       parentAgentId?: string | null;
       customerOrgId?: string | null;
       agentVersion?: string | null;
+      description?: string | null;
       context?: Record<string, unknown> | null;
       env?: string | null;
       sessionId?: string | null;
@@ -92,6 +94,7 @@ export class BoundAgent {
       parentAgentId: opts.parentAgentId ?? null,
       customerOrgId: opts.customerOrgId ?? null,
       agentVersion: opts.agentVersion ?? null,
+      description: opts.description ?? null,
       context: opts.context ?? null,
       env: opts.env ?? null,
       sessionId: opts.sessionId ?? null,
@@ -116,6 +119,7 @@ export class BoundAgent {
       env: this._defaults.env,
       customerOrgId: this._defaults.customerOrgId,
       agentVersion: this._defaults.agentVersion,
+      description: this._defaults.description,
       sessionId: this._defaults.sessionId,
       traceId: this._defaults.traceId,
       groups: this._defaults.groups,

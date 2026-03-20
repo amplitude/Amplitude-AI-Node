@@ -9,6 +9,7 @@ export interface SessionContextOptions {
   env?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   idleTimeoutMinutes?: number | null;
@@ -26,6 +27,7 @@ export class SessionContext {
   readonly env: string | null;
   readonly customerOrgId: string | null;
   readonly agentVersion: string | null;
+  readonly description: string | null;
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
   readonly idleTimeoutMinutes: number | null;
@@ -42,6 +44,7 @@ export class SessionContext {
     this.env = options.env ?? null;
     this.customerOrgId = options.customerOrgId ?? null;
     this.agentVersion = options.agentVersion ?? null;
+    this.description = options.description ?? null;
     this.context = options.context ?? null;
     this.groups = options.groups ?? null;
     this.idleTimeoutMinutes = options.idleTimeoutMinutes ?? null;

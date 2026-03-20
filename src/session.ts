@@ -84,6 +84,7 @@ export class Session {
       env: defaults.env as string | null,
       customerOrgId: defaults.customerOrgId as string | null,
       agentVersion: defaults.agentVersion as string | null,
+      description: defaults.description as string | null,
       context: defaults.context as Record<string, unknown> | null,
       groups: defaults.groups as Record<string, unknown> | null,
       idleTimeoutMinutes: this.idleTimeoutMinutes,
