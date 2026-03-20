@@ -33,6 +33,10 @@ export interface ScanResult {
   instrumented_call_sites: number;
   uninstrumented_call_sites: number;
   is_multi_agent: boolean;
+  has_streaming: boolean;
+  message_queue_deps: string[];
+  has_frontend_deps: boolean;
+  recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
 
@@ -70,6 +74,27 @@ const AGENT_FRAMEWORK_DEPS = [
   '@openai/agents',
   'crewai',
 ];
+
+const MESSAGE_QUEUE_DEPS = [
+  'bullmq',
+  'bull',
+  'ioredis',
+  'amqplib',
+  '@aws-sdk/client-sqs',
+  'kafkajs',
+  '@google-cloud/pubsub',
+];
+
+const FRONTEND_DEPS = [
+  'react',
+  'vue',
+  'svelte',
+  '@sveltejs/kit',
+  'angular',
+  '@angular/core',
+];
+
+const STREAMING_RE = /stream\s*:\s*true|\.stream\s*\(|streamText\s*\(|useChat\s*\(/;
 
 const ROUTE_HANDLER_RE =
   /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b|app\.\s*(?:get|post|put|delete)\s*\(|router\./;
@@ -201,6 +226,7 @@ export function scanProject(rootPath: string): ScanResult {
   let globalHasWrappers = false;
   let globalHasSessionContext = false;
   let globalHasAmplitudeImport = hasAmplitudeAiDep;
+  let hasStreaming = false;
 
   const agents: ScanResult['agents'] = [];
   const filesWithCallSites = new Set<string>();
@@ -219,6 +245,7 @@ export function scanProject(rootPath: string): ScanResult {
     if (analysis.has_session_context) globalHasSessionContext = true;
 
     if (/\bpatch\s*\(\s*\{/.test(content)) globalHasPatch = true;
+    if (STREAMING_RE.test(content)) hasStreaming = true;
     if (/\.wrap\s*\(/.test(content) && analysis.has_amplitude_import) {
       globalHasWrappers = true;
     }
@@ -276,6 +303,14 @@ export function scanProject(rootPath: string): ScanResult {
   const isMultiAgent =
     multipleFilesWithCalls || hasAgentFrameworkDeps || multipleProviders;
 
+  // Message queue deps (cross-service signal)
+  const messageQueueDeps = MESSAGE_QUEUE_DEPS.filter((dep) =>
+    allDeps.has(dep),
+  );
+
+  // Frontend deps (browser-server linking signal)
+  const hasFrontendDeps = FRONTEND_DEPS.some((dep) => allDeps.has(dep));
+
   // Recommended tier
   let recommendedTier: ScanResult['recommended_tier'];
   if (isMultiAgent) {
@@ -284,6 +319,28 @@ export function scanProject(rootPath: string): ScanResult {
     recommendedTier = 'standard';
   } else {
     recommendedTier = 'quick_start';
+  }
+
+  // Contextual recommendations
+  const recommendations: string[] = [];
+  if (hasStreaming) {
+    recommendations.push(
+      'Streaming detected: keep sessions open until stream is fully consumed. ' +
+      'Use session.run() with an awaited stream, not a fire-and-forget pattern.',
+    );
+  }
+  if (messageQueueDeps.length > 0) {
+    recommendations.push(
+      `Message queue deps detected (${messageQueueDeps.join(', ')}): ` +
+      'enable propagateContext in the bootstrap file and use injectContext/extractContext ' +
+      'to correlate events across services.',
+    );
+  }
+  if (hasFrontendDeps) {
+    recommendations.push(
+      'Frontend framework detected alongside backend: pass browserSessionId and deviceId ' +
+      'from frontend request headers to agent.session() for session replay linking.',
+    );
   }
 
   return {
@@ -305,6 +362,10 @@ export function scanProject(rootPath: string): ScanResult {
     instrumented_call_sites: instrumentedCallSites,
     uninstrumented_call_sites: uninstrumentedCallSites,
     is_multi_agent: isMultiAgent,
+    has_streaming: hasStreaming,
+    message_queue_deps: messageQueueDeps,
+    has_frontend_deps: hasFrontendDeps,
+    recommendations,
     recommended_tier: recommendedTier,
   };
 }

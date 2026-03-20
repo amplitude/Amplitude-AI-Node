@@ -81,6 +81,48 @@ export function generateVerifyTest(scanResult: ScanResult): string {
         '  });',
         '',
       );
+
+      lines.push(
+        "  it('tool calls inside runAs are attributed to child agent', () => {",
+        '    const mock = new MockAmplitudeAI();',
+        `    const parent = mock.agent('${parentAgent.inferred_id}');`,
+        `    const child = parent.child('${childAgent.inferred_id}');`,
+        "    const session = parent.session({ userId: 'verify-user', sessionId: 'verify-tools' });",
+        '    session.runSync((s) => {',
+        '      s.runAsSync(child, (cs) => {',
+        "        cs.trackToolCall('search_knowledge_base', 150, true);",
+        '      });',
+        '    });',
+        "    const toolEvents = mock.getEvents().filter(e => e.event_type === '[Agent] Tool Call');",
+        '    expect(toolEvents.length).toBe(1);',
+        `    expect(toolEvents[0].event_properties?.['[Agent] Agent ID']).toBe('${childAgent.inferred_id}');`,
+        `    expect(toolEvents[0].event_properties?.['[Agent] Parent Agent ID']).toBe('${parentAgent.inferred_id}');`,
+        '  });',
+        '',
+      );
+
+      lines.push(
+        "  it('runAs restores parent context after child throws', () => {",
+        '    const mock = new MockAmplitudeAI();',
+        `    const parent = mock.agent('${parentAgent.inferred_id}');`,
+        `    const faultyChild = parent.child('${childAgent.inferred_id}-faulty');`,
+        "    const session = parent.session({ userId: 'verify-user', sessionId: 'verify-error' });",
+        '    session.runSync((s) => {',
+        '      try {',
+        '        s.runAsSync(faultyChild, () => {',
+        "          throw new Error('child failed');",
+        '        });',
+        '      } catch {',
+        "        s.trackUserMessage('recovering from child failure');",
+        '      }',
+        '    });',
+        `    const parentEvents = mock.eventsForAgent('${parentAgent.inferred_id}');`,
+        "    const recoveryMsg = parentEvents.find(e => e.event_type === '[Agent] User Message');",
+        '    expect(recoveryMsg).toBeDefined();',
+        `    expect(recoveryMsg?.event_properties?.['[Agent] Agent ID']).toBe('${parentAgent.inferred_id}');`,
+        '  });',
+        '',
+      );
     }
   }
 

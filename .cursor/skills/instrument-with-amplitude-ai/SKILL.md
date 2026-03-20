@@ -36,7 +36,14 @@ Detected environment:
   Agent frameworks: [list or "none"]
   Existing instrumentation: [yes/no]
   Multi-agent signals: [yes/no]
+  Streaming: [yes/no]
+  Message queues: [list or "none"]
+  Frontend deps: [yes/no]
   Recommended tier: [quick_start / standard / advanced]
+
+Recommendations:
+  - [contextual recommendations from scan_project, e.g. streaming guidance,
+     cross-service propagation, browser-server session linking]
 ```
 
 **Decision point:** Ask the developer to confirm the detection and choose a tier:
@@ -186,7 +193,65 @@ ai.trackScore({
 });
 ```
 
-### Step 3f: Framework-specific middleware
+### Step 3f: Streaming session lifecycle
+
+If `scan_project` reports `has_streaming: true`, session wrapping must keep the session open until the stream is fully consumed. The session must not auto-end when the stream object is created — it must end when the last chunk is read.
+
+```typescript
+// WRONG: session ends when stream is created, not consumed
+return agent.session({ userId, sessionId }).run(async (s) => {
+  const stream = await openai.chat.completions.create({ model: 'gpt-4o', messages, stream: true });
+  return new Response(stream.toReadableStream()); // session ends here, before stream consumed!
+});
+
+// CORRECT: session stays open until stream is fully consumed
+return agent.session({ userId, sessionId }).run(async (s) => {
+  const stream = await openai.chat.completions.create({ model: 'gpt-4o', messages, stream: true });
+  const readable = stream.toReadableStream();
+  const [passthrough, forClient] = readable.tee();
+  // Consume one branch to keep session alive until stream completes
+  const reader = passthrough.getReader();
+  (async () => { while (!(await reader.read()).done) {} })();
+  return new Response(forClient);
+});
+```
+
+For non-streaming endpoints, no special handling is needed — `session.run()` naturally awaits the provider call.
+
+### Step 3g: Cross-service context propagation
+
+If `scan_project` reports `message_queue_deps`, the app uses message queues and likely has a multi-service architecture. Add context propagation to the bootstrap:
+
+```typescript
+import { injectContext, extractContext } from '@amplitude/ai';
+
+// Sender side: include Amplitude context in message headers
+const headers = injectContext(session);
+await queue.send({ payload, headers });
+
+// Receiver side: restore context from headers
+const ctx = extractContext(message.headers);
+const session = agent.session({ ...ctx });
+```
+
+### Step 3h: Browser-server session linking
+
+If `scan_project` reports `has_frontend_deps: true`, the project has a React/Vue/Svelte frontend alongside the backend. Add browser session linking:
+
+```typescript
+// In the API route handler, extract browser IDs from request headers
+const browserSessionId = req.headers.get('x-amplitude-session-id');
+const deviceId = req.headers.get('x-amplitude-device-id');
+
+const session = agent.session({
+  userId,
+  sessionId,
+  browserSessionId,  // links to Amplitude browser session
+  deviceId,          // links to Amplitude device
+});
+```
+
+### Step 3i: Framework-specific middleware
 
 **Next.js App Router**: Session wrapping goes inside each route handler (no global middleware needed — each route is its own serverless function).
 
@@ -196,7 +261,7 @@ import { createAmplitudeAIMiddleware } from '@amplitude/ai';
 app.use(createAmplitudeAIMiddleware({ amplitudeAI: ai }));
 ```
 
-### Step 3g: Environment variables
+### Step 3j: Environment variables
 
 Add to `.env.example`:
 ```
