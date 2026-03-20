@@ -105,11 +105,17 @@ export function calculateCost(options: {
           priceOptions.providerId = defaultProvider;
         }
 
-        const result = (prices.calcPrice as Function)(
+        const calcPriceFn = prices.calcPrice as (
+          usage: Record<string, number>,
+          modelId: string,
+          options?: Record<string, unknown>,
+        ) => { total_price?: number } | null;
+
+        const result = calcPriceFn(
           usage,
           normalized,
           Object.keys(priceOptions).length > 0 ? priceOptions : undefined,
-        ) as { total_price?: number } | null;
+        );
 
         return result?.total_price ?? 0;
       }
