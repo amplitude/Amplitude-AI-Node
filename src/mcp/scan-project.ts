@@ -34,6 +34,10 @@ export interface ScanResult {
   uninstrumented_call_sites: number;
   is_multi_agent: boolean;
   has_streaming: boolean;
+  has_vercel_ai_sdk: boolean;
+  has_edge_runtime: boolean;
+  has_assistants_api: boolean;
+  has_langgraph: boolean;
   message_queue_deps: string[];
   has_frontend_deps: boolean;
   recommendations: string[];
@@ -95,6 +99,15 @@ const FRONTEND_DEPS = [
 ];
 
 const STREAMING_RE = /stream\s*:\s*true|\.stream\s*\(|streamText\s*\(|useChat\s*\(/;
+
+const VERCEL_AI_SDK_DEPS = ['ai', '@ai-sdk/openai', '@ai-sdk/anthropic', '@ai-sdk/google', '@ai-sdk/mistral'];
+const VERCEL_AI_SDK_RE = /\b(?:streamText|generateText|streamObject|generateObject|useChat|useCompletion|useAssistant)\s*\(/;
+
+const EDGE_RUNTIME_RE = /runtime\s*=\s*['"]edge['"]/;
+
+const ASSISTANTS_API_RE = /\.beta\.(?:threads|assistants)\./;
+
+const LANGGRAPH_DEPS = ['@langchain/langgraph'];
 
 const ROUTE_HANDLER_RE =
   /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b|app\.\s*(?:get|post|put|delete)\s*\(|router\./;
@@ -227,6 +240,9 @@ export function scanProject(rootPath: string): ScanResult {
   let globalHasSessionContext = false;
   let globalHasAmplitudeImport = hasAmplitudeAiDep;
   let hasStreaming = false;
+  let hasVercelAiSdkUsage = false;
+  let hasEdgeRuntime = false;
+  let hasAssistantsApi = false;
 
   const agents: ScanResult['agents'] = [];
   const filesWithCallSites = new Set<string>();
@@ -246,6 +262,9 @@ export function scanProject(rootPath: string): ScanResult {
 
     if (/\bpatch\s*\(\s*\{/.test(content)) globalHasPatch = true;
     if (STREAMING_RE.test(content)) hasStreaming = true;
+    if (VERCEL_AI_SDK_RE.test(content)) hasVercelAiSdkUsage = true;
+    if (EDGE_RUNTIME_RE.test(content)) hasEdgeRuntime = true;
+    if (ASSISTANTS_API_RE.test(content)) hasAssistantsApi = true;
     if (/\.wrap\s*\(/.test(content) && analysis.has_amplitude_import) {
       globalHasWrappers = true;
     }
@@ -311,6 +330,12 @@ export function scanProject(rootPath: string): ScanResult {
   // Frontend deps (browser-server linking signal)
   const hasFrontendDeps = FRONTEND_DEPS.some((dep) => allDeps.has(dep));
 
+  // Vercel AI SDK detection (dep-level)
+  const hasVercelAiSdk = VERCEL_AI_SDK_DEPS.some((dep) => allDeps.has(dep)) || hasVercelAiSdkUsage;
+
+  // LangGraph detection
+  const hasLanggraph = LANGGRAPH_DEPS.some((dep) => allDeps.has(dep)) || allDeps.has('@langchain/langgraph');
+
   // Recommended tier
   let recommendedTier: ScanResult['recommended_tier'];
   if (isMultiAgent) {
@@ -342,6 +367,36 @@ export function scanProject(rootPath: string): ScanResult {
       'from frontend request headers to agent.session() for session replay linking.',
     );
   }
+  if (hasVercelAiSdk) {
+    recommendations.push(
+      'Vercel AI SDK detected. Provider wrappers instrument the underlying provider SDK (openai, ' +
+      '@anthropic-ai/sdk), not the Vercel AI SDK abstraction layer (streamText, generateText). ' +
+      'If you also have the underlying provider as a direct dependency, wrappers will work because ' +
+      'Vercel AI SDK delegates to them internally. Otherwise, use Tier 1 (patch) which intercepts ' +
+      'at the transport level, or add the underlying provider SDK as a direct dependency.',
+    );
+  }
+  if (hasEdgeRuntime) {
+    recommendations.push(
+      'Edge Runtime detected. session.run() relies on AsyncLocalStorage which may not be available ' +
+      'in Edge Runtime or Cloudflare Workers. Use explicit context passing instead of session.run(): ' +
+      'call agent.trackUserMessage() and agent.trackAiMessage() directly with sessionId parameter.',
+    );
+  }
+  if (hasAssistantsApi) {
+    recommendations.push(
+      'OpenAI Assistants API detected (client.beta.threads/assistants). Provider wrappers do not ' +
+      'auto-instrument the Assistants API. Use manual tracking with trackUserMessage/trackAiMessage, ' +
+      'or migrate to the OpenAI Agents SDK which supports AmplitudeTracingProcessor.',
+    );
+  }
+  if (hasLanggraph) {
+    recommendations.push(
+      'LangGraph detected. LLM calls within LangGraph are captured via the LangChain ' +
+      'AmplitudeCallbackHandler, but graph orchestration events (node transitions, checkpoints, ' +
+      'human-in-the-loop) are not yet instrumented.',
+    );
+  }
 
   return {
     project_name: projectName,
@@ -363,6 +418,10 @@ export function scanProject(rootPath: string): ScanResult {
     uninstrumented_call_sites: uninstrumentedCallSites,
     is_multi_agent: isMultiAgent,
     has_streaming: hasStreaming,
+    has_vercel_ai_sdk: hasVercelAiSdk,
+    has_edge_runtime: hasEdgeRuntime,
+    has_assistants_api: hasAssistantsApi,
+    has_langgraph: hasLanggraph,
     message_queue_deps: messageQueueDeps,
     has_frontend_deps: hasFrontendDeps,
     recommendations,

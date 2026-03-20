@@ -58,6 +58,30 @@ const llmPatterns = [
     provider: 'bedrock',
     api: 'converse',
   },
+  {
+    pattern: /\bstreamText\s*\(/g,
+    receiverRe: null,
+    provider: 'vercel-ai-sdk',
+    api: 'streamText',
+  },
+  {
+    pattern: /\bgenerateText\s*\(/g,
+    receiverRe: null,
+    provider: 'vercel-ai-sdk',
+    api: 'generateText',
+  },
+  {
+    pattern: /\bstreamObject\s*\(/g,
+    receiverRe: null,
+    provider: 'vercel-ai-sdk',
+    api: 'streamObject',
+  },
+  {
+    pattern: /\bgenerateObject\s*\(/g,
+    receiverRe: null,
+    provider: 'vercel-ai-sdk',
+    api: 'generateObject',
+  },
 ];
 
 function findWrappedConstructors(source: string): Set<string> {
@@ -113,7 +137,7 @@ export function analyzeFileInstrumentation(source: string): FileAnalysis {
     for (const { pattern, receiverRe, provider, api } of llmPatterns) {
       pattern.lastIndex = 0;
       if (pattern.test(line)) {
-        const rm = line.match(receiverRe);
+        const rm = receiverRe ? line.match(receiverRe) : null;
         const receiver = rm?.[1] ?? '';
         const instrumented = hasPatch || wrappedClients.has(receiver);
         callSites.push({ line: i + 1, provider, api, instrumented });

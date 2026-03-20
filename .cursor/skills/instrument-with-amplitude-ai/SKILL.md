@@ -37,13 +37,17 @@ Detected environment:
   Existing instrumentation: [yes/no]
   Multi-agent signals: [yes/no]
   Streaming: [yes/no]
+  Vercel AI SDK: [yes/no]
+  Edge Runtime: [yes/no]
+  Assistants API: [yes/no]
+  LangGraph: [yes/no]
   Message queues: [list or "none"]
   Frontend deps: [yes/no]
   Recommended tier: [quick_start / standard / advanced]
 
 Recommendations:
   - [contextual recommendations from scan_project, e.g. streaming guidance,
-     cross-service propagation, browser-server session linking]
+     cross-service propagation, ecosystem-specific warnings]
 ```
 
 **Decision point:** Ask the developer to confirm the detection and choose a tier:
@@ -332,6 +336,51 @@ Next steps:
   2. Keep __amplitude_verify__.test.ts for CI regression testing
   3. Deploy and verify live events in Amplitude
 ```
+
+---
+
+## Ecosystem-Specific Guidance
+
+### Vercel AI SDK
+
+If `scan_project` reports `has_vercel_ai_sdk: true`, the project uses `streamText()`, `generateText()`, `useChat()`, or similar Vercel AI SDK APIs instead of direct provider calls.
+
+- **validate_file** detects `streamText`, `generateText`, `streamObject`, `generateObject` as call sites
+- Provider wrappers instrument the *underlying* provider SDK (`openai`, `@anthropic-ai/sdk`), not the Vercel AI SDK abstraction
+- If the project has both `@ai-sdk/openai` and `openai` in deps, wrappers work because Vercel AI SDK delegates to the underlying SDK
+- If only `@ai-sdk/openai` is present (no direct `openai`), recommend Tier 1 (`patch()`) or adding `openai` as a direct dependency
+
+### Edge Runtime / Cloudflare Workers
+
+If `scan_project` reports `has_edge_runtime: true`, route files declare `runtime = 'edge'` or the project targets Cloudflare Workers.
+
+- `session.run()` relies on `AsyncLocalStorage` which is unavailable or limited in Edge Runtime
+- Generate explicit-context code instead of `session.run()`:
+
+```typescript
+const agent = ai.agent('handler', { userId });
+agent.trackUserMessage(content, { sessionId });
+const response = await openai.chat.completions.create({ ... });
+// Provider wrapper captures AI response automatically
+```
+
+- This loses automatic session lifecycle (no auto session-end) but works in Edge Runtime
+
+### OpenAI Assistants API
+
+If `scan_project` reports `has_assistants_api: true`, the project uses `client.beta.threads.*` or `client.beta.assistants.*`.
+
+- Provider wrappers do **not** auto-instrument the Assistants API (it's async/polling-based)
+- Use manual tracking: `trackUserMessage()` when creating a message, `trackAiMessage()` when polling the completed run
+- Or recommend migrating to the OpenAI Agents SDK which supports `AmplitudeTracingProcessor`
+
+### LangGraph
+
+If `scan_project` reports `has_langgraph: true`:
+
+- LLM calls within LangGraph nodes are captured via the LangChain `AmplitudeCallbackHandler`
+- Graph-level orchestration events (node transitions, checkpoints, human-in-the-loop) are **not yet instrumented**
+- Recommend setting up `AmplitudeCallbackHandler` for LLM call visibility and noting the graph-level gap
 
 ---
 
