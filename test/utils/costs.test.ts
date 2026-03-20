@@ -273,6 +273,13 @@ describe('calculateCost', () => {
     expect(providerIds).not.toContain('openai');
   });
 
+  it('normalizes inferred gemini provider to google for genai-prices', (): void => {
+    const candidates = getGenaiPriceLookupCandidates('gemini-2.0-flash-001');
+    const providerIds = candidates.map((c) => c.providerId);
+    expect(providerIds).toContain('google');
+    expect(providerIds).not.toContain('gemini');
+  });
+
   // ------ Reasoning tokens NOT double-counted ------
 
   it('reasoning tokens are ignored (not added to output)', (): void => {
@@ -452,13 +459,23 @@ describe('calculateCost', () => {
     ).toBeGreaterThan(0);
   });
 
-  it('returns nonzero for gemini-2.0-flash', (): void => {
+  it('returns nonzero for gemini-2.0-flash with explicit google provider', (): void => {
     expect(
       calculateCost({
         modelName: 'gemini-2.0-flash-001',
         inputTokens: 1000,
         outputTokens: 500,
         defaultProvider: 'google',
+      }),
+    ).toBeGreaterThan(0);
+  });
+
+  it('returns nonzero for gemini via inferred provider (no defaultProvider)', (): void => {
+    expect(
+      calculateCost({
+        modelName: 'gemini-2.0-flash-001',
+        inputTokens: 1000,
+        outputTokens: 500,
       }),
     ).toBeGreaterThan(0);
   });

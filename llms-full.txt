@@ -1,5 +1,5 @@
 # llms-full.txt
-# @amplitude/ai 0.2.0 — Detailed API Reference for LLM Agents
+# @amplitude/ai 0.2.1 — Detailed API Reference for LLM Agents
 # Use this file for instrumentation guidance. See llms.txt for discovery.
 
 ## Core API

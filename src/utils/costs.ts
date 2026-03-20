@@ -72,6 +72,13 @@ export function stripProviderPrefix(modelName: string): string {
  */
 export const inferProvider = inferProviderFromModel;
 
+function normalizeProviderForGenaiPrices(
+  provider: string | undefined,
+): string | undefined {
+  if (provider === 'gemini') return 'google';
+  return provider;
+}
+
 /**
  * Generate candidate (modelRef, providerId) pairs for price lookup.
  *
@@ -95,7 +102,9 @@ export function getGenaiPriceLookupCandidates(
     inferred === 'bedrock' ||
     defaultProvider === 'bedrock' ||
     modelName.startsWith('bedrock:');
-  const providerId = isBedrock ? 'aws' : inferred;
+  const providerId = isBedrock
+    ? 'aws'
+    : normalizeProviderForGenaiPrices(inferred);
 
   const candidates: Array<{ model: string; providerId?: string }> = [
     { model: stripped, providerId },
