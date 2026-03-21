@@ -32,7 +32,24 @@ import {
 } from './context.js';
 import type { SessionEnrichments } from './core/enrichments.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
+import { isServerless } from './serverless.js';
 import { getLogger } from './utils/logger.js';
+
+export interface SessionOptions {
+  sessionId?: string | null;
+  idleTimeoutMinutes?: number | null;
+  userId?: string | null;
+  deviceId?: string | null;
+  browserSessionId?: string | null;
+  /**
+   * Automatically flush pending events when `run()` completes.
+   *
+   * - `true`  — always flush (recommended for serverless)
+   * - `false` — never flush (for long-running servers where the periodic timer handles it)
+   * - `undefined` (default) — auto-detect: flush if a serverless environment is detected
+   */
+  autoFlush?: boolean;
+}
 
 export class Session {
   readonly sessionId: string;
@@ -41,20 +58,12 @@ export class Session {
   readonly userId: string | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
+  readonly autoFlush: boolean;
   private _agent: BoundAgent;
   private _enrichments: SessionEnrichments | null = null;
   private _sessionReplayId: string | null;
 
-  constructor(
-    agent: BoundAgent,
-    opts: {
-      sessionId?: string | null;
-      idleTimeoutMinutes?: number | null;
-      userId?: string | null;
-      deviceId?: string | null;
-      browserSessionId?: string | null;
-    } = {},
-  ) {
+  constructor(agent: BoundAgent, opts: SessionOptions = {}) {
     this.sessionId = opts.sessionId ?? randomUUID();
     this.idleTimeoutMinutes = opts.idleTimeoutMinutes ?? null;
     this.userId = opts.userId ?? null;
@@ -63,6 +72,7 @@ export class Session {
     this.browserSessionId =
       opts.browserSessionId ??
       (agent._defaults.browserSessionId as string | null);
+    this.autoFlush = opts.autoFlush ?? isServerless();
     this._agent = agent;
     this._sessionReplayId =
       this.deviceId && this.browserSessionId
@@ -84,6 +94,7 @@ export class Session {
       env: defaults.env as string | null,
       customerOrgId: defaults.customerOrgId as string | null,
       agentVersion: defaults.agentVersion as string | null,
+      description: defaults.description as string | null,
       context: defaults.context as Record<string, unknown> | null,
       groups: defaults.groups as Record<string, unknown> | null,
       idleTimeoutMinutes: this.idleTimeoutMinutes,
@@ -91,6 +102,7 @@ export class Session {
       browserSessionId:
         this.browserSessionId ?? (defaults.browserSessionId as string | null),
       nextTurnIdFn: () => ai._nextTurnId(sid),
+      amplitude: ai.amplitude,
     });
   }
 
@@ -110,6 +122,11 @@ export class Session {
   /**
    * Run a callback within this session context.
    * This is the Node.js equivalent of Python's `with session as s:` block.
+   *
+   * When {@link autoFlush} is `true` (default in serverless environments),
+   * all pending events are flushed before the promise resolves. This
+   * prevents event loss when the serverless runtime freezes or terminates
+   * after the handler returns.
    */
   async run<T>(fn: (session: Session) => T | Promise<T>): Promise<T> {
     const ctx = this._buildSessionContext();
@@ -118,6 +135,9 @@ export class Session {
       return result;
     } finally {
       this._autoEnd();
+      if (this.autoFlush) {
+        await this._flush();
+      }
     }
   }
 
@@ -195,6 +215,17 @@ export class Session {
       this._agent.trackSessionEnd(this._inject(endOpts));
     } catch (e) {
       getLogger().debug(`Failed to auto-end session ${this.sessionId}: ${e}`);
+    }
+  }
+
+  private async _flush(): Promise<void> {
+    try {
+      const result = this._agent.flush();
+      if (result != null && typeof (result as Promise<unknown>).then === 'function') {
+        await result;
+      }
+    } catch (e) {
+      getLogger().debug(`Failed to flush after session ${this.sessionId}: ${e}`);
     }
   }
 

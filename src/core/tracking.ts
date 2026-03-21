@@ -19,6 +19,7 @@ import {
   EVENT_USER_MESSAGE,
   MAX_SERIALIZED_LENGTH,
   PROP_ABANDONMENT_TURN,
+  PROP_AGENT_DESCRIPTION,
   PROP_AGENT_ID,
   PROP_AGENT_VERSION,
   PROP_ATTACHMENT_COUNT,
@@ -52,6 +53,7 @@ import {
   PROP_MAX_OUTPUT_TOKENS,
   PROP_MESSAGE_ID,
   PROP_MESSAGE_LABELS,
+  PROP_MESSAGE_SOURCE,
   PROP_MODEL_NAME,
   PROP_MODEL_TIER,
   PROP_OUTPUT_STATE,
@@ -166,11 +168,13 @@ export interface TrackUserMessageOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   isRegeneration?: boolean;
   isEdit?: boolean;
   editedMessageId?: string | null;
   attachments?: Attachment[] | null;
+  messageSource?: string | null;
   labels?: MessageLabel[] | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
@@ -209,6 +213,8 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
+  if (opts.messageSource) properties[PROP_MESSAGE_SOURCE] = opts.messageSource;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
 
@@ -308,6 +314,7 @@ export interface TrackAiMessageOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   spanKind?: string | null;
   eventProperties?: Record<string, unknown> | null;
@@ -352,6 +359,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
@@ -476,6 +484,7 @@ export interface TrackToolCallOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   errorMessage?: string | null;
   env?: string | null;
@@ -522,6 +531,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
@@ -577,6 +587,7 @@ export interface TrackConversationOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   eventProperties?: Record<string, unknown> | null;
@@ -605,6 +616,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
         parentAgentId: opts.parentAgentId,
         customerOrgId: opts.customerOrgId,
         agentVersion: opts.agentVersion,
+        description: opts.description,
         context: opts.context,
         env: opts.env,
         eventProperties: opts.eventProperties,
@@ -630,6 +642,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
         parentAgentId: opts.parentAgentId,
         customerOrgId: opts.customerOrgId,
         agentVersion: opts.agentVersion,
+        description: opts.description,
         context: opts.context,
         env: opts.env,
         eventProperties: opts.eventProperties,
@@ -663,6 +676,7 @@ export interface TrackEmbeddingOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   eventProperties?: Record<string, unknown> | null;
@@ -704,6 +718,7 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
@@ -748,6 +763,7 @@ export interface TrackSpanOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   eventProperties?: Record<string, unknown> | null;
@@ -785,6 +801,7 @@ export function trackSpan(opts: TrackSpanOptions): string {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
@@ -837,6 +854,7 @@ export interface TrackSessionEndOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   abandonmentTurn?: number | null;
@@ -868,6 +886,7 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
@@ -918,6 +937,7 @@ export interface TrackSessionEnrichmentOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   eventProperties?: Record<string, unknown> | null;
@@ -949,6 +969,7 @@ export function trackSessionEnrichment(
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
@@ -998,6 +1019,7 @@ export interface TrackScoreOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   eventProperties?: Record<string, unknown> | null;
@@ -1032,6 +1054,7 @@ export function trackScore(opts: TrackScoreOptions): void {
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
+  if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;

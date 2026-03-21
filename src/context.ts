@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { AmplitudeLike } from './types.js';
 
 export interface SessionContextOptions {
   sessionId: string;
@@ -9,12 +10,14 @@ export interface SessionContextOptions {
   env?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   idleTimeoutMinutes?: number | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
   nextTurnIdFn?: (() => number) | null;
+  amplitude?: AmplitudeLike | null;
 }
 
 export class SessionContext {
@@ -26,11 +29,13 @@ export class SessionContext {
   readonly env: string | null;
   readonly customerOrgId: string | null;
   readonly agentVersion: string | null;
+  readonly description: string | null;
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
   readonly idleTimeoutMinutes: number | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
+  readonly amplitude: AmplitudeLike | null;
   private readonly _nextTurnIdFn: (() => number) | null;
 
   constructor(options: SessionContextOptions) {
@@ -42,11 +47,13 @@ export class SessionContext {
     this.env = options.env ?? null;
     this.customerOrgId = options.customerOrgId ?? null;
     this.agentVersion = options.agentVersion ?? null;
+    this.description = options.description ?? null;
     this.context = options.context ?? null;
     this.groups = options.groups ?? null;
     this.idleTimeoutMinutes = options.idleTimeoutMinutes ?? null;
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;
+    this.amplitude = options.amplitude ?? null;
     this._nextTurnIdFn = options.nextTurnIdFn ?? null;
   }
 

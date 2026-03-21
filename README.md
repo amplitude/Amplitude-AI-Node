@@ -4,48 +4,81 @@
 [![CI](https://github.com/amplitude/Amplitude-AI-Node/actions/workflows/test.yml/badge.svg)](https://github.com/amplitude/Amplitude-AI-Node/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Agent analytics for [Amplitude](https://amplitude.com). Track every LLM call as events in your Amplitude project, then build funnels, cohorts, and retention charts across AI and product behavior.
+Agent analytics for [Amplitude](https://amplitude.com). Track every LLM call, user message, tool call, and quality signal as events in your Amplitude project — then build funnels, cohorts, and retention charts across AI and product behavior.
 
 ```bash
 npm install @amplitude/ai @amplitude/analytics-node
 ```
 
 ```typescript
-import { AmplitudeAI, patch } from '@amplitude/ai';
-// Your existing code — unchanged
-import OpenAI from 'openai';
+import { AmplitudeAI, OpenAI } from '@amplitude/ai';
 
 const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
-patch({ amplitudeAI: ai });
+const openai = new OpenAI({ amplitude: ai, apiKey: process.env.OPENAI_API_KEY });
+const agent = ai.agent('my-agent');
 
-const response = await new OpenAI().chat.completions.create({
-  model: 'gpt-4o',
-  messages: [{ role: 'user', content: 'What is retention?' }],
+app.post('/chat', async (req, res) => {
+  const session = agent.session({ userId: req.userId, sessionId: req.sessionId });
+
+  const result = await session.run(async (s) => {
+    s.trackUserMessage(req.body.message);
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: req.body.messages,
+    });
+    return response.choices[0].message.content;
+  });
+
+  await ai.flush();
+  res.json({ response: result });
 });
-// [Agent] User Message + [Agent] AI Response now in your Amplitude project
+// Events: [Agent] User Message, [Agent] AI Response (with model, tokens, cost, latency),
+//         [Agent] Session Start, [Agent] Session End — all tied to userId and sessionId
 ```
 
-One call auto-detects and patches every installed provider (OpenAI, Anthropic, Azure OpenAI, Gemini, Mistral, Bedrock). Want more control? See [Choose Your Integration Tier](#choose-your-integration-tier) below.
+## How to Get Started
+
+### Instrument with a coding agent (recommended)
+
+```bash
+npm install @amplitude/ai
+npx amplitude-ai
+```
+
+The CLI prints a prompt to paste into any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.):
+
+> Instrument this app with @amplitude/ai. Follow node_modules/@amplitude/ai/amplitude-ai.md
+
+The agent reads the guide, scans your project, discovers your agents and LLM call sites, and instruments everything — provider wrappers, session lifecycle, multi-agent delegation, tool tracking, scoring, and a verification test. You review and approve each step.
+
+### Other paths
+
+| Your situation | Recommended path | What happens |
+|---|---|---|
+| **Manual setup** | Follow the [code example above](#amplitude-ai) | Agents + sessions + provider wrappers — the full event model |
+| **Just want to verify the SDK works** | `patch()` ([details below](#patching-diagnostic--legacy)) | Aggregate cost/latency monitoring only — no user analytics, no funnels |
+
+> **Start with full instrumentation.** The coding agent workflow defaults to agents + sessions + provider wrappers. This gives you every event type, per-user analytics, and server-side enrichment. `patch()` exists for quick verification or legacy codebases where you can't modify call sites, but it only captures `[Agent] AI Response` without user identity — no funnels, no cohorts, no retention.
 
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.1.0                                                                                                                                                                            |
+| Version         | 0.2.1                                                                                                                                                                            |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, @pydantic/genai-prices (cost), tiktoken or js-tiktoken (token counting) |
 
 ## Table of Contents
 
+- [How to Get Started](#how-to-get-started)
+  - [Instrument with a Coding Agent (recommended)](#instrument-with-a-coding-agent-recommended)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
   - [Current Limitations](#current-limitations)
   - [Is this for me?](#is-this-for-me)
   - [Why this SDK?](#why-this-sdk)
   - [What you can build](#what-you-can-build)
-- [Choose Your Integration Tier](#choose-your-integration-tier)
-  - [Support matrix](#support-matrix)
-  - [Parity and runtime limitations](#parity-and-runtime-limitations)
+- [What You Get at Each Level](#what-you-get-at-each-level)
 - [Core Concepts](#core-concepts)
   - [User Identity](#user-identity)
   - [Session](#session)
@@ -63,7 +96,7 @@ One call auto-detects and patches every installed provider (OpenAI, Anthropic, A
 - [Scoring Patterns](#scoring-patterns)
 - [Enrichments](#enrichments)
 - [Debug and Dry-Run Modes](#debug-and-dry-run-modes)
-- [Patching (Zero-Code Instrumentation)](#patching-zero-code-instrumentation)
+- [Patching (Diagnostic / Legacy)](#patching-diagnostic--legacy)
 - [Auto-Instrumentation CLI](#auto-instrumentation-cli)
 - [Integrations](#integrations)
 - [Data Flow](#data-flow)
@@ -100,68 +133,25 @@ Install provider SDKs based on what you use (for example: `openai`, `@anthropic-
 
 ## Quick Start
 
-### Quickstart (5 minutes)
+### 5-minute quick start
 
 1. **Install:** `npm install @amplitude/ai @amplitude/analytics-node`
 2. **Get your API key:** In Amplitude, go to **Settings > Projects** and copy the API key.
-3. **Add two lines** to the top of your app (see the hero example above).
-4. **Run your app.** Any OpenAI, Anthropic, Gemini, or Mistral call is now instrumented automatically.
-5. **Open Amplitude > Events.** You should see `[Agent] AI Response` within 30 seconds.
+3. **Auto-instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent — it scans your project, generates a bootstrap file, instruments your LLM call sites, and creates a verification test. Or follow the manual patterns below.
+4. **Set your API key** in the generated `.env` file and replace the placeholder `userId`/`sessionId`.
+5. **Run your app.** You should see `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` within 30 seconds.
 
 To verify locally before checking Amplitude, add `debug: true`:
 
 ```typescript
-import { AIConfig, AmplitudeAI, patch } from '@amplitude/ai';
-
 const ai = new AmplitudeAI({
   apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ debug: true }),
 });
-patch({ amplitudeAI: ai });
 // Prints: [amplitude-ai] [Agent] AI Response | model=gpt-4o | tokens=847 | cost=$0.0042 | latency=1,203ms
 ```
 
-### Full-control quick start
-
-For maximum flexibility, use `BoundAgent` + `Session` with explicit tracking calls:
-
-```typescript
-import { AmplitudeAI } from '@amplitude/ai';
-
-const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
-
-const agent = ai.agent('my-agent', { userId: 'user-123' });
-const session = agent.session();
-
-await session.run(async (s) => {
-  s.trackUserMessage('What is the capital of France?');
-
-  const response = await callLLM('What is the capital of France?');
-
-  s.trackAiMessage(
-    response.content,
-    response.model,
-    'openai',
-    response.latencyMs,
-    {
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-    },
-  );
-});
-```
-
-### What the quick setup gives you
-
-The zero-code / CLI setup gives you cost, latency, token counts, and error tracking immediately. But cohorts, retention analysis, funnels, and server-side enrichment all require `userId` and `sessionId`. Without them you have aggregate monitoring — not per-user analytics.
-
-| Setup                | What you get                                      |
-| -------------------- | ------------------------------------------------- |
-| CLI / zero-code only | Cost, latency, tokens, errors — aggregate only    |
-| + `userId`           | Per-user funnels, cohorts, retention              |
-| + `sessionId`        | Session grouping, enrichment, behavioral patterns |
-
-Adding `userId` is one option per call. Adding session context is `session.run()`. See [Session](#session) and [Choose Your Integration Tier](#choose-your-integration-tier).
+> **Tip:** Call `enableLivePriceUpdates()` at startup so cost tracking stays accurate when new models are released. See [Cache-Aware Cost Tracking](#cache-aware-cost-tracking).
 
 ### Current Limitations
 
@@ -191,7 +181,9 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
 
-**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code.
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Score` events with rubric scores, `[Agent] Topic Classification` events with category labels, and `[Agent] Session Evaluation` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
+
+**Quality signals from every source in one event type.** User thumbs up/down (`source: 'user'`), automated rubric scores from the enrichment pipeline (`source: 'ai'`), and reviewer assessments (`source: 'reviewer'`) all produce `[Agent] Score` events differentiated by `[Agent] Evaluation Source`. One chart shows all three side by side. Filter by source or view them together. Filter by `[Agent] Agent ID` for per-agent quality attribution.
 
 **Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
 
@@ -206,13 +198,69 @@ Once AI events are in Amplitude alongside your product events:
 - **Retention.** Do users with successful AI sessions retain better than those with failures? Segment retention curves by `[Agent] Overall Outcome` or task completion score.
 - **Agent analytics.** Compare quality, cost, and failure rate across agents in one chart. Identify which agent in a multi-agent chain introduced a failure.
 
-## Choose Your Integration Tier
+### How quality measurement works
 
-| Tier                  | Code Changes                                          | What You Get                                      |
-| --------------------- | ----------------------------------------------------- | ------------------------------------------------- |
-| **Zero-code (patch)** | 2 lines                                               | Auto-tracks supported provider calls via patching |
-| **Wrap**              | `wrap(client, ai)` or `new OpenAI({ amplitude: ai })` | Auto-tracking + full control of options per call  |
-| **Full control**      | Call `trackUserMessage`/`trackAiMessage` directly     | Maximum flexibility, works with any LLM provider  |
+The SDK captures quality signals at three layers, from most direct to most comprehensive:
+
+**1. Explicit user feedback** — Instrument thumbs up/down, star ratings, or CSAT scores via [`trackScore()`](#scoring-patterns). Each call produces an `[Agent] Score` event with `source: 'user'`:
+
+```typescript
+ai.trackScore({
+  userId: 'u1', name: 'user-feedback', value: 1,
+  targetId: aiMessageId, targetType: 'message', source: 'user',
+});
+```
+
+**2. Implicit behavioral signals** — The SDK auto-tracks behavioral proxies for quality on every turn, with zero additional instrumentation:
+
+| Signal | Property | Event | Interpretation |
+|--------|----------|-------|----------------|
+| Copy | `[Agent] Was Copied` | `[Agent] AI Response` | User copied the output — positive |
+| Regeneration | `[Agent] Is Regeneration` | `[Agent] User Message` | User asked for a redo — negative |
+| Edit | `[Agent] Is Edit` | `[Agent] User Message` | User refined their prompt — friction |
+| Abandonment | `[Agent] Abandonment Turn` | `[Agent] Session End` | User left after N turns — potential failure |
+
+**3. Automated server-side evaluation** — When `contentMode: 'full'`, Amplitude's enrichment pipeline runs LLM-as-judge evaluators on every session after it closes. No eval code to write or maintain:
+
+| Rubric | What it measures | Scale |
+|--------|-----------------|-------|
+| `task_completion` | Did the agent accomplish what the user asked? | 0–2 |
+| `response_quality` | Was the response clear, accurate, and helpful? | 0–2 |
+| `user_satisfaction` | Did the user seem satisfied based on conversation signals? | 0–2 |
+| `agent_confusion` | Did the agent misunderstand or go off track? | 0–2 |
+
+Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure` (agent failed to deliver), `data_quality_issues`, and `behavioral_patterns` (clarification loops, topic drift). All results are emitted as `[Agent] Score` events with `source: 'ai'`.
+
+**All three layers use the same `[Agent] Score` event type**, differentiated by `[Agent] Evaluation Source` (`'user'`, `'ai'`, or `'reviewer'`). One chart shows user feedback alongside automated evals. No joins, no separate tables.
+
+## What You Set vs What You Get
+
+| You set | Where it comes from | What you unlock |
+|---|---|---|
+| API key | Amplitude project settings | Events reach Amplitude |
+| userId | Your auth layer (JWT, session cookie, API token) | Per-user analytics, cohorts, retention |
+| agentId | Your choice (e.g. `'chat-handler'`) | Per-agent cost, latency, quality dashboards |
+| sessionId | Your conversation/thread/ticket ID | Multi-turn analysis, session enrichment, quality scores |
+| *description* | *Your choice (e.g. `'Handles support queries via GPT-4o'`)* | *Human-readable agent registry from event streams* |
+| *contentMode + redactPii* | *Config (defaults work)* | *Server enrichment (automatic), PII scrubbing* |
+| *model, tokens, cost* | *Auto-captured by provider wrappers* | *Cost analytics, latency monitoring* |
+| parentAgentId | Auto via `child()`/`runAs()` | Multi-agent hierarchy |
+| env, agentVersion, context | Your deploy pipeline | Segmentation, regression detection |
+
+*Italicized rows require zero developer effort — they're automatic or have sensible defaults.*
+
+**The minimum viable setup is 4 fields**: API key, userId, agentId, sessionId.
+Everything else is either automatic or a progressive enhancement.
+
+## What You Get at Each Level
+
+The coding agent workflow defaults to **full instrumentation** — the top row below. Lower levels exist as fallbacks, not as recommended starting points.
+
+| Level | Events you get | What it unlocks in Amplitude |
+|---|---|---|
+| **Full** (agents + sessions + wrappers) | User Message, AI Response, Tool Call, Session Start/End, Score, Enrichments | Per-user funnels, cohorts, retention, session replay linking, quality scoring |
+| **Wrappers only** (no sessions) | AI Response (with cost, tokens, latency) | Aggregate cost monitoring, model comparison |
+| **`patch()` only** (no wrappers, no sessions) | AI Response (basic) | Aggregate call counts — useful for verification only |
 
 ### Support matrix
 
@@ -231,9 +279,9 @@ This section is the source of truth for behavior that is intentionally different
 - Auto-instrument bootstrap differs by runtime (`node --import` in Node vs `sitecustomize` in Python).
 - Request middleware differs by runtime (Express-compatible in Node vs ASGI middleware in Python).
 
-### Zero-code (recommended for getting started)
+### Zero-code (for verification or legacy codebases)
 
-Add two lines at application startup and LLM calls through supported patched providers are tracked automatically:
+`patch()` monkey-patches provider SDKs so existing LLM calls are tracked without code changes. This is useful for verifying the SDK works or for legacy codebases where you can't modify call sites. It only captures `[Agent] AI Response` without user identity — for the full event model, use agents + sessions (see [Quick Start](#quick-start)).
 
 ```typescript
 import { AmplitudeAI, patch } from '@amplitude/ai';
@@ -354,23 +402,30 @@ const ai = new AmplitudeAI({ amplitude: existingAmplitudeClient });
 
 ### BoundAgent
 
-Agent with pre-bound defaults (`agentId`, `userId`, `env`, etc.). Use `agent()` to create:
+Agent with pre-bound defaults (`agentId`, `description`, `userId`, `env`, etc.). Use `agent()` to create:
 
 ```typescript
 const agent = ai.agent('support-bot', {
+  description: 'Handles customer support queries via OpenAI GPT-4o',
   userId: 'user-123',
   env: 'production',
   customerOrgId: 'org-456',
 });
 ```
 
-Child agents inherit context from their parent and automatically set `parentAgentId`:
+Child agents inherit context (including `description`) from their parent and automatically set `parentAgentId`:
 
 ```typescript
-const orchestrator = ai.agent('orchestrator', { userId: 'user-123' });
+const orchestrator = ai.agent('orchestrator', {
+  description: 'Routes queries to specialized child agents',
+  userId: 'user-123',
+});
 const researcher = orchestrator.child('researcher');
-const writer = orchestrator.child('writer');
+const writer = orchestrator.child('writer', {
+  description: 'Drafts responses using retrieved context',
+});
 // researcher.parentAgentId === 'orchestrator'
+// researcher inherits orchestrator's description; writer has its own
 ```
 
 ### TenantHandle
@@ -560,6 +615,7 @@ The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unk
 ```typescript
 const agent = ai.agent('support-bot', {
   userId: 'u1',
+  description: 'Handles customer support queries via OpenAI GPT-4o',
   agentVersion: '4.2.0',
   context: {
     agent_type: 'executor',
@@ -1155,7 +1211,10 @@ const ai = new AmplitudeAI({
   }),
 });
 
-const agent = ai.agent('support-bot', { agentVersion: '2.1.0' });
+const agent = ai.agent('support-bot', {
+  description: 'Handles support conversations in metadata-only mode',
+  agentVersion: '2.1.0',
+});
 
 // 2. Run the conversation — content is NOT sent (metadata only)
 const session = agent.session({ userId: 'user-42' });
@@ -1308,9 +1367,9 @@ Both modes can be enabled via environment variables when using auto-instrumentat
 AMPLITUDE_AI_DEBUG=true amplitude-ai-instrument node app.js
 ```
 
-## Patching (Zero-Code Instrumentation)
+## Patching (Diagnostic / Legacy)
 
-Monkey-patch provider SDKs to auto-track without changing call sites:
+Monkey-patch provider SDKs to auto-track without changing call sites. This is useful for quick verification that the SDK is connected, or for legacy codebases where modifying call sites is impractical. For the full event model (user messages, sessions, scoring, enrichments), use agents + sessions as shown in [Quick Start](#quick-start).
 
 ```typescript
 import {
@@ -1366,13 +1425,7 @@ Environment variables:
 | `AMPLITUDE_AI_CONTENT_MODE` | `full`, `metadata_only`, or `customer_enriched` |
 | `AMPLITUDE_AI_DEBUG`        | `"true"` for debug output to stderr             |
 
-### Init and Doctor CLI
-
-Scaffold a minimal setup:
-
-```bash
-amplitude-ai init
-```
+### Doctor CLI
 
 Validate setup (env, provider deps, mock event capture, mock flush path):
 
@@ -1380,12 +1433,8 @@ Validate setup (env, provider deps, mock event capture, mock flush path):
 amplitude-ai doctor
 ```
 
-When a check fails, `doctor` includes an actionable `fix` field with a copy-pasteable remediation command (e.g., `export AMPLITUDE_AI_API_KEY=...`, `pnpm add openai`).
-
 Useful flags:
 
-- `amplitude-ai init --dry-run`
-- `amplitude-ai init --force`
 - `amplitude-ai doctor --no-mock-check`
 
 ### Status
@@ -1418,20 +1467,25 @@ amplitude-ai mcp
 
 MCP surface:
 
-| Tool                      | Description                                                   |
-| ------------------------- | ------------------------------------------------------------- |
-| `get_event_schema`        | Return the full event schema and property definitions         |
-| `get_integration_pattern` | Return canonical instrumentation code patterns                |
-| `validate_setup`          | Check env vars and dependency presence                        |
-| `suggest_instrumentation` | Context-aware next steps based on your framework and provider |
-| `validate_file`           | Analyze source code to detect uninstrumented LLM call sites   |
+| Tool                      | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `scan_project`            | Scan project structure, detect providers, frameworks, and multi-agent patterns |
+| `validate_file`           | Analyze a source file to detect uninstrumented LLM call sites              |
+| `instrument_file`         | Apply instrumentation transforms to a source file                          |
+| `generate_verify_test`    | Generate a dry-run verification test using MockAmplitudeAI                 |
+| `get_event_schema`        | Return the full event schema and property definitions                      |
+| `get_integration_pattern` | Return canonical instrumentation code patterns                             |
+| `validate_setup`          | Check env vars and dependency presence                                     |
+| `suggest_instrumentation` | Context-aware next steps based on your framework and provider              |
+| `search_docs`             | Full-text search across SDK documentation (README, llms-full.txt)          |
 
-Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`
+Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`, `amplitude-ai://instrument-guide`
 
 Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 
-### Examples and Cursor Skill
+### Examples and AI Coding Agent Guide
 
+- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx amplitude-ai` to see the prompt that points your agent to this file.
 - Mock-based examples demonstrating the event model (also used as CI smoke tests):
   - `examples/zero-code.ts`
   - `examples/wrap-openai.ts`
@@ -1440,8 +1494,6 @@ Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 - Real provider examples (require API keys):
   - `examples/real-openai.ts` — end-to-end OpenAI integration with session tracking and flush
   - `examples/real-anthropic.ts` — end-to-end Anthropic integration with session tracking and flush
-- Cursor skill:
-  - `.cursor/skills/instrument-with-amplitude-ai/SKILL.md`
 
 ## Integrations
 
@@ -1763,7 +1815,18 @@ await session.run(async (s) => {
 
 ## Serverless Environments
 
-**Critical**: Always `await ai.flush()` before your handler returns. Without this, events buffered in memory are lost when the runtime freezes or terminates:
+The SDK auto-detects serverless environments (Vercel, AWS Lambda, Netlify, Google Cloud Functions, Azure Functions, Cloudflare Pages). When detected, `session.run()` automatically flushes all pending events before the promise resolves — no explicit `ai.flush()` needed. You can also control this explicitly via the `autoFlush` option on `session()`:
+
+```typescript
+// Auto-detected: flushes automatically in serverless, skips in long-running servers
+agent.session({ userId, sessionId });
+
+// Explicit control:
+agent.session({ userId, sessionId, autoFlush: true });   // always flush
+agent.session({ userId, sessionId, autoFlush: false });  // never flush
+```
+
+If you track events **outside** of `session.run()`, you still need `await ai.flush()` before your handler returns:
 
 ```typescript
 export async function handler(event: APIGatewayEvent) {
@@ -2030,6 +2093,7 @@ Event-specific properties for `[Agent] User Message` (in addition to common prop
 | `[Agent] Total Attachment Size Bytes` | number   | No       | Total size of all attachments in bytes.                                                                                                               |
 | `[Agent] Attachments`                 | string   | No       | Serialized JSON array of attachment metadata (type, name, size_bytes, mime_type). Only metadata, never file content.                                  |
 | `[Agent] Message Labels`              | string   | No       | Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context. |
+| `[Agent] Message Source`              | string   | No       | Origin of the message: `'user'` for direct user input, `'agent'` for messages delegated from a parent agent. Auto-set based on `parentAgentId`.     |
 
 ### AI Response Properties
 
@@ -2478,17 +2542,32 @@ See `src/core/tracking.ts` and `src/core/constants.ts` for the full list.
 
 ## For AI Coding Agents
 
-This SDK is designed to be discovered and used by AI coding agents (Cursor, Copilot, Claude Code, etc.). The following files ship with the package to help agents understand and integrate the SDK without reading the full README:
+This SDK is designed to be discovered and used by any AI coding agent — Cursor, Claude Code, Windsurf, Copilot, Codex, Cline, or any agent that can read files.
 
-| File                                                   | Purpose                                                                                             |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `AGENTS.md`                                            | Machine-readable decision tree, canonical patterns, MCP surface, gotchas, and CLI reference         |
-| `llms.txt`                                             | Compact discovery file listing tools, resources, and event names                                    |
-| `llms-full.txt`                                        | Extended reference with full API signatures, provider coverage matrix, and common error resolutions |
-| `mcp.schema.json`                                      | Structured JSON describing the MCP server's tools, resources, and prompt                            |
-| `.cursor/skills/instrument-with-amplitude-ai/SKILL.md` | Cursor skill that guides agents through instrumenting a project step by step                        |
+**The fastest path:**
 
-Run `amplitude-ai mcp` to start the MCP server. Agents can call tools like `validate_file` to scan source code for uninstrumented LLM calls, or `suggest_instrumentation` for context-aware setup guidance based on the detected framework and provider.
+```bash
+npm install @amplitude/ai
+npx amplitude-ai
+```
+
+The CLI prints a prompt to paste into your agent:
+
+> Instrument this app with @amplitude/ai. Follow node_modules/@amplitude/ai/amplitude-ai.md
+
+The agent reads the guide, scans your project, and instruments everything in 4 phases: Detect, Discover, Instrument, Verify.
+
+**Files shipped with the package:**
+
+| File                                                   | Purpose                                                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `amplitude-ai.md`                                      | **Primary guide** — self-contained 4-phase instrumentation workflow and full API reference            |
+| `AGENTS.md`                                            | Concise index with canonical patterns, MCP surface, gotchas, and CLI reference                       |
+| `llms.txt`                                             | Compact discovery file listing tools, resources, and event names                                     |
+| `llms-full.txt`                                        | Extended reference with full API signatures, provider coverage matrix, and common error resolutions   |
+| `mcp.schema.json`                                      | Structured JSON describing the MCP server's tools, resources, and prompt                             |
+
+**Optional: MCP server for advanced tooling.** Run `amplitude-ai mcp` to start the MCP server (standard stdio protocol). MCP-compatible agents can call tools like `scan_project`, `instrument_file`, `validate_file`, and `generate_verify_test` for deeper analysis. The MCP server is not required for the core instrumentation workflow — `amplitude-ai.md` is self-contained.
 
 ## For Python SDK Migrators
 

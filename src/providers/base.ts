@@ -41,6 +41,7 @@ export interface ProviderTrackOptions {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
   agentVersion?: string | null;
+  description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
   groups?: Record<string, unknown> | null;
@@ -71,6 +72,7 @@ export function applySessionContext(
     if (!result.parentAgentId) result.parentAgentId = ctx.parentAgentId;
     if (!result.customerOrgId) result.customerOrgId = ctx.customerOrgId;
     if (!result.agentVersion) result.agentVersion = ctx.agentVersion;
+    if (!result.description) result.description = ctx.description;
     if (!result.context) result.context = ctx.context;
     if (!result.env) result.env = ctx.env;
     if (!result.groups) result.groups = ctx.groups;
@@ -115,6 +117,7 @@ export type TrackContextFields = Pick<
   | 'parentAgentId'
   | 'customerOrgId'
   | 'agentVersion'
+  | 'description'
   | 'context'
   | 'env'
   | 'groups'
@@ -131,6 +134,7 @@ export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
     parentAgentId: ctx.parentAgentId,
     customerOrgId: ctx.customerOrgId,
     agentVersion: ctx.agentVersion,
+    description: ctx.description,
     context: ctx.context,
     env: ctx.env,
     groups: ctx.groups,
@@ -163,6 +167,7 @@ export abstract class BaseAIProvider {
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
       agentVersion: opts.agentVersion,
+      description: opts.description,
       context: opts.context,
       env: opts.env,
       groups: opts.groups,
@@ -180,6 +185,7 @@ export abstract class BaseAIProvider {
       parentAgentId: merged.parentAgentId ?? opts.parentAgentId,
       customerOrgId: merged.customerOrgId ?? opts.customerOrgId,
       agentVersion: merged.agentVersion ?? opts.agentVersion,
+      description: merged.description ?? opts.description,
       context: merged.context ?? opts.context,
       env: merged.env ?? opts.env,
       groups: merged.groups ?? opts.groups,

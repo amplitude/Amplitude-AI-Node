@@ -11,6 +11,9 @@ import {
   MCP_TOOLS,
 } from './contract.js';
 import { getIntegrationPatterns } from './patterns.js';
+import { generateVerifyTest } from './generate-verify-test.js';
+import { instrumentFile } from './instrument-file.js';
+import { type ScanResult, scanProject } from './scan-project.js';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
 type EventSchema = {
@@ -26,6 +29,7 @@ type EventCatalog = {
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 let _catalogCache: EventCatalog | undefined;
+let _skillCache: string | undefined;
 
 const readEventCatalog = (): EventCatalog => {
   if (_catalogCache) return _catalogCache;
@@ -33,6 +37,23 @@ const readEventCatalog = (): EventCatalog => {
   const raw = readFileSync(filePath, 'utf8');
   _catalogCache = JSON.parse(raw) as EventCatalog;
   return _catalogCache;
+};
+
+const readSkillGuide = (): string => {
+  if (_skillCache) return _skillCache;
+  const skillPath = join(
+    packageRoot,
+    '.cursor',
+    'skills',
+    'instrument-with-amplitude-ai',
+    'SKILL.md',
+  );
+  try {
+    _skillCache = readFileSync(skillPath, 'utf8');
+  } catch {
+    _skillCache = 'Instrument guide not found. See llms-full.txt for API reference.';
+  }
+  return _skillCache;
 };
 
 type ContentTier = 'full' | 'metadata_only' | 'customer_enriched';
@@ -384,6 +405,102 @@ const createServer = (): McpServer => {
     },
   );
 
+  server.registerTool(
+    MCP_TOOLS.scanProject,
+    {
+      title: 'Scan Project',
+      description:
+        'Scan a project directory to detect framework, LLM providers, agents, and call sites. Returns a structured discovery report for the instrument-with-amplitude-ai skill.',
+      inputSchema: {
+        root_path: z
+          .string()
+          .describe('Absolute path to the project root directory'),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
+    async (args: any) => {
+      const rootPath =
+        typeof args?.root_path === 'string' ? args.root_path : '';
+      const result = scanProject(rootPath);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.generateVerifyTest,
+    {
+      title: 'Generate Verify Test',
+      description:
+        'Generate a vitest verification test from a scan_project result. The test exercises all discovered agents in dry-run mode using MockAmplitudeAI.',
+      inputSchema: {
+        scan_result: z
+          .string()
+          .describe('JSON string of the scan_project result'),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
+    async (args: any) => {
+      const raw =
+        typeof args?.scan_result === 'string' ? args.scan_result : '{}';
+      const parsed = JSON.parse(raw) as ScanResult;
+      const testCode = generateVerifyTest(parsed);
+      return {
+        content: [{ type: 'text' as const, text: testCode }],
+      };
+    },
+  );
+
+  server.registerTool(
+    MCP_TOOLS.instrumentFile,
+    {
+      title: 'Instrument File',
+      description:
+        'Apply instrumentation transforms to a source file. Returns the instrumented source code.',
+      inputSchema: {
+        source: z.string().describe('Source code of the file'),
+        file_path: z.string().describe('Path to the file (for context)'),
+        tier: z.enum(['quick_start', 'standard', 'advanced']),
+        bootstrap_import_path: z
+          .string()
+          .describe('Import path for the amplitude bootstrap module'),
+        agent_id: z.string().describe('Agent ID to use'),
+        description: z
+          .string()
+          .optional()
+          .describe('Agent description'),
+        providers: z
+          .array(z.string())
+          .describe('Provider names used in this file'),
+      },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
+    async (args: any) => {
+      const result = instrumentFile({
+        source: typeof args?.source === 'string' ? args.source : '',
+        filePath: typeof args?.file_path === 'string' ? args.file_path : '',
+        tier: args?.tier ?? 'standard',
+        bootstrapImportPath:
+          typeof args?.bootstrap_import_path === 'string'
+            ? args.bootstrap_import_path
+            : '@/lib/amplitude',
+        agentId: typeof args?.agent_id === 'string' ? args.agent_id : 'agent',
+        description:
+          typeof args?.description === 'string' ? args.description : null,
+        providers: Array.isArray(args?.providers) ? args.providers : [],
+      });
+      return {
+        content: [{ type: 'text' as const, text: result }],
+      };
+    },
+  );
+
   server.registerResource(
     'event_schema',
     MCP_RESOURCES.eventSchema,
@@ -422,12 +539,32 @@ const createServer = (): McpServer => {
     }),
   );
 
+  server.registerResource(
+    'instrument_guide',
+    MCP_RESOURCES.instrumentGuide,
+    {
+      title: 'Amplitude AI Instrumentation Guide',
+      description:
+        'Complete 4-phase workflow (Detect → Discover → Instrument → Verify) for instrumenting JS/TS AI apps with @amplitude/ai. Includes code examples for every step.',
+      mimeType: 'text/markdown',
+    },
+    async () => ({
+      contents: [
+        {
+          uri: MCP_RESOURCES.instrumentGuide,
+          mimeType: 'text/markdown',
+          text: readSkillGuide(),
+        },
+      ],
+    }),
+  );
+
   server.registerPrompt(
     MCP_PROMPTS.instrumentApp,
     {
       title: 'Instrument App',
       description:
-        'Guided checklist for instrumenting an app with @amplitude/ai from zero to validated setup.',
+        'Full guided instrumentation of a JS/TS AI app with @amplitude/ai. Includes the complete 4-phase workflow: Detect environment, Discover agents, Instrument code, Verify correctness.',
       argsSchema: {
         framework: z.string().optional(),
         provider: z.string().optional(),
@@ -439,13 +576,14 @@ const createServer = (): McpServer => {
         typeof args?.framework === 'string' ? args.framework : 'node';
       const provider =
         typeof args?.provider === 'string' ? args.provider : 'openai';
+      const guide = readSkillGuide();
       return {
         messages: [
           {
             role: 'user',
             content: {
               type: 'text',
-              text: `Instrument this ${framework} app with ${provider} using @amplitude/ai. Start from the production default: wrapper/swap integration plus ai.agent(...).session(...), choose a content tier (full/metadata_only/customer_enriched) with privacy defaults, and treat patch() only as a migration fallback. Then validate setup and annotate any uninstrumented call sites.`,
+              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nFollow this guide step by step:\n\n${guide}`,
             },
           },
         ],

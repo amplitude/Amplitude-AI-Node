@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 1,
-    "generated_at": "2026-03-17T17:32:06.752295+00:00",
+    "schema_version": 2,
+    "generated_at": "2026-03-20T19:12:10.988879+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -45,6 +45,11 @@
           "name": "[Agent] Agent Version",
           "type": "string",
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         },
         {
           "name": "[Agent] Context",
@@ -135,6 +140,11 @@
           "name": "[Agent] Message Labels",
           "type": "string",
           "description": "Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context."
+        },
+        {
+          "name": "[Agent] Message Source",
+          "type": "string",
+          "description": "Origin of the message: 'user' for direct user input, 'agent' for messages delegated from a parent agent (auto-set based on parentAgentId)."
         }
       ]
     },
@@ -177,6 +187,11 @@
           "name": "[Agent] Agent Version",
           "type": "string",
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         },
         {
           "name": "[Agent] Context",
@@ -445,6 +460,11 @@
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
         },
         {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
           "name": "[Agent] Context",
           "type": "string",
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
@@ -580,6 +600,11 @@
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
         },
         {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
           "name": "[Agent] Context",
           "type": "string",
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
@@ -687,6 +712,11 @@
           "name": "[Agent] Agent Version",
           "type": "string",
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         },
         {
           "name": "[Agent] Context",
@@ -797,6 +827,11 @@
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
         },
         {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
           "name": "[Agent] Context",
           "type": "string",
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
@@ -876,6 +911,11 @@
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
         },
         {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
           "name": "[Agent] Context",
           "type": "string",
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
@@ -944,6 +984,11 @@
           "name": "[Agent] Agent Version",
           "type": "string",
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         },
         {
           "name": "[Agent] Context",
@@ -1199,6 +1244,11 @@
           "name": "[Agent] Agent Version",
           "type": "string",
           "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
+        },
+        {
+          "name": "[Agent] Agent Description",
+          "type": "string",
+          "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         }
       ]
     },

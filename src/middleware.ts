@@ -71,6 +71,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
       agentId,
       env,
       nextTurnIdFn: () => amplitudeAI._nextTurnId(sessionId),
+      amplitude: amplitudeAI.amplitude,
     });
 
     _sessionStorage.run(ctx, () => {

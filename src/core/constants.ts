@@ -47,6 +47,8 @@ export const PROP_SPAN_KIND = '[Agent] Span Kind';
 export const PROP_COMPONENT_TYPE = '[Agent] Component Type';
 export const PROP_CUSTOMER_ORG_ID = '[Agent] Customer Org ID';
 export const PROP_AGENT_VERSION = '[Agent] Agent Version';
+export const PROP_AGENT_DESCRIPTION = '[Agent] Agent Description';
+export const PROP_MESSAGE_SOURCE = '[Agent] Message Source';
 export const PROP_CONTEXT = '[Agent] Context';
 
 // v0.3.0 properties
