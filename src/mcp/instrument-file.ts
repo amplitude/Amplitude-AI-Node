@@ -124,7 +124,7 @@ function addSessionWrapping(
     );
     result = result.replace(
       /(export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\s*\([^)]*\)\s*\{)/,
-      `$1\n  ${agentLine.trim()}\n  const { messages, userId, sessionId } = await req.json();\n  const _response = await agent.session({ userId, sessionId }).run(async (s) => {`,
+      `$1\n  ${agentLine.trim()}\n  const { messages, userId, sessionId } = await req.json();\n  // TODO(required): Ensure userId comes from auth, not the request body, to prevent spoofing.\n  // sessionId is optional — omit it and the SDK auto-generates a unique UUID per request.\n  const _response = await agent.session({ userId, ...(sessionId && { sessionId }) }).run(async (s) => {`,
     );
     if (handlerMatch?.index != null) {
       const openBraceIdx = result.indexOf('{', handlerMatch.index);
@@ -143,7 +143,7 @@ function addSessionWrapping(
   } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(
       /((?:app|router)\.\s*(?:get|post|put|delete)\s*\(\s*['"][^'"]+['"]\s*,\s*(?:async\s+)?\([^)]*\)\s*(?:=>)?\s*\{)/,
-      `$1\n    ${agentLine.trim()}\n    const _response = await agent.session({ userId: 'todo-extract-user-id' }).run(async (s) => {`,
+      `$1\n    // TODO(required): Replace with the real user ID from your auth/request context.\n    // Without a real userId, per-user funnels, retention, and cohorts won't work.\n    const _userId = 'anonymous'; // e.g. req.user.id, req.auth.sub, req.session.userId\n    ${agentLine.trim()}\n    const _response = await agent.session({ userId: _userId }).run(async (s) => {`,
     );
   }
 
