@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
