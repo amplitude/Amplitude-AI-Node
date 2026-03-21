@@ -46,10 +46,9 @@ Package: `@amplitude/ai` v0.2.1
 
 ## CLI
 
-- `amplitude-ai init [--dry-run] [--force]`
+- `amplitude-ai mcp` — start the MCP server for AI coding agents
 - `amplitude-ai doctor`
 - `amplitude-ai status`
-- `amplitude-ai mcp`
 
 ## Examples
 

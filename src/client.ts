@@ -1,4 +1,4 @@
-import { BoundAgent } from './bound-agent.js';
+import { BoundAgent, type AgentOptions } from './bound-agent.js';
 import { AIConfig } from './config.js';
 import type { MessageLabel, SessionEnrichments } from './core/enrichments.js';
 import type { PrivacyConfig } from './core/privacy.js';
@@ -659,23 +659,7 @@ export class AmplitudeAI {
   // Bound Agent Factory
   // ---------------------------------------------------------------
 
-  agent(
-    agentId: string,
-    opts: {
-      userId?: string | null;
-      parentAgentId?: string | null;
-      customerOrgId?: string | null;
-      agentVersion?: string | null;
-      description?: string | null;
-      context?: Record<string, unknown> | null;
-      env?: string | null;
-      sessionId?: string | null;
-      traceId?: string | null;
-      groups?: Record<string, unknown> | null;
-      deviceId?: string | null;
-      browserSessionId?: string | null;
-    } = {},
-  ): BoundAgent {
+  agent(agentId: string, opts: AgentOptions = {}): BoundAgent {
     return new BoundAgent(this, { agentId, ...opts });
   }
 

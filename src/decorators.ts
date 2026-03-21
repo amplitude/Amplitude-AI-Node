@@ -160,7 +160,7 @@ function _resolveContextFields(opts: ToolOptions): ResolvedContext {
   }
 
   return {
-    amplitude: opts.amplitude ?? ToolCallTracker._amplitude ?? null,
+    amplitude: opts.amplitude ?? ctx?.amplitude ?? ToolCallTracker._amplitude ?? null,
     userId: resolve(opts.userId, ToolCallTracker._userId, ctx?.userId) as
       | string
       | null,
@@ -221,8 +221,10 @@ function _resolveContextFields(opts: ToolOptions): ResolvedContext {
 // tool() HOF — wraps a function to auto-track as [Agent] Tool Call
 // ---------------------------------------------------------------------------
 
-type AnyFn = (...args: unknown[]) => unknown;
-type AsyncFn = (...args: unknown[]) => Promise<unknown>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyFn = (...args: any[]) => any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AsyncFn = (...args: any[]) => Promise<any>;
 
 /**
  * Converts a function's return type to Promise-wrapped if not already.
@@ -460,7 +462,7 @@ interface ResolvedObserveParams {
 function _resolveObserveParams(opts: ObserveOptions): ResolvedObserveParams {
   const ctx = getActiveContext();
   return {
-    amplitude: opts.amplitude ?? ToolCallTracker._amplitude ?? null,
+    amplitude: opts.amplitude ?? ctx?.amplitude ?? ToolCallTracker._amplitude ?? null,
     userId: opts.userId ?? ctx?.userId ?? ToolCallTracker._userId ?? '',
     agentId: opts.agentId ?? ctx?.agentId ?? ToolCallTracker._agentId ?? null,
     env: opts.env ?? ctx?.env ?? ToolCallTracker._env ?? null,
@@ -568,6 +570,7 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
         userId: params.userId,
         agentId: params.agentId || spanName,
         env: params.env,
+        amplitude: params.amplitude,
       });
       return _sessionStorage.run(newCtx, runFn);
     }

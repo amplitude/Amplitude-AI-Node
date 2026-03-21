@@ -65,27 +65,28 @@ const CONTEXT_FIELDS = [
   'groups',
 ] as const;
 
+export interface AgentOptions {
+  userId?: string | null;
+  parentAgentId?: string | null;
+  customerOrgId?: string | null;
+  agentVersion?: string | null;
+  description?: string | null;
+  context?: Record<string, unknown> | null;
+  env?: string | null;
+  sessionId?: string | null;
+  traceId?: string | null;
+  groups?: Record<string, unknown> | null;
+  deviceId?: string | null;
+  browserSessionId?: string | null;
+}
+
 export class BoundAgent {
   readonly _ai: AmplitudeAI;
   readonly _defaults: Record<string, unknown>;
 
   constructor(
     ai: AmplitudeAI,
-    opts: {
-      agentId: string;
-      userId?: string | null;
-      parentAgentId?: string | null;
-      customerOrgId?: string | null;
-      agentVersion?: string | null;
-      description?: string | null;
-      context?: Record<string, unknown> | null;
-      env?: string | null;
-      sessionId?: string | null;
-      traceId?: string | null;
-      groups?: Record<string, unknown> | null;
-      deviceId?: string | null;
-      browserSessionId?: string | null;
-    },
+    opts: AgentOptions & { agentId: string },
   ) {
     this._ai = ai;
     this._defaults = {
@@ -113,7 +114,7 @@ export class BoundAgent {
     return this._ai;
   }
 
-  child(agentId: string, overrides: Record<string, unknown> = {}): BoundAgent {
+  child(agentId: string, overrides: AgentOptions = {}): BoundAgent {
     const inherited: Record<string, unknown> = {
       userId: this._defaults.userId,
       env: this._defaults.env,
@@ -128,10 +129,7 @@ export class BoundAgent {
     };
 
     const parentCtx = this._defaults.context as Record<string, unknown> | null;
-    const childCtx = overrides.context as
-      | Record<string, unknown>
-      | null
-      | undefined;
+    const childCtx = overrides.context ?? null;
     const overrideEntries = Object.entries(overrides).filter(
       ([k]) => k !== 'context',
     );

@@ -2,6 +2,7 @@
 export { AmplitudeAI } from './client.js';
 export { BoundAgent } from './bound-agent.js';
 export type {
+  AgentOptions,
   UserMessageOpts,
   AiMessageOpts,
   ToolCallOpts,

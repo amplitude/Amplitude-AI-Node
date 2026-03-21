@@ -102,6 +102,7 @@ export class Session {
       browserSessionId:
         this.browserSessionId ?? (defaults.browserSessionId as string | null),
       nextTurnIdFn: () => ai._nextTurnId(sid),
+      amplitude: ai.amplitude,
     });
   }
 

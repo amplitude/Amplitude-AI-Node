@@ -4,10 +4,10 @@
 
 ## Core API
 
-### AmplitudeAI(config)
+### AmplitudeAI(options)
 Initialize the SDK. Required entry point.
 ```
-new AmplitudeAI({ apiKey: string, contentMode?: 'full' | 'metadata_only' | 'customer_enriched' })
+new AmplitudeAI({ apiKey: string, config?: new AIConfig({ contentMode?: 'full' | 'metadata_only' | 'customer_enriched', redactPii?: boolean, debug?: boolean }) })
 ```
 
 ### patch(options)
@@ -101,8 +101,12 @@ await session.run(async () => { /* LLM calls tracked automatically */ });
 
 ### 5. Express middleware
 ```typescript
-import { createAmplitudeAIMiddleware } from '@amplitude/ai';
-app.use(createAmplitudeAIMiddleware());
+import { AmplitudeAI, createAmplitudeAIMiddleware } from '@amplitude/ai';
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+app.use(createAmplitudeAIMiddleware({
+  amplitudeAI: ai,
+  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+}));
 ```
 
 ### 6. Multi-agent orchestration with session.runAs()
@@ -130,10 +134,9 @@ await session.run(async (s) => {
 
 ## CLI
 
-- `amplitude-ai init [--dry-run] [--force]` — Scaffold .env.example and setup file
+- `amplitude-ai mcp` — Start the MCP server for AI coding agents
 - `amplitude-ai doctor [--json] [--no-mock-check]` — Validate environment and event pipeline
 - `amplitude-ai status [--json]` — Show SDK version, installed providers, and env config
-- `amplitude-ai mcp` — Start MCP server over stdio
 - `amplitude-ai --help` / `amplitude-ai --version`
 
 ## Common Errors

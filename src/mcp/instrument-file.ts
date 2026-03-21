@@ -12,20 +12,36 @@ const PROVIDER_IMPORT_MAP: Record<string, { module: string; defaultExport: strin
   openai: { module: 'openai', defaultExport: 'OpenAI', namedExport: 'openai' },
   '@anthropic-ai/sdk': { module: '@anthropic-ai/sdk', defaultExport: 'Anthropic', namedExport: 'anthropic' },
   '@google/generative-ai': { module: '@google/generative-ai', defaultExport: 'GoogleGenerativeAI', namedExport: 'gemini' },
+  '@google/genai': { module: '@google/genai', defaultExport: 'GoogleGenAI', namedExport: 'genai' },
   '@mistralai/mistralai': { module: '@mistralai/mistralai', defaultExport: 'Mistral', namedExport: 'mistral' },
+  '@azure/openai': { module: '@azure/openai', defaultExport: 'AzureOpenAI', namedExport: 'azureOpenai' },
+  'cohere-ai': { module: 'cohere-ai', defaultExport: 'CohereClient', namedExport: 'cohere' },
 };
 
-const CONSTRUCTOR_RE: Record<string, RegExp> = {
-  openai: /new\s+OpenAI\s*\([^)]*\)/g,
-  '@anthropic-ai/sdk': /new\s+Anthropic\s*\([^)]*\)/g,
-  '@google/generative-ai': /new\s+GoogleGenerativeAI\s*\([^)]*\)/g,
-  '@mistralai/mistralai': /new\s+Mistral\s*\([^)]*\)/g,
-};
+// Balanced-paren constructor matcher: handles nested parens like new OpenAI({ apiKey: getKey() })
+function matchConstructor(source: string, constructorName: string): Array<{ start: number; end: number; fullMatch: string }> {
+  const results: Array<{ start: number; end: number; fullMatch: string }> = [];
+  const re = new RegExp(`new\\s+${constructorName}\\s*\\(`, 'g');
+  for (const m of source.matchAll(re)) {
+    const openIdx = (m.index ?? 0) + m[0].length - 1;
+    let depth = 1;
+    let i = openIdx + 1;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '(') depth++;
+      else if (source[i] === ')') depth--;
+      i++;
+    }
+    results.push({ start: m.index ?? 0, end: i, fullMatch: source.slice(m.index ?? 0, i) });
+  }
+  return results;
+}
 
 const ROUTE_HANDLER_RE =
   /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b/;
 const EXPRESS_HANDLER_RE =
   /(?:app|router)\.\s*(?:get|post|put|delete)\s*\(\s*['"][^'"]+['"]\s*,\s*(?:async\s+)?\(/;
+const HONO_HANDLER_RE =
+  /(?:app|router)\.\s*(?:get|post|put|delete)\s*\(\s*['"][^'"]+['"]\s*,\s*(?:async\s+)?\(\s*c\b/;
 
 function replaceProviderImports(
   source: string,
@@ -47,9 +63,13 @@ function replaceProviderImports(
       namedImports.push(mapping.namedExport);
     }
 
-    const constructorRe = CONSTRUCTOR_RE[provider];
-    if (constructorRe) {
-      result = result.replace(constructorRe, mapping.namedExport);
+    // Replace constructors with pre-wrapped named imports using balanced-paren matching
+    const matches = matchConstructor(result, mapping.defaultExport);
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const match = matches[i];
+      if (match) {
+        result = result.slice(0, match.start) + mapping.namedExport + result.slice(match.end);
+      }
     }
   }
 
@@ -85,17 +105,22 @@ function addSessionWrapping(
   }
 
   const agentLine = `const agent = ai.agent('${agentId}');\n`;
-  const sessionLine = `const session = agent.session({ userId: 'todo-extract-user-id', sessionId: 'todo-extract-session-id' });\n`;
 
+  // Wrap route handler body inside session.run()
   if (ROUTE_HANDLER_RE.test(result)) {
     result = result.replace(
       /(export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\s*\([^)]*\)\s*\{)/,
-      `$1\n  ${agentLine.trim()}\n  ${sessionLine.trim()}`,
+      `$1\n  ${agentLine.trim()}\n  const { messages, userId, sessionId } = await req.json();\n  return agent.session({ userId, sessionId }).run(async (s) => {`,
     );
-  } else if (EXPRESS_HANDLER_RE.test(result)) {
+    // Insert closing brace + ai.flush() before the final closing brace
+    const lastBrace = result.lastIndexOf('}');
+    if (lastBrace > 0) {
+      result = result.slice(0, lastBrace) + '  });\n' + result.slice(lastBrace);
+    }
+  } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(
       /((?:app|router)\.\s*(?:get|post|put|delete)\s*\(\s*['"][^'"]+['"]\s*,\s*(?:async\s+)?\([^)]*\)\s*(?:=>)?\s*\{)/,
-      `$1\n    ${agentLine.trim()}\n    ${sessionLine.trim()}`,
+      `$1\n    ${agentLine.trim()}\n    return agent.session({ userId: 'todo-extract-user-id', sessionId: 'todo-extract-session-id' }).run(async (s) => {`,
     );
   }
 
@@ -108,10 +133,18 @@ function addUserMessageTracking(source: string): string {
   if (match) {
     return source.replace(
       match[0],
-      `${match[0]};\n    // TODO: extract user message and call session.trackUserMessage(userMessage)`,
+      `${match[0]};\n    // TODO: extract user message and call s.trackUserMessage(userMessage)`,
     );
   }
   return source;
+}
+
+function addFlushBeforeReturn(source: string): string {
+  // Insert await ai.flush() before return statements in route handlers
+  return source.replace(
+    /(\n)([ \t]*)(return\s+(?:Response\.json|new\s+Response|NextResponse|res\.json|res\.send)\s*\()/g,
+    '$1$2await ai.flush();\n$2$3',
+  );
 }
 
 export function instrumentFile(opts: InstrumentFileOptions): string {
@@ -126,6 +159,7 @@ export function instrumentFile(opts: InstrumentFileOptions): string {
   if (opts.tier === 'advanced') {
     result = addSessionWrapping(result, opts.agentId, opts.bootstrapImportPath);
     result = addUserMessageTracking(result);
+    result = addFlushBeforeReturn(result);
   }
 
   return result;

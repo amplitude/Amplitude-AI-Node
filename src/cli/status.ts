@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PROVIDER_ENTRIES } from './providers.js';
 
 type StatusResult = {
@@ -14,25 +15,31 @@ const isPackageInstalled = (cwd: string, pkg: string): boolean => {
   return existsSync(nmPath);
 };
 
-const runStatus = (cwd: string): StatusResult => {
-  let version = 'unknown';
+function resolveVersion(cwd: string): string {
+  // First try the user's project node_modules
   try {
-    const pkgPath = join(
-      cwd,
-      'node_modules',
-      '@amplitude',
-      'ai',
-      'package.json',
-    );
-    if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-        version?: string;
-      };
-      version = pkg.version ?? 'unknown';
+    const nmPkgPath = join(cwd, 'node_modules', '@amplitude', 'ai', 'package.json');
+    if (existsSync(nmPkgPath)) {
+      const pkg = JSON.parse(readFileSync(nmPkgPath, 'utf8')) as { version?: string };
+      if (pkg.version) return pkg.version;
     }
-  } catch {
-    // fall through
-  }
+  } catch { /* fall through */ }
+
+  // Fallback: read our own package.json (works when running from the SDK repo)
+  try {
+    const selfDir = dirname(fileURLToPath(import.meta.url));
+    const selfPkgPath = join(selfDir, '..', '..', 'package.json');
+    if (existsSync(selfPkgPath)) {
+      const pkg = JSON.parse(readFileSync(selfPkgPath, 'utf8')) as { version?: string };
+      if (pkg.version) return pkg.version;
+    }
+  } catch { /* fall through */ }
+
+  return 'unknown';
+}
+
+const runStatus = (cwd: string): StatusResult => {
+  const version = resolveVersion(cwd);
 
   const installedCache = new Map<string, boolean>();
   const providers = PROVIDER_ENTRIES.map(({ name, npm }) => {

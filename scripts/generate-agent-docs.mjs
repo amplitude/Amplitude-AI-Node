@@ -82,10 +82,9 @@ Package: \`${packageJson.name}\` v${packageJson.version}
 
 ## CLI
 
-- \`amplitude-ai init [--dry-run] [--force]\`
+- \`amplitude-ai mcp\` — start the MCP server for AI coding agents
 - \`amplitude-ai doctor\`
 - \`amplitude-ai status\`
-- \`amplitude-ai mcp\`
 
 ## Examples
 
@@ -268,10 +267,9 @@ await session.run(async (s) => {
 
 ## CLI
 
-- \`amplitude-ai init [--dry-run] [--force]\` — Scaffold .env.example and setup file
+- \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json] [--no-mock-check]\` — Validate environment and event pipeline
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
-- \`amplitude-ai mcp\` — Start MCP server over stdio
 - \`amplitude-ai --help\` / \`amplitude-ai --version\`
 
 ## Common Errors

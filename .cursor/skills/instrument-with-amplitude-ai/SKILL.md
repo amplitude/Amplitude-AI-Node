@@ -51,7 +51,7 @@ Recommendations:
 ```
 
 **Decision point:** Ask the developer to confirm the detection and choose a tier:
-- **Quick start** — `ai.patch()`, zero code changes, good for getting data flowing
+- **Quick start** — `patch({ amplitudeAI: ai })`, zero code changes, good for getting data flowing
 - **Standard** — Provider wrappers + session middleware (recommended for most apps)
 - **Advanced** — Multi-agent `runAs`, agent descriptions, scoring, tool tracking
 
@@ -66,7 +66,7 @@ For **Quick start** tier, skip to Phase 3 — discovery is just "which providers
 For **Standard** and **Advanced** tiers:
 
 1. Use `scan_project` results to identify files with LLM call sites
-2. For each file with call sites, review:
+2. For each file with call sites, read the actual source file and review:
    - Is it a route handler / API endpoint?
    - What provider(s) does it use?
    - Does it call other files with LLM call sites? (delegation → multi-agent)
@@ -75,6 +75,27 @@ For **Standard** and **Advanced** tiers:
    - Delegation patterns (parent calls child → `runAs`)
    - Feedback handlers (thumbs up/down UI components)
    - Tool functions (functions called by the LLM via function calling)
+
+### Semantic Multi-Agent Detection
+
+`scan_project` returns two fields to guide architectural reasoning — do not skip these:
+
+- **`multi_agent_signals`**: a list of raw structural observations (e.g. "LLM call sites in 3 separate files", "tool definitions overlap with LLM-calling functions"). Use this as evidence, not a conclusion.
+- **`is_multi_agent`**: `true` only when Amplitude AI SDK delegation APIs (`.child()`, `.runAs()`) are detected. `false` means SDK patterns weren't found, not that the app is single-agent.
+
+**When `multi_agent_signals` is non-empty, reason over it before concluding:**
+
+For each agent in `scan_project.agents`, examine:
+- `call_site_details[].containing_function` — which function makes each LLM call
+- `tool_definitions` — which functions are exposed as LLM tools in this file
+- `function_definitions` — all top-level functions defined in the file
+
+Then read the actual source files for any agents flagged in `multi_agent_signals`. Ask:
+1. Do any `tool_definitions` in file A reference functions that make LLM calls themselves (in file A or file B)? → **delegation-as-tools** (A2A) pattern
+2. Does a parent function in file A call a function in file B that has LLM call sites? → **sequential delegation** pattern
+3. Are there multiple `agent.session()` or `agent.child()` instantiation points? → explicit multi-agent setup
+
+Only mark the architecture as multi-agent once you've confirmed one of these patterns by reading the source.
 
 **Output to the developer:**
 
@@ -88,12 +109,15 @@ Agent 1: "chat-handler"
   Entry point: POST /api/chat
   [Call sites: 2 uninstrumented]
 
-Agent 2: "code-reviewer"  (child of chat-handler)
-  Description: "Reviews code diffs using Anthropic Claude"
-  File: src/lib/review-agent.ts
-  Provider: Anthropic (messages.create)
-  Delegation: called from Agent 1
+Agent 2: "recipe-agent"  (child of chat-handler, called as a tool)
+  Description: "Specialized recipe planning agent called by the orchestrator"
+  File: src/lib/recipe-agent.ts
+  Provider: OpenAI (chat.completions.create)
+  Delegation: ask_recipe_agent() tool in Agent 1 delegates to this file
   [Call sites: 1 uninstrumented]
+
+Multi-agent architecture: delegation-as-tools (A2A)
+  → will instrument with ai.agent().child() + session.runAs()
 
 Proceed with instrumentation? [Review changes first / Apply / Skip]
 ```
@@ -104,6 +128,8 @@ Proceed with instrumentation? [Review changes first / Apply / Skip]
 
 ## Phase 3: Instrument
 
+**Primary approach: read and edit files directly.** The `instrument_file` MCP tool is available as a helper for simple provider swaps, but it operates on text patterns without semantic understanding. For anything beyond a basic import swap — session wrapping, multi-agent delegation, streaming, edge cases — read the source file and write the instrumentation yourself using the patterns below as guidance.
+
 ### Step 3a: Install dependencies
 
 ```bash
@@ -113,17 +139,25 @@ pnpm add @amplitude/ai    # or npm install / yarn add
 
 ### Step 3b: Create bootstrap file
 
-Create `src/lib/amplitude.ts` (or the project's conventional lib path):
+Create `src/lib/amplitude.ts` (or the project's conventional lib path). Write this file directly — do not use `instrument_file` for the bootstrap, as it requires project-specific context (detected providers, content mode, agent IDs from Phase 2).
+
+**Choose `contentMode` based on privacy and enrichment needs:**
+
+- **`full`** — captures full prompt/response text. Best for debugging and enrichment. Always pair with `redactPii: true` unless the customer has explicit consent.
+- **`metadata_only`** — captures token counts, latency, model, cost, but no text. Use when prompts contain sensitive PII or regulated data (healthcare, finance).
+- **`customer_enriched`** — no text captured by default, but the customer can send enriched summaries via `trackSessionEnrichment()`. Use when the customer wants control over what text reaches Amplitude.
 
 ```typescript
-import { AmplitudeAI, OpenAI, Anthropic, enableLivePriceUpdates } from '@amplitude/ai';
+import { AmplitudeAI, AIConfig, OpenAI, Anthropic, enableLivePriceUpdates } from '@amplitude/ai';
 
 enableLivePriceUpdates();
 
 export const ai = new AmplitudeAI({
   apiKey: process.env.AMPLITUDE_AI_API_KEY!,
-  contentMode: 'full',
-  redactPii: true,
+  config: new AIConfig({
+    contentMode: 'full',       // or 'metadata_only' / 'customer_enriched' — see guidance above
+    redactPii: true,
+  }),
 });
 
 // One wrapped client per provider detected in Phase 1
@@ -135,11 +169,21 @@ export const openai = new OpenAI({
 // Add more providers as detected...
 ```
 
+**Alternative: `wrap()` instead of constructor wrappers.** If the project creates provider clients in many places or dynamically, use `wrap()` to instrument an existing client without changing its construction:
+
+```typescript
+import { wrap } from '@amplitude/ai';
+import OpenAI from 'openai';
+
+const rawClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+export const openai = wrap(rawClient, ai);
+```
+
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
 
 ### Step 3c: Swap provider imports
 
-For each file with LLM call sites, use MCP `instrument_file` tool or manually:
+Read each file with LLM call sites. Replace the direct provider instantiation with an import from the bootstrap file. You can use the MCP `instrument_file` tool for files where a simple text pattern swap is sufficient, but prefer direct editing when the file has custom initialization, multiple clients, or non-standard patterns.
 
 **Before:**
 ```typescript
@@ -185,19 +229,44 @@ const review = await s.runAs(codeReviewer, async () => {
 });
 ```
 
-### Step 3e: Add scoring (Advanced tier only)
+### Step 3e: Track tools and explicit AI responses
+
+**Tool tracking:** If the agent uses function calling (detected via `tool_definitions` in scan results), wrap tool functions with the `tool()` higher-order function. The `tool()` HOF automatically tracks duration, success/failure, and input/output when called inside a session context:
+
+```typescript
+import { tool } from '@amplitude/ai';
+
+// Wrap the function (at definition time, outside the route handler):
+const searchKnowledgeBase = tool(searchDB, { name: 'search_knowledge_base' });
+
+// Inside session.run(), call the wrapped function:
+const result = await searchKnowledgeBase(query);
+```
+
+**Explicit AI response capture:** When the provider wrapper can't automatically capture the AI response (e.g. Assistants API polling, custom post-processing), use `trackAiMessage()` with positional arguments:
+
+```typescript
+// After polling a completed Assistants API run:
+s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
+  inputTokens: usage.prompt_tokens,
+  outputTokens: usage.completion_tokens,
+  totalTokens: usage.total_tokens,
+});
+```
+
+### Step 3f: Add scoring (Advanced tier only)
 
 If feedback handlers were detected (thumbs up/down UI), wire them:
 
 ```typescript
 // In the feedback handler component/API
-ai.trackScore({
+ai.score({
   userId, name: 'user-feedback', value: thumbsUp ? 1 : 0,
   targetId: messageId, targetType: 'message', source: 'user',
 });
 ```
 
-### Step 3f: Streaming session lifecycle
+### Step 3g: Streaming session lifecycle
 
 If `scan_project` reports `has_streaming: true`, session wrapping must keep the session open until the stream is fully consumed. The session must not auto-end when the stream object is created — it must end when the last chunk is read.
 
@@ -222,15 +291,15 @@ return agent.session({ userId, sessionId }).run(async (s) => {
 
 For non-streaming endpoints, no special handling is needed — `session.run()` naturally awaits the provider call.
 
-### Step 3g: Cross-service context propagation
+### Step 3h: Cross-service context propagation
 
 If `scan_project` reports `message_queue_deps`, the app uses message queues and likely has a multi-service architecture. Add context propagation to the bootstrap:
 
 ```typescript
 import { injectContext, extractContext } from '@amplitude/ai';
 
-// Sender side: include Amplitude context in message headers
-const headers = injectContext(session);
+// Sender side: include Amplitude context in message headers (inside session.run())
+const headers = injectContext();
 await queue.send({ payload, headers });
 
 // Receiver side: restore context from headers
@@ -238,7 +307,7 @@ const ctx = extractContext(message.headers);
 const session = agent.session({ ...ctx });
 ```
 
-### Step 3h: Browser-server session linking
+### Step 3i: Browser-server session linking
 
 If `scan_project` reports `has_frontend_deps: true`, the project has a React/Vue/Svelte frontend alongside the backend. Add browser session linking:
 
@@ -255,17 +324,20 @@ const session = agent.session({
 });
 ```
 
-### Step 3i: Framework-specific middleware
+### Step 3j: Framework-specific middleware
 
 **Next.js App Router**: Session wrapping goes inside each route handler (no global middleware needed — each route is its own serverless function).
 
 **Express/Fastify/Hono**: Use `createAmplitudeAIMiddleware`:
 ```typescript
 import { createAmplitudeAIMiddleware } from '@amplitude/ai';
-app.use(createAmplitudeAIMiddleware({ amplitudeAI: ai }));
+app.use(createAmplitudeAIMiddleware({
+  amplitudeAI: ai,
+  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+}));
 ```
 
-### Step 3j: Environment variables
+### Step 3k: Environment variables
 
 Add to `.env.example`:
 ```
@@ -294,13 +366,24 @@ Or manually create the test — it should verify:
 npx vitest run __amplitude_verify__.test.ts
 ```
 
-### Step 4c: Run doctor
+### Step 4c: Enable debug mode for development
+
+During verification, enable debug logging to see events being emitted in the console:
+
+```typescript
+const ai = new AmplitudeAI({
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+  config: new AIConfig({ debug: true }),  // logs all tracked events to console — disable in production
+});
+```
+
+### Step 4d: Run doctor
 
 ```bash
 npx amplitude-ai doctor
 ```
 
-### Step 4d: Validate instrumented files
+### Step 4e: Validate instrumented files
 
 Use MCP `validate_file` tool on each modified file to confirm all LLM call sites are covered. Or use ripgrep:
 
@@ -310,14 +393,14 @@ rg 'chat\.completions\.create|messages\.create|responses\.create|generateContent
 
 Compare against the list of instrumented files — any gaps mean missed call sites.
 
-### Step 4e: Run project checks
+### Step 4f: Run project checks
 
 ```bash
 npx tsc --noEmit    # TypeScript compiles
 npm test            # Existing tests still pass
 ```
 
-### Step 4f: Show confidence report
+### Step 4g: Show confidence report
 
 Summarize results for the developer:
 

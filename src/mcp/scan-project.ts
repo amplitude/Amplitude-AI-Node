@@ -28,11 +28,22 @@ export interface ScanResult {
     is_instrumented: boolean;
     is_route_handler: boolean;
     inferred_description: string | null;
+    call_site_details: Array<{
+      line: number;
+      provider: string;
+      api: string;
+      instrumented: boolean;
+      containing_function: string | null;
+      code_context: string;
+    }>;
+    tool_definitions: string[];
+    function_definitions: string[];
   }>;
   total_call_sites: number;
   instrumented_call_sites: number;
   uninstrumented_call_sites: number;
   is_multi_agent: boolean;
+  multi_agent_signals: string[];
   has_streaming: boolean;
   has_vercel_ai_sdk: boolean;
   has_edge_runtime: boolean;
@@ -67,8 +78,11 @@ const PROVIDER_DEPS = [
   'openai',
   '@anthropic-ai/sdk',
   '@google/generative-ai',
+  '@google/genai',
   '@aws-sdk/client-bedrock-runtime',
   '@mistralai/mistralai',
+  '@azure/openai',
+  'cohere-ai',
 ];
 
 const AGENT_FRAMEWORK_DEPS = [
@@ -98,7 +112,8 @@ const FRONTEND_DEPS = [
   '@angular/core',
 ];
 
-const STREAMING_RE = /stream\s*:\s*true|\.stream\s*\(|streamText\s*\(|useChat\s*\(/;
+// Tightened to LLM-specific contexts: stream:true near model/messages, or Vercel AI SDK fns
+const STREAMING_RE = /streamText\s*\(|useChat\s*\(|stream\s*:\s*true/;
 
 const VERCEL_AI_SDK_DEPS = ['ai', '@ai-sdk/openai', '@ai-sdk/anthropic', '@ai-sdk/google', '@ai-sdk/mistral'];
 const VERCEL_AI_SDK_RE = /\b(?:streamText|generateText|streamObject|generateObject|useChat|useCompletion|useAssistant)\s*\(/;
@@ -238,7 +253,6 @@ export function scanProject(rootPath: string): ScanResult {
   let instrumentedCallSites = 0;
   let uninstrumentedCallSites = 0;
   let globalHasPatch = false;
-  let globalHasWrappers = false;
   let globalHasSessionContext = false;
   let globalHasAmplitudeImport = hasAmplitudeAiDep;
   let hasStreaming = false;
@@ -246,6 +260,16 @@ export function scanProject(rootPath: string): ScanResult {
   let hasEdgeRuntime = false;
   let hasAssistantsApi = false;
   let hasMultiAgentCodePatterns = false;
+
+  // Per-provider tracking: which providers have wrappers globally
+  const globalWrappedProviders = new Set<string>();
+
+  const CONSTRUCTOR_TO_PROVIDER: Record<string, string> = {
+    OpenAI: 'openai', Anthropic: 'anthropic', Gemini: 'gemini',
+    GoogleGenerativeAI: 'gemini', GoogleGenAI: 'gemini',
+    AzureOpenAI: 'azure-openai', Bedrock: 'bedrock',
+    Mistral: 'mistral', CohereClient: 'cohere',
+  };
 
   const agents: ScanResult['agents'] = [];
   const filesWithCallSites = new Set<string>();
@@ -264,21 +288,29 @@ export function scanProject(rootPath: string): ScanResult {
     if (analysis.has_session_context) globalHasSessionContext = true;
 
     if (/\bpatch\s*\(\s*\{/.test(content)) globalHasPatch = true;
-    if (STREAMING_RE.test(content)) hasStreaming = true;
+    // Only flag streaming if the file also has LLM call sites (two-pass approach)
+    if (STREAMING_RE.test(content) && analysis.total_call_sites > 0) hasStreaming = true;
     if (VERCEL_AI_SDK_RE.test(content)) hasVercelAiSdkUsage = true;
     if (EDGE_RUNTIME_RE.test(content)) hasEdgeRuntime = true;
     if (ASSISTANTS_API_RE.test(content)) hasAssistantsApi = true;
     if (MULTI_AGENT_CODE_RE.test(content)) hasMultiAgentCodePatterns = true;
-    if (/\.wrap\s*\(/.test(content) && analysis.has_amplitude_import) {
-      globalHasWrappers = true;
-    }
-    if (
-      /new\s+(?:OpenAI|Anthropic|Gemini|AzureOpenAI|Bedrock|Mistral)\s*\(/.test(
-        content,
-      ) &&
-      /\bamplitude\s*:/.test(content)
-    ) {
-      globalHasWrappers = true;
+
+    // Track wrapped providers: detect which specific provider is wrapped
+    if (analysis.has_amplitude_import || /\bamplitude\s*:/.test(content)) {
+      const constructorRe = /new\s+(OpenAI|Anthropic|Gemini|AzureOpenAI|Bedrock|Mistral|GoogleGenerativeAI|GoogleGenAI|CohereClient)\s*\(/g;
+      for (const m of content.matchAll(constructorRe)) {
+        const ctorName = m[1] ?? '';
+        const provLabel = CONSTRUCTOR_TO_PROVIDER[ctorName];
+        if (provLabel && /\bamplitude\s*:/.test(content)) {
+          globalWrappedProviders.add(provLabel);
+        }
+      }
+      if (/\.wrap\s*\(/.test(content)) {
+        // wrap() can wrap any provider; attribute based on which providers are in this file
+        for (const site of analysis.call_sites) {
+          globalWrappedProviders.add(site.provider);
+        }
+      }
     }
 
     // Track provider imports per file for multi-agent signal
@@ -310,36 +342,85 @@ export function scanProject(rootPath: string): ScanResult {
         is_instrumented: allInstrumented,
         is_route_handler: isRouteHandler,
         inferred_description: inferDescription(filePath, isRouteHandler),
+        call_site_details: analysis.call_sites.map((cs) => ({
+          line: cs.line,
+          provider: cs.provider,
+          api: cs.api,
+          instrumented: cs.instrumented,
+          containing_function: cs.containing_function,
+          code_context: cs.code_context,
+        })),
+        tool_definitions: analysis.tool_definitions,
+        function_definitions: analysis.function_definitions,
       });
     }
   }
 
-  // Cross-file wrapper propagation: when a wrapper is defined in one file
-  // (e.g., ai.ts) and used in another (e.g., route.ts), per-file analysis
-  // can't see the connection. If we know wrappers exist globally, upgrade
-  // uninstrumented agents that use the same provider.
+  const globalHasWrappers = globalWrappedProviders.size > 0;
+
+  // Cross-file wrapper propagation (per-provider): only upgrade an agent's
+  // instrumentation status if ALL of its call-site providers are wrapped globally.
   if (globalHasWrappers && globalHasAmplitudeImport) {
     for (const agent of agents) {
       if (!agent.is_instrumented) {
-        agent.is_instrumented = true;
-        const delta = agent.call_sites;
-        uninstrumentedCallSites -= delta;
-        instrumentedCallSites += delta;
+        const agentProviders = new Set(agent.call_site_details.map((cs) => cs.provider));
+        const allCovered = [...agentProviders].every((p) => globalWrappedProviders.has(p));
+        if (allCovered) {
+          agent.is_instrumented = true;
+          const delta = agent.call_sites;
+          uninstrumentedCallSites -= delta;
+          instrumentedCallSites += delta;
+        }
       }
     }
   }
 
-  // Multi-agent signals
+  // Multi-agent signals: collect raw evidence for AI skill to reason over.
+  // is_multi_agent is conservative — only set when SDK delegation APIs are found.
+  // The AI skill uses multi_agent_signals to perform the real semantic determination.
+  const multiAgentSignals: string[] = [];
+
   const multipleFilesWithCalls = filesWithCallSites.size > 1;
-  const hasAgentFrameworkDeps = agentFrameworks.length > 0;
+  if (multipleFilesWithCalls) {
+    multiAgentSignals.push(
+      `LLM call sites found in ${filesWithCallSites.size} separate files: ${[...filesWithCallSites].join(', ')}`,
+    );
+  }
+
+  if (agentFrameworks.length > 0) {
+    multiAgentSignals.push(`Agent framework dependencies detected: ${agentFrameworks.join(', ')}`);
+  }
+
   const allProviders = new Set<string>();
   for (const provSet of providerImportsPerFile.values()) {
     for (const p of provSet) allProviders.add(p);
   }
-  const multipleProviders = allProviders.size > 1;
+  if (allProviders.size > 1) {
+    multiAgentSignals.push(`Multiple LLM providers in use: ${[...allProviders].join(', ')}`);
+  }
 
-  const isMultiAgent =
-    multipleFilesWithCalls || hasAgentFrameworkDeps || multipleProviders || hasMultiAgentCodePatterns;
+  // Check if any file's tool_definitions reference functions that also contain LLM calls
+  for (const agent of agents) {
+    const toolNames = agent.tool_definitions;
+    const callFunctions = agent.call_site_details
+      .map((cs) => cs.containing_function)
+      .filter(Boolean) as string[];
+    const overlapping = toolNames.filter((t) => callFunctions.includes(t));
+    if (overlapping.length > 0) {
+      multiAgentSignals.push(
+        `File ${agent.file}: tool definitions ${overlapping.join(', ')} also contain LLM calls — possible delegation-as-tools pattern`,
+      );
+    }
+  }
+
+  if (hasMultiAgentCodePatterns) {
+    multiAgentSignals.push(
+      'Amplitude AI SDK delegation APIs detected: .child() or .runAs() — multi-agent confirmed',
+    );
+  }
+
+  // is_multi_agent is true only when SDK APIs are found; broader signals are in multi_agent_signals
+  const isMultiAgent = hasMultiAgentCodePatterns;
 
   // Message queue deps (cross-service signal)
   const messageQueueDeps = MESSAGE_QUEUE_DEPS.filter((dep) =>
@@ -355,15 +436,9 @@ export function scanProject(rootPath: string): ScanResult {
   // LangGraph detection
   const hasLanggraph = LANGGRAPH_DEPS.some((dep) => allDeps.has(dep)) || allDeps.has('@langchain/langgraph');
 
-  // Recommended tier
-  let recommendedTier: ScanResult['recommended_tier'];
-  if (isMultiAgent) {
-    recommendedTier = 'advanced';
-  } else if (totalCallSites > 0) {
-    recommendedTier = 'standard';
-  } else {
-    recommendedTier = 'quick_start';
-  }
+  // Recommended tier: always default to advanced for maximum instrumentation.
+  // Lower tiers exist as fallbacks, not as recommended starting points.
+  const recommendedTier: ScanResult['recommended_tier'] = 'advanced';
 
   // Contextual recommendations
   const recommendations: string[] = [];
@@ -444,6 +519,7 @@ export function scanProject(rootPath: string): ScanResult {
     instrumented_call_sites: instrumentedCallSites,
     uninstrumented_call_sites: uninstrumentedCallSites,
     is_multi_agent: isMultiAgent,
+    multi_agent_signals: multiAgentSignals,
     has_streaming: hasStreaming,
     has_vercel_ai_sdk: hasVercelAiSdk,
     has_edge_runtime: hasEdgeRuntime,

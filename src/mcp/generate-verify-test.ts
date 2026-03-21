@@ -28,7 +28,11 @@ export function generateVerifyTest(scanResult: ScanResult): string {
     );
   }
 
-  if (scanResult.is_multi_agent && scanResult.agents.length >= 2) {
+  const shouldEmitMultiAgentTests =
+    (scanResult.is_multi_agent || scanResult.multi_agent_signals.length > 0) &&
+    scanResult.agents.length >= 2;
+
+  if (shouldEmitMultiAgentTests) {
     const parentAgent = scanResult.agents[0];
     const childAgent = scanResult.agents[1];
 
@@ -74,7 +78,7 @@ export function generateVerifyTest(scanResult: ScanResult): string {
         '      ));',
         '    });',
         '    for (const child of children) {',
-        '      const events = mock.eventsForAgent(child.id);',
+        '      const events = mock.eventsForAgent(child.agentId);',
         '      expect(events.length).toBeGreaterThan(0);',
         "      expect(events[0].event_properties?.['[Agent] Session ID']).toBe('verify-parallel');",
         '    }',
