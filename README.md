@@ -55,8 +55,8 @@ The agent reads the guide, scans your project, discovers your agents and LLM cal
 
 | Your situation | Recommended path | What happens |
 |---|---|---|
-| **Manual setup** | Follow the [code example above](#amplitude-ai) | Agents + sessions + provider wrappers — the full event model |
-| **Just want to verify the SDK works** | `patch()` ([details below](#patching-diagnostic--legacy)) | Aggregate cost/latency monitoring only — no user analytics, no funnels |
+| **Manual setup** | Follow the [Quick Start guide](#quick-start) | Agents + sessions + provider wrappers — the full event model |
+| **Just want to verify the SDK works** | `patch()` ([details below](#patching)) | Aggregate cost/latency monitoring only — no user analytics, no funnels |
 
 > **Start with full instrumentation.** The coding agent workflow defaults to agents + sessions + provider wrappers. This gives you every event type, per-user analytics, and server-side enrichment. `patch()` exists for quick verification or legacy codebases where you can't modify call sites, but it only captures `[Agent] AI Response` without user identity — no funnels, no cohorts, no retention.
 
@@ -84,7 +84,7 @@ The agent reads the guide, scans your project, discovers your agents and LLM cal
   - [Session](#session)
 - [Configuration](#configuration)
 - [Context Dict Conventions](#context-dict-conventions)
-- [Privacy & Content Control](#privacy--content-control)
+- [Privacy & Content Control](#privacy-content-control)
 - [Cache-Aware Cost Tracking](#cache-aware-cost-tracking)
 - [Semantic Cache Tracking](#semantic-cache-tracking)
 - [Model Tier Classification](#model-tier-classification)
@@ -96,7 +96,7 @@ The agent reads the guide, scans your project, discovers your agents and LLM cal
 - [Scoring Patterns](#scoring-patterns)
 - [Enrichments](#enrichments)
 - [Debug and Dry-Run Modes](#debug-and-dry-run-modes)
-- [Patching (Diagnostic / Legacy)](#patching-diagnostic--legacy)
+- [Patching](#patching)
 - [Auto-Instrumentation CLI](#auto-instrumentation-cli)
 - [Integrations](#integrations)
 - [Data Flow](#data-flow)
@@ -1367,7 +1367,7 @@ Both modes can be enabled via environment variables when using auto-instrumentat
 AMPLITUDE_AI_DEBUG=true amplitude-ai-instrument node app.js
 ```
 
-## Patching (Diagnostic / Legacy)
+## Patching
 
 Monkey-patch provider SDKs to auto-track without changing call sites. This is useful for quick verification that the SDK is connected, or for legacy codebases where modifying call sites is impractical. For the full event model (user messages, sessions, scoring, enrichments), use agents + sessions as shown in [Quick Start](#quick-start).
 
