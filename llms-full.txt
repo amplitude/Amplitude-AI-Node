@@ -23,11 +23,11 @@ Agent-specific setup:
 
 Cursor: Add to .cursor/mcp.json:
   { "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } } }
-  Then use /instrument-with-amplitude-ai skill (shipped at node_modules/@amplitude/ai/.cursor/skills/)
+  Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
 Claude Code:
   claude mcp add amplitude-ai -- npx amplitude-ai mcp
-  Then use /project:instrument-with-amplitude-ai command
+  Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
 Codex CLI: Add to ~/.codex/config.toml:
   [mcp_servers.amplitude-ai]

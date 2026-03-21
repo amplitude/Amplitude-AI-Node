@@ -26,14 +26,14 @@ Add to `.cursor/mcp.json` in your project root:
   }
 }
 ```
-Then use the `/instrument-with-amplitude-ai` skill (shipped at `node_modules/@amplitude/ai/.cursor/skills/instrument-with-amplitude-ai/SKILL.md`).
+Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
 
 ### Claude Code
 
 ```bash
 claude mcp add amplitude-ai -- npx amplitude-ai mcp
 ```
-Then use the `/project:instrument-with-amplitude-ai` command (shipped at `node_modules/@amplitude/ai/.claude/commands/instrument-with-amplitude-ai.md`).
+Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
 
 ### OpenAI Codex CLI
 
@@ -64,20 +64,20 @@ Codex auto-reads this `AGENTS.md` file for context.
 ## MCP Surface
 
 Tools:
-- `get_event_schema`
-- `get_integration_pattern`
-- `validate_setup`
-- `suggest_instrumentation`
-- `validate_file`
-- `search_docs`
-- `scan_project`
-- `generate_verify_test`
-- `instrument_file`
+- `scan_project` — Detect framework, providers, agents, call sites, multi-agent signals
+- `validate_file` — AST-based analysis of a single file for uninstrumented call sites
+- `instrument_file` — Apply provider swap and session transforms
+- `generate_verify_test` — Generate MockAmplitudeAI verification test
+- `validate_setup` — Check required environment variables
+- `suggest_instrumentation` — Framework-specific instrumentation guidance
+- `get_event_schema` — Event property catalog
+- `get_integration_pattern` — Canonical instrumentation patterns
+- `search_docs` — Keyword search over README and llms-full.txt
 
 Resources:
-- `amplitude-ai://event-schema`
-- `amplitude-ai://integration-patterns`
-- `amplitude-ai://instrument-guide`
+- `amplitude-ai://event-schema` — Full event property catalog
+- `amplitude-ai://integration-patterns` — Canonical setup patterns as JSON
+- `amplitude-ai://instrument-guide` — Complete 4-phase instrumentation workflow
 
 Prompt:
 - `instrument_app` — Full guided instrumentation with embedded SKILL.md
@@ -120,18 +120,13 @@ Prompt:
 - `examples/framework-integration.ts`
 - `examples/real-openai.ts` (requires OPENAI_API_KEY)
 
+## Extended Reference
+
+- `llms-full.txt` — Full API reference with all MCP tools, patterns, and setup guidance
+
 ## Instrumentation Guide
 
-- `amplitude-ai.md` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
-- `llms-full.txt` — Extended API reference with MCP tools and patterns
-
-## Cursor Skill
-
-- `.cursor/skills/instrument-with-amplitude-ai/SKILL.md`
-
-## Claude Code Command
-
-- `.claude/commands/instrument-with-amplitude-ai.md`
+- `amplitude-ai.md` — self-contained 4-phase instrumentation guide for any AI coding agent
 
 ## Event Schema (names)
 

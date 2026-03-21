@@ -62,14 +62,14 @@ Add to \`.cursor/mcp.json\` in your project root:
   }
 }
 \`\`\`
-Then use the \`/instrument-with-amplitude-ai\` skill (shipped at \`node_modules/@amplitude/ai/.cursor/skills/instrument-with-amplitude-ai/SKILL.md\`).
+Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
 
 ### Claude Code
 
 \`\`\`bash
 claude mcp add amplitude-ai -- npx amplitude-ai mcp
 \`\`\`
-Then use the \`/project:instrument-with-amplitude-ai\` command (shipped at \`node_modules/@amplitude/ai/.claude/commands/instrument-with-amplitude-ai.md\`).
+Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
 
 ### OpenAI Codex CLI
 
@@ -151,14 +151,6 @@ Prompt:
 - \`amplitude-ai.md\` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
 
-## Cursor Skill
-
-- \`.cursor/skills/instrument-with-amplitude-ai/SKILL.md\`
-
-## Claude Code Command
-
-- \`.claude/commands/instrument-with-amplitude-ai.md\`
-
 ## Event Schema (names)
 
 ${events.map((name) => `- \`${name}\``).join('\n')}
@@ -217,11 +209,11 @@ Agent-specific setup:
 
 Cursor: Add to .cursor/mcp.json:
   { "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } } }
-  Then use /instrument-with-amplitude-ai skill (shipped at node_modules/@amplitude/ai/.cursor/skills/)
+  Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
 Claude Code:
   claude mcp add amplitude-ai -- npx amplitude-ai mcp
-  Then use /project:instrument-with-amplitude-ai command
+  Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
 Codex CLI: Add to ~/.codex/config.toml:
   [mcp_servers.amplitude-ai]

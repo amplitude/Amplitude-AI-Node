@@ -254,7 +254,7 @@ Everything else is either automatic or a progressive enhancement.
 
 ## What You Get at Each Level
 
-The AI skill defaults to **full instrumentation** — the top row below. Lower levels exist as fallbacks, not as recommended starting points.
+The coding agent workflow defaults to **full instrumentation** — the top row below. Lower levels exist as fallbacks, not as recommended starting points.
 
 | Level | Events you get | What it unlocks in Amplitude |
 |---|---|---|
@@ -2566,8 +2566,6 @@ The agent reads the guide, scans your project, and instruments everything in 4 p
 | `llms.txt`                                             | Compact discovery file listing tools, resources, and event names                                     |
 | `llms-full.txt`                                        | Extended reference with full API signatures, provider coverage matrix, and common error resolutions   |
 | `mcp.schema.json`                                      | Structured JSON describing the MCP server's tools, resources, and prompt                             |
-| `.cursor/skills/instrument-with-amplitude-ai/SKILL.md` | Cursor-specific skill file (backward compatibility)                                                  |
-| `.claude/commands/instrument-with-amplitude-ai.md`     | Claude Code command file (backward compatibility)                                                    |
 
 **Optional: MCP server for advanced tooling.** Run `amplitude-ai mcp` to start the MCP server (standard stdio protocol). MCP-compatible agents can call tools like `scan_project`, `instrument_file`, `validate_file`, and `generate_verify_test` for deeper analysis. The MCP server is not required for the core instrumentation workflow — `amplitude-ai.md` is self-contained.
 
