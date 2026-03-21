@@ -413,7 +413,7 @@ const agent = ai.agent('support-bot', {
 });
 ```
 
-Child agents inherit context (including `description`) from their parent and automatically set `parentAgentId`:
+Child agents inherit context from their parent and automatically set `parentAgentId` (note: `description` is agent-specific and is **not** inherited — pass it explicitly if needed):
 
 ```typescript
 const orchestrator = ai.agent('orchestrator', {
