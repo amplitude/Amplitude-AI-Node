@@ -35,7 +35,7 @@ Codex CLI: Add to ~/.codex/config.toml:
   args = ["amplitude-ai", "mcp"]
   AGENTS.md in the npm package is auto-read by Codex.
 
-Without MCP: Read amplitude-ai.md for the complete guided workflow, or this file for the API reference.
+Without MCP: Read this file. It has everything you need.
 
 ## Instrumentation Workflow (4 Phases)
 
@@ -121,6 +121,7 @@ const session = agent.session({
 ### session.run(fn) / session.runSync(fn)
 Execute code within session context. Auto-ends session when fn completes.
 Provider calls inside run() are automatically tagged with session/agent identity.
+In serverless environments (Vercel, Lambda, Netlify, etc.), run() auto-flushes events before resolving.
 ```
 await session.run(async (s) => {
   s.trackUserMessage(content);
@@ -226,7 +227,6 @@ app.use(createAmplitudeAIMiddleware({
 ### MockAmplitudeAI (testing)
 Deterministic test double. Captures events in-memory.
 ```
-import { AIConfig } from '@amplitude/ai';
 import { MockAmplitudeAI } from '@amplitude/ai/testing';
 const mock = new MockAmplitudeAI(new AIConfig({ contentMode: 'full' }));
 const agent = mock.agent('test-agent', { userId: 'u1' });
@@ -326,8 +326,7 @@ app.use(createAmplitudeAIMiddleware({
 
 ### 6. Testing with MockAmplitudeAI
 ```typescript
-import { AIConfig, tool } from '@amplitude/ai';
-import { MockAmplitudeAI } from '@amplitude/ai/testing';
+import { MockAmplitudeAI, AIConfig, tool } from '@amplitude/ai/testing';
 const mock = new MockAmplitudeAI(new AIConfig({ contentMode: 'full' }));
 const agent = mock.agent('test-agent');
 const session = agent.session({ userId: 'test-user', sessionId: 'test-session' });

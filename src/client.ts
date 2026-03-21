@@ -29,6 +29,7 @@ import { tryRequire } from './utils/resolve-module.js';
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
 
 // Global set of AmplitudeAI instances for the unflushed-events exit warning.
+// Uses strong references — call shutdown() to remove an instance and allow GC.
 const _activeInstances = new Set<AmplitudeAI>();
 let _exitHookRegistered = false;
 

@@ -174,9 +174,10 @@ export async function POST(req: Request) {
   return agent.session({ userId }).run(async (s) => {
     s.trackUserMessage(messages[messages.length - 1].content);
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
-    await ai.flush(); // CRITICAL for serverless (Next.js, Lambda)
     return Response.json(response);
   });
+  // session.run() auto-flushes in serverless (Vercel, Lambda, Netlify, etc.)
+  // For non-serverless, or tracking outside session.run(), call: await ai.flush()
 }
 ```
 
@@ -351,8 +352,8 @@ Next steps:
 | `new AIConfig({ contentMode?, redactPii?, debug? })` | Privacy/debug config |
 | `ai.agent(agentId, opts?)` | Create bound agent |
 | `agent.child(agentId, opts?)` | Create child agent |
-| `agent.session(opts?)` | Create session |
-| `session.run(fn)` | Execute with session context |
+| `agent.session(opts?)` | Create session (`autoFlush` auto-detects serverless) |
+| `session.run(fn)` | Execute with session context (auto-flushes in serverless) |
 | `s.runAs(childAgent, fn)` | Delegate to child agent |
 | `ai.flush()` | Flush events (serverless) |
 

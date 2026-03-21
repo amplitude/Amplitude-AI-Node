@@ -55,11 +55,19 @@ function replaceProviderImports(
     const mapping = PROVIDER_IMPORT_MAP[provider];
     if (!mapping) continue;
 
+    // Match default import: import OpenAI from 'openai'
     const defaultImportRe = new RegExp(
       `import\\s+${mapping.defaultExport}\\s+from\\s+['"]${mapping.module}['"];?`,
     );
+    // Match named import: import { AzureOpenAI } from '@azure/openai'
+    const namedImportRe = new RegExp(
+      `import\\s*\\{\\s*${mapping.defaultExport}\\s*\\}\\s*from\\s+['"]${mapping.module}['"];?`,
+    );
     if (defaultImportRe.test(result)) {
       result = result.replace(defaultImportRe, '');
+      namedImports.push(mapping.namedExport);
+    } else if (namedImportRe.test(result)) {
+      result = result.replace(namedImportRe, '');
       namedImports.push(mapping.namedExport);
     }
 
@@ -108,14 +116,27 @@ function addSessionWrapping(
 
   // Wrap route handler body inside session.run()
   if (ROUTE_HANDLER_RE.test(result)) {
+    const handlerMatch = result.match(
+      /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\s*\([^)]*\)\s*\{/,
+    );
     result = result.replace(
       /(export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\s*\([^)]*\)\s*\{)/,
       `$1\n  ${agentLine.trim()}\n  const { messages, userId, sessionId } = await req.json();\n  return agent.session({ userId, sessionId }).run(async (s) => {`,
     );
-    // Insert closing brace + ai.flush() before the final closing brace
-    const lastBrace = result.lastIndexOf('}');
-    if (lastBrace > 0) {
-      result = `${result.slice(0, lastBrace)}  });\n${result.slice(lastBrace)}`;
+    // Find the handler's closing brace using balanced-brace matching from the handler opening
+    if (handlerMatch?.index != null) {
+      const openBraceIdx = result.indexOf('{', handlerMatch.index);
+      if (openBraceIdx >= 0) {
+        let depth = 1;
+        let i = openBraceIdx + 1;
+        while (i < result.length && depth > 0) {
+          if (result[i] === '{') depth++;
+          else if (result[i] === '}') depth--;
+          i++;
+        }
+        const closingBraceIdx = i - 1;
+        result = `${result.slice(0, closingBraceIdx)}  });\n${result.slice(closingBraceIdx)}`;
+      }
     }
   } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(

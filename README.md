@@ -1815,7 +1815,18 @@ await session.run(async (s) => {
 
 ## Serverless Environments
 
-**Critical**: Always `await ai.flush()` before your handler returns. Without this, events buffered in memory are lost when the runtime freezes or terminates:
+The SDK auto-detects serverless environments (Vercel, AWS Lambda, Netlify, Google Cloud Functions, Azure Functions, Cloudflare Pages). When detected, `session.run()` automatically flushes all pending events before the promise resolves — no explicit `ai.flush()` needed. You can also control this explicitly via the `autoFlush` option on `session()`:
+
+```typescript
+// Auto-detected: flushes automatically in serverless, skips in long-running servers
+agent.session({ userId, sessionId });
+
+// Explicit control:
+agent.session({ userId, sessionId, autoFlush: true });   // always flush
+agent.session({ userId, sessionId, autoFlush: false });  // never flush
+```
+
+If you track events **outside** of `session.run()`, you still need `await ai.flush()` before your handler returns:
 
 ```typescript
 export async function handler(event: APIGatewayEvent) {
@@ -2082,6 +2093,7 @@ Event-specific properties for `[Agent] User Message` (in addition to common prop
 | `[Agent] Total Attachment Size Bytes` | number   | No       | Total size of all attachments in bytes.                                                                                                               |
 | `[Agent] Attachments`                 | string   | No       | Serialized JSON array of attachment metadata (type, name, size_bytes, mime_type). Only metadata, never file content.                                  |
 | `[Agent] Message Labels`              | string   | No       | Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context. |
+| `[Agent] Message Source`              | string   | No       | Origin of the message: `'user'` for direct user input, `'agent'` for messages delegated from a parent agent. Auto-set based on `parentAgentId`.     |
 
 ### AI Response Properties
 

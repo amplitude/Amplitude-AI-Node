@@ -140,6 +140,11 @@
           "name": "[Agent] Message Labels",
           "type": "string",
           "description": "Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context."
+        },
+        {
+          "name": "[Agent] Message Source",
+          "type": "string",
+          "description": "Origin of the message: 'user' for direct user input, 'agent' for messages delegated from a parent agent (auto-set based on parentAgentId)."
         }
       ]
     },

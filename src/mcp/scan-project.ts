@@ -434,7 +434,7 @@ export function scanProject(rootPath: string): ScanResult {
   const hasVercelAiSdk = VERCEL_AI_SDK_DEPS.some((dep) => allDeps.has(dep)) || hasVercelAiSdkUsage;
 
   // LangGraph detection
-  const hasLanggraph = LANGGRAPH_DEPS.some((dep) => allDeps.has(dep)) || allDeps.has('@langchain/langgraph');
+  const hasLanggraph = LANGGRAPH_DEPS.some((dep) => allDeps.has(dep));
 
   // Recommended tier: always default to advanced for maximum instrumentation.
   // Lower tiers exist as fallbacks, not as recommended starting points.
