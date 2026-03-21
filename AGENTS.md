@@ -64,20 +64,20 @@ Codex auto-reads this `AGENTS.md` file for context.
 ## MCP Surface
 
 Tools:
-- `scan_project` — Detect framework, providers, agents, call sites, multi-agent signals
-- `validate_file` — AST-based analysis of a single file for uninstrumented call sites
-- `instrument_file` — Apply provider swap and session transforms
-- `generate_verify_test` — Generate MockAmplitudeAI verification test
-- `validate_setup` — Check required environment variables
-- `suggest_instrumentation` — Framework-specific instrumentation guidance
-- `get_event_schema` — Event property catalog
-- `get_integration_pattern` — Canonical instrumentation patterns
-- `search_docs` — Keyword search over README and llms-full.txt
+- `get_event_schema`
+- `get_integration_pattern`
+- `validate_setup`
+- `suggest_instrumentation`
+- `validate_file`
+- `search_docs`
+- `scan_project`
+- `generate_verify_test`
+- `instrument_file`
 
 Resources:
-- `amplitude-ai://event-schema` — Full event property catalog
-- `amplitude-ai://integration-patterns` — Canonical setup patterns as JSON
-- `amplitude-ai://instrument-guide` — Complete 4-phase instrumentation workflow
+- `amplitude-ai://event-schema`
+- `amplitude-ai://integration-patterns`
+- `amplitude-ai://instrument-guide`
 
 Prompt:
 - `instrument_app` — Full guided instrumentation with embedded SKILL.md
@@ -120,13 +120,10 @@ Prompt:
 - `examples/framework-integration.ts`
 - `examples/real-openai.ts` (requires OPENAI_API_KEY)
 
-## Extended Reference
-
-- `llms-full.txt` — Full API reference with all MCP tools, patterns, and setup guidance
-
 ## Instrumentation Guide
 
-- `amplitude-ai.md` — self-contained 4-phase instrumentation guide for any AI coding agent
+- `amplitude-ai.md` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+- `llms-full.txt` — Extended API reference with MCP tools and patterns
 
 ## Event Schema (names)
 
