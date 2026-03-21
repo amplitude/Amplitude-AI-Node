@@ -1,5 +1,9 @@
 import type { ScanResult } from './scan-project.js';
 
+function escapeStr(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 export function generateVerifyTest(scanResult: ScanResult): string {
   const lines: string[] = [];
 
@@ -11,17 +15,18 @@ export function generateVerifyTest(scanResult: ScanResult): string {
   );
 
   for (const agent of scanResult.agents) {
+    const eid = escapeStr(agent.inferred_id);
     lines.push(
-      `  it('${agent.inferred_id} emits correct event sequence', () => {`,
+      `  it('${eid} emits correct event sequence', () => {`,
       '    const mock = new MockAmplitudeAI();',
-      `    const agent = mock.agent('${agent.inferred_id}');`,
+      `    const agent = mock.agent('${eid}');`,
       "    const session = agent.session({ userId: 'verify-user', sessionId: 'verify-session' });",
       '    session.runSync((s) => {',
       "      s.trackUserMessage('test message');",
       '    });',
       '    const events = mock.getEvents();',
       '    expect(events.length).toBeGreaterThanOrEqual(2);',
-      `    mock.assertEventTracked('[Agent] User Message', { '[Agent] Agent ID': '${agent.inferred_id}' });`,
+      `    mock.assertEventTracked('[Agent] User Message', { '[Agent] Agent ID': '${eid}' });`,
       "    mock.assertSessionClosed('verify-session');",
       '  });',
       '',
@@ -37,18 +42,21 @@ export function generateVerifyTest(scanResult: ScanResult): string {
     const childAgent = scanResult.agents[1];
 
     if (parentAgent && childAgent) {
+      const pid = escapeStr(parentAgent.inferred_id);
+      const cid = escapeStr(childAgent.inferred_id);
+
       lines.push(
         "  it('multi-agent delegation via runAs', () => {",
         '    const mock = new MockAmplitudeAI();',
-        `    const parent = mock.agent('${parentAgent.inferred_id}');`,
-        `    const child = parent.child('${childAgent.inferred_id}');`,
+        `    const parent = mock.agent('${pid}');`,
+        `    const child = parent.child('${cid}');`,
         "    const session = parent.session({ userId: 'verify-user', sessionId: 'verify-multi' });",
         '    session.runSync((s) => {',
         '      s.runAsSync(child, (cs) => {',
         "        cs.trackUserMessage('delegated task');",
         '      });',
         '    });',
-        `    const childEvents = mock.eventsForAgent('${childAgent.inferred_id}');`,
+        `    const childEvents = mock.eventsForAgent('${cid}');`,
         '    expect(childEvents.length).toBeGreaterThan(0);',
         "    expect(childEvents[0].event_properties?.['[Agent] Session ID']).toBe('verify-multi');",
         '  });',
@@ -59,12 +67,12 @@ export function generateVerifyTest(scanResult: ScanResult): string {
       lines.push(
         "  it('parallel fan-out shares session', async () => {",
         '    const mock = new MockAmplitudeAI();',
-        `    const orchestrator = mock.agent('${parentAgent.inferred_id}');`,
+        `    const orchestrator = mock.agent('${pid}');`,
         '    const children = [',
       );
       for (const child of childAgents) {
         lines.push(
-          `      orchestrator.child('${child.inferred_id}'),`,
+          `      orchestrator.child('${escapeStr(child.inferred_id)}'),`,
         );
       }
       lines.push(
@@ -89,8 +97,8 @@ export function generateVerifyTest(scanResult: ScanResult): string {
       lines.push(
         "  it('tool calls inside runAs are attributed to child agent', () => {",
         '    const mock = new MockAmplitudeAI();',
-        `    const parent = mock.agent('${parentAgent.inferred_id}');`,
-        `    const child = parent.child('${childAgent.inferred_id}');`,
+        `    const parent = mock.agent('${pid}');`,
+        `    const child = parent.child('${cid}');`,
         "    const session = parent.session({ userId: 'verify-user', sessionId: 'verify-tools' });",
         '    session.runSync((s) => {',
         '      s.runAsSync(child, (cs) => {',
@@ -99,8 +107,8 @@ export function generateVerifyTest(scanResult: ScanResult): string {
         '    });',
         "    const toolEvents = mock.getEvents().filter(e => e.event_type === '[Agent] Tool Call');",
         '    expect(toolEvents.length).toBe(1);',
-        `    expect(toolEvents[0].event_properties?.['[Agent] Agent ID']).toBe('${childAgent.inferred_id}');`,
-        `    expect(toolEvents[0].event_properties?.['[Agent] Parent Agent ID']).toBe('${parentAgent.inferred_id}');`,
+        `    expect(toolEvents[0].event_properties?.['[Agent] Agent ID']).toBe('${cid}');`,
+        `    expect(toolEvents[0].event_properties?.['[Agent] Parent Agent ID']).toBe('${pid}');`,
         '  });',
         '',
       );
@@ -108,8 +116,8 @@ export function generateVerifyTest(scanResult: ScanResult): string {
       lines.push(
         "  it('runAs restores parent context after child throws', () => {",
         '    const mock = new MockAmplitudeAI();',
-        `    const parent = mock.agent('${parentAgent.inferred_id}');`,
-        `    const faultyChild = parent.child('${childAgent.inferred_id}-faulty');`,
+        `    const parent = mock.agent('${pid}');`,
+        `    const faultyChild = parent.child('${cid}-faulty');`,
         "    const session = parent.session({ userId: 'verify-user', sessionId: 'verify-error' });",
         '    session.runSync((s) => {',
         '      try {',
@@ -120,10 +128,10 @@ export function generateVerifyTest(scanResult: ScanResult): string {
         "        s.trackUserMessage('recovering from child failure');",
         '      }',
         '    });',
-        `    const parentEvents = mock.eventsForAgent('${parentAgent.inferred_id}');`,
+        `    const parentEvents = mock.eventsForAgent('${pid}');`,
         "    const recoveryMsg = parentEvents.find(e => e.event_type === '[Agent] User Message');",
         '    expect(recoveryMsg).toBeDefined();',
-        `    expect(recoveryMsg?.event_properties?.['[Agent] Agent ID']).toBe('${parentAgent.inferred_id}');`,
+        `    expect(recoveryMsg?.event_properties?.['[Agent] Agent ID']).toBe('${pid}');`,
         '  });',
         '',
       );

@@ -59,9 +59,12 @@ function replaceProviderImports(
     const defaultImportRe = new RegExp(
       `import\\s+${mapping.defaultExport}\\s+from\\s+['"]${mapping.module}['"];?`,
     );
-    // Match named import: import { AzureOpenAI } from '@azure/openai'
+    // Match named import (single or multi-line): import { OpenAI } from 'openai'
+    // or: import {\n  OpenAI,\n  AsyncOpenAI,\n} from 'openai'
+    const escapedModule = mapping.module.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const namedImportRe = new RegExp(
-      `import\\s*\\{\\s*${mapping.defaultExport}\\s*\\}\\s*from\\s+['"]${mapping.module}['"];?`,
+      `import\\s*\\{[^}]*\\b${mapping.defaultExport}\\b[^}]*\\}\\s*from\\s+['"]${escapedModule}['"];?`,
+      's',
     );
     if (defaultImportRe.test(result)) {
       result = result.replace(defaultImportRe, '');
@@ -114,16 +117,15 @@ function addSessionWrapping(
 
   const agentLine = `const agent = ai.agent('${agentId}');\n`;
 
-  // Wrap route handler body inside session.run()
+  // Wrap route handler body inside session.run(), with flush after session completes
   if (ROUTE_HANDLER_RE.test(result)) {
     const handlerMatch = result.match(
       /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\s*\([^)]*\)\s*\{/,
     );
     result = result.replace(
       /(export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\s*\([^)]*\)\s*\{)/,
-      `$1\n  ${agentLine.trim()}\n  const { messages, userId, sessionId } = await req.json();\n  return agent.session({ userId, sessionId }).run(async (s) => {`,
+      `$1\n  ${agentLine.trim()}\n  const { messages, userId, sessionId } = await req.json();\n  const _response = await agent.session({ userId, sessionId }).run(async (s) => {`,
     );
-    // Find the handler's closing brace using balanced-brace matching from the handler opening
     if (handlerMatch?.index != null) {
       const openBraceIdx = result.indexOf('{', handlerMatch.index);
       if (openBraceIdx >= 0) {
@@ -135,13 +137,13 @@ function addSessionWrapping(
           i++;
         }
         const closingBraceIdx = i - 1;
-        result = `${result.slice(0, closingBraceIdx)}  });\n${result.slice(closingBraceIdx)}`;
+        result = `${result.slice(0, closingBraceIdx)}  });\n  await ai.flush();\n  return _response;\n${result.slice(closingBraceIdx)}`;
       }
     }
   } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(
       /((?:app|router)\.\s*(?:get|post|put|delete)\s*\(\s*['"][^'"]+['"]\s*,\s*(?:async\s+)?\([^)]*\)\s*(?:=>)?\s*\{)/,
-      `$1\n    ${agentLine.trim()}\n    return agent.session({ userId: 'todo-extract-user-id', sessionId: 'todo-extract-session-id' }).run(async (s) => {`,
+      `$1\n    ${agentLine.trim()}\n    const _response = await agent.session({ userId: 'todo-extract-user-id', sessionId: 'todo-extract-session-id' }).run(async (s) => {`,
     );
   }
 
@@ -160,14 +162,6 @@ function addUserMessageTracking(source: string): string {
   return source;
 }
 
-function addFlushBeforeReturn(source: string): string {
-  // Insert await ai.flush() before return statements in route handlers
-  return source.replace(
-    /(\n)([ \t]*)(return\s+(?:Response\.json|new\s+Response|NextResponse|res\.json|res\.send)\s*\()/g,
-    '$1$2await ai.flush();\n$2$3',
-  );
-}
-
 export function instrumentFile(opts: InstrumentFileOptions): string {
   if (opts.tier === 'quick_start') {
     return opts.source;
@@ -180,7 +174,6 @@ export function instrumentFile(opts: InstrumentFileOptions): string {
   if (opts.tier === 'advanced') {
     result = addSessionWrapping(result, opts.agentId, opts.bootstrapImportPath);
     result = addUserMessageTracking(result);
-    result = addFlushBeforeReturn(result);
   }
 
   return result;
