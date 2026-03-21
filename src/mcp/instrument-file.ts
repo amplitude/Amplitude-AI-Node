@@ -143,7 +143,7 @@ function addSessionWrapping(
   } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(
       /((?:app|router)\.\s*(?:get|post|put|delete)\s*\(\s*['"][^'"]+['"]\s*,\s*(?:async\s+)?\([^)]*\)\s*(?:=>)?\s*\{)/,
-      `$1\n    ${agentLine.trim()}\n    const _response = await agent.session({ userId: 'todo-extract-user-id', sessionId: 'todo-extract-session-id' }).run(async (s) => {`,
+      `$1\n    ${agentLine.trim()}\n    const _response = await agent.session({ userId: 'todo-extract-user-id' }).run(async (s) => {`,
     );
   }
 
