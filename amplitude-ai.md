@@ -57,6 +57,7 @@ For **Standard** and **Advanced** tiers:
    - Delegation patterns (parent calls child → `runAs`)
    - Feedback handlers (thumbs up/down UI components)
    - Tool functions (functions called by the LLM via function calling)
+4. For each event emission you plan to add, trace **all code paths** that should emit the same event type. Look for error handlers, retry-exhaustion paths, timeout handlers, and fallback branches that represent the same logical operation failing — these should also emit the event (typically with `success: false` or an `errorMessage`).
 
 ### Multi-Agent Detection
 
@@ -64,6 +65,7 @@ Look for these patterns by reading the source files:
 1. Do any tool functions call other functions that make LLM calls? → **delegation-as-tools** (A2A) pattern
 2. Does a parent function call a function in another file that has LLM call sites? → **sequential delegation**
 3. Are there multiple distinct agent roles or personas with separate system prompts?
+4. Identify **orchestration wrappers** — functions that invoke sub-agents and should measure their execution. These are candidates for `observe()` / `trackSpan()` to capture delegation latency, input/output summaries, and error status. Look for: try/catch blocks around sub-agent calls, functions that dispatch to multiple agents in sequence or parallel, and any function that measures duration of a delegated operation.
 
 Only mark the architecture as multi-agent once you've confirmed one of these patterns by reading the source.
 
@@ -218,18 +220,54 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-### Step 3f: Add scoring (Advanced tier only)
+### Step 3f: Add span tracking for orchestration (Advanced tier)
 
-If feedback handlers were detected (thumbs up/down UI):
+When a parent agent delegates work to a child agent, wrap the delegation call with span tracking to measure latency and capture errors. Look for existing try/catch blocks around sub-agent execution — these are natural places to add span tracking with both success and error paths:
 
 ```typescript
+import { observe } from '@amplitude/ai';
+
+// Option A: higher-order function on orchestration functions
+const runSubAgent = observe(async (prompt: string) => {
+  return await subAgent.execute(prompt);
+}, { name: 'sub-agent-execution' });
+
+// Option B: explicit tracking when you need more control
+const start = Date.now();
+try {
+  const result = await subAgent.execute(prompt);
+  s.trackSpan({
+    name: childAgentName,
+    latencyMs: Date.now() - start,
+    inputState: { prompt: prompt.slice(0, 1000) },
+    outputState: { response: result.slice(0, 1000) },
+  });
+} catch (e) {
+  s.trackSpan({
+    name: childAgentName,
+    latencyMs: Date.now() - start,
+    isError: true,
+    errorMessage: `${(e as Error).name}: ${(e as Error).message}`,
+  });
+  throw e;
+}
+```
+
+### Step 3g: Add scoring (Advanced tier only)
+
+If feedback handlers were detected (thumbs up/down UI), check whether the handler receives a `messageId` — if so, target the specific message for finer-grained scoring. Otherwise fall back to session-level scoring:
+
+```typescript
+const targetId = messageId ?? sessionId;
+const targetType = messageId ? 'message' : 'session';
 ai.score({
   userId, name: 'user-feedback', value: thumbsUp ? 1 : 0,
-  targetId: messageId, targetType: 'message', source: 'user',
+  targetId, targetType, source: 'user',
+  sessionId, comment: feedbackText,
 });
 ```
 
-### Step 3g: Streaming session lifecycle
+### Step 3h: Streaming session lifecycle
 
 If the app uses streaming, the session must stay open until the stream is fully consumed:
 
@@ -251,7 +289,7 @@ return agent.session({ userId }).run(async (s) => {
 });
 ```
 
-### Step 3h: Browser-server session linking
+### Step 3i: Browser-server session linking
 
 If frontend deps were detected, extract browser IDs from request headers:
 
@@ -261,7 +299,7 @@ const deviceId = req.headers.get('x-amplitude-device-id');
 const session = agent.session({ userId, browserSessionId, deviceId });
 ```
 
-### Step 3i: Framework-specific notes
+### Step 3j: Framework-specific notes
 
 **Next.js App Router**: Session wrapping goes inside each route handler. Add `@amplitude/ai` to `serverExternalPackages` in `next.config.ts`.
 
