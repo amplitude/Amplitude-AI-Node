@@ -1,7 +1,7 @@
 {
   "generated": true,
   "package": "@amplitude/ai",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "prompt": "instrument_app",
   "tools": [
     "get_event_schema",

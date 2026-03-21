@@ -1,5 +1,5 @@
 # llms-full.txt
-# @amplitude/ai 0.3.3 — Complete API Reference for AI Coding Agents
+# @amplitude/ai 0.3.4 — Complete API Reference for AI Coding Agents
 #
 # This file is the definitive guide for any coding agent instrumenting
 # a JavaScript/TypeScript AI application with @amplitude/ai.
