@@ -120,7 +120,6 @@ export class BoundAgent {
       env: this._defaults.env,
       customerOrgId: this._defaults.customerOrgId,
       agentVersion: this._defaults.agentVersion,
-      description: this._defaults.description,
       sessionId: this._defaults.sessionId,
       traceId: this._defaults.traceId,
       groups: this._defaults.groups,

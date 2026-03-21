@@ -87,7 +87,7 @@ describe('BoundAgent', () => {
 
       child.trackUserMessage('From child', { sessionId: 's1' });
       const ep = mock.events[0].event_properties!;
-      expect(ep[PROP_AGENT_DESCRIPTION]).toBe('Main orchestrator');
+      expect(ep[PROP_AGENT_DESCRIPTION]).toBeUndefined();
     });
 
     it('allows child to override description', (): void => {
