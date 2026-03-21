@@ -41,9 +41,7 @@ function _registerExitHook(): void {
     for (const instance of _activeInstances) {
       if (instance._trackCountSinceFlush > 0) {
         console.warn(
-          `⚠️  AmplitudeAI: ${instance._trackCountSinceFlush} event(s) were tracked but ` +
-            'never flushed. In serverless environments, call `await ai.flush()` before ' +
-            'your handler returns, or use session.run() which auto-flushes by default.',
+          `⚠️  AmplitudeAI: ${instance._trackCountSinceFlush} event(s) were tracked but never flushed. In serverless environments, call \`await ai.flush()\` before your handler returns, or use session.run() which auto-flushes by default.`,
         );
         break; // one warning is enough
       }
@@ -123,9 +121,8 @@ export class AmplitudeAI {
 
   private _installTrackCounter(): void {
     const originalTrack = this._amplitude.track.bind(this._amplitude);
-    const self = this;
     this._amplitude.track = (event: AmplitudeEvent) => {
-      self._trackCountSinceFlush++;
+      this._trackCountSinceFlush++;
       return originalTrack(event);
     };
   }

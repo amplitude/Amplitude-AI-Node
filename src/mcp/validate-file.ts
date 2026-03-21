@@ -106,7 +106,7 @@ interface FunctionDeclaration extends EstreeNode {
   id: Identifier | null;
   async: boolean;
 }
-interface ArrowFunctionExpression extends EstreeNode {
+interface _ArrowFunctionExpression extends EstreeNode {
   type: 'ArrowFunctionExpression';
   async: boolean;
 }
@@ -164,7 +164,7 @@ function hasKeywordArg(args: EstreeNode[], keyword: string): boolean {
   return false;
 }
 
-function extractCodeContext(sourceLines: string[], lineNum: number, radius: number = 4): string {
+function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4): string {
   const idx = lineNum - 1;
   const start = Math.max(0, idx - radius);
   const end = Math.min(sourceLines.length - 1, idx + radius);
@@ -250,7 +250,8 @@ function analyzeWithAST(source: string, sourceLines: string[]): FileAnalysis | n
 
   let tree: AcornNode;
   try {
-    tree = parse!(source, {
+    if (!parse) return null;
+    tree = parse(source, {
       sourceType: 'module',
       ecmaVersion: 'latest',
       locations: true,

@@ -222,8 +222,10 @@ function _resolveContextFields(opts: ToolOptions): ResolvedContext {
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: must accept any function signature
 type AnyFn = (...args: any[]) => any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: must accept any async function signature
 type AsyncFn = (...args: any[]) => Promise<any>;
 
 /**

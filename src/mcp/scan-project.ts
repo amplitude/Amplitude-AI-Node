@@ -450,9 +450,7 @@ export function scanProject(rootPath: string): ScanResult {
   }
   if (messageQueueDeps.length > 0) {
     recommendations.push(
-      `Message queue deps detected (${messageQueueDeps.join(', ')}): ` +
-      'enable propagateContext in the bootstrap file and use injectContext/extractContext ' +
-      'to correlate events across services.',
+      `Message queue deps detected (${messageQueueDeps.join(', ')}): enable propagateContext in the bootstrap file and use injectContext/extractContext to correlate events across services.`,
     );
   }
   if (hasFrontendDeps) {

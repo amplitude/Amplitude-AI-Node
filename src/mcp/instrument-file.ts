@@ -99,9 +99,9 @@ function addSessionWrapping(
       const newNames = existingNames.trim() ? `ai, ${existingNames.trim()}` : 'ai';
       result = result.replace(existingImportMatch[0], `import { ${newNames} } from '${bootstrapImportPath}'`);
     }
-  } else if (!result.includes("from '" + bootstrapImportPath + "'") &&
-      !result.includes('from "' + bootstrapImportPath + '"')) {
-    result = `import { ai } from '${bootstrapImportPath}';\n` + result;
+  } else if (!result.includes(`from '${bootstrapImportPath}'`) &&
+      !result.includes(`from "${bootstrapImportPath}"`)) {
+    result = `import { ai } from '${bootstrapImportPath}';\n${result}`;
   }
 
   const agentLine = `const agent = ai.agent('${agentId}');\n`;
@@ -115,7 +115,7 @@ function addSessionWrapping(
     // Insert closing brace + ai.flush() before the final closing brace
     const lastBrace = result.lastIndexOf('}');
     if (lastBrace > 0) {
-      result = result.slice(0, lastBrace) + '  });\n' + result.slice(lastBrace);
+      result = `${result.slice(0, lastBrace)}  });\n${result.slice(lastBrace)}`;
     }
   } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(
