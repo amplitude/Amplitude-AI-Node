@@ -96,6 +96,7 @@
     "amplitude-ai-status": "./bin/amplitude-ai-status.mjs"
   },
   "files": [
+    "amplitude-ai.md",
     "AGENTS.md",
     "dist",
     "bin",
@@ -103,7 +104,8 @@
     "llms.txt",
     "llms-full.txt",
     "mcp.schema.json",
-    ".cursor/skills/instrument-with-amplitude-ai/SKILL.md"
+    ".cursor/skills/instrument-with-amplitude-ai/SKILL.md",
+    ".claude/commands/instrument-with-amplitude-ai.md"
   ],
   "scripts": {
     "build": "tsdown",

@@ -29,6 +29,7 @@ type EventCatalog = {
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 let _catalogCache: EventCatalog | undefined;
+let _skillCache: string | undefined;
 
 const readEventCatalog = (): EventCatalog => {
   if (_catalogCache) return _catalogCache;
@@ -36,6 +37,23 @@ const readEventCatalog = (): EventCatalog => {
   const raw = readFileSync(filePath, 'utf8');
   _catalogCache = JSON.parse(raw) as EventCatalog;
   return _catalogCache;
+};
+
+const readSkillGuide = (): string => {
+  if (_skillCache) return _skillCache;
+  const skillPath = join(
+    packageRoot,
+    '.cursor',
+    'skills',
+    'instrument-with-amplitude-ai',
+    'SKILL.md',
+  );
+  try {
+    _skillCache = readFileSync(skillPath, 'utf8');
+  } catch {
+    _skillCache = 'Instrument guide not found. See llms-full.txt for API reference.';
+  }
+  return _skillCache;
 };
 
 type ContentTier = 'full' | 'metadata_only' | 'customer_enriched';
@@ -521,12 +539,32 @@ const createServer = (): McpServer => {
     }),
   );
 
+  server.registerResource(
+    'instrument_guide',
+    MCP_RESOURCES.instrumentGuide,
+    {
+      title: 'Amplitude AI Instrumentation Guide',
+      description:
+        'Complete 4-phase workflow (Detect → Discover → Instrument → Verify) for instrumenting JS/TS AI apps with @amplitude/ai. Includes code examples for every step.',
+      mimeType: 'text/markdown',
+    },
+    async () => ({
+      contents: [
+        {
+          uri: MCP_RESOURCES.instrumentGuide,
+          mimeType: 'text/markdown',
+          text: readSkillGuide(),
+        },
+      ],
+    }),
+  );
+
   server.registerPrompt(
     MCP_PROMPTS.instrumentApp,
     {
       title: 'Instrument App',
       description:
-        'Guided checklist for instrumenting an app with @amplitude/ai from zero to validated setup.',
+        'Full guided instrumentation of a JS/TS AI app with @amplitude/ai. Includes the complete 4-phase workflow: Detect environment, Discover agents, Instrument code, Verify correctness.',
       argsSchema: {
         framework: z.string().optional(),
         provider: z.string().optional(),
@@ -538,13 +576,14 @@ const createServer = (): McpServer => {
         typeof args?.framework === 'string' ? args.framework : 'node';
       const provider =
         typeof args?.provider === 'string' ? args.provider : 'openai';
+      const guide = readSkillGuide();
       return {
         messages: [
           {
             role: 'user',
             content: {
               type: 'text',
-              text: `Instrument this ${framework} app with ${provider} using @amplitude/ai. Start from the production default: wrapper/swap integration plus ai.agent(...).session(...), choose a content tier (full/metadata_only/customer_enriched) with privacy defaults, and treat patch() only as a migration fallback. Then validate setup and annotate any uninstrumented call sites.`,
+              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nFollow this guide step by step:\n\n${guide}`,
             },
           },
         ],

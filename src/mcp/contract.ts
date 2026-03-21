@@ -15,6 +15,7 @@ export const MCP_TOOLS = {
 export const MCP_RESOURCES = {
   eventSchema: 'amplitude-ai://event-schema',
   integrationPatterns: 'amplitude-ai://integration-patterns',
+  instrumentGuide: 'amplitude-ai://instrument-guide',
 } as const;
 
 export const MCP_PROMPTS = {

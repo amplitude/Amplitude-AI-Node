@@ -1,4 +1,4 @@
-<!-- GENERATED FILE: do not edit manually -->
+<!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
 version=0.2.1
@@ -17,6 +17,7 @@ instrument_file
 [mcp.resources]
 amplitude-ai://event-schema
 amplitude-ai://integration-patterns
+amplitude-ai://instrument-guide
 
 [events]
 [Agent] AI Response

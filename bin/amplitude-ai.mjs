@@ -18,7 +18,17 @@ const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.jso
 if (command === '--help' || command === '-h' || command === undefined) {
   const version = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
   process.stdout.write(
-    `@amplitude/ai v${version}\n\nRecommended: use /instrument-with-amplitude-ai in your AI coding agent\n(Cursor, Claude Code, Windsurf, etc.) for fully automated instrumentation.\n\nCLI commands:\n  mcp       Start the MCP server (for AI coding agents)\n  doctor    Validate environment, deps, and event pipeline\n  status    Show SDK version, installed providers, and env config\n\nQuick start:\n  1. Add to your AI agent's MCP config: amplitude-ai mcp\n  2. Use /instrument-with-amplitude-ai to auto-instrument your app\n`
+    `@amplitude/ai v${version}
+
+Paste this into your AI coding agent (Cursor, Claude Code, Copilot, etc.):
+
+  Instrument this app with @amplitude/ai. Follow node_modules/@amplitude/ai/amplitude-ai.md
+
+CLI commands:
+  mcp       Start the MCP server (optional, for advanced tooling)
+  doctor    Validate environment, deps, and event pipeline
+  status    Show SDK version, installed providers, and env config
+`
   );
   process.exit(0);
 }

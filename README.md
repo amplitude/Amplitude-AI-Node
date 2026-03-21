@@ -38,19 +38,32 @@ app.post('/chat', async (req, res) => {
 
 ## How to Get Started
 
+### Instrument with a coding agent (recommended)
+
+```bash
+npm install @amplitude/ai
+npx amplitude-ai
+```
+
+The CLI prints a prompt to paste into any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.):
+
+> Instrument this app with @amplitude/ai. Follow node_modules/@amplitude/ai/amplitude-ai.md
+
+The agent reads the guide, scans your project, discovers your agents and LLM call sites, and instruments everything — provider wrappers, session lifecycle, multi-agent delegation, tool tracking, scoring, and a verification test. You review and approve each step.
+
+### Other paths
+
 | Your situation | Recommended path | What happens |
 |---|---|---|
-| **Any project (AI IDE)** | Use `/instrument-with-amplitude-ai` in Cursor, Claude Code, Windsurf, etc. | AI agent scans your project and instruments all LLM call sites automatically |
-| **Use an AI IDE** (Cursor, Claude Code, Windsurf, etc.) | Add the MCP server, use `/instrument-with-amplitude-ai` | AI agent finds and instruments all your LLM call sites automatically |
-| **Manual** | Follow the code example above | Agents + sessions + provider wrappers — the full event model |
+| **Manual setup** | Follow the [code example above](#amplitude-ai) | Agents + sessions + provider wrappers — the full event model |
 | **Just want to verify the SDK works** | `patch()` ([details below](#patching-diagnostic--legacy)) | Aggregate cost/latency monitoring only — no user analytics, no funnels |
 
-> **Start with full instrumentation.** The AI skill defaults to agents + sessions + provider wrappers. This gives you every event type, per-user analytics, and server-side enrichment. `patch()` exists for quick verification or legacy codebases where you can't modify call sites, but it only captures `[Agent] AI Response` without user identity — no funnels, no cohorts, no retention.
+> **Start with full instrumentation.** The coding agent workflow defaults to agents + sessions + provider wrappers. This gives you every event type, per-user analytics, and server-side enrichment. `patch()` exists for quick verification or legacy codebases where you can't modify call sites, but it only captures `[Agent] AI Response` without user identity — no funnels, no cohorts, no retention.
 
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.1.0                                                                                                                                                                            |
+| Version         | 0.2.1                                                                                                                                                                            |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, @pydantic/genai-prices (cost), tiktoken or js-tiktoken (token counting) |
@@ -58,6 +71,7 @@ app.post('/chat', async (req, res) => {
 ## Table of Contents
 
 - [How to Get Started](#how-to-get-started)
+  - [Instrument with a Coding Agent (recommended)](#instrument-with-a-coding-agent-recommended)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
   - [Current Limitations](#current-limitations)
@@ -123,7 +137,7 @@ Install provider SDKs based on what you use (for example: `openai`, `@anthropic-
 
 1. **Install:** `npm install @amplitude/ai @amplitude/analytics-node`
 2. **Get your API key:** In Amplitude, go to **Settings > Projects** and copy the API key.
-3. **Auto-instrument:** In your AI coding agent, use `/instrument-with-amplitude-ai` — it scans your project, generates a bootstrap file, instruments your LLM call sites, and creates a CI verification test. Or follow the manual patterns below.
+3. **Auto-instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent — it scans your project, generates a bootstrap file, instruments your LLM call sites, and creates a verification test. Or follow the manual patterns below.
 4. **Set your API key** in the generated `.env` file and replace the placeholder `userId`/`sessionId`.
 5. **Run your app.** You should see `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` within 30 seconds.
 
@@ -1453,20 +1467,25 @@ amplitude-ai mcp
 
 MCP surface:
 
-| Tool                      | Description                                                   |
-| ------------------------- | ------------------------------------------------------------- |
-| `get_event_schema`        | Return the full event schema and property definitions         |
-| `get_integration_pattern` | Return canonical instrumentation code patterns                |
-| `validate_setup`          | Check env vars and dependency presence                        |
-| `suggest_instrumentation` | Context-aware next steps based on your framework and provider |
-| `validate_file`           | Analyze source code to detect uninstrumented LLM call sites   |
+| Tool                      | Description                                                                |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `scan_project`            | Scan project structure, detect providers, frameworks, and multi-agent patterns |
+| `validate_file`           | Analyze a source file to detect uninstrumented LLM call sites              |
+| `instrument_file`         | Apply instrumentation transforms to a source file                          |
+| `generate_verify_test`    | Generate a dry-run verification test using MockAmplitudeAI                 |
+| `get_event_schema`        | Return the full event schema and property definitions                      |
+| `get_integration_pattern` | Return canonical instrumentation code patterns                             |
+| `validate_setup`          | Check env vars and dependency presence                                     |
+| `suggest_instrumentation` | Context-aware next steps based on your framework and provider              |
+| `search_docs`             | Full-text search across SDK documentation (README, llms-full.txt)          |
 
-Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`
+Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`, `amplitude-ai://instrument-guide`
 
 Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 
-### Examples and AI Coding Agent Skill
+### Examples and AI Coding Agent Guide
 
+- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx amplitude-ai` to see the prompt that points your agent to this file.
 - Mock-based examples demonstrating the event model (also used as CI smoke tests):
   - `examples/zero-code.ts`
   - `examples/wrap-openai.ts`
@@ -1475,8 +1494,6 @@ Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 - Real provider examples (require API keys):
   - `examples/real-openai.ts` — end-to-end OpenAI integration with session tracking and flush
   - `examples/real-anthropic.ts` — end-to-end Anthropic integration with session tracking and flush
-- AI coding agent skill (works with Cursor, Claude Code, Windsurf, Cline, or any MCP-compatible agent):
-  - `.cursor/skills/instrument-with-amplitude-ai/SKILL.md`
 
 ## Integrations
 
@@ -2513,17 +2530,34 @@ See `src/core/tracking.ts` and `src/core/constants.ts` for the full list.
 
 ## For AI Coding Agents
 
-This SDK is designed to be discovered and used by AI coding agents (Cursor, Claude Code, Windsurf, Cline, Copilot, or any MCP-compatible assistant). The following files ship with the package to help agents understand and integrate the SDK without reading the full README:
+This SDK is designed to be discovered and used by any AI coding agent — Cursor, Claude Code, Windsurf, Copilot, Codex, Cline, or any agent that can read files.
 
-| File                                                   | Purpose                                                                                             |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `AGENTS.md`                                            | Machine-readable decision tree, canonical patterns, MCP surface, gotchas, and CLI reference         |
-| `llms.txt`                                             | Compact discovery file listing tools, resources, and event names                                    |
-| `llms-full.txt`                                        | Extended reference with full API signatures, provider coverage matrix, and common error resolutions |
-| `mcp.schema.json`                                      | Structured JSON describing the MCP server's tools, resources, and prompt                            |
-| `.cursor/skills/instrument-with-amplitude-ai/SKILL.md` | AI coding agent skill that guides through instrumenting a project step by step                      |
+**The fastest path:**
 
-Run `amplitude-ai mcp` to start the MCP server (standard stdio protocol). Any MCP-compatible AI coding agent can call tools like `scan_project` to analyze your codebase, `instrument_file` to transform source files, `validate_file` to detect uninstrumented LLM call sites, and `generate_verify_test` to produce CI tests.
+```bash
+npm install @amplitude/ai
+npx amplitude-ai
+```
+
+The CLI prints a prompt to paste into your agent:
+
+> Instrument this app with @amplitude/ai. Follow node_modules/@amplitude/ai/amplitude-ai.md
+
+The agent reads the guide, scans your project, and instruments everything in 4 phases: Detect, Discover, Instrument, Verify.
+
+**Files shipped with the package:**
+
+| File                                                   | Purpose                                                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `amplitude-ai.md`                                      | **Primary guide** — self-contained 4-phase instrumentation workflow and full API reference            |
+| `AGENTS.md`                                            | Concise index with canonical patterns, MCP surface, gotchas, and CLI reference                       |
+| `llms.txt`                                             | Compact discovery file listing tools, resources, and event names                                     |
+| `llms-full.txt`                                        | Extended reference with full API signatures, provider coverage matrix, and common error resolutions   |
+| `mcp.schema.json`                                      | Structured JSON describing the MCP server's tools, resources, and prompt                             |
+| `.cursor/skills/instrument-with-amplitude-ai/SKILL.md` | Cursor-specific skill file (backward compatibility)                                                  |
+| `.claude/commands/instrument-with-amplitude-ai.md`     | Claude Code command file (backward compatibility)                                                    |
+
+**Optional: MCP server for advanced tooling.** Run `amplitude-ai mcp` to start the MCP server (standard stdio protocol). MCP-compatible agents can call tools like `scan_project`, `instrument_file`, `validate_file`, and `generate_verify_test` for deeper analysis. The MCP server is not required for the core instrumentation workflow — `amplitude-ai.md` is self-contained.
 
 ## For Python SDK Migrators
 

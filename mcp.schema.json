@@ -16,6 +16,7 @@
   ],
   "resources": [
     "amplitude-ai://event-schema",
-    "amplitude-ai://integration-patterns"
+    "amplitude-ai://integration-patterns",
+    "amplitude-ai://instrument-guide"
   ]
 }

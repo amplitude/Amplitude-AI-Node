@@ -115,6 +115,7 @@ describe('agent-dx contract', (): void => {
     expect(schema.resources).toEqual([
       'amplitude-ai://event-schema',
       'amplitude-ai://integration-patterns',
+      'amplitude-ai://instrument-guide',
     ]);
   });
 });
