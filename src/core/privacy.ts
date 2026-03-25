@@ -443,7 +443,6 @@ export class PrivacyConfig {
       [PROP_TOOL_DEFINITIONS_COUNT]: normalized.length,
     };
 
-    const canonical = JSON.stringify(normalized, Object.keys(normalized[0] ?? {}).sort());
     const canonicalSorted = JSON.stringify(
       normalized.map((t) => {
         const sorted: Record<string, unknown> = {};
