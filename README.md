@@ -2060,228 +2060,232 @@ All event properties are prefixed with `[Agent]` (except `[Amplitude] Session Re
 
 ### Common Properties (present on all SDK events)
 
-| Property                  | Type   | Required | Description                                                                                                                   |
-| ------------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Session ID`      | string | Yes      | Unique session identifier. All events in one conversation share the same session ID.                                          |
-| `[Agent] Trace ID`        | string | No       | Identifies one user-message-to-AI-response cycle within a session.                                                            |
-| `[Agent] Turn ID`         | number | No       | Monotonically increasing counter for event ordering within a session.                                                         |
-| `[Agent] Agent ID`        | string | No       | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston').                                           |
-| `[Agent] Parent Agent ID` | string | No       | For multi-agent orchestration: the agent that delegated to this agent.                                                        |
-| `[Agent] Customer Org ID` | string | No       | Organization ID for multi-tenant platforms. Enables account-level group analytics.                                            |
-| `[Agent] Agent Version`   | string | No       | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison.                                           |
-| `[Agent] Context`         | string | No       | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
-| `[Agent] Env`             | string | No       | Deployment environment: 'production', 'staging', or 'dev'.                                                                    |
-| `[Agent] SDK Version`     | string | Yes      | Version of the amplitude-ai SDK that produced this event.                                                                     |
-| `[Agent] Runtime`         | string | Yes      | SDK runtime: 'python' or 'node'.                                                                                              |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
+| `[Agent] Trace ID` | string | No | Identifies one user-message-to-AI-response cycle within a session. |
+| `[Agent] Turn ID` | number | No | Monotonically increasing counter for event ordering within a session. |
+| `[Agent] Agent ID` | string | No | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
+| `[Agent] Parent Agent ID` | string | No | For multi-agent orchestration: the agent that delegated to this agent. |
+| `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
+| `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
+| `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
+| `[Agent] Env` | string | No | Deployment environment: 'production', 'staging', or 'dev'. |
+| `[Agent] SDK Version` | string | Yes | Version of the amplitude-ai SDK that produced this event. |
+| `[Agent] Runtime` | string | Yes | SDK runtime: 'python' or 'node'. |
 
 ### User Message Properties
 
 Event-specific properties for `[Agent] User Message` (in addition to common properties above).
 
-| Property                              | Type     | Required | Description                                                                                                                                           |
-| ------------------------------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Message ID`                  | string   | Yes      | Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages.                                        |
-| `[Agent] Component Type`              | string   | Yes      | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.                                                                 |
-| `[Agent] Locale`                      | string   | No       | User locale (e.g., 'en-US').                                                                                                                          |
-| `[Amplitude] Session Replay ID`       | string   | No       | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay.                     |
-| `[Agent] Is Regeneration`             | boolean  | No       | Whether the user requested the AI regenerate a previous response.                                                                                     |
-| `[Agent] Is Edit`                     | boolean  | No       | Whether the user edited a previous message and resubmitted.                                                                                           |
-| `[Agent] Edited Message ID`           | string   | No       | The message_id of the original message that was edited (links the edit to the original).                                                              |
-| `[Agent] Has Attachments`             | boolean  | No       | Whether this message includes file attachments (uploads, images, etc.).                                                                               |
-| `[Agent] Attachment Types`            | string[] | No       | Distinct attachment types (e.g., 'pdf', 'image', 'csv'). Serialized JSON array.                                                                       |
-| `[Agent] Attachment Count`            | number   | No       | Number of file attachments included with this message.                                                                                                |
-| `[Agent] Total Attachment Size Bytes` | number   | No       | Total size of all attachments in bytes.                                                                                                               |
-| `[Agent] Attachments`                 | string   | No       | Serialized JSON array of attachment metadata (type, name, size_bytes, mime_type). Only metadata, never file content.                                  |
-| `[Agent] Message Labels`              | string   | No       | Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context. |
-| `[Agent] Message Source`              | string   | No       | Origin of the message: `'user'` for direct user input, `'agent'` for messages delegated from a parent agent. Auto-set based on `parentAgentId`.     |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Message ID` | string | Yes | Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages. |
+| `[Agent] Component Type` | string | Yes | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
+| `[Agent] Locale` | string | No | User locale (e.g., 'en-US'). |
+| `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
+| `[Agent] Is Regeneration` | boolean | No | Whether the user requested the AI regenerate a previous response. |
+| `[Agent] Is Edit` | boolean | No | Whether the user edited a previous message and resubmitted. |
+| `[Agent] Edited Message ID` | string | No | The message_id of the original message that was edited (links the edit to the original). |
+| `[Agent] Has Attachments` | boolean | No | Whether this message includes file attachments (uploads, images, etc.). |
+| `[Agent] Attachment Types` | string[] | No | Distinct attachment types (e.g., 'pdf', 'image', 'csv'). Serialized JSON array. |
+| `[Agent] Attachment Count` | number | No | Number of file attachments included with this message. |
+| `[Agent] Total Attachment Size Bytes` | number | No | Total size of all attachments in bytes. |
+| `[Agent] Attachments` | string | No | Serialized JSON array of attachment metadata (type, name, size_bytes, mime_type). Only metadata, never file content. |
+| `[Agent] Message Labels` | string | No | Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context. |
+| `[Agent] Message Source` | string | No | Origin of the user message: 'user' for real end-user input, 'agent' for inter-agent delegation (parent agent sending instructions to a child agent). Automatically set by provider wrappers based on parent_agent_id context. |
 
 ### AI Response Properties
 
 Event-specific properties for `[Agent] AI Response` (in addition to common properties above).
 
-| Property                              | Type     | Required | Description                                                                                                                                                           |
-| ------------------------------------- | -------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Message ID`                  | string   | Yes      | Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages.                                                        |
-| `[Agent] Component Type`              | string   | Yes      | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.                                                                                 |
-| `[Agent] Model Name`                  | string   | Yes      | LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514').                                                                                                    |
-| `[Agent] Provider`                    | string   | Yes      | LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock').                                                                                      |
-| `[Agent] Latency Ms`                  | number   | Yes      | Total wall-clock latency in milliseconds for this operation.                                                                                                          |
-| `[Agent] Is Error`                    | boolean  | Yes      | Whether this event represents an error condition.                                                                                                                     |
-| `[Agent] Error Message`               | string   | No       | Error message text when Is Error is true.                                                                                                                             |
-| `[Agent] Locale`                      | string   | No       | User locale (e.g., 'en-US').                                                                                                                                          |
-| `[Agent] Span Kind`                   | string   | No       | Classification of the span type for OTEL bridge compatibility.                                                                                                        |
-| `[Amplitude] Session Replay ID`       | string   | No       | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay.                                     |
-| `[Agent] TTFB Ms`                     | number   | No       | Time to first byte/token in milliseconds. Measures perceived responsiveness for streaming.                                                                            |
-| `[Agent] Input Tokens`                | number   | No       | Number of input/prompt tokens consumed by this LLM call.                                                                                                              |
-| `[Agent] Output Tokens`               | number   | No       | Number of output/completion tokens generated by this LLM call.                                                                                                        |
-| `[Agent] Total Tokens`                | number   | No       | Total tokens consumed (input + output).                                                                                                                               |
-| `[Agent] Reasoning Tokens`            | number   | No       | Tokens consumed by reasoning/thinking (o1, o3, extended thinking models).                                                                                             |
-| `[Agent] Cache Read Tokens`           | number   | No       | Input tokens served from the provider's prompt cache (cheaper rate). Used for cache-aware cost calculation.                                                           |
-| `[Agent] Cache Creation Tokens`       | number   | No       | Input tokens that created new prompt cache entries.                                                                                                                   |
-| `[Agent] Cost USD`                    | number   | No       | Estimated cost in USD for this LLM call. Cache-aware when cache token counts are provided.                                                                            |
-| `[Agent] Finish Reason`               | string   | No       | Why the model stopped generating: 'stop', 'end_turn', 'tool_use', 'length', 'content_filter', etc.                                                                    |
-| `[Agent] Tool Calls`                  | string   | No       | Serialized JSON array of tool call requests made by the AI in this response.                                                                                          |
-| `[Agent] Has Reasoning`               | boolean  | No       | Whether the AI response included reasoning/thinking content.                                                                                                          |
-| `[Agent] Reasoning Content`           | string   | No       | The AI's reasoning/thinking content (when available and content_mode permits).                                                                                        |
-| `[Agent] System Prompt`               | string   | No       | The system prompt used for this LLM call (when content_mode permits). Chunked for long prompts.                                                                       |
-| `[Agent] System Prompt Length`        | number   | No       | Character length of the system prompt.                                                                                                                                |
-| `[Agent] Temperature`                 | number   | No       | Temperature parameter used for this LLM call.                                                                                                                         |
-| `[Agent] Max Output Tokens`           | number   | No       | Maximum output tokens configured for this LLM call.                                                                                                                   |
-| `[Agent] Top P`                       | number   | No       | Top-p (nucleus sampling) parameter used for this LLM call.                                                                                                            |
-| `[Agent] Is Streaming`                | boolean  | No       | Whether this response was generated via streaming.                                                                                                                    |
-| `[Agent] Prompt ID`                   | string   | No       | Identifier for the prompt template or version used.                                                                                                                   |
-| `[Agent] Was Copied`                  | boolean  | No       | Whether the user copied this AI response content. An implicit positive quality signal.                                                                                |
-| `[Agent] Was Cached`                  | boolean  | No       | Whether this response was served from a semantic/full-response cache (distinct from token-level prompt caching).                                                      |
-| `[Agent] Model Tier`                  | string   | No       | Model tier classification: 'fast' (GPT-4o-mini, Haiku, Flash), 'standard' (GPT-4o, Sonnet, Pro), or 'reasoning' (o1, o3, DeepSeek-R1). Auto-inferred from model name. |
-| `[Agent] Has Attachments`             | boolean  | No       | Whether this AI response includes generated attachments (images, charts, files).                                                                                      |
-| `[Agent] Attachment Types`            | string[] | No       | Distinct attachment types in this AI response. Serialized JSON array.                                                                                                 |
-| `[Agent] Attachment Count`            | number   | No       | Number of attachments generated by the AI in this response.                                                                                                           |
-| `[Agent] Total Attachment Size Bytes` | number   | No       | Total size of all AI-generated attachments in bytes.                                                                                                                  |
-| `[Agent] Attachments`                 | string   | No       | Serialized JSON array of AI-generated attachment metadata.                                                                                                            |
-| `[Agent] Message Labels`              | string   | No       | Serialized JSON array of MessageLabel objects attached to this AI response.                                                                                           |
-| `[Agent] Message Label Map`           | string   | No       | Serialized JSON map of label key to value for quick lookup.                                                                                                           |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Message ID` | string | Yes | Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages. |
+| `[Agent] Component Type` | string | Yes | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
+| `[Agent] Model Name` | string | Yes | LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514'). |
+| `[Agent] Provider` | string | Yes | LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock'). |
+| `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
+| `[Agent] Is Error` | boolean | Yes | Whether this event represents an error condition. |
+| `[Agent] Error Message` | string | No | Error message text when Is Error is true. |
+| `[Agent] Locale` | string | No | User locale (e.g., 'en-US'). |
+| `[Agent] Span Kind` | string | No | Classification of the span type for OTEL bridge compatibility. |
+| `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
+| `[Agent] TTFB Ms` | number | No | Time to first byte/token in milliseconds. Measures perceived responsiveness for streaming. |
+| `[Agent] Input Tokens` | number | No | Number of input/prompt tokens consumed by this LLM call. |
+| `[Agent] Output Tokens` | number | No | Number of output/completion tokens generated by this LLM call. |
+| `[Agent] Total Tokens` | number | No | Total tokens consumed (input + output). |
+| `[Agent] Reasoning Tokens` | number | No | Tokens consumed by reasoning/thinking (o1, o3, extended thinking models). |
+| `[Agent] Cache Read Tokens` | number | No | Input tokens served from the provider's prompt cache (cheaper rate). Used for cache-aware cost calculation. |
+| `[Agent] Cache Creation Tokens` | number | No | Input tokens that created new prompt cache entries. |
+| `[Agent] Cost USD` | number | No | Estimated cost in USD for this LLM call. Cache-aware when cache token counts are provided. |
+| `[Agent] Finish Reason` | string | No | Why the model stopped generating: 'stop', 'end_turn', 'tool_use', 'length', 'content_filter', etc. |
+| `[Agent] Tool Calls` | string | No | Serialized JSON array of tool call requests made by the AI in this response. |
+| `[Agent] Has Reasoning` | boolean | No | Whether the AI response included reasoning/thinking content. |
+| `[Agent] Reasoning Content` | string | No | The AI's reasoning/thinking content (when available and content_mode permits). |
+| `[Agent] System Prompt` | string | No | The system prompt used for this LLM call (when content_mode permits). Chunked for long prompts. |
+| `[Agent] System Prompt Length` | number | No | Character length of the system prompt. |
+| `[Agent] Tool Definitions` | string | No | Normalized JSON array of tool definitions sent to the LLM (when content_mode permits). Each entry contains name, description, and parameters schema. |
+| `[Agent] Tool Definitions Count` | number | No | Number of tool definitions in the LLM request. |
+| `[Agent] Tool Definitions Hash` | string | No | Stable SHA-256 hash of the normalized tool definitions. Always present regardless of content_mode; enables toolset change detection without exposing schemas. |
+| `[Agent] Temperature` | number | No | Temperature parameter used for this LLM call. |
+| `[Agent] Max Output Tokens` | number | No | Maximum output tokens configured for this LLM call. |
+| `[Agent] Top P` | number | No | Top-p (nucleus sampling) parameter used for this LLM call. |
+| `[Agent] Is Streaming` | boolean | No | Whether this response was generated via streaming. |
+| `[Agent] Prompt ID` | string | No | Identifier for the prompt template or version used. |
+| `[Agent] Was Copied` | boolean | No | Whether the user copied this AI response content. An implicit positive quality signal. |
+| `[Agent] Was Cached` | boolean | No | Whether this response was served from a semantic/full-response cache (distinct from token-level prompt caching). |
+| `[Agent] Model Tier` | string | No | Model tier classification: 'fast' (GPT-4o-mini, Haiku, Flash), 'standard' (GPT-4o, Sonnet, Pro), or 'reasoning' (o1, o3, DeepSeek-R1). Auto-inferred from model name. |
+| `[Agent] Has Attachments` | boolean | No | Whether this AI response includes generated attachments (images, charts, files). |
+| `[Agent] Attachment Types` | string[] | No | Distinct attachment types in this AI response. Serialized JSON array. |
+| `[Agent] Attachment Count` | number | No | Number of attachments generated by the AI in this response. |
+| `[Agent] Total Attachment Size Bytes` | number | No | Total size of all AI-generated attachments in bytes. |
+| `[Agent] Attachments` | string | No | Serialized JSON array of AI-generated attachment metadata. |
+| `[Agent] Message Labels` | string | No | Serialized JSON array of MessageLabel objects attached to this AI response. |
+| `[Agent] Message Label Map` | string | No | Serialized JSON map of label key to value for quick lookup. |
 
 ### Tool Call Properties
 
 Event-specific properties for `[Agent] Tool Call` (in addition to common properties above).
 
-| Property                        | Type    | Required | Description                                                                                                                       |
-| ------------------------------- | ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Component Type`        | string  | Yes      | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.                                             |
-| `[Agent] Latency Ms`            | number  | Yes      | Total wall-clock latency in milliseconds for this operation.                                                                      |
-| `[Agent] Is Error`              | boolean | Yes      | Whether this event represents an error condition.                                                                                 |
-| `[Agent] Error Message`         | string  | No       | Error message text when Is Error is true.                                                                                         |
-| `[Agent] Locale`                | string  | No       | User locale (e.g., 'en-US').                                                                                                      |
-| `[Agent] Span Kind`             | string  | No       | Classification of the span type for OTEL bridge compatibility.                                                                    |
-| `[Amplitude] Session Replay ID` | string  | No       | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
-| `[Agent] Invocation ID`         | string  | Yes      | Unique identifier for this tool invocation (UUID). Used to link tool calls to parent messages.                                    |
-| `[Agent] Tool Name`             | string  | Yes      | Name of the tool/function that was invoked (e.g., 'search_docs', 'web_search').                                                   |
-| `[Agent] Tool Success`          | boolean | Yes      | Whether the tool call completed successfully.                                                                                     |
-| `[Agent] Tool Input`            | string  | No       | Serialized JSON of the tool's input arguments. Only sent when content_mode='full'.                                                |
-| `[Agent] Tool Output`           | string  | No       | Serialized JSON of the tool's output/return value. Only sent when content_mode='full'.                                            |
-| `[Agent] Parent Message ID`     | string  | No       | The message_id of the user message that triggered this tool call. Links the tool call into the event graph.                       |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Component Type` | string | Yes | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
+| `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
+| `[Agent] Is Error` | boolean | Yes | Whether this event represents an error condition. |
+| `[Agent] Error Message` | string | No | Error message text when Is Error is true. |
+| `[Agent] Locale` | string | No | User locale (e.g., 'en-US'). |
+| `[Agent] Span Kind` | string | No | Classification of the span type for OTEL bridge compatibility. |
+| `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
+| `[Agent] Invocation ID` | string | Yes | Unique identifier for this tool invocation (UUID). Used to link tool calls to parent messages. |
+| `[Agent] Tool Name` | string | Yes | Name of the tool/function that was invoked (e.g., 'search_docs', 'web_search'). |
+| `[Agent] Tool Success` | boolean | Yes | Whether the tool call completed successfully. |
+| `[Agent] Tool Input` | string | No | Serialized JSON of the tool's input arguments. Only sent when content_mode='full'. |
+| `[Agent] Tool Output` | string | No | Serialized JSON of the tool's output/return value. Only sent when content_mode='full'. |
+| `[Agent] Parent Message ID` | string | No | The message_id of the user message that triggered this tool call. Links the tool call into the event graph. |
 
 ### Embedding Properties
 
 Event-specific properties for `[Agent] Embedding` (in addition to common properties above).
 
-| Property                       | Type   | Required | Description                                                                           |
-| ------------------------------ | ------ | -------- | ------------------------------------------------------------------------------------- |
-| `[Agent] Component Type`       | string | Yes      | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
-| `[Agent] Model Name`           | string | Yes      | LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514').                    |
-| `[Agent] Provider`             | string | Yes      | LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock').      |
-| `[Agent] Latency Ms`           | number | Yes      | Total wall-clock latency in milliseconds for this operation.                          |
-| `[Agent] Span ID`              | string | Yes      | Unique identifier for this embedding operation (UUID).                                |
-| `[Agent] Input Tokens`         | number | No       | Number of input tokens processed by the embedding model.                              |
-| `[Agent] Embedding Dimensions` | number | No       | Dimensionality of the output embedding vector.                                        |
-| `[Agent] Cost USD`             | number | No       | Estimated cost in USD for this embedding operation.                                   |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Component Type` | string | Yes | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
+| `[Agent] Model Name` | string | Yes | LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514'). |
+| `[Agent] Provider` | string | Yes | LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock'). |
+| `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
+| `[Agent] Span ID` | string | Yes | Unique identifier for this embedding operation (UUID). |
+| `[Agent] Input Tokens` | number | No | Number of input tokens processed by the embedding model. |
+| `[Agent] Embedding Dimensions` | number | No | Dimensionality of the output embedding vector. |
+| `[Agent] Cost USD` | number | No | Estimated cost in USD for this embedding operation. |
 
 ### Span Properties
 
 Event-specific properties for `[Agent] Span` (in addition to common properties above).
 
-| Property                 | Type    | Required | Description                                                                     |
-| ------------------------ | ------- | -------- | ------------------------------------------------------------------------------- |
-| `[Agent] Latency Ms`     | number  | Yes      | Total wall-clock latency in milliseconds for this operation.                    |
-| `[Agent] Is Error`       | boolean | Yes      | Whether this event represents an error condition.                               |
-| `[Agent] Error Message`  | string  | No       | Error message text when Is Error is true.                                       |
-| `[Agent] Span ID`        | string  | Yes      | Unique identifier for this span (UUID).                                         |
-| `[Agent] Span Name`      | string  | Yes      | Name of the operation (e.g., 'rag_pipeline', 'vector_search', 'rerank').        |
-| `[Agent] Parent Span ID` | string  | No       | Span ID of the parent span for nested pipeline steps.                           |
-| `[Agent] Input State`    | string  | No       | Serialized JSON of the span's input state. Only sent when content_mode='full'.  |
-| `[Agent] Output State`   | string  | No       | Serialized JSON of the span's output state. Only sent when content_mode='full'. |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
+| `[Agent] Is Error` | boolean | Yes | Whether this event represents an error condition. |
+| `[Agent] Error Message` | string | No | Error message text when Is Error is true. |
+| `[Agent] Span ID` | string | Yes | Unique identifier for this span (UUID). |
+| `[Agent] Span Name` | string | Yes | Name of the operation (e.g., 'rag_pipeline', 'vector_search', 'rerank'). |
+| `[Agent] Parent Span ID` | string | No | Span ID of the parent span for nested pipeline steps. |
+| `[Agent] Input State` | string | No | Serialized JSON of the span's input state. Only sent when content_mode='full'. |
+| `[Agent] Output State` | string | No | Serialized JSON of the span's output state. Only sent when content_mode='full'. |
 
 ### Session End Properties
 
 Event-specific properties for `[Agent] Session End` (in addition to common properties above).
 
-| Property                               | Type   | Required | Description                                                                                                                                              |
-| -------------------------------------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Enrichments`                  | string | No       | Serialized JSON of SessionEnrichments (topic classifications, rubric scores, outcome, flags). Attached when enrichments are provided at session close.   |
-| `[Agent] Abandonment Turn`             | number | No       | Turn ID of the last user message that received an AI response before the user left. Low values (e.g., 1) strongly signal first-response dissatisfaction. |
-| `[Agent] Session Idle Timeout Minutes` | number | No       | Custom idle timeout for this session (default 30 min). Tells the server how long to wait before auto-closing.                                            |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Enrichments` | string | No | Serialized JSON of SessionEnrichments (topic classifications, rubric scores, outcome, flags). Attached when enrichments are provided at session close. |
+| `[Agent] Abandonment Turn` | number | No | Turn ID of the last user message that received an AI response before the user left. Low values (e.g., 1) strongly signal first-response dissatisfaction. |
+| `[Agent] Session Idle Timeout Minutes` | number | No | Custom idle timeout for this session (default 30 min). Tells the server how long to wait before auto-closing. |
 
 ### Session Enrichment Properties
 
 Event-specific properties for `[Agent] Session Enrichment` (in addition to common properties above).
 
-| Property              | Type   | Required | Description                                                                                                                                                                      |
-| --------------------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Enrichments` | string | Yes      | Serialized JSON of SessionEnrichments: topic_classifications, rubrics, overall_outcome, quality_score, sentiment_score, boolean flags, agent chain metadata, and message labels. |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Enrichments` | string | Yes | Serialized JSON of SessionEnrichments: topic_classifications, rubrics, overall_outcome, quality_score, sentiment_score, boolean flags, agent chain metadata, and message labels. |
 
 ### Score Properties
 
 Event-specific properties for `[Agent] Score` (in addition to common properties above).
 
-| Property                    | Type   | Required | Description                                                                                                                                                                     |
-| --------------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Score Name`        | string | Yes      | Name of the score (e.g., 'user-feedback', 'task_completion', 'accuracy', 'groundedness').                                                                                       |
-| `[Agent] Score Value`       | number | Yes      | Numeric score value. Binary (0/1), continuous (0.0-1.0), or rating scale (1-5).                                                                                                 |
-| `[Agent] Target ID`         | string | Yes      | The message_id or session_id being scored.                                                                                                                                      |
-| `[Agent] Target Type`       | string | Yes      | What is being scored: 'message' or 'session'.                                                                                                                                   |
-| `[Agent] Evaluation Source` | string | Yes      | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).                                                           |
-| `[Agent] Comment`           | string | No       | Optional text explanation for the score (respects content_mode).                                                                                                                |
-| `[Agent] Taxonomy Version`  | string | No       | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).                                                                             |
-| `[Agent] Evaluated At`      | number | No       | Epoch milliseconds when this enrichment/evaluation was computed.                                                                                                                |
-| `[Agent] Score Label`       | string | No       | Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only. |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Score Name` | string | Yes | Name of the score (e.g., 'user-feedback', 'task_completion', 'accuracy', 'groundedness'). |
+| `[Agent] Score Value` | number | Yes | Numeric score value. Binary (0/1), continuous (0.0-1.0), or rating scale (1-5). |
+| `[Agent] Target ID` | string | Yes | The message_id or session_id being scored. |
+| `[Agent] Target Type` | string | Yes | What is being scored: 'message' or 'session'. |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Comment` | string | No | Optional text explanation for the score (respects content_mode). |
+| `[Agent] Taxonomy Version` | string | No | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Evaluated At` | number | No | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Score Label` | string | No | Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only. |
 
 ### Server-Side: Session Evaluation Properties
 
 `[Agent] Session Evaluation` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
 
-| Property                          | Type     | Required | Description                                                                                                                |
-| --------------------------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Session ID`              | string   | Yes      | Unique session identifier. All events in one conversation share the same session ID.                                       |
-| `[Agent] Agent ID`                | string   | Yes      | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston').                                        |
-| `[Agent] Customer Org ID`         | string   | Yes      | Organization ID for multi-tenant platforms. Enables account-level group analytics.                                         |
-| `[Agent] Evaluation Source`       | string   | Yes      | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).      |
-| `[Agent] Taxonomy Version`        | string   | Yes      | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).                        |
-| `[Agent] Evaluated At`            | number   | Yes      | Epoch milliseconds when this enrichment/evaluation was computed.                                                           |
-| `[Agent] Overall Outcome`         | string   | Yes      | Session outcome classification: 'success', 'partial_success', 'failure', 'abandoned', 'response_provided', etc.            |
-| `[Agent] Turn Count`              | number   | Yes      | Number of conversation turns in this session.                                                                              |
-| `[Agent] Session Total Tokens`    | number   | No       | Total LLM tokens consumed across all turns in this session.                                                                |
-| `[Agent] Session Avg Latency Ms`  | number   | No       | Average AI response latency in milliseconds across the session.                                                            |
-| `[Agent] Request Complexity`      | string   | No       | Complexity classification of the user's request: 'simple', 'moderate', 'complex', or 'ambiguous'.                          |
-| `[Agent] Has Task Failure`        | boolean  | Yes      | Whether the agent failed to complete the user's request.                                                                   |
-| `[Agent] Has Negative Feedback`   | boolean  | Yes      | Whether the user expressed dissatisfaction during the session.                                                             |
-| `[Agent] Has Technical Failure`   | boolean  | Yes      | Whether technical errors occurred (tool timeouts, API failures, etc.).                                                     |
-| `[Agent] Has Data Quality Issues` | boolean  | Yes      | Whether the AI output had data quality problems (wrong data, hallucinations, etc.).                                        |
-| `[Agent] Models Used`             | string[] | No       | LLM models used in this session. JSON array of strings.                                                                    |
-| `[Agent] Root Agent Name`         | string   | No       | Entry-point agent in multi-agent flows.                                                                                    |
-| `[Agent] Agent Chain Depth`       | number   | No       | Number of agents in the delegation chain.                                                                                  |
-| `[Agent] Task Failure Type`       | string   | No       | Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete').                          |
-| `[Agent] Technical Error Count`   | number   | No       | Count of technical errors that occurred during the session.                                                                |
-| `[Agent] Error Categories`        | string[] | No       | Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings.                                       |
-| `[Agent] Behavioral Patterns`     | string[] | No       | Detected behavioral anti-patterns (e.g., 'retry_storm', 'clarification_loop', 'early_abandonment'). JSON array of strings. |
-| `[Agent] Session Cost USD`        | number   | No       | Total LLM cost in USD for this AI session (aggregated from per-message costs).                                             |
-| `[Agent] Enrichment Cost USD`     | number   | No       | Cost in USD of running the enrichment pipeline's LLM inference for this session. Distinct from the session's own LLM cost. |
-| `[Agent] Quality Score`           | number   | No       | Overall quality score (0.0-1.0) computed by the enrichment pipeline for this session.                                      |
-| `[Agent] Sentiment Score`         | number   | No       | User sentiment score (0.0-1.0) inferred from the conversation by the enrichment pipeline.                                  |
-| `[Agent] Task Failure Reason`     | string   | No       | Explanation of why the task failed when has_task_failure is true (e.g., 'chart data source unavailable').                  |
-| `[Agent] Agent Chain`             | string[] | No       | Serialized JSON array of agent IDs representing the delegation chain in multi-agent flows.                                 |
-| `[Agent] Project ID`              | string   | No       | Amplitude project ID that owns the AI session being evaluated.                                                             |
-| `[Agent] Has User Feedback`       | boolean  | Yes      | Whether the session received explicit user feedback (thumbs up/down, rating).                                              |
-| `[Agent] User Score`              | number   | No       | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true.                      |
-| `[Agent] Agent Version`           | string   | No       | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison.                                        |
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
+| `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
+| `[Agent] Customer Org ID` | string | Yes | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Overall Outcome` | string | Yes | Session outcome classification: 'success', 'partial_success', 'failure', 'abandoned', 'response_provided', etc. |
+| `[Agent] Turn Count` | number | Yes | Number of conversation turns in this session. |
+| `[Agent] Session Total Tokens` | number | No | Total LLM tokens consumed across all turns in this session. |
+| `[Agent] Session Avg Latency Ms` | number | No | Average AI response latency in milliseconds across the session. |
+| `[Agent] Request Complexity` | string | No | Complexity classification of the user's request: 'simple', 'moderate', 'complex', or 'ambiguous'. |
+| `[Agent] Has Task Failure` | boolean | Yes | Whether the agent failed to complete the user's request. |
+| `[Agent] Has Negative Feedback` | boolean | Yes | Whether the user expressed dissatisfaction during the session. |
+| `[Agent] Has Technical Failure` | boolean | Yes | Whether technical errors occurred (tool timeouts, API failures, etc.). |
+| `[Agent] Has Data Quality Issues` | boolean | Yes | Whether the AI output had data quality problems (wrong data, hallucinations, etc.). |
+| `[Agent] Models Used` | string[] | No | LLM models used in this session. JSON array of strings. |
+| `[Agent] Root Agent Name` | string | No | Entry-point agent in multi-agent flows. |
+| `[Agent] Agent Chain Depth` | number | No | Number of agents in the delegation chain. |
+| `[Agent] Task Failure Type` | string | No | Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete'). |
+| `[Agent] Technical Error Count` | number | No | Count of technical errors that occurred during the session. |
+| `[Agent] Error Categories` | string[] | No | Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings. |
+| `[Agent] Behavioral Patterns` | string[] | No | Detected behavioral anti-patterns (e.g., 'retry_storm', 'clarification_loop', 'early_abandonment'). JSON array of strings. |
+| `[Agent] Session Cost USD` | number | No | Total LLM cost in USD for this AI session (aggregated from per-message costs). |
+| `[Agent] Enrichment Cost USD` | number | No | Cost in USD of running the enrichment pipeline's LLM inference for this session. Distinct from the session's own LLM cost. |
+| `[Agent] Quality Score` | number | No | Overall quality score (0.0-1.0) computed by the enrichment pipeline for this session. |
+| `[Agent] Sentiment Score` | number | No | User sentiment score (0.0-1.0) inferred from the conversation by the enrichment pipeline. |
+| `[Agent] Task Failure Reason` | string | No | Explanation of why the task failed when has_task_failure is true (e.g., 'chart data source unavailable'). |
+| `[Agent] Agent Chain` | string[] | No | Serialized JSON array of agent IDs representing the delegation chain in multi-agent flows. |
+| `[Agent] Project ID` | string | No | Amplitude project ID that owns the AI session being evaluated. |
+| `[Agent] Has User Feedback` | boolean | Yes | Whether the session received explicit user feedback (thumbs up/down, rating). |
+| `[Agent] User Score` | number | No | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true. |
+| `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
+| `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
 
 ### Server-Side: Topic Classification Properties
 
 `[Agent] Topic Classification` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
 
-| Property                    | Type     | Required | Description                                                                                                                     |
-| --------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `[Agent] Session ID`        | string   | Yes      | Unique session identifier. All events in one conversation share the same session ID.                                            |
-| `[Agent] Agent ID`          | string   | Yes      | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston').                                             |
-| `[Agent] Customer Org ID`   | string   | Yes      | Organization ID for multi-tenant platforms. Enables account-level group analytics.                                              |
-| `[Agent] Evaluation Source` | string   | Yes      | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).           |
-| `[Agent] Taxonomy Version`  | string   | Yes      | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).                             |
-| `[Agent] Evaluated At`      | number   | Yes      | Epoch milliseconds when this enrichment/evaluation was computed.                                                                |
-| `[Agent] Topic`             | string   | Yes      | Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain').                            |
-| `[Agent] Selection Mode`    | string   | Yes      | Whether this topic model uses 'single' (MECE) or 'multiple' (multi-label) selection.                                            |
-| `[Agent] Primary`           | string   | No       | Primary classification value (e.g., 'charts', 'billing_issues').                                                                |
-| `[Agent] Secondary`         | string[] | No       | Secondary classifications for multi-label topics. JSON array of strings.                                                        |
-| `[Agent] Subcategories`     | string[] | No       | Subcategories for finer classification within the primary topic (e.g., 'TREND_ANALYSIS', 'WRONG_EVENT'). JSON array of strings. |
-
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
+| `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
+| `[Agent] Customer Org ID` | string | Yes | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Topic` | string | Yes | Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain'). |
+| `[Agent] Selection Mode` | string | Yes | Whether this topic model uses 'single' (MECE) or 'multiple' (multi-label) selection. |
+| `[Agent] Primary` | string | No | Primary classification value (e.g., 'charts', 'billing_issues'). |
+| `[Agent] Secondary` | string[] | No | Secondary classifications for multi-label topics. JSON array of strings. |
+| `[Agent] Subcategories` | string[] | No | Subcategories for finer classification within the primary topic (e.g., 'TREND_ANALYSIS', 'WRONG_EVENT'). JSON array of strings. |
 <!-- END EVENT PROPERTY REFERENCE -->
 
 ## Event JSON Examples
