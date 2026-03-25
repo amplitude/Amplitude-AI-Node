@@ -186,6 +186,7 @@ export class WrappedMessages {
         toolCalls:
           extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
         isStreaming: false,
+        toolDefinitions: extractAnthropicToolDefinitions(requestParams),
         systemPrompt: extractAnthropicSystemPrompt(requestParams.system),
         temperature: requestParams.temperature as number | undefined,
         maxOutputTokens: requestParams.max_tokens as number | undefined,
@@ -330,6 +331,7 @@ export class WrappedMessages {
         isError: state.isError,
         errorMessage: state.errorMessage,
         reasoningContent: reasoningContent || undefined,
+        toolDefinitions: extractAnthropicToolDefinitions(params),
         systemPrompt: extractAnthropicSystemPrompt(params.system),
         temperature: params.temperature as number | undefined,
         maxOutputTokens: params.max_tokens as number | undefined,
@@ -459,4 +461,13 @@ export function extractAnthropicContent(
   }
 
   return { text, reasoning, toolCalls };
+}
+
+function extractAnthropicToolDefinitions(
+  params: Record<string, unknown>,
+): Array<Record<string, unknown>> | undefined {
+  const tools = params.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
+    : undefined;
 }

@@ -123,6 +123,9 @@ export {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SYSTEM_PROMPT,
   PROP_SYSTEM_PROMPT_LENGTH,
+  PROP_TOOL_DEFINITIONS,
+  PROP_TOOL_DEFINITIONS_COUNT,
+  PROP_TOOL_DEFINITIONS_HASH,
   PROP_TEMPERATURE,
   PROP_MAX_OUTPUT_TOKENS,
   PROP_TOP_P,
@@ -176,7 +179,7 @@ export {
 } from './core/enrichments.js';
 
 // Core - Privacy
-export { PrivacyConfig } from './core/privacy.js';
+export { PrivacyConfig, normalizeToolDefinitions } from './core/privacy.js';
 
 // Exceptions
 export {

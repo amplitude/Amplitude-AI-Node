@@ -440,6 +440,7 @@ export interface TrackCallOptions {
   finishReason?: string | null;
   toolCalls?: Array<ToolCallShape | Record<string, unknown>> | null;
   reasoningContent?: string | null;
+  toolDefinitions?: Array<Record<string, unknown>> | null;
   systemPrompt?: string | null;
   temperature?: number | null;
   maxOutputTokens?: number | null;

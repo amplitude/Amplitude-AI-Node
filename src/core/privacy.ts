@@ -6,6 +6,9 @@ import {
   PROP_REASONING_TOKENS,
   PROP_SYSTEM_PROMPT,
   PROP_SYSTEM_PROMPT_LENGTH,
+  PROP_TOOL_DEFINITIONS,
+  PROP_TOOL_DEFINITIONS_COUNT,
+  PROP_TOOL_DEFINITIONS_HASH,
 } from './constants.js';
 
 export const REDACTED_IMAGE_PLACEHOLDER = '[base64 image redacted]';
@@ -191,6 +194,79 @@ export function sanitizeStructuredContent(
   return content;
 }
 
+/**
+ * Normalize tool definitions from various provider formats into a canonical shape:
+ * `[{ name, description, parameters }]`.
+ */
+export function normalizeToolDefinitions(
+  toolDefinitions: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const normalized: Array<Record<string, unknown>> = [];
+  for (const tool of toolDefinitions) {
+    if (tool == null || typeof tool !== 'object') continue;
+
+    // OpenAI Chat format: { type: "function", function: { name, description, parameters } }
+    const fn = tool.function;
+    if (fn != null && typeof fn === 'object') {
+      const f = fn as Record<string, unknown>;
+      normalized.push({
+        name: f.name ?? '',
+        description: f.description ?? '',
+        parameters: f.parameters ?? null,
+      });
+      continue;
+    }
+
+    // Anthropic format: { name, description, input_schema }
+    if ('input_schema' in tool) {
+      normalized.push({
+        name: tool.name ?? '',
+        description: tool.description ?? '',
+        parameters: tool.input_schema ?? null,
+      });
+      continue;
+    }
+
+    // Bedrock format: { toolSpec: { name, description, inputSchema } }
+    const toolSpec = tool.toolSpec;
+    if (toolSpec != null && typeof toolSpec === 'object') {
+      const ts = toolSpec as Record<string, unknown>;
+      normalized.push({
+        name: ts.name ?? '',
+        description: ts.description ?? '',
+        parameters: ts.inputSchema ?? null,
+      });
+      continue;
+    }
+
+    // Gemini format: { function_declarations: [{ name, description, parameters }] }
+    const fnDecls = tool.function_declarations;
+    if (Array.isArray(fnDecls)) {
+      for (const decl of fnDecls) {
+        if (decl != null && typeof decl === 'object') {
+          const d = decl as Record<string, unknown>;
+          normalized.push({
+            name: d.name ?? '',
+            description: d.description ?? '',
+            parameters: d.parameters ?? null,
+          });
+        }
+      }
+      continue;
+    }
+
+    // Generic / OpenAI Responses format: { name, description, parameters }
+    if ('name' in tool) {
+      normalized.push({
+        name: tool.name ?? '',
+        description: tool.description ?? '',
+        parameters: tool.parameters ?? null,
+      });
+    }
+  }
+  return normalized;
+}
+
 export interface PrivacyConfigOptions {
   privacyMode?: boolean;
   redactPii?: boolean;
@@ -352,6 +428,44 @@ export class PrivacyConfig {
       sanitized = this._applyCustomPatterns(sanitized);
       result[PROP_REASONING_CONTENT] =
         sanitized.length > 10000 ? sanitized.slice(0, 10000) : sanitized;
+    }
+
+    return result;
+  }
+
+  sanitizeToolDefinitions(
+    toolDefinitions: Array<Record<string, unknown>> | null | undefined,
+  ): Record<string, unknown> {
+    if (!toolDefinitions?.length) return {};
+
+    const normalized = normalizeToolDefinitions(toolDefinitions);
+    const result: Record<string, unknown> = {
+      [PROP_TOOL_DEFINITIONS_COUNT]: normalized.length,
+    };
+
+    const canonical = JSON.stringify(normalized, Object.keys(normalized[0] ?? {}).sort());
+    const canonicalSorted = JSON.stringify(
+      normalized.map((t) => {
+        const sorted: Record<string, unknown> = {};
+        for (const key of Object.keys(t).sort()) sorted[key] = t[key];
+        return sorted;
+      }),
+    );
+    result[PROP_TOOL_DEFINITIONS_HASH] = crypto
+      .createHash('sha256')
+      .update(canonicalSorted)
+      .digest('hex')
+      .slice(0, 16);
+
+    let mode = this._contentMode;
+    if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
+
+    if (mode === 'full') {
+      let serialized = JSON.stringify(normalized);
+      if (this.redactPii) serialized = redactPiiPatterns(serialized);
+      serialized = this._applyCustomPatterns(serialized);
+      result[PROP_TOOL_DEFINITIONS] =
+        serialized.length > 10000 ? serialized.slice(0, 10000) : serialized;
     }
 
     return result;

@@ -275,6 +275,7 @@ export class AmplitudeAI {
     finishReason?: string | null;
     toolCalls?: Array<Record<string, unknown>> | null;
     reasoningContent?: string | null;
+    toolDefinitions?: Array<Record<string, unknown>> | null;
     systemPrompt?: string | null;
     temperature?: number | null;
     maxOutputTokens?: number | null;
@@ -347,6 +348,7 @@ export class AmplitudeAI {
       finishReason: opts.finishReason,
       toolCalls: opts.toolCalls,
       reasoningContent: opts.reasoningContent,
+      toolDefinitions: opts.toolDefinitions,
       systemPrompt: opts.systemPrompt,
       temperature: opts.temperature,
       maxOutputTokens: opts.maxOutputTokens,
