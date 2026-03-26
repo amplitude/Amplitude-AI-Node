@@ -96,6 +96,7 @@ export class Gemini extends BaseAIProvider {
         toolCalls: extracted.functionCalls?.length
           ? extracted.functionCalls
           : undefined,
+        toolDefinitions: extractGeminiToolDefinitions(params),
         systemPrompt: extractGeminiSystemPrompt(params),
         temperature: extractGeminiTemperature(params),
         topP: extractGeminiTopP(params),
@@ -260,6 +261,7 @@ export class Gemini extends BaseAIProvider {
         totalCostUsd: costUsd,
         finishReason: state.finishReason,
         toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+        toolDefinitions: extractGeminiToolDefinitions(params),
         systemPrompt: extractGeminiSystemPrompt(params),
         temperature: extractGeminiTemperature(params),
         topP: extractGeminiTopP(params),
@@ -340,6 +342,15 @@ function extractGeminiMaxOutputTokens(
 ): number | undefined {
   return (params.generationConfig as Record<string, unknown> | undefined)
     ?.maxOutputTokens as number | undefined;
+}
+
+function extractGeminiToolDefinitions(
+  params: Record<string, unknown>,
+): Array<Record<string, unknown>> | undefined {
+  const tools = params.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
+    : undefined;
 }
 
 function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {

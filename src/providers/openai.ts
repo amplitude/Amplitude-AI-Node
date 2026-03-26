@@ -234,6 +234,7 @@ export class WrappedCompletions {
         finishReason: choice?.finish_reason,
         toolCalls: toolCalls ?? undefined,
         isStreaming: false,
+        toolDefinitions: extractToolDefinitions(requestParams),
         systemPrompt: extractSystemPrompt(requestParams),
         temperature: requestParams.temperature as number | undefined,
         maxOutputTokens: requestParams.max_tokens as number | undefined,
@@ -396,6 +397,7 @@ export class WrappedCompletions {
         isError: state.isError,
         errorMessage: state.errorMessage,
         reasoningContent: reasoningContent || undefined,
+        toolDefinitions: extractToolDefinitions(params),
         systemPrompt: extractSystemPrompt(params),
         temperature: params.temperature as number | undefined,
         maxOutputTokens: params.max_tokens as number | undefined,
@@ -544,6 +546,7 @@ export class WrappedResponses {
         finishReason: extractResponsesFinishReason(resp),
         toolCalls: responseToolCalls.length > 0 ? responseToolCalls : undefined,
         isStreaming: false,
+        toolDefinitions: extractResponsesToolDefinitions(requestParams),
         systemPrompt: extractResponsesSystemPrompt(requestParams),
         temperature: requestParams.temperature as number | undefined,
         maxOutputTokens: requestParams.max_output_tokens as number | undefined,
@@ -684,6 +687,7 @@ export class WrappedResponses {
         isStreaming: true,
         isError: state.isError,
         errorMessage: state.errorMessage,
+        toolDefinitions: extractResponsesToolDefinitions(params),
         systemPrompt: extractResponsesSystemPrompt(params),
         temperature: params.temperature as number | undefined,
         maxOutputTokens: params.max_output_tokens as number | undefined,
@@ -811,6 +815,24 @@ function extractOutputItemText(item: OpenAIResponseOutputItem): string {
     if (typeof c?.text === 'string') text += c.text;
   }
   return text;
+}
+
+export function extractToolDefinitions(
+  params: Record<string, unknown>,
+): Array<Record<string, unknown>> | undefined {
+  const tools = params.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
+    : undefined;
+}
+
+function extractResponsesToolDefinitions(
+  params: Record<string, unknown>,
+): Array<Record<string, unknown>> | undefined {
+  const tools = params.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
+    : undefined;
 }
 
 function extractResponsesUserInputs(input: unknown): string[] {

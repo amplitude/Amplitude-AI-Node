@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 2,
-    "generated_at": "2026-03-20T19:12:10.988879+00:00",
+    "schema_version": 3,
+    "generated_at": "2026-03-25T22:00:10.579458+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -144,7 +144,7 @@
         {
           "name": "[Agent] Message Source",
           "type": "string",
-          "description": "Origin of the message: 'user' for direct user input, 'agent' for messages delegated from a parent agent (auto-set based on parentAgentId)."
+          "description": "Origin of the user message: 'user' for real end-user input, 'agent' for inter-agent delegation (parent agent sending instructions to a child agent). Automatically set by provider wrappers based on parent_agent_id context."
         }
       ]
     },
@@ -340,6 +340,21 @@
           "name": "[Agent] System Prompt Length",
           "type": "number",
           "description": "Character length of the system prompt."
+        },
+        {
+          "name": "[Agent] Tool Definitions",
+          "type": "string",
+          "description": "Normalized JSON array of tool definitions sent to the LLM (when content_mode permits). Each entry contains name, description, and parameters schema."
+        },
+        {
+          "name": "[Agent] Tool Definitions Count",
+          "type": "number",
+          "description": "Number of tool definitions in the LLM request."
+        },
+        {
+          "name": "[Agent] Tool Definitions Hash",
+          "type": "string",
+          "description": "Stable SHA-256 hash of the normalized tool definitions. Always present regardless of content_mode; enables toolset change detection without exposing schemas."
         },
         {
           "name": "[Agent] Temperature",

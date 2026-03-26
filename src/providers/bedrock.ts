@@ -95,6 +95,7 @@ export class Bedrock extends BaseAIProvider {
         finishReason: extracted.stopReason,
         toolCalls:
           extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
+        toolDefinitions: extractBedrockToolDefinitions(params),
         systemPrompt: extracted.systemPrompt,
         temperature: extracted.temperature,
         topP: extracted.topP,
@@ -266,6 +267,7 @@ export class Bedrock extends BaseAIProvider {
         totalCostUsd: costUsd,
         finishReason: state.finishReason,
         toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+        toolDefinitions: extractBedrockToolDefinitions(params),
         systemPrompt: extractSystemPromptFromParams(params),
         temperature: (
           params.inferenceConfig as Record<string, unknown> | undefined
@@ -356,6 +358,17 @@ function extractSystemPromptFromParams(
   const system = params.system as Array<Record<string, unknown>> | undefined;
   if (!Array.isArray(system) || system.length === 0) return undefined;
   return system.map((s) => String(s.text ?? '')).join('');
+}
+
+function extractBedrockToolDefinitions(
+  params: Record<string, unknown>,
+): Array<Record<string, unknown>> | undefined {
+  const toolConfig = params.toolConfig as Record<string, unknown> | undefined;
+  if (toolConfig == null) return undefined;
+  const tools = toolConfig.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
+    : undefined;
 }
 
 function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {

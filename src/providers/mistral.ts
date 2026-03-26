@@ -129,6 +129,7 @@ export class WrappedChat {
         totalCostUsd: costUsd,
         finishReason: choice?.finish_reason,
         toolCalls: toolCalls ?? undefined,
+        toolDefinitions: extractMistralToolDefinitions(params),
         systemPrompt: extractMistralSystemPrompt(params),
         temperature: params.temperature as number | undefined,
         topP: params.top_p as number | undefined,
@@ -285,6 +286,7 @@ export class WrappedChat {
         totalCostUsd: costUsd,
         finishReason: state.finishReason,
         toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+        toolDefinitions: extractMistralToolDefinitions(params),
         systemPrompt: extractMistralSystemPrompt(params),
         temperature: params.temperature as number | undefined,
         topP: params.top_p as number | undefined,
@@ -326,6 +328,15 @@ function extractMistralSystemPrompt(
   const systemMessage = messages.find((m) => m.role === 'system');
   return typeof systemMessage?.content === 'string'
     ? systemMessage.content
+    : undefined;
+}
+
+function extractMistralToolDefinitions(
+  params: Record<string, unknown>,
+): Array<Record<string, unknown>> | undefined {
+  const tools = params.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
     : undefined;
 }
 

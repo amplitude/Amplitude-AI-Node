@@ -98,6 +98,11 @@ export const PROP_ATTACHMENTS = '[Agent] Attachments';
 export const PROP_MESSAGE_LABELS = '[Agent] Message Labels';
 export const PROP_MESSAGE_LABEL_MAP = '[Agent] Message Label Map';
 
+// Tool definitions (v0.8.0) — request-side tool schemas sent to the LLM
+export const PROP_TOOL_DEFINITIONS = '[Agent] Tool Definitions';
+export const PROP_TOOL_DEFINITIONS_COUNT = '[Agent] Tool Definitions Count';
+export const PROP_TOOL_DEFINITIONS_HASH = '[Agent] Tool Definitions Hash';
+
 // Session replay linking (v0.7.0)
 export const PROP_SESSION_REPLAY_ID = '[Amplitude] Session Replay ID';
 

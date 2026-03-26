@@ -297,6 +297,7 @@ export interface TrackAiMessageOptions {
   finishReason?: string | null;
   toolCalls?: Array<ToolCallShape | Record<string, unknown>> | null;
   reasoningContent?: string | null;
+  toolDefinitions?: Array<Record<string, unknown>> | null;
   systemPrompt?: string | null;
   temperature?: number | null;
   maxOutputTokens?: number | null;
@@ -410,6 +411,10 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   // System prompt
   const systemPromptProps = pc.sanitizeSystemPrompt(opts.systemPrompt ?? null);
   Object.assign(properties, systemPromptProps);
+
+  // Tool definitions (request-side schemas)
+  const toolDefProps = pc.sanitizeToolDefinitions(opts.toolDefinitions);
+  Object.assign(properties, toolDefProps);
 
   if (opts.temperature != null) properties[PROP_TEMPERATURE] = opts.temperature;
   if (opts.maxOutputTokens != null)
