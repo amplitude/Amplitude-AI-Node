@@ -850,8 +850,19 @@ function extractResponsesUserInputs(input: unknown): string[] {
   if (typeof input === 'string') return [input];
   if (!Array.isArray(input)) return [];
 
+  const entries = input as OpenAIResponseInput[];
+
+  // In agent loops the full input array is re-sent each iteration.
+  // Only extract user inputs after the last assistant/function reply
+  // so the same message isn't autotracked on every create() call.
+  const lastReplyIdx = entries.findLastIndex((e) => {
+    if (typeof e === 'string') return false;
+    return e.role === 'assistant' || e.type === 'function_call' || e.type === 'function_call_output';
+  });
+  const newEntries = entries.slice(lastReplyIdx + 1);
+
   const result: string[] = [];
-  for (const entry of input as OpenAIResponseInput[]) {
+  for (const entry of newEntries) {
     if (typeof entry === 'string') {
       result.push(entry);
       continue;
