@@ -149,6 +149,11 @@ export function sanitizeAnyContent(
     textContent = String(content);
   }
 
+  // Tool-call-only LLM responses have content=null which the provider
+  // coerces to ''.  Emitting $llm_message with an empty string causes
+  // the response to appear as "missing text" in the thread view.
+  if (textContent.length === 0) return result;
+
   if (redactPii) {
     textContent = redactPiiPatterns(textContent);
     const redacted = redactBase64Content(textContent);

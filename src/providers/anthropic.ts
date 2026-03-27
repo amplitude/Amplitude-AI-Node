@@ -362,7 +362,16 @@ export class WrappedMessages {
     if (!shouldTrackInputMessages) return;
     if (ctx.userId == null || ctx.sessionId == null) return;
     if (!Array.isArray(messages)) return;
-    for (const msg of messages) {
+
+    // In agent loops each create() re-sends the full conversation.
+    // Only track user messages appended after the last assistant reply
+    // so the same message isn't autotracked on every iteration.
+    const lastReplyIdx = (messages as Record<string, unknown>[]).findLastIndex(
+      (m) => m?.role === 'assistant',
+    );
+    const newMessages = (messages as Record<string, unknown>[]).slice(lastReplyIdx + 1);
+
+    for (const msg of newMessages) {
       const role = (msg as Record<string, unknown>)?.role;
       if (role !== 'user') continue;
       const rawContent = (msg as Record<string, unknown>)?.content;

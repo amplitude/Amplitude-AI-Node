@@ -428,7 +428,18 @@ export class WrappedCompletions {
     if (!shouldTrackInputMessages) return;
     if (ctx.userId == null || ctx.sessionId == null) return;
     if (!Array.isArray(messages)) return;
-    for (const msg of messages as ChatMessage[]) {
+
+    const msgs = messages as ChatMessage[];
+
+    // In agent loops each create() re-sends the full conversation history.
+    // Only track user messages appended *after* the last assistant/tool
+    // reply so the same message isn't autotracked on every iteration.
+    const lastReplyIdx = msgs.findLastIndex(
+      (m) => m?.role === 'assistant' || m?.role === 'tool',
+    );
+    const newMessages = msgs.slice(lastReplyIdx + 1);
+
+    for (const msg of newMessages) {
       if (msg?.role !== 'user') continue;
       const content = msg.content;
       if (typeof content !== 'string' || content.length === 0) continue;
@@ -839,8 +850,19 @@ function extractResponsesUserInputs(input: unknown): string[] {
   if (typeof input === 'string') return [input];
   if (!Array.isArray(input)) return [];
 
+  const entries = input as OpenAIResponseInput[];
+
+  // In agent loops the full input array is re-sent each iteration.
+  // Only extract user inputs after the last assistant/function reply
+  // so the same message isn't autotracked on every create() call.
+  const lastReplyIdx = entries.findLastIndex((e) => {
+    if (typeof e === 'string') return false;
+    return e.role === 'assistant' || e.type === 'function_call' || e.type === 'function_call_output';
+  });
+  const newEntries = entries.slice(lastReplyIdx + 1);
+
   const result: string[] = [];
-  for (const entry of input as OpenAIResponseInput[]) {
+  for (const entry of newEntries) {
     if (typeof entry === 'string') {
       result.push(entry);
       continue;
