@@ -17,7 +17,6 @@ import {
   PROP_FINISH_REASON,
   PROP_MESSAGE_SOURCE,
   PROP_PARENT_AGENT_ID,
-  PROP_SESSION_ID,
   PROP_TOOL_CALLS,
   PROP_TURN_ID,
 } from '../src/core/constants.js';
@@ -213,7 +212,7 @@ describe('Multi-agent autotrack bug reproduction', () => {
 
         // After delegation, parent continues with a new create() call
         // that re-sends ALL messages including the original user message
-        const parentCompletion = await completions.create({
+        await completions.create({
           model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: 'You are a shopping agent' },
@@ -225,7 +224,6 @@ describe('Multi-agent autotrack bug reproduction', () => {
       });
 
       const userMsgEvents = mock.getEvents(EVENT_USER_MESSAGE);
-      const aiResponseEvents = mock.getEvents(EVENT_AI_RESPONSE);
 
       console.log(`\n=== Issue 1b: Sub-agent user message duplication ===`);
       console.log(`Total [Agent] User Message events: ${userMsgEvents.length}`);
@@ -330,8 +328,7 @@ describe('Multi-agent autotrack bug reproduction', () => {
           toolCallResponse('ask_recipe_agent', '{"query":"vegan dinner recipe"}'),
         );
 
-        // First create() call for shopping agent
-        const firstCompletion = await completions.create({
+        await completions.create({
           model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: 'You are a shopping agent' },

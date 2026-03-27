@@ -431,21 +431,15 @@ export class WrappedCompletions {
 
     const msgs = messages as ChatMessage[];
 
-    // Only track user messages that appear *after* the last assistant/tool
-    // message.  In an agent loop each iteration re-sends the full
-    // conversation; without this guard the same user message is autotracked
-    // on every create() call.
-    let lastNonUserIdx = -1;
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const role = msgs[i]?.role;
-      if (role === 'assistant' || role === 'tool') {
-        lastNonUserIdx = i;
-        break;
-      }
-    }
+    // In agent loops each create() re-sends the full conversation history.
+    // Only track user messages appended *after* the last assistant/tool
+    // reply so the same message isn't autotracked on every iteration.
+    const lastReplyIdx = msgs.findLastIndex(
+      (m) => m?.role === 'assistant' || m?.role === 'tool',
+    );
+    const newMessages = msgs.slice(lastReplyIdx + 1);
 
-    for (let i = lastNonUserIdx + 1; i < msgs.length; i++) {
-      const msg = msgs[i];
+    for (const msg of newMessages) {
       if (msg?.role !== 'user') continue;
       const content = msg.content;
       if (typeof content !== 'string' || content.length === 0) continue;
