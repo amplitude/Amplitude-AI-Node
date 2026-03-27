@@ -289,7 +289,7 @@ describe('Anthropic provider with real SDK mocking', () => {
     const props = (amp.track.mock.calls[0][0] as Record<string, unknown>)
       .event_properties as Record<string, unknown>;
     const llmMsg = props.$llm_message as Record<string, unknown> | undefined;
-    expect(llmMsg?.text).toBe('');
+    expect(llmMsg).toBeUndefined();
   });
 
   it('handles missing usage', async (): Promise<void> => {

@@ -428,7 +428,24 @@ export class WrappedCompletions {
     if (!shouldTrackInputMessages) return;
     if (ctx.userId == null || ctx.sessionId == null) return;
     if (!Array.isArray(messages)) return;
-    for (const msg of messages as ChatMessage[]) {
+
+    const msgs = messages as ChatMessage[];
+
+    // Only track user messages that appear *after* the last assistant/tool
+    // message.  In an agent loop each iteration re-sends the full
+    // conversation; without this guard the same user message is autotracked
+    // on every create() call.
+    let lastNonUserIdx = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const role = msgs[i]?.role;
+      if (role === 'assistant' || role === 'tool') {
+        lastNonUserIdx = i;
+        break;
+      }
+    }
+
+    for (let i = lastNonUserIdx + 1; i < msgs.length; i++) {
+      const msg = msgs[i];
       if (msg?.role !== 'user') continue;
       const content = msg.content;
       if (typeof content !== 'string' || content.length === 0) continue;
