@@ -1,0 +1,67 @@
+name: Test README Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — print payload without dispatching"
+        type: boolean
+        default: true
+
+env:
+  DOCS_REPO: amplitude/amplitude-docs
+
+jobs:
+  test-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build payload
+        id: payload
+        run: |
+          readme_content=$(cat README.md)
+
+          # Build the JSON payload using jq
+          payload=$(jq -n \
+            --arg source_repo "${{ github.repository }}" \
+            --arg readme_content "$readme_content" \
+            --arg readme_diff "$readme_content" \
+            --arg commit_sha "${{ github.sha }}" \
+            --arg commit_message "test-sync: manual trigger (full re-sync)" \
+            '{
+              event_type: "readme-sync",
+              client_payload: {
+                source_repo: $source_repo,
+                readme_content: $readme_content,
+                readme_diff: $readme_diff,
+                commit_sha: $commit_sha,
+                commit_message: $commit_message
+              }
+            }')
+
+          echo "$payload" > /tmp/payload.json
+
+      - name: Print payload
+        run: |
+          echo "::group::Payload that would be sent to $DOCS_REPO"
+          cat /tmp/payload.json | jq .
+          echo "::endgroup::"
+
+      - name: Dispatch to docs repo
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_REPO_PAT }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/$DOCS_REPO/dispatches" \
+            --input /tmp/payload.json
+
+          echo "Successfully dispatched readme-sync event to $DOCS_REPO"
+
+      - name: Dry run notice
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "Dry run — no dispatch sent. Set dry_run to false to send."
