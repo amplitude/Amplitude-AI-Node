@@ -28,10 +28,46 @@ import { tryRequire } from './utils/resolve-module.js';
 
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
 
-// Global set of AmplitudeAI instances for the unflushed-events exit warning.
-// Uses strong references — call shutdown() to remove an instance and allow GC.
-const _activeInstances = new Set<AmplitudeAI>();
+/**
+ * Thin mutable wrapper around a potentially-frozen Amplitude client.
+ *
+ * ES module namespaces (`import * as mod`) are frozen objects whose
+ * export bindings cannot be reassigned.  Instead of monkey-patching
+ * `track` on the real client we keep the replacement on this proxy,
+ * which is always a plain mutable object.
+ */
+class TrackingProxy implements AmplitudeClientLike {
+  private readonly _original: AmplitudeClientLike;
+  track: (event: AmplitudeEvent) => void;
+
+  constructor(original: AmplitudeClientLike) {
+    this._original = original;
+    this.track = original.track.bind(original);
+  }
+
+  flush(): unknown {
+    return this._original.flush();
+  }
+
+  shutdown(): void {
+    this._original.shutdown?.();
+  }
+
+  get configuration(): Record<string, unknown> | undefined {
+    return this._original.configuration;
+  }
+}
+
+// Module-level counter for the unflushed-events exit warning.
+// Avoids holding strong references to AmplitudeAI instances (which would
+// prevent GC if the consumer forgets to call shutdown()).
+let _globalUnflushedCount = 0;
 let _exitHookRegistered = false;
+
+/** @internal Exposed for testing only. */
+export function _getGlobalUnflushedCount(): number {
+  return _globalUnflushedCount;
+}
 
 function _registerExitHook(): void {
   if (_exitHookRegistered) return;
@@ -39,13 +75,10 @@ function _registerExitHook(): void {
 
   process.on('beforeExit', () => {
     if (!isServerless()) return;
-    for (const instance of _activeInstances) {
-      if (instance._trackCountSinceFlush > 0) {
-        console.warn(
-          `⚠️  AmplitudeAI: ${instance._trackCountSinceFlush} event(s) were tracked but never flushed. In serverless environments, call \`await ai.flush()\` before your handler returns, or use session.run() which auto-flushes by default.`,
-        );
-        break; // one warning is enough
-      }
+    if (_globalUnflushedCount > 0) {
+      console.warn(
+        `⚠️  AmplitudeAI: ${_globalUnflushedCount} event(s) were tracked but never flushed. In serverless environments, call \`await ai.flush()\` before your handler returns, or use session.run() which auto-flushes by default.`,
+      );
     }
   });
 }
@@ -82,8 +115,9 @@ export class AmplitudeAI {
     apiKey?: string;
     config?: AIConfig;
   }) {
+    let rawAmplitude: AmplitudeClientLike;
     if (options.amplitude != null) {
-      this._amplitude = options.amplitude;
+      rawAmplitude = options.amplitude;
       this._ownsClient = false;
     } else if (options.apiKey != null) {
       const amplitudeNode = tryRequire('@amplitude/analytics-node') as
@@ -95,13 +129,17 @@ export class AmplitudeAI {
         );
       }
       amplitudeNode.init(options.apiKey);
-      this._amplitude = amplitudeNode;
+      rawAmplitude = amplitudeNode;
       this._ownsClient = true;
     } else {
       throw new ConfigurationError(
         "Provide either an existing Amplitude instance via 'amplitude' or an API key via 'apiKey'.",
       );
     }
+
+    // Wrap in a mutable proxy so we never mutate the caller's object
+    // (which may be a frozen ES module namespace).
+    this._amplitude = new TrackingProxy(rawAmplitude);
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();
@@ -116,7 +154,6 @@ export class AmplitudeAI {
     }
 
     this._installTrackCounter();
-    _activeInstances.add(this);
     _registerExitHook();
   }
 
@@ -124,6 +161,7 @@ export class AmplitudeAI {
     const originalTrack = this._amplitude.track.bind(this._amplitude);
     this._amplitude.track = (event: AmplitudeEvent) => {
       this._trackCountSinceFlush++;
+      _globalUnflushedCount++;
       return originalTrack(event);
     };
   }
@@ -716,12 +754,13 @@ export class AmplitudeAI {
   }
 
   flush(): unknown {
+    _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
     return this._amplitude.flush();
   }
 
   shutdown(): void {
-    _activeInstances.delete(this);
+    _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
     if (this._ownsClient) {
       this._amplitude.shutdown?.();
