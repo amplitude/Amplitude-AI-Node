@@ -35,6 +35,21 @@ import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { isServerless } from './serverless.js';
 import { getLogger } from './utils/logger.js';
 
+let _warnedRunSyncAutoFlush = false;
+function _warnRunSyncAutoFlush(): void {
+  if (_warnedRunSyncAutoFlush) return;
+  _warnedRunSyncAutoFlush = true;
+  getLogger().warn(
+    'runSync() cannot flush asynchronously — autoFlush has no effect. ' +
+      'Use session.run() (async) or call `await ai.flush()` after runSync().',
+  );
+}
+
+/** @internal Reset the one-time warning flag. For test isolation only. */
+export function _resetRunSyncWarning(): void {
+  _warnedRunSyncAutoFlush = false;
+}
+
 export interface SessionOptions {
   sessionId?: string | null;
   idleTimeoutMinutes?: number | null;
@@ -143,8 +158,15 @@ export class Session {
 
   /**
    * Synchronous version of run() for non-async code.
+   *
+   * Note: `autoFlush` has no effect here because `runSync` cannot await
+   * the asynchronous flush.  Use `session.run()` (async) or call
+   * `await ai.flush()` manually after `runSync` returns.
    */
   runSync<T>(fn: (session: Session) => T): T {
+    if (this.autoFlush) {
+      _warnRunSyncAutoFlush();
+    }
     const ctx = this._buildSessionContext();
     try {
       return _sessionStorage.run(ctx, () => fn(this));
@@ -220,9 +242,23 @@ export class Session {
 
   private async _flush(): Promise<void> {
     try {
-      const result = this._agent.flush();
-      if (result != null && typeof (result as Promise<unknown>).then === 'function') {
-        await result;
+      const result = this._agent.flush() as
+        | { promise?: Promise<unknown> }
+        | Promise<unknown>
+        | null
+        | undefined;
+      if (result != null) {
+        // @amplitude/analytics-node returns { promise: Promise } rather than
+        // a direct thenable.  Detect both shapes.
+        const awaitable =
+          typeof (result as { promise?: unknown }).promise === 'object'
+            ? (result as { promise: Promise<unknown> }).promise
+            : typeof (result as Promise<unknown>).then === 'function'
+              ? result
+              : null;
+        if (awaitable != null) {
+          await awaitable;
+        }
       }
     } catch (e) {
       getLogger().debug(`Failed to flush after session ${this.sessionId}: ${e}`);

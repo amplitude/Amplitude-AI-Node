@@ -131,7 +131,11 @@ export class MockAmplitudeAI extends AmplitudeAI {
 
   /**
    * Configure a simulated latency (in ms) added to each tracking call.
-   * Combined with async tests, this helps verify timeout and retry logic.
+   * The delay is non-blocking (uses `setTimeout`), so the event loop
+   * remains responsive during tests.
+   *
+   * Because tracking becomes asynchronous, use `await` or
+   * `vi.advanceTimersByTime()` in tests to let events resolve.
    */
   simulateLatency(ms: number): void {
     this._simulatedLatencyMs = ms;
@@ -140,12 +144,10 @@ export class MockAmplitudeAI extends AmplitudeAI {
     };
     this._amplitude.track = (event) => {
       if (this._simulatedLatencyMs > 0) {
-        const start = Date.now();
-        while (Date.now() - start < this._simulatedLatencyMs) {
-          // busy wait for synchronous latency simulation
-        }
+        setTimeout(() => originalCapture(event as MockEvent), this._simulatedLatencyMs);
+      } else {
+        originalCapture(event as MockEvent);
       }
-      originalCapture(event as MockEvent);
     };
   }
 

@@ -63,7 +63,13 @@ export function enableLivePriceUpdates(intervalMs = 3_600_000): void {
 
 export function stripProviderPrefix(modelName: string): string {
   const colonIdx = modelName.indexOf(':');
-  return colonIdx >= 0 ? modelName.slice(colonIdx + 1) : modelName;
+  if (colonIdx < 0) return modelName;
+  const prefix = modelName.slice(0, colonIdx);
+  // Real provider prefixes are simple identifiers (e.g. "openai", "bedrock").
+  // If the prefix contains a dot, it's part of a Bedrock model ID where the
+  // colon separates a version suffix (e.g. "anthropic.claude-v1:0").
+  if (prefix.includes('.')) return modelName;
+  return modelName.slice(colonIdx + 1);
 }
 
 /**
