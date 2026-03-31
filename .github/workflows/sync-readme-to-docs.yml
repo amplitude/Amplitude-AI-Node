@@ -1,0 +1,72 @@
+name: Sync README to Docs
+
+on:
+  push:
+    branches: [main]
+    paths: [README.md]
+
+env:
+  DOCS_REPO: amplitude/amplitude-docs
+
+jobs:
+  sync-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Extract README content and diff
+        id: readme
+        run: |
+          # Read the full current README
+          readme_content=$(cat README.md)
+
+          # Try to diff against previous commit; if README is brand new, use full content as diff
+          if git show HEAD~1:README.md > /dev/null 2>&1; then
+            readme_diff=$(git diff HEAD~1 HEAD -- README.md)
+          else
+            echo "README.md is new — using full content as diff"
+            readme_diff="$readme_content"
+          fi
+
+          # Write to files for safe multiline handling
+          echo "$readme_content" > /tmp/readme_content.txt
+          echo "$readme_diff" > /tmp/readme_diff.txt
+
+      - name: Dispatch to docs repo
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_REPO_PAT }}
+        run: |
+          # Build the JSON payload using jq to safely handle multiline strings
+          payload=$(jq -n \
+            --arg source_repo "${{ github.repository }}" \
+            --arg readme_content "$(cat /tmp/readme_content.txt)" \
+            --arg readme_diff "$(cat /tmp/readme_diff.txt)" \
+            --arg commit_sha "${{ github.sha }}" \
+            --arg commit_message "${{ github.event.head_commit.message }}" \
+            '{
+              event_type: "readme-sync",
+              client_payload: {
+                source_repo: $source_repo,
+                readme_content: $readme_content,
+                readme_diff: $readme_diff,
+                commit_sha: $commit_sha,
+                commit_message: $commit_message
+              }
+            }')
+
+          echo "::group::Dispatching to $DOCS_REPO"
+          echo "Source repo: ${{ github.repository }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "::endgroup::"
+
+          # Use gh api to dispatch — handles auth and encoding
+          gh api \
+            --method POST \
+            "repos/$DOCS_REPO/dispatches" \
+            --input - <<< "$payload"
+
+          echo "Successfully dispatched readme-sync event to $DOCS_REPO"
