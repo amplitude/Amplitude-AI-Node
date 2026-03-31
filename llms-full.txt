@@ -67,6 +67,7 @@ const ai = new AmplitudeAI({
 
 ### patch(options) / unpatch()
 Zero-code instrumentation. Monkey-patches all detected provider SDKs.
+Captures aggregate `[Agent] AI Response` events only — no user identity, no funnels. Use as a quick verification or for legacy codebases where you cannot modify call sites.
 ```
 import { patch, unpatch } from '@amplitude/ai';
 patch({ amplitudeAI: ai });

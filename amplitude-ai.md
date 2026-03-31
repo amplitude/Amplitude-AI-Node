@@ -29,30 +29,21 @@ Detected environment:
   Multi-agent signals: [yes/no]
   Streaming: [yes/no]
   Frontend deps: [yes/no]
-  Recommended tier: [quick_start / standard / advanced]
+  Recommended: full instrumentation
 ```
 
-**Decision point:** Ask the developer to confirm the detection and choose a tier:
-- **Quick start** — `patch({ amplitudeAI: ai })`, zero code changes, good for getting data flowing
-- **Standard** — Provider wrappers + session middleware (recommended for most apps)
-- **Advanced** — Multi-agent `runAs`, agent descriptions, scoring, tool tracking
-
-If multi-agent signals are detected, recommend Advanced.
+**Next step:** Confirm the detection with the developer, then proceed to full instrumentation. Always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
 
 ---
 
 ## Phase 2: Discover Agents and Call Sites
-
-For **Quick start** tier, skip to Phase 3 — discovery is just "which providers are imported."
-
-For **Standard** and **Advanced** tiers:
 
 1. Identify files with LLM call sites (search for `chat.completions.create`, `messages.create`, `generateContent`, `streamText`, `generateText`)
 2. For each file with call sites, read the actual source and review:
    - Is it a route handler / API endpoint?
    - What provider(s) does it use?
    - Does it call other files with LLM call sites? (delegation → multi-agent)
-3. For **Advanced** tier, also identify:
+3. Identify:
    - Agent boundaries (each distinct orchestration unit = one agent)
    - Delegation patterns (parent calls child → `runAs`)
    - Feedback handlers (thumbs up/down UI components)
@@ -135,16 +126,9 @@ export const openai = new OpenAI({
 // export const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, amplitude: ai });
 ```
 
-**Alternative: `wrap()` for existing clients.** If the project creates provider clients dynamically:
-
-```typescript
-import { wrap } from '@amplitude/ai';
-import OpenAI from 'openai';
-const rawClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
-export const openai = wrap(rawClient, ai);
-```
-
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
+
+> **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible.
 
 ### Step 3c: Swap provider imports
 
@@ -163,7 +147,7 @@ import { openai as client } from '@/lib/amplitude';
 
 ### Step 3d: Add session context
 
-**Standard tier** — wrap route handlers with agent + session:
+Wrap route handlers with agent + session:
 
 ```typescript
 import { ai } from '@/lib/amplitude';
@@ -183,7 +167,7 @@ export async function POST(req: Request) {
 }
 ```
 
-**Advanced tier** — add multi-agent delegation with `runAs`:
+If multi-agent signals were detected, add delegation with `runAs`:
 
 ```typescript
 const orchestrator = ai.agent('shopping-agent', { description: 'Orchestrates shopping requests' });
@@ -220,7 +204,7 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-### Step 3f: Add span tracking for orchestration (Advanced tier)
+### Step 3f: Add span tracking for orchestration
 
 When a parent agent delegates work to a child agent, wrap the delegation call with span tracking to measure latency and capture errors. Look for existing try/catch blocks around sub-agent execution — these are natural places to add span tracking with both success and error paths:
 
@@ -253,9 +237,9 @@ try {
 }
 ```
 
-### Step 3g: Add scoring (Advanced tier only)
+### Step 3g: Add scoring
 
-If feedback handlers were detected (thumbs up/down UI), check whether the handler receives a `messageId` — if so, target the specific message for finer-grained scoring. Otherwise fall back to session-level scoring:
+If feedback handlers were detected (thumbs up/down UI), add scoring. Check whether the handler receives a `messageId` — if so, target the specific message for finer-grained scoring. Otherwise fall back to session-level scoring:
 
 ```typescript
 const targetId = messageId ?? sessionId;

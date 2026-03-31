@@ -89,12 +89,12 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 
 ## Decision Tree
 
-- Need zero-code coverage: use \`patch()\`.
-- Already have a provider client: use \`wrap()\` or provider wrappers.
-- Need user/session lineage: use \`ai.agent(...).session(...)\`.
+- **Default: use \`ai.agent(...).session(...)\` with provider wrappers** — gives you every event type, per-user analytics, session enrichment, quality scoring.
+- Already have a provider client: use \`wrap()\` to instrument it.
 - Multiple agents collaborating: use \`session.runAs(childAgent, fn)\` for automatic identity propagation.
 - Need tool telemetry: use \`tool()\`.
 - Need span/observability: use \`observe()\`.
+- Cannot modify call sites at all: use \`patch()\` for aggregate-only monitoring (no per-user analytics).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 
 ## MCP Surface
@@ -253,6 +253,7 @@ const ai = new AmplitudeAI({
 
 ### patch(options) / unpatch()
 Zero-code instrumentation. Monkey-patches all detected provider SDKs.
+Captures aggregate \`[Agent] AI Response\` events only — no user identity, no funnels. Use as a quick verification or for legacy codebases where you cannot modify call sites.
 \`\`\`
 import { patch, unpatch } from '@amplitude/ai';
 patch({ amplitudeAI: ai });
