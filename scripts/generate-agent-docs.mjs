@@ -89,12 +89,12 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 
 ## Decision Tree
 
-- Need zero-code coverage: use \`patch()\`.
-- Already have a provider client: use \`wrap()\` or provider wrappers.
-- Need user/session lineage: use \`ai.agent(...).session(...)\`.
+- **Default: use \`ai.agent(...).session(...)\` with provider wrappers** — gives you every event type, per-user analytics, session enrichment, quality scoring.
+- Already have a provider client: use \`wrap()\` to instrument it.
 - Multiple agents collaborating: use \`session.runAs(childAgent, fn)\` for automatic identity propagation.
 - Need tool telemetry: use \`tool()\`.
 - Need span/observability: use \`observe()\`.
+- Cannot modify call sites at all: use \`patch()\` for aggregate-only monitoring (no per-user analytics).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 
 ## MCP Surface
@@ -128,6 +128,8 @@ Prompt:
 
 ## CLI
 
+- \`amplitude-ai\` — Print instrumentation prompt for AI coding agents
+- \`amplitude-ai --print-guide\` — Print the full amplitude-ai.md guide to stdout
 - \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json]\` — Validate environment, deps, and event pipeline
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
@@ -253,6 +255,7 @@ const ai = new AmplitudeAI({
 
 ### patch(options) / unpatch()
 Zero-code instrumentation. Monkey-patches all detected provider SDKs.
+Captures aggregate \`[Agent] AI Response\` events only — no user identity, no funnels. Use as a quick verification or for legacy codebases where you cannot modify call sites.
 \`\`\`
 import { patch, unpatch } from '@amplitude/ai';
 patch({ amplitudeAI: ai });
@@ -581,6 +584,8 @@ with code examples for every step. Read this for guided instrumentation.
 
 ## CLI
 
+- \`amplitude-ai\` — Print instrumentation prompt for AI coding agents
+- \`amplitude-ai --print-guide\` — Print the full amplitude-ai.md guide to stdout
 - \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json] [--no-mock-check]\` — Validate environment and event pipeline
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
