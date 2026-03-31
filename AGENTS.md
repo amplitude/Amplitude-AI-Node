@@ -53,12 +53,12 @@ Codex auto-reads this `AGENTS.md` file for context.
 
 ## Decision Tree
 
-- Need zero-code coverage: use `patch()`.
-- Already have a provider client: use `wrap()` or provider wrappers.
-- Need user/session lineage: use `ai.agent(...).session(...)`.
+- **Default: use `ai.agent(...).session(...)` with provider wrappers** — gives you every event type, per-user analytics, session enrichment, quality scoring.
+- Already have a provider client: use `wrap()` to instrument it.
 - Multiple agents collaborating: use `session.runAs(childAgent, fn)` for automatic identity propagation.
 - Need tool telemetry: use `tool()`.
 - Need span/observability: use `observe()`.
+- Cannot modify call sites at all: use `patch()` for aggregate-only monitoring (no per-user analytics).
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 
 ## MCP Surface
@@ -102,6 +102,8 @@ Prompt:
 
 ## CLI
 
+- `amplitude-ai` — Print instrumentation prompt for AI coding agents
+- `amplitude-ai --print-guide` — Print the full amplitude-ai.md guide to stdout
 - `amplitude-ai mcp` — Start the MCP server for AI coding agents
 - `amplitude-ai doctor [--json]` — Validate environment, deps, and event pipeline
 - `amplitude-ai status [--json]` — Show SDK version, installed providers, and env config

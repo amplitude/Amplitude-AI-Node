@@ -51,14 +51,19 @@ The CLI prints a prompt to paste into any AI coding agent (Cursor, Claude Code, 
 
 The agent reads the guide, scans your project, discovers your agents and LLM call sites, and instruments everything — provider wrappers, session lifecycle, multi-agent delegation, tool tracking, scoring, and a verification test. You review and approve each step.
 
-### Other paths
+### Manual setup
 
-| Your situation | Recommended path | What happens |
-|---|---|---|
-| **Manual setup** | Follow the [Quick Start guide](#quick-start) | Agents + sessions + provider wrappers — the full event model |
-| **Just want to verify the SDK works** | `patch()` ([details below](#patching)) | Aggregate cost/latency monitoring only — no user analytics, no funnels |
+Whether you use a coding agent or set up manually, the goal is the same: **full instrumentation** — agents + sessions + provider wrappers. This gives you every event type, per-user analytics, and server-side enrichment.
 
-> **Start with full instrumentation.** The coding agent workflow defaults to agents + sessions + provider wrappers. This gives you every event type, per-user analytics, and server-side enrichment. `patch()` exists for quick verification or legacy codebases where you can't modify call sites, but it only captures `[Agent] AI Response` without user identity — no funnels, no cohorts, no retention.
+Follow the [code example above](#amplitude-ai) to get started. The pattern is:
+
+1. **Swap your LLM import** — `import { OpenAI } from '@amplitude/ai'` (or `Anthropic`, `Gemini`, etc.)
+2. **Create an agent** — `ai.agent('my-agent')` to name and track your AI component
+3. **Wrap in a session** — `agent.session({ userId, sessionId }).run(async (s) => { ... })` for per-user analytics, funnels, cohorts, and server-side enrichment
+4. **Track user messages** — `s.trackUserMessage(...)` for conversation context
+5. **Score responses** — `s.score(...)` for quality measurement
+
+> `patch()` exists for quick verification or legacy codebases where you can't modify call sites, but it only captures `[Agent] AI Response` without user identity — no funnels, no cohorts, no retention. Start with full instrumentation; fall back to `patch()` only if you can't modify call sites.
 
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,7 +105,7 @@ The agent reads the guide, scans your project, discovers your agents and LLM cal
 - [Auto-Instrumentation CLI](#auto-instrumentation-cli)
 - [Integrations](#integrations)
 - [Data Flow](#data-flow)
-- [Which Integration Should I Use?](#which-integration-should-i-use)
+- [Integration Approaches](#integration-approaches)
 - [Integration Patterns](#integration-patterns)
 - [Serverless Environments](#serverless-environments)
 - [Error Handling and Reliability](#error-handling-and-reliability)
@@ -137,7 +142,7 @@ Install provider SDKs based on what you use (for example: `openai`, `@anthropic-
 
 1. **Install:** `npm install @amplitude/ai @amplitude/analytics-node`
 2. **Get your API key:** In Amplitude, go to **Settings > Projects** and copy the API key.
-3. **Auto-instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent — it scans your project, generates a bootstrap file, instruments your LLM call sites, and creates a verification test. Or follow the manual patterns below.
+3. **Instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
 4. **Set your API key** in the generated `.env` file and replace the placeholder `userId`/`sessionId`.
 5. **Run your app.** You should see `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` within 30 seconds.
 
@@ -504,7 +509,13 @@ const session = agent.session({
 });
 ```
 
-Without this, sessions with long idle periods may be closed and evaluated prematurely. The default is 30 minutes.
+Without this, sessions with long idle periods may be closed and enrichment may run earlier than expected. The default is 30 minutes.
+
+**Session lifecycle and enrichment.** You do **not** need to call `trackSessionEnd()` for sessions to work. Amplitude's server automatically closes sessions after 30 minutes of inactivity and queues them for enrichment (topic classification, quality scoring, session evaluation) at that point. The only reason to call `trackSessionEnd()` is to **trigger enrichment sooner** — for example, if you know the conversation is over and want evaluation results immediately rather than waiting for the idle timeout.
+
+"Closed" is a server-side concept meaning "queued for enrichment" — it does **not** prevent new events from flowing into the same session. If the user resumes a conversation after session end, new messages with the same `sessionId` are still associated with that session.
+
+If you use `session.run()`, session end is tracked automatically when the callback completes. For long-lived conversations (chatbots, support agents), you can skip explicit session end entirely and let the server handle it.
 
 **Link to Session Replay**: If your frontend uses Amplitude's [Session Replay](https://www.docs.developers.amplitude.com/session-replay/), pass the browser's `deviceId` and `browserSessionId` to link AI sessions to browser recordings:
 
@@ -1643,33 +1654,20 @@ Your Application
 - The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Evaluation` and `[Agent] Score`.
 - With `contentMode: 'customer_enriched'`, the enrichment pipeline is skipped — you provide your own enrichments via `trackSessionEnrichment()`.
 
-## Which Integration Should I Use?
+## Integration Approaches
 
-Start here and pick the first tier that satisfies your analytics needs:
+**Start with full instrumentation.** Use agents + sessions + provider wrappers. This is the recommended approach for both coding agent and manual workflows — it gives you every event type, per-user analytics, and server-side enrichment.
 
-```
-                      Do you need per-user analytics
-                      (funnels, cohorts, retention)?
-                              │
-                    ┌─── No ──┴── Yes ──┐
-                    │                   │
-              Tier 0: Zero-Code     Do you need session
-              (CLI auto-patch)      grouping & enrichment?
-              Cost, latency,              │
-              tokens, errors.     ┌─ No ──┴── Yes ──┐
-                                  │                 │
-                           Tier 1: Events      Do you control
-                           Per-call tracking   the LLM call site?
-                           + userId                  │
-                                           ┌── Yes ──┴── No ──┐
-                                           │                  │
-                                    Tier 2: Sessions    Tier 3: OTEL Bridge
-                                    session.run()       Add exporter to
-                                    Full enrichment     existing OTEL pipeline
-                                    Implicit feedback   Limited to OTEL attrs
-```
+| Approach | When to use | What you get |
+|---|---|---|
+| **Full control** (recommended) | Any project, new or existing | `BoundAgent` + `session.run()` + provider wrappers — all event types, per-user funnels, cohorts, retention, quality scoring, enrichments |
+| **Express/Fastify middleware** | Web app, auto-session per request | Same as full control with automatic session lifecycle via `createAmplitudeAIMiddleware` |
+| **Swap import** | Existing codebase, incremental adoption | `new OpenAI({ amplitude: ai })` — auto-tracking per call, add sessions when ready |
+| **Wrap** | You've already created a client | `wrap(client, ai)` — instruments an existing client instance |
+| **Zero-code / `patch()`** | Verification or legacy codebases only | `patch({ amplitudeAI: ai })` — `[Agent] AI Response` only, no user identity, no funnels |
+| **OTEL Bridge** | Third-party framework exports OTEL spans | Add exporter to existing OTEL pipeline — limited to OTEL attributes |
 
-**Rule of thumb:** If you own the LLM call site, start with **Tier 2** (sessions). If you don't (e.g., a third-party framework exports OTEL spans), use **Tier 3** (OTEL bridge). If you just want aggregate cost monitoring without user analytics, **Tier 0** (zero-code) is ready in 60 seconds.
+> The first four approaches all support the full event model. Choose based on how you want to integrate — the analytics capabilities are the same. **`patch()` is the exception**: it only captures aggregate `[Agent] AI Response` events without user identity, useful only for verifying the SDK works or for codebases where you can't modify call sites.
 
 ## Integration Patterns
 
