@@ -102,6 +102,8 @@ Prompt:
 
 ## CLI
 
+- `amplitude-ai` — Print instrumentation prompt for AI coding agents
+- `amplitude-ai --print-guide` — Print the full amplitude-ai.md guide to stdout
 - `amplitude-ai mcp` — Start the MCP server for AI coding agents
 - `amplitude-ai doctor [--json]` — Validate environment, deps, and event pipeline
 - `amplitude-ai status [--json]` — Show SDK version, installed providers, and env config
