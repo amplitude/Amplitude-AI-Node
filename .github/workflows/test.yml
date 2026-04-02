@@ -58,7 +58,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Pin openai devDependency for this matrix cell
-        run: pnpm add -D openai@${{ matrix.openai-version }} --no-frozen-lockfile
+        run: pnpm add -D openai@${{ matrix.openai-version }}
 
       - name: Build
         run: pnpm run build

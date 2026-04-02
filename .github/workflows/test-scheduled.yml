@@ -24,7 +24,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Float openai to latest v6
-        run: pnpm add -D openai@6 --no-frozen-lockfile
+        run: pnpm add -D openai@6
 
       - name: Build
         run: pnpm run build
