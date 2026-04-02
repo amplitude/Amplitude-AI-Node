@@ -125,6 +125,9 @@ Prompt:
 - Use \`MockAmplitudeAI\` for deterministic tests.
 - Call \`ai.flush()\` before returning from serverless handlers (Next.js, Lambda, Vercel).
 - \`session.run()\` relies on \`AsyncLocalStorage\`; not available in Edge Runtime.
+- **User message text:** \`trackUserMessage(content, opts?)\` — put human-readable intent in \`content\`; large JSON / RAG / pipeline state in \`opts.context\` or \`opts.eventProperties\`, not as the only \`content\`, or session labels and segmentation show raw JSON.
+- **Turns vs spans:** \`[Agent] User Message\` + \`[Agent] AI Response\` drive turn-level analytics; \`observe()\` / \`trackSpan()\` complement them — do not use spans alone for conversation metrics.
+- **Gateways / custom \`baseURL\`:** use \`trackAiMessage\` with \`usage\` fields, the **real** routed model id, and \`totalCostUsd\` when genai-prices cannot resolve the model string (install \`@pydantic/genai-prices\` for automatic cost when supported).
 
 ## CLI
 
@@ -331,13 +334,14 @@ await s.runAs(recipeAgent, async (cs) => {
 \`\`\`
 
 ### s.trackUserMessage(content, opts?) → eventId
-Track a user message. Returns the event ID.
+Track a user message. Returns the event ID. The \`content\` string becomes \`$llm_message.text\` in Amplitude — use a short natural-language line; put structured payloads in \`opts.context\` or \`opts.eventProperties\`.
 \`\`\`
 s.trackUserMessage('What recipes do you have for pancakes?');
+s.trackUserMessage('Summarize the design doc', { context: { outline: docOutline } });
 \`\`\`
 
 ### s.trackAiMessage(content, model, provider, latencyMs, opts?) → eventId
-Track an AI response. Use when provider wrappers can't auto-capture (e.g. Assistants API).
+Track an AI response. Use when provider wrappers can't auto-capture (e.g. Assistants API, gateways). Pass **token usage** from the provider response; use the **real** model id (not an internal gateway label). Set \`totalCostUsd\` in \`opts\` if automatic cost lookup cannot resolve the model.
 \`\`\`
 s.trackAiMessage('Here are some pancake recipes...', 'gpt-4o-mini', 'openai', 1250, {
   inputTokens: 150, outputTokens: 400, totalTokens: 550,

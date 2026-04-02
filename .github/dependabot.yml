@@ -4,7 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    allow:
-      - dependency-name: "@pydantic/genai-prices"
+    open-pull-requests-limit: 10
+    groups:
+      sdk-dependencies:
+        patterns:
+          - "*"
     commit-message:
       prefix: "[sdk]"

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.3.8
+Package: `@amplitude/ai` v0.3.9
 
 ## Install
 
@@ -99,6 +99,9 @@ Prompt:
 - Use `MockAmplitudeAI` for deterministic tests.
 - Call `ai.flush()` before returning from serverless handlers (Next.js, Lambda, Vercel).
 - `session.run()` relies on `AsyncLocalStorage`; not available in Edge Runtime.
+- **User message text:** `trackUserMessage(content, opts?)` — put human-readable intent in `content`; large JSON / RAG / pipeline state in `opts.context` or `opts.eventProperties`, not as the only `content`, or session labels and segmentation show raw JSON.
+- **Turns vs spans:** `[Agent] User Message` + `[Agent] AI Response` drive turn-level analytics; `observe()` / `trackSpan()` complement them — do not use spans alone for conversation metrics.
+- **Gateways / custom `baseURL`:** use `trackAiMessage` with `usage` fields, the **real** routed model id, and `totalCostUsd` when genai-prices cannot resolve the model string (install `@pydantic/genai-prices` for automatic cost when supported).
 
 ## CLI
 

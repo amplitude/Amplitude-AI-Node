@@ -1,5 +1,5 @@
 # llms-full.txt
-# @amplitude/ai 0.3.8 — Complete API Reference for AI Coding Agents
+# @amplitude/ai 0.3.9 — Complete API Reference for AI Coding Agents
 #
 # This file is the definitive guide for any coding agent instrumenting
 # a JavaScript/TypeScript AI application with @amplitude/ai.
@@ -143,13 +143,14 @@ await s.runAs(recipeAgent, async (cs) => {
 ```
 
 ### s.trackUserMessage(content, opts?) → eventId
-Track a user message. Returns the event ID.
+Track a user message. Returns the event ID. The `content` string becomes `$llm_message.text` in Amplitude — use a short natural-language line; put structured payloads in `opts.context` or `opts.eventProperties`.
 ```
 s.trackUserMessage('What recipes do you have for pancakes?');
+s.trackUserMessage('Summarize the design doc', { context: { outline: docOutline } });
 ```
 
 ### s.trackAiMessage(content, model, provider, latencyMs, opts?) → eventId
-Track an AI response. Use when provider wrappers can't auto-capture (e.g. Assistants API).
+Track an AI response. Use when provider wrappers can't auto-capture (e.g. Assistants API, gateways). Pass **token usage** from the provider response; use the **real** model id (not an internal gateway label). Set `totalCostUsd` in `opts` if automatic cost lookup cannot resolve the model.
 ```
 s.trackAiMessage('Here are some pancake recipes...', 'gpt-4o-mini', 'openai', 1250, {
   inputTokens: 150, outputTokens: 400, totalTokens: 550,
