@@ -1,0 +1,39 @@
+# Weekly: float openai to latest v6 within peer range (<7) ahead of Dependabot bumps.
+name: Test scheduled
+
+on:
+  schedule:
+    - cron: "0 15 * * 1" # Monday 15:00 UTC
+  workflow_dispatch:
+
+jobs:
+  test-latest-openai-6:
+    name: Latest openai v6 · Node 22
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Float openai to latest v6
+        run: pnpm add -D openai@6
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Type check
+        run: pnpm run test:typescript
+
+      - name: Run tests
+        run: pnpm run test:coverage
+
+      - name: Check generated docs
+        run: pnpm run check:generated

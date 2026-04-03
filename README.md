@@ -68,7 +68,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.2.1                                                                                                                                                                            |
+| Version         | 0.3.9                                                                                                                                                                            |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, @pydantic/genai-prices (cost), tiktoken or js-tiktoken (token counting) |
@@ -1668,6 +1668,14 @@ Your Application
 | **OTEL Bridge** | Third-party framework exports OTEL spans | Add exporter to existing OTEL pipeline — limited to OTEL attributes |
 
 > The first four approaches all support the full event model. Choose based on how you want to integrate — the analytics capabilities are the same. **`patch()` is the exception**: it only captures aggregate `[Agent] AI Response` events without user identity, useful only for verifying the SDK works or for codebases where you can't modify call sites.
+
+### User text, turn-level events, and gateways
+
+These rules match the Python `amplitude-ai` agent guide and affect how Agent Analytics labels sessions and computes costs:
+
+- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** or **`opts.eventProperties`**, not as the only `content`, or session titles and segmentation will show raw JSON.
+- **Turn-level vs spans** — **`[Agent] User Message`** and **`[Agent] AI Response`** (with session + turn ids) drive **turn counts** and conversation views. **`observe()`** / **`trackSpan()`** add trace detail but **do not replace** those turn events; keep a user + AI pair for each user-visible cycle unless you intentionally document otherwise.
+- **Gateways / custom `baseURL`** — If you use stock `openai` (or another client) against a proxy, the SDK may not auto-wrap that path. Call **`trackAiMessage`** with **`usage`** token fields from the response (or stream end), pass the **actual routed model id** as the model argument, and set **`totalCostUsd`** if genai-prices cannot resolve the model string. Install **`@pydantic/genai-prices`** for automatic USD estimates when model + tokens are known.
 
 ## Integration Patterns
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.9 (2026-04-03)
+
+### Documentation
+
+- **`amplitude-ai.md`**: OpenAI-compatible proxies; user `content` vs `context` / `eventProperties`; gateway **`usage`**, real **model id**, **genai-prices**, and **`totalCostUsd`**; spans vs turn-level user/AI events.
+- **README**: Same semantics under Integration Approaches; version table updated.
+
+### Repository
+
+- **CI**: Matrix job exercises multiple **`openai`** semver lines within the declared peer range; weekly scheduled test against latest **openai** v6.
+- **Dependabot**: Weekly grouped npm updates for the repo (single reviewable PR batch).
+
 ## 0.3.8 (2026-03-31)
 
 ### Bug Fixes

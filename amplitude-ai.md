@@ -8,7 +8,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 
 1. Read `package.json` for dependencies
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
-3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`
+3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL`, in-house gateway, or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
 5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
@@ -167,6 +167,23 @@ export async function POST(req: Request) {
 }
 ```
 
+**User message text vs structured pipeline data (critical for Agent Analytics UI):**
+
+- `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
+- **Do not** pass large JSON blobs, RAG context packs, or internal pipeline state as the **only** user message body — the product will show that JSON as the session title and break down charts by raw JSON.
+- **Do** pass a **short natural-language** line (the real end-user prompt, or a canonical summary for headless jobs, e.g. `"Summarize the attached design doc and list open questions"`).
+- Put structured data in the **options** object: **`context`** (object → `[Agent] Context` JSON) or **`eventProperties`** — not in place of the human-readable message.
+
+```typescript
+// GOOD: readable user line + structured state in context
+s.trackUserMessage('Summarize the attached design doc and list open questions', {
+  context: { structuredPayload: payloadRecord },
+});
+
+// BAD: entire pipeline state as the "user message" (shows up as session label / $llm_message.text)
+s.trackUserMessage(JSON.stringify(payloadRecord));
+```
+
 If multi-agent signals were detected, add delegation with `runAs`:
 
 ```typescript
@@ -204,7 +221,11 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
+**Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label. Cost estimation uses **genai-prices** (via `@pydantic/genai-prices` when installed) from model + token counts; if the model string is not a known id, **`[Agent] Cost USD`** may stay **0** or be wrong unless you set **`totalCostUsd`** in the options object.
+
 ### Step 3f: Add span tracking for orchestration
+
+**`[Agent] Span` and `observe()` / `trackSpan()` do not replace turn-level events.** Agent Analytics **turn counts** and conversation views are driven by **`[Agent] User Message`** and **`[Agent] AI Response`** (with **`[Agent] Session ID`** and **`[Agent] Turn ID`**). If you only add spans around internal completion steps, Amplitude may show **spans in a trace** but **missing or incomplete** turn-level analytics — always ensure **each user-visible cycle** has the **user + AI response** pair (or explicitly document intentional single-turn pipelines). Add spans **in addition to** that pair, not instead of it.
 
 When a parent agent delegates work to a child agent, wrap the delegation call with span tracking to measure latency and capture errors. Look for existing try/catch blocks around sub-agent execution — these are natural places to add span tracking with both success and error paths:
 
