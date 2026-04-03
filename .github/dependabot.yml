@@ -5,9 +5,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    # Group devDependencies only. Anything not in this group (e.g. optionalDependencies
+    # like zod, @modelcontextprotocol/sdk) gets its own PR so majors ship with explicit
+    # review and don't mix with lint/test/tooling bumps.
     groups:
-      sdk-dependencies:
-        patterns:
-          - "*"
+      dev-tooling:
+        dependency-type: development
     commit-message:
       prefix: "[sdk]"
