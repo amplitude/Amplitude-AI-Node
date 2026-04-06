@@ -118,4 +118,24 @@ describe('agent-dx contract', (): void => {
       'amplitude-ai://instrument-guide',
     ]);
   });
+
+  it('amplitude-ai.md has content-shaping excerpt markers', (): void => {
+    const guide = readFileSync(resolve('amplitude-ai.md'), 'utf8');
+    expect(guide).toContain('<!-- llms-excerpt:content-shaping:start -->');
+    expect(guide).toContain('<!-- llms-excerpt:content-shaping:end -->');
+  });
+
+  it('llms-full.txt includes content-shaping excerpt', (): void => {
+    const llmsFull = readFileSync(resolve('llms-full.txt'), 'utf8');
+    expect(llmsFull).toContain(
+      '## Content shaping (excerpt from amplitude-ai.md)',
+    );
+    expect(llmsFull).toContain('structuredPayload');
+  });
+
+  it('MCP server lists amplitude-ai.md in search_docs sources', (): void => {
+    const serverSrc = readFileSync(resolve('src/mcp/server.ts'), 'utf8');
+    expect(serverSrc).toContain("name: 'amplitude-ai.md'");
+    expect(serverSrc).toContain('readInstrumentGuideMarkdown');
+  });
 });

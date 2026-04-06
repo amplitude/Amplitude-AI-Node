@@ -7,6 +7,21 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const checkMode = process.argv.includes('--check');
 
+
+function extractContentShapingExcerpt(guidePath) {
+  const start = '<!-- llms-excerpt:content-shaping:start -->';
+  const end = '<!-- llms-excerpt:content-shaping:end -->';
+  const raw = readFileSync(guidePath, 'utf8');
+  const i = raw.indexOf(start);
+  const j = raw.indexOf(end);
+  if (i === -1 || j === -1 || j <= i) {
+    throw new Error(
+      `Missing content-shaping excerpt markers in ${guidePath} (expected ${start} and ${end})`,
+    );
+  }
+  return raw.slice(i + start.length, j).trim();
+}
+
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const catalog = JSON.parse(
   readFileSync(join(root, 'data', 'agent_event_catalog.json'), 'utf8'),
@@ -106,7 +121,7 @@ Resources:
 ${resources.map((uri) => `- \`${uri}\``).join('\n')}
 
 Prompt:
-- \`instrument_app\` — Full guided instrumentation with embedded SKILL.md
+- \`instrument_app\` — Short prompt; fetch \`amplitude-ai://instrument-guide\` (full amplitude-ai.md) before editing
 
 ## Canonical Patterns
 
@@ -570,7 +585,7 @@ Return the event property catalog for all or specific event types.
 Return canonical instrumentation patterns (zero-code, wrap, bound-agent, etc.).
 
 ### search_docs(query, max_results?) → SearchResults
-Keyword search over README and this file.
+Keyword search over README, this file, and amplitude-ai.md.
 
 ## MCP Resources
 
@@ -622,10 +637,23 @@ with code examples for every step. Read this for guided instrumentation.
 - "observe() not emitting spans" → observe() must be called inside session.run() for session context
 `;
 
+const contentShapingExcerpt = extractContentShapingExcerpt(
+  join(root, 'amplitude-ai.md'),
+);
+const llmsFullTxtWithExcerpt = `${llmsFullTxt}
+---
+
+## Content shaping (excerpt from amplitude-ai.md)
+
+Full guide: \`amplitude-ai.md\` or MCP resource \`amplitude-ai://instrument-guide\`.
+
+${contentShapingExcerpt}
+`;
+
 const outputs = [
   { path: join(root, 'AGENTS.md'), content: agentsMd },
   { path: join(root, 'llms.txt'), content: llmsTxt },
-  { path: join(root, 'llms-full.txt'), content: llmsFullTxt },
+  { path: join(root, 'llms-full.txt'), content: llmsFullTxtWithExcerpt },
   { path: join(root, 'mcp.schema.json'), content: `${mcpSchema}\n` },
 ];
 

@@ -379,7 +379,7 @@ Return the event property catalog for all or specific event types.
 Return canonical instrumentation patterns (zero-code, wrap, bound-agent, etc.).
 
 ### search_docs(query, max_results?) → SearchResults
-Keyword search over README and this file.
+Keyword search over README, this file, and amplitude-ai.md.
 
 ## MCP Resources
 
@@ -429,3 +429,26 @@ with code examples for every step. Read this for guided instrumentation.
 - "tool() not tracking" → tool() must be called inside session.run() to inherit context
 - "child agent events missing parentAgentId" → Use s.runAs(child, fn), not direct child calls
 - "observe() not emitting spans" → observe() must be called inside session.run() for session context
+
+---
+
+## Content shaping (excerpt from amplitude-ai.md)
+
+Full guide: `amplitude-ai.md` or MCP resource `amplitude-ai://instrument-guide`.
+
+**User message text vs structured pipeline data (critical for Agent Analytics UI):**
+
+- `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
+- **Do not** pass large JSON blobs, RAG context packs, or internal pipeline state as the **only** user message body — the product will show that JSON as the session title and break down charts by raw JSON.
+- **Do** pass a **short natural-language** line (the real end-user prompt, or a canonical summary for headless jobs, e.g. `"Summarize the attached design doc and list open questions"`).
+- Put structured data in the **options** object: **`context`** (object → `[Agent] Context` JSON) or **`eventProperties`** — not in place of the human-readable message.
+
+```typescript
+// GOOD: readable user line + structured state in context
+s.trackUserMessage('Summarize the attached design doc and list open questions', {
+  context: { structuredPayload: payloadRecord },
+});
+
+// BAD: entire pipeline state as the "user message" (shows up as session label / $llm_message.text)
+s.trackUserMessage(JSON.stringify(payloadRecord));
+```
