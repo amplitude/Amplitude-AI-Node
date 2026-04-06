@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.10 (2026-04-06)
+
+### Documentation & MCP
+
+- **`amplitude-ai://instrument-guide`**: MCP resource serves the full package-root `amplitude-ai.md` (parity with Python SDK).
+- **`instrument_app` prompt**: Points agents at that resource and `trackUserMessage` / `context` / `eventProperties` for content shaping.
+- **`search_docs`**: Includes `amplitude-ai.md` in indexed sources; **llms-full** gains the content-shaping excerpt via `generate-agent-docs.mjs`.
+- **Skill / README**: Note that the instrument guide is the full shipped markdown.
+
 ## 0.3.9 (2026-04-03)
 
 ### Documentation

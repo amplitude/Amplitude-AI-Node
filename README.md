@@ -68,7 +68,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.3.9                                                                                                                                                                            |
+| Version         | 0.3.10                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, @pydantic/genai-prices (cost), tiktoken or js-tiktoken (token counting) |
@@ -1488,7 +1488,7 @@ MCP surface:
 | `get_integration_pattern` | Return canonical instrumentation code patterns                             |
 | `validate_setup`          | Check env vars and dependency presence                                     |
 | `suggest_instrumentation` | Context-aware next steps based on your framework and provider              |
-| `search_docs`             | Full-text search across SDK documentation (README, llms-full.txt, amplitude-ai.md)          |
+| `search_docs`             | Full-text search across SDK documentation (README, llms-full.txt)          |
 
 Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`, `amplitude-ai://instrument-guide`
 
