@@ -167,6 +167,7 @@ export async function POST(req: Request) {
 }
 ```
 
+<!-- llms-excerpt:content-shaping:start -->
 **User message text vs structured pipeline data (critical for Agent Analytics UI):**
 
 - `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
@@ -183,6 +184,9 @@ s.trackUserMessage('Summarize the attached design doc and list open questions', 
 // BAD: entire pipeline state as the "user message" (shows up as session label / $llm_message.text)
 s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
+<!-- llms-excerpt:content-shaping:end -->
+
+**Enrichment vs Agent Analytics UI:** A short **`content`** line plus structured data in **`context`** / **`eventProperties`** keeps session titles and segmentation readable. Amplitude’s **server-side LLM enrichment** builds eval input primarily from **turn text** stored on each session (`input_text` / `output_text` derived from `$llm_message`). If automated evaluators must reason over the **full** structured payload, keep essential facts in **`content`**, add **scalar event properties** for key fields, or coordinate a pipeline change to merge allowlisted **`context`** into enrichment input—do not assume enrichments automatically parse large JSON blobs only present in `[Agent] Context`.
 
 If multi-agent signals were detected, add delegation with `runAs`:
 

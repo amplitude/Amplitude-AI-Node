@@ -29,7 +29,7 @@ type EventCatalog = {
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 let _catalogCache: EventCatalog | undefined;
-let _skillCache: string | undefined;
+let _instrumentGuideCache: string | undefined;
 
 const readEventCatalog = (): EventCatalog => {
   if (_catalogCache) return _catalogCache;
@@ -39,21 +39,17 @@ const readEventCatalog = (): EventCatalog => {
   return _catalogCache;
 };
 
-const readSkillGuide = (): string => {
-  if (_skillCache) return _skillCache;
-  const skillPath = join(
-    packageRoot,
-    '.cursor',
-    'skills',
-    'instrument-with-amplitude-ai',
-    'SKILL.md',
-  );
+/** Full instrumentation guide shipped as amplitude-ai.md (parity with Python MCP instrument-guide). */
+const readInstrumentGuideMarkdown = (): string => {
+  if (_instrumentGuideCache) return _instrumentGuideCache;
+  const guidePath = join(packageRoot, 'amplitude-ai.md');
   try {
-    _skillCache = readFileSync(skillPath, 'utf8');
+    _instrumentGuideCache = readFileSync(guidePath, 'utf8');
   } catch {
-    _skillCache = 'Instrument guide not found. See llms-full.txt for API reference.';
+    _instrumentGuideCache =
+      'Instrument guide not found. Ensure amplitude-ai.md is next to package.json, or see llms-full.txt.';
   }
-  return _skillCache;
+  return _instrumentGuideCache;
 };
 
 type ContentTier = 'full' | 'metadata_only' | 'customer_enriched';
@@ -315,7 +311,7 @@ const createServer = (): McpServer => {
     {
       title: 'Search Documentation',
       description:
-        'Search the SDK README and API reference for a keyword or phrase. Returns matching sections with surrounding context.',
+        'Search README.md, llms-full.txt, and amplitude-ai.md for a keyword or phrase. Returns matching sections with surrounding context.',
       inputSchema: {
         query: z.string().describe('Keyword or phrase to search for'),
         max_results: z
@@ -345,6 +341,7 @@ const createServer = (): McpServer => {
       const sources: Array<{ name: string; path: string }> = [
         { name: 'README.md', path: join(packageRoot, 'README.md') },
         { name: 'llms-full.txt', path: join(packageRoot, 'llms-full.txt') },
+        { name: 'amplitude-ai.md', path: join(packageRoot, 'amplitude-ai.md') },
       ];
 
       const results: Array<{
@@ -545,7 +542,7 @@ const createServer = (): McpServer => {
     {
       title: 'Amplitude AI Instrumentation Guide',
       description:
-        'Complete 4-phase workflow (Detect → Discover → Instrument → Verify) for instrumenting JS/TS AI apps with @amplitude/ai. Includes code examples for every step.',
+        'Full amplitude-ai.md: 4-phase workflow (Detect → Discover → Instrument → Verify) for instrumenting JS/TS AI apps with @amplitude/ai. Includes code examples for every step.',
       mimeType: 'text/markdown',
     },
     async () => ({
@@ -553,7 +550,7 @@ const createServer = (): McpServer => {
         {
           uri: MCP_RESOURCES.instrumentGuide,
           mimeType: 'text/markdown',
-          text: readSkillGuide(),
+          text: readInstrumentGuideMarkdown(),
         },
       ],
     }),
@@ -576,14 +573,17 @@ const createServer = (): McpServer => {
         typeof args?.framework === 'string' ? args.framework : 'node';
       const provider =
         typeof args?.provider === 'string' ? args.provider : 'openai';
-      const guide = readSkillGuide();
       return {
         messages: [
           {
             role: 'user',
             content: {
               type: 'text',
-              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nFollow this guide step by step:\n\n${guide}`,
+              text:
+                `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\n` +
+                'Before editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. ' +
+                'Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put large JSON / RAG / pipeline state in context or eventProperties — not JSON.stringify as the only content. ' +
+                'Then use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.',
             },
           },
         ],

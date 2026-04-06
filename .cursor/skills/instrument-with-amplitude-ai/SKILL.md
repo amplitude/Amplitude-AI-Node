@@ -10,3 +10,5 @@ Read and follow `node_modules/@amplitude/ai/amplitude-ai.md` step by step.
 That file contains the complete 4-phase workflow: **Detect → Discover → Instrument → Verify**.
 
 If the `amplitude-ai` MCP server is connected, use `scan_project`, `validate_file`, `instrument_file`, and `generate_verify_test` tools to accelerate each phase.
+
+MCP resource `amplitude-ai://instrument-guide` serves the full `amplitude-ai.md` from the package (same content as `node_modules/@amplitude/ai/amplitude-ai.md`).

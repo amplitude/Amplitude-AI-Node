@@ -80,7 +80,7 @@ Resources:
 - `amplitude-ai://instrument-guide`
 
 Prompt:
-- `instrument_app` — Full guided instrumentation with embedded SKILL.md
+- `instrument_app` — Short prompt; fetch `amplitude-ai://instrument-guide` (full amplitude-ai.md) before editing
 
 ## Canonical Patterns
 

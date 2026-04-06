@@ -1488,7 +1488,7 @@ MCP surface:
 | `get_integration_pattern` | Return canonical instrumentation code patterns                             |
 | `validate_setup`          | Check env vars and dependency presence                                     |
 | `suggest_instrumentation` | Context-aware next steps based on your framework and provider              |
-| `search_docs`             | Full-text search across SDK documentation (README, llms-full.txt)          |
+| `search_docs`             | Full-text search across SDK documentation (README, llms-full.txt, amplitude-ai.md)          |
 
 Resources: `amplitude-ai://event-schema`, `amplitude-ai://integration-patterns`, `amplitude-ai://instrument-guide`
 
