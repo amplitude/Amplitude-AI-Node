@@ -579,11 +579,7 @@ const createServer = (): McpServer => {
             role: 'user',
             content: {
               type: 'text',
-              text:
-                `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\n` +
-                'Before editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. ' +
-                'Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put large JSON / RAG / pipeline state in context or eventProperties — not JSON.stringify as the only content. ' +
-                'Then use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.',
+              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nBefore editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put large JSON / RAG / pipeline state in context or eventProperties — not JSON.stringify as the only content. Then use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.`,
             },
           },
         ],
