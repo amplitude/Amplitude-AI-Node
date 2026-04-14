@@ -227,7 +227,79 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 
 **Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label. Cost estimation uses **genai-prices** (via `@pydantic/genai-prices` when installed) from model + token counts; if the model string is not a known id, **`[Agent] Cost USD`** may stay **0** or be wrong unless you set **`totalCostUsd`** in the options object.
 
-### Step 3f: Add span tracking for orchestration
+### Step 3f: Managed and hosted agent architectures
+
+**Use this pattern when LLM calls happen server-side** — Anthropic Managed Agents, OpenAI Assistants API, agent-as-a-service platforms, or LLM gateways where you poll for results rather than calling `messages.create` directly. Provider wrappers have nothing to intercept in this architecture; use manual tracking instead.
+
+**Privacy / content mode:** For managed agents, use `contentMode: 'full'` with `redactPii: true`. The managed API already stores message content server-side, so `metadata_only` offers no additional privacy benefit — but PII redaction remains valuable.
+
+**Track user messages** sent to the managed agent:
+
+```typescript
+s.trackUserMessage(userInput);
+```
+
+**Track AI responses** from polled events, passing token counts and cost from the API response:
+
+```typescript
+s.trackAiMessage(responseText, event.model, 'anthropic', responseLatencyMs, {
+  inputTokens: event.usage.input_tokens,
+  outputTokens: event.usage.output_tokens,
+  totalCostUsd: event.usage.cost, // or omit — SDK auto-calculates from model + tokens
+});
+```
+
+**Track tool calls** observed from the managed agent's event stream. Use `trackToolCall` (not `trackSpan`) — it emits the correct `[Agent] Tool Call` event type:
+
+```typescript
+s.trackToolCall(toolEvent.name, toolEvent.durationMs, !toolEvent.isError, {
+  input: toolEvent.input,
+  output: toolEvent.output,
+});
+```
+
+**Anthropic Managed Agents example** — polling `client.beta.sessions` for events:
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk';
+import { AmplitudeAI } from '@amplitude/ai';
+
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+const agent = ai.agent('design-agent', { description: 'Anthropic managed design agent' });
+const client = new Anthropic();
+
+// Create a managed agent session
+const managedSession = await client.beta.sessions.create({
+  agent_id: 'your-anthropic-agent-id',
+  messages: [{ role: 'user', content: userInput }],
+});
+
+const session = agent.session({ userId, sessionId });
+await session.run(async (s) => {
+  s.trackUserMessage(userInput);
+
+  // Poll for completion events
+  const events = await client.beta.sessions.messages.list({
+    session_id: managedSession.id,
+  });
+
+  for (const event of events) {
+    if (event.type === 'message' && event.role === 'assistant') {
+      s.trackAiMessage(event.content[0].text, event.model, 'anthropic', event.latencyMs, {
+        inputTokens: event.usage.input_tokens,
+        outputTokens: event.usage.output_tokens,
+      });
+    } else if (event.type === 'tool_use') {
+      s.trackToolCall(event.name, event.durationMs, true, {
+        input: event.input,
+        output: event.output,
+      });
+    }
+  }
+});
+```
+
+### Step 3g: Add span tracking for orchestration
 
 **`[Agent] Span` and `observe()` / `trackSpan()` do not replace turn-level events.** Agent Analytics **turn counts** and conversation views are driven by **`[Agent] User Message`** and **`[Agent] AI Response`** (with **`[Agent] Session ID`** and **`[Agent] Turn ID`**). If you only add spans around internal completion steps, Amplitude may show **spans in a trace** but **missing or incomplete** turn-level analytics — always ensure **each user-visible cycle** has the **user + AI response** pair (or explicitly document intentional single-turn pipelines). Add spans **in addition to** that pair, not instead of it.
 
@@ -262,7 +334,7 @@ try {
 }
 ```
 
-### Step 3g: Add scoring
+### Step 3h: Add scoring
 
 If feedback handlers were detected (thumbs up/down UI), add scoring. Check whether the handler receives a `messageId` — if so, target the specific message for finer-grained scoring. Otherwise fall back to session-level scoring:
 
@@ -276,7 +348,7 @@ ai.score({
 });
 ```
 
-### Step 3h: Streaming session lifecycle
+### Step 3i: Streaming session lifecycle
 
 If the app uses streaming, the session must stay open until the stream is fully consumed:
 
@@ -298,7 +370,7 @@ return agent.session({ userId }).run(async (s) => {
 });
 ```
 
-### Step 3i: Browser-server session linking
+### Step 3j: Browser-server session linking
 
 If frontend deps were detected, extract browser IDs from request headers:
 
@@ -308,7 +380,7 @@ const deviceId = req.headers.get('x-amplitude-device-id');
 const session = agent.session({ userId, browserSessionId, deviceId });
 ```
 
-### Step 3j: Framework-specific notes
+### Step 3k: Framework-specific notes
 
 **Next.js App Router**: Session wrapping goes inside each route handler. Add `@amplitude/ai` to `serverExternalPackages` in `next.config.ts`.
 
@@ -458,6 +530,12 @@ All imported from `@amplitude/ai`:
 ### OpenAI Assistants API
 - Provider wrappers do NOT auto-instrument the Assistants API (async/polling-based)
 - Use manual tracking: `trackUserMessage()` when creating a message, `trackAiMessage()` when polling
+
+### Anthropic Managed Agents
+- Provider wrappers do NOT work — LLM calls happen in Anthropic's cloud, not your code
+- Use manual tracking: `trackUserMessage()` when sending, `trackAiMessage()` / `trackToolCall()` when polling events from `client.beta.sessions`
+- Pass `inputTokens` / `outputTokens` from the event response for cost estimation
+- See Step 3f and `examples/anthropic-managed-agents-example.ts` for a complete pattern
 
 ---
 

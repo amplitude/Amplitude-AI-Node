@@ -1607,6 +1607,19 @@ import { AmplitudeTracingProcessor } from '@amplitude/ai';
 import { AmplitudeToolLoop } from '@amplitude/ai';
 ```
 
+### Managed Agents (Anthropic)
+
+For managed / hosted agent architectures where LLM calls happen server-side and you only receive results via API:
+
+```typescript
+import { ManagedAgentTracker } from '@amplitude/ai/integrations/anthropic-managed';
+
+const tracker = new ManagedAgentTracker(session, { provider: 'anthropic' });
+tracker.trackTurn(sessionEventsFromAPI);
+```
+
+See `examples/anthropic-managed-agents-example.ts` and the coding agent guide (`amplitude-ai.md`, Step 3f) for full usage.
+
 ### CrewAI (Python-only)
 
 ```typescript
@@ -1664,6 +1677,7 @@ Your Application
 | **Express/Fastify middleware** | Web app, auto-session per request | Same as full control with automatic session lifecycle via `createAmplitudeAIMiddleware` |
 | **Swap import** | Existing codebase, incremental adoption | `new OpenAI({ amplitude: ai })` — auto-tracking per call, add sessions when ready |
 | **Wrap** | You've already created a client | `wrap(client, ai)` — instruments an existing client instance |
+| **Managed / hosted agents** | Anthropic Managed Agents, OpenAI Assistants, agent-as-a-service | Manual `trackUserMessage` + `trackAiMessage` + `trackToolCall` with tokens/cost from the API response, or `ManagedAgentTracker` adapter |
 | **Zero-code / `patch()`** | Verification or legacy codebases only | `patch({ amplitudeAI: ai })` — `[Agent] AI Response` only, no user identity, no funnels |
 | **OTEL Bridge** | Third-party framework exports OTEL spans | Add exporter to existing OTEL pipeline — limited to OTEL attributes |
 
