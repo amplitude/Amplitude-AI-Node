@@ -509,11 +509,14 @@ All imported from `@amplitude/ai`:
 
 | API | Usage |
 |-----|-------|
-| `patch({ amplitudeAI: ai })` / `unpatch()` | Zero-code instrumentation |
+| `patch({ amplitudeAI: ai })` / `unpatch()` | Zero-code instrumentation (also auto-extracts `[Agent] Tool Call` from message arrays — see below) |
 | `wrap(client, ai)` | Wrap existing provider client |
 | `injectContext()` / `extractContext(headers)` | Cross-service propagation |
 | `createAmplitudeAIMiddleware(opts)` | Express/Fastify/Hono middleware |
 | `MockAmplitudeAI` (from `@amplitude/ai/testing`) | Deterministic test double |
+| `ClaudeAgentSDKTracker` (from `@amplitude/ai/integrations/claude-agent-sdk`) | PreToolUse/PostToolUse hooks + message processing for Claude Agent SDK |
+
+**Automatic tool call extraction via `patch()`:** When using `patch()`, the SDK automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed. It detects tool calls for OpenAI Chat Completions (`role: "assistant"` with `tool_calls` + `role: "tool"` results), OpenAI Responses API (`type: "function_call"` / `type: "function_call_output"`), and Anthropic Messages (`type: "tool_use"` / `type: "tool_result"` blocks). Extracted tool calls are emitted with `latencyMs: 0` since execution timing isn't available through message inspection. For real tool latency, use `tool()` HOF, `trackToolCall()`, or the `ClaudeAgentSDKTracker` hooks.
 
 ---
 
@@ -536,6 +539,34 @@ All imported from `@amplitude/ai`:
 - Use manual tracking: `trackUserMessage()` when sending, `trackAiMessage()` / `trackToolCall()` when polling events from `client.beta.sessions`
 - Pass `inputTokens` / `outputTokens` from the event response for cost estimation
 - See Step 3f and `examples/anthropic-managed-agents-example.ts` for a complete pattern
+
+### Claude Agent SDK
+- Use `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk`
+- **Essential fields** — two fields are required for events to be useful in Amplitude:
+  - **`agentId`** (on `ai.agent()`) — identifies *which* AI feature produced the events. Without it, all events are lumped together with no way to filter by feature. This is the key the LLM Usage Application Registry maps to.
+  - **`userId` + `sessionId`** (on `agent.session()`) — ties all events into a single user conversation, powering funnels, retention, and conversation views. The session automatically emits `[Agent] Session Start` / `[Agent] Session End`.
+- `tracker.hooks(session)` returns `PreToolUse`/`PostToolUse` hooks for `ClaudeAgentOptions` — tracks tool execution with precise latency
+- `tracker.process(session, message)` processes messages from `query()` stream to track AI responses and user messages
+
+```typescript
+import { AmplitudeAI } from '@amplitude/ai';
+import { ClaudeAgentSDKTracker } from '@amplitude/ai/integrations/claude-agent-sdk';
+
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+// agentId identifies which AI feature this is — maps to the LLM Usage Application Registry
+const agent = ai.agent({ agentId: 'code-reviewer' });
+const tracker = new ClaudeAgentSDKTracker();
+
+// userId + sessionId bind all events to this user's conversation
+await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
+  for await (const message of query({
+    prompt: 'Analyze this codebase',
+    options: { hooks: tracker.hooks(s) },
+  })) {
+    tracker.process(s, message);
+  }
+});
+```
 
 ---
 

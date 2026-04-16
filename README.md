@@ -1408,6 +1408,8 @@ Available patch functions: `patchOpenAI`, `patchAnthropic`, `patchAzureOpenAI`, 
 
 `patch()` returns a `string[]` of providers where at least one supported surface was successfully patched (e.g., `['openai', 'anthropic']`), matching the Python SDK's return signature.
 
+**Automatic tool call extraction:** `patch()` now automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed for basic tool tracking. For OpenAI Chat Completions, it scans `role: "assistant"` messages with `tool_calls` arrays and correlates with `role: "tool"` result messages. For OpenAI Responses API, it extracts `type: "function_call"` and `type: "function_call_output"` entries. For Anthropic Messages, it scans `type: "tool_use"` content blocks in assistant messages and correlates with `type: "tool_result"` blocks in subsequent user messages. Extracted tool calls are emitted with `latencyMs: 0` since execution timing isn't available through message inspection.
+
 Patch surface notes:
 
 - OpenAI/Azure OpenAI: `chat.completions.create`, `chat.completions.parse`, and Responses APIs are instrumented (including streaming shapes where exposed by the SDK).
@@ -1620,6 +1622,32 @@ tracker.trackTurn(sessionEventsFromAPI);
 
 See `examples/anthropic-managed-agents-example.ts` and the coding agent guide (`amplitude-ai.md`, Step 3f) for full usage.
 
+### Claude Agent SDK
+
+Track tool calls with execution latency and AI messages from Claude Agent SDK.
+
+**Essential fields:** `agentId` (on `ai.agent()`) identifies which AI feature produced the events — it maps to the LLM Usage Application Registry. `userId` + `sessionId` (on `agent.session()`) tie all events into a single user conversation, powering funnels, retention, and conversation views. The session automatically emits `[Agent] Session Start` and `[Agent] Session End`.
+
+```typescript
+import { AmplitudeAI } from '@amplitude/ai';
+import { ClaudeAgentSDKTracker } from '@amplitude/ai/integrations/claude-agent-sdk';
+
+const ai = new AmplitudeAI({ apiKey: 'YOUR_KEY' });
+const agent = ai.agent({ agentId: 'code-reviewer' });
+const tracker = new ClaudeAgentSDKTracker();
+
+await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
+  for await (const message of query({
+    prompt: 'Analyze this codebase',
+    options: { hooks: tracker.hooks(s) },
+  })) {
+    tracker.process(s, message);
+  }
+});
+```
+
+`hooks(session)` returns `PreToolUse`/`PostToolUse` hooks for `ClaudeAgentOptions` that track tool execution with precise latency. `process(session, message)` processes messages from the `query()` stream to track AI responses and user messages.
+
 ### CrewAI (Python-only)
 
 ```typescript
@@ -1679,6 +1707,7 @@ Your Application
 | **Wrap** | You've already created a client | `wrap(client, ai)` — instruments an existing client instance |
 | **Managed / hosted agents** | Anthropic Managed Agents, OpenAI Assistants, agent-as-a-service | Manual `trackUserMessage` + `trackAiMessage` + `trackToolCall` with tokens/cost from the API response, or `ManagedAgentTracker` adapter |
 | **Zero-code / `patch()`** | Verification or legacy codebases only | `patch({ amplitudeAI: ai })` — `[Agent] AI Response` only, no user identity, no funnels |
+| **Claude Agent SDK hooks** | Apps using Claude Agent SDK `query()` | `ClaudeAgentSDKTracker` — real tool latency via PreToolUse/PostToolUse hooks, plus AI response and user message tracking |
 | **OTEL Bridge** | Third-party framework exports OTEL spans | Add exporter to existing OTEL pipeline — limited to OTEL attributes |
 
 > The first four approaches all support the full event model. Choose based on how you want to integrate — the analytics capabilities are the same. **`patch()` is the exception**: it only captures aggregate `[Agent] AI Response` events without user identity, useful only for verifying the SDK works or for codebases where you can't modify call sites.
