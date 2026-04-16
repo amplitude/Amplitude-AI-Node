@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-04-16)
 
 ### Breaking changes
 
@@ -8,14 +8,22 @@
 
 ### Features
 
-- **Auto-inherited `parentAgentId` in nested sessions** (`SessionContext`): when a new `SessionContext` is created while another session context is active (via `withSession` / `AsyncLocalStorage`), `parentAgentId` now defaults to the enclosing session's `agentId`. Middleware and multi-turn agents get the correct caller chain without having to thread `parentAgentId` through every layer. Pass `parentAgentId: null` explicitly to opt out.
-- **Auto user-message tracking on streaming responses**: `SimpleStreamingTracker` gained `setInputMessages(messages, { skipAuto? })`. When provided, `finalize()` auto-emits `$llm_user_message` events for the last user turn (respecting privacy / content-mode config), matching the non-streaming path. Providers that already call `trackUserMessage` ahead of streaming can pass `{ skipAuto: true }` to avoid duplicates.
-- **Real tool-call latency** (`src/utils/tool-latency.ts`): new internal registry records assistant-emitted `tool_use` / `tool_call` timestamps via `recordToolUsesFromResponse` and `recordToolUse`, and consumes them on the next turn via `consumeToolUseLatencyMs`. OpenAI and Anthropic providers now emit `latencyMs` on `$llm_tool_call` events instead of `0`. The registry is bounded (10k entries) and TTL-gated (10 minutes) to prevent unbounded growth.
-- **`patch({ expectedProviders, appKey })`**: optional guardrail. When callers declare which providers they expect to instrument (for example `['openai']`), the SDK logs a one-time warning if the runtime-patched set differs (missing or extra providers). Useful for catching drift between declared configuration and what your code actually imports. Warn-only — patching always runs to completion. Per-`appKey` deduplication prevents noisy logs in multi-tenant hosts.
+- **Automatic tool call extraction in `patch()`**: `[Agent] Tool Call` events are extracted from message arrays with no manual `trackToolCall()` calls. Supports OpenAI Chat Completions (`tool_calls` + `role: "tool"`), OpenAI Responses API (`function_call` / `function_call_output`), and Anthropic Messages (`tool_use` / `tool_result` blocks).
+- **Claude Agent SDK integration** (`@amplitude/ai/integrations/claude-agent-sdk`): new `ClaudeAgentSDKTracker` exposes `hooks(session)` (PreToolUse / PostToolUse hooks for precise tool latency) and `process(session, message)` (message stream processing for AI-response and user-message tracking). Structural typing keeps `@anthropic-ai/claude-agent-sdk` out of the runtime dependency graph.
+- **Real tool-call latency** (`src/utils/tool-latency.ts`): new internal registry records assistant-emitted `tool_use` / `tool_call` timestamps via `recordToolUsesFromResponse` / `recordToolUse`, and consumes them on the next turn via `consumeToolUseLatencyMs`. OpenAI and Anthropic providers now emit real `latencyMs` on `$llm_tool_call` events instead of `0`. The registry is bounded (10k entries) and TTL-gated (10 minutes).
+- **Auto-inherited `parentAgentId` in nested sessions** (`SessionContext`): when a new `SessionContext` is created while another is active (via `withSession` / `AsyncLocalStorage`), `parentAgentId` defaults to the enclosing session's `agentId`. Multi-turn agents and middleware no longer have to thread `parentAgentId` through every layer. Pass `parentAgentId: null` explicitly to opt out.
+- **Auto user-message tracking on streaming responses**: `SimpleStreamingTracker` gained `setInputMessages(messages, { skipAuto? })`. On `finalize()`, it auto-emits `$llm_user_message` events for the last user turn (respecting privacy / content-mode config) and bumps the AI-response `turnId` past those user messages, matching the non-streaming path. Providers that already call `trackUserMessage` ahead of streaming can pass `{ skipAuto: true }` to avoid duplicates.
+- **`patch({ expectedProviders, appKey })`**: optional guardrail. When callers declare which providers they expect to instrument (for example `['openai']`), the SDK logs a one-time warning if the runtime-patched set differs (missing or extra providers). Warn-only — patching always runs to completion. Per-`appKey` deduplication prevents noisy logs in multi-tenant hosts.
 
 ### Fixes
 
 - **`redactPiiPatterns` is null/non-string safe**: forwarding a non-string value (typed `null`, tool-call output that hasn't been coerced) no longer throws.
+
+## 0.4.0 (2026-04-10)
+
+### Features
+
+- **Managed agents SDK support** (`AA-150259`): extends the SDK so apps using Amplitude-managed agents can emit the full agent-analytics event model without duplicating instrumentation.
 
 ## 0.3.10 (2026-04-06)
 
