@@ -123,10 +123,10 @@ describe('sanitizeAnyContent', () => {
 });
 
 describe('PrivacyConfig', () => {
-  it('defaults to non-privacy mode', () => {
+  it('defaults to non-privacy mode with redactPii=true', () => {
     const config = new PrivacyConfig();
     expect(config.privacyMode).toBe(false);
-    expect(config.redactPii).toBe(false);
+    expect(config.redactPii).toBe(true);
   });
 
   it('throws on invalid content mode', () => {

@@ -24,6 +24,10 @@ import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import {
+  consumeToolUseLatencyMs,
+  recordToolUsesFromResponse,
+} from '../utils/tool-latency.js';
+import {
   applySessionContext,
   BaseAIProvider,
   contextFields,
@@ -241,6 +245,13 @@ export class WrappedCompletions {
         topP: requestParams.top_p as number | undefined,
       });
 
+      // Record the moment each tool_call was emitted so the next turn's
+      // matching tool result reports real latencyMs.
+      recordToolUsesFromResponse(toolCalls, {
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+      });
+
       return response as ChatCompletionResponse;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -402,6 +413,13 @@ export class WrappedCompletions {
         temperature: params.temperature as number | undefined,
         maxOutputTokens: params.max_tokens as number | undefined,
         topP: params.top_p as number | undefined,
+      });
+
+      // Record the moment each streamed tool_call was emitted so the next
+      // turn's matching tool result reports real latencyMs.
+      recordToolUsesFromResponse(state.toolCalls, {
+        sessionId: sessionCtx.sessionId,
+        agentId: sessionCtx.agentId,
       });
     }
   }
@@ -568,6 +586,13 @@ export class WrappedResponses {
         temperature: requestParams.temperature as number | undefined,
         maxOutputTokens: requestParams.max_output_tokens as number | undefined,
         topP: requestParams.top_p as number | undefined,
+      });
+
+      // Record the moment each Responses-API tool_call was emitted so the
+      // next turn's matching function_call_output reports real latencyMs.
+      recordToolUsesFromResponse(responseToolCalls, {
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
       });
 
       return response as OpenAIResponse;
@@ -928,12 +953,18 @@ function extractAndTrackToolCalls(
     const toolOutput =
       typeof msg.content === 'string' ? msg.content : undefined;
 
+    const latencyMs = consumeToolUseLatencyMs({
+      sessionId: ctx.sessionId,
+      toolUseId: toolCallId,
+      agentId: ctx.agentId,
+    });
+
     trackToolCall({
       amplitude,
       userId: ctx.userId,
       toolName,
       success: true,
-      latencyMs: 0,
+      latencyMs,
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       turnId: ctx.turnId ?? undefined,
@@ -1017,12 +1048,18 @@ function extractAndTrackResponsesToolCalls(
       | string
       | undefined;
 
+    const latencyMs = consumeToolUseLatencyMs({
+      sessionId: ctx.sessionId,
+      toolUseId: callId,
+      agentId: ctx.agentId,
+    });
+
     trackToolCall({
       amplitude,
       userId: ctx.userId,
       toolName,
       success: true,
-      latencyMs: 0,
+      latencyMs,
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       turnId: ctx.turnId ?? undefined,

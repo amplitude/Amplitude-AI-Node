@@ -101,7 +101,7 @@ Create `src/lib/amplitude.ts` (or the project's conventional lib path):
 
 **Choose `contentMode` based on privacy needs:**
 
-- **`full`** — captures full prompt/response text. Best for debugging and enrichment. Always pair with `redactPii: true` unless the customer has explicit consent.
+- **`full`** — captures full prompt/response text. Best for debugging and enrichment. `redactPii` defaults to `true` in this mode, so emails/phones/SSNs/credit cards are scrubbed automatically. Only set `redactPii: false` with explicit customer consent.
 - **`metadata_only`** — captures token counts, latency, model, cost, but no text. Use for sensitive PII or regulated data.
 - **`customer_enriched`** — no text captured by default, but the customer can send enriched summaries via `trackSessionEnrichment()`.
 

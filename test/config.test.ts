@@ -13,9 +13,9 @@ describe('AIConfig', () => {
       expect(config.debug).toBe(false);
     });
 
-    it('uses redactPii=false by default', (): void => {
+    it('uses redactPii=true by default', (): void => {
       const config = new AIConfig();
-      expect(config.redactPii).toBe(false);
+      expect(config.redactPii).toBe(true);
     });
 
     it('uses dryRun=false by default', (): void => {
@@ -93,7 +93,7 @@ describe('AIConfig', () => {
       const config = new AIConfig({ contentMode: ContentMode.FULL });
       const privacy = config.toPrivacyConfig();
       expect(privacy.privacyMode).toBe(false);
-      expect(privacy.redactPii).toBe(false);
+      expect(privacy.redactPii).toBe(true);
       expect(privacy.contentMode).toBe('full');
     });
 

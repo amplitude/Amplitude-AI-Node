@@ -12,8 +12,10 @@ import {
 import type { PrivacyConfig } from '../core/privacy.js';
 import {
   trackAiMessage,
+  trackUserMessage,
   type TrackAiMessageOptions,
 } from '../core/tracking.js';
+import { recordToolUsesFromResponse } from '../utils/tool-latency.js';
 import {
   resolveAmplitude,
   type AmplitudeLike,
@@ -202,18 +204,55 @@ export abstract class BaseAIProvider {
   createStreamingTracker(): SimpleStreamingTracker {
     return new SimpleStreamingTracker(this);
   }
+
+  /** @internal Accessor for SimpleStreamingTracker. */
+  _amplitudeClient(): AmplitudeLike {
+    return this._amplitude;
+  }
+
+  /** @internal Accessor for SimpleStreamingTracker. */
+  _privacyConfigRef(): PrivacyConfig | null {
+    return this._privacyConfig;
+  }
 }
 
 export class SimpleStreamingTracker {
   private _trackFn: TrackFn;
+  private _amplitude: AmplitudeLike;
+  private _privacyConfig: PrivacyConfig | null;
   readonly accumulator: StreamingAccumulator;
   private _modelName = 'unknown';
   private _providerName: string;
+  private _inputMessages: Array<Record<string, unknown>> = [];
+  private _autoUserTracked = false;
+  private _skipAutoUserTracking = false;
 
   constructor(provider: BaseAIProvider) {
     this._trackFn = provider.trackFn();
+    this._amplitude = provider._amplitudeClient();
+    this._privacyConfig = provider._privacyConfigRef();
     this._providerName = provider._providerName;
     this.accumulator = new StreamingAccumulator();
+  }
+
+  /**
+   * Hand the tracker the request's input conversation so that
+   * {@link SimpleStreamingTracker.finalize} emits
+   * `trackUserMessage` events for any new user-role messages
+   * (those appearing after the last assistant reply). Matches the
+   * behavior of the provider wrappers' `_trackInputMessages()`.
+   *
+   * Pass `{ skipAuto: true }` when the caller is already emitting
+   * user-message events themselves.
+   */
+  setInputMessages(
+    messages: unknown,
+    options: { skipAuto?: boolean } = {},
+  ): void {
+    this._inputMessages = Array.isArray(messages)
+      ? (messages as Array<Record<string, unknown>>)
+      : [];
+    if (options.skipAuto) this._skipAutoUserTracking = true;
   }
 
   setModel(model: string): void {
@@ -239,9 +278,10 @@ export class SimpleStreamingTracker {
 
   finalize(overrides: ProviderTrackOptions = {}): string {
     const state = this.accumulator.getState();
+    const ctx = applySessionContext(overrides);
 
-    return this._trackFn({
-      ...contextFields(overrides),
+    const eventId = this._trackFn({
+      ...contextFields(ctx),
       modelName: this._modelName,
       provider: this._providerName,
       responseContent: state.content,
@@ -257,5 +297,99 @@ export class SimpleStreamingTracker {
       providerTtfbMs: state.ttfbMs,
       isStreaming: true,
     });
+
+    // Record streamed tool_use timestamps so the next completion reports
+    // real tool-call latencyMs instead of 0.
+    recordToolUsesFromResponse(state.toolCalls, {
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+    });
+
+    // Emit trackUserMessage() for any new user-role messages in the input
+    // conversation. Mirrors provider wrappers' `_trackInputMessages()` so
+    // custom streaming integrations get zero-instrumentation parity.
+    // Idempotent across repeat finalize() calls via _autoUserTracked.
+    if (
+      !this._skipAutoUserTracking &&
+      !this._autoUserTracked &&
+      ctx.userId != null &&
+      ctx.sessionId != null &&
+      this._inputMessages.length > 0
+    ) {
+      this._autoUserTracked = true;
+      this._emitAutoUserMessages(ctx);
+    }
+
+    return eventId;
+  }
+
+  /**
+   * Track each new user-role message in the input conversation.
+   * Mirrors the provider wrappers' `_trackInputMessages()` logic —
+   * only messages appearing after the last assistant / tool reply
+   * are emitted, so repeat turns don't double-track.
+   */
+  private _emitAutoUserMessages(
+    ctx: ReturnType<typeof applySessionContext>,
+  ): void {
+    const msgs = this._inputMessages;
+    const lastReplyIdx = msgs.findLastIndex((m) => {
+      const role = m?.role;
+      return role === 'assistant' || role === 'tool';
+    });
+    const fresh = msgs.slice(lastReplyIdx + 1);
+
+    for (const msg of fresh) {
+      if (msg?.role !== 'user') continue;
+
+      const raw = msg.content;
+      let content = '';
+      if (typeof raw === 'string') {
+        content = raw;
+      } else if (Array.isArray(raw)) {
+        // Skip tool-result-only user messages (no visible text).
+        const hasToolResult = raw.some(
+          (p: unknown) =>
+            p != null &&
+            typeof p === 'object' &&
+            ((p as Record<string, unknown>).type === 'tool_result' ||
+              (p as Record<string, unknown>).type === 'function_call_output'),
+        );
+        const hasText = raw.some(
+          (p: unknown) =>
+            p != null &&
+            typeof p === 'object' &&
+            typeof (p as Record<string, unknown>).text === 'string',
+        );
+        if (hasToolResult && !hasText) continue;
+        content = raw
+          .map((p: unknown) => {
+            if (typeof p === 'string') return p;
+            const text = (p as Record<string, unknown>)?.text;
+            return typeof text === 'string' ? text : '';
+          })
+          .join('');
+      }
+      if (!content) continue;
+
+      trackUserMessage({
+        amplitude: this._amplitude,
+        userId: ctx.userId as string,
+        messageContent: content,
+        sessionId: ctx.sessionId,
+        traceId: ctx.traceId,
+        turnId: ctx.turnId ?? undefined,
+        messageSource: ctx.parentAgentId ? 'agent' : 'user',
+        agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
+        customerOrgId: ctx.customerOrgId,
+        agentVersion: ctx.agentVersion,
+        context: ctx.context,
+        env: ctx.env,
+        groups: ctx.groups,
+        eventProperties: ctx.eventProperties,
+        privacyConfig: this._privacyConfig,
+      });
+    }
   }
 }

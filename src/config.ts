@@ -62,7 +62,7 @@ export class AIConfig {
 
   constructor(options: AIConfigOptions = {}) {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
-    this.redactPii = options.redactPii ?? false;
+    this.redactPii = options.redactPii ?? true;
     this.customRedactionPatterns = options.customRedactionPatterns ?? [];
     this.onEventCallback = options.onEventCallback ?? null;
     this.debug = options.debug ?? false;
