@@ -427,7 +427,8 @@ export class WrappedMessages {
     );
     if (lastAssistantIdx < 0) return;
 
-    const assistantMsg = messages[lastAssistantIdx]!;
+    const assistantMsg = messages[lastAssistantIdx];
+    if (!assistantMsg) return;
     const assistantContent = assistantMsg.content as
       | Array<Record<string, unknown>>
       | undefined;
@@ -479,7 +480,7 @@ export class WrappedMessages {
 
         trackToolCall({
           amplitude: this._amplitude,
-          userId: ctx.userId!,
+          userId: ctx.userId as string,
           toolName,
           success: !isError,
           latencyMs: 0,

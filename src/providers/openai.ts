@@ -896,7 +896,8 @@ function extractAndTrackToolCalls(
   }
   if (assistantIdx < 0) return;
 
-  const assistantMsg = msgs[assistantIdx]!;
+  const assistantMsg = msgs[assistantIdx];
+  if (!assistantMsg) return;
   const toolCalls = assistantMsg.tool_calls as Array<{
     id?: string;
     function?: { name?: string; arguments?: string };

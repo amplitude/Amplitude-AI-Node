@@ -140,7 +140,7 @@ export class ClaudeAgentSDKTracker {
 
       let latencyMs = 0;
       if (toolUseId && this._toolTimers.has(toolUseId)) {
-        latencyMs = performance.now() - this._toolTimers.get(toolUseId)!;
+        latencyMs = performance.now() - (this._toolTimers.get(toolUseId) ?? 0);
         this._toolTimers.delete(toolUseId);
       }
 
