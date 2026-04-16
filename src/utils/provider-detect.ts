@@ -81,10 +81,7 @@ export function warnIfProviderMismatch(opts: ProviderMismatchOptions): void {
   if (unexpected.length > 0) {
     parts.push(`unexpected: ${JSON.stringify(unexpected.sort())}`);
   }
-  const message =
-    'amplitude-ai: ' +
-    parts.join('; ') +
-    '. Events will still be emitted; consider aligning your declared providers with what your code actually uses.';
+  const message = `amplitude-ai: ${parts.join('; ')}. Events will still be emitted; consider aligning your declared providers with what your code actually uses.`;
 
   getLogger().warn(message);
 }
