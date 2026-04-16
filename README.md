@@ -597,7 +597,7 @@ const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
 | Option                    | Description                                                                                                 |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `contentMode`             | `'full'` (default), `'metadata_only'`, or `'customer_enriched'`. Both `ContentMode.FULL` and `'full'` work. |
-| `redactPii`               | Redact email, phone, SSN, credit card patterns                                                              |
+| `redactPii`               | Redact email, phone, SSN, and credit-card patterns from tracked content. **Defaults to `true`** — set to `false` to opt out. |
 | `customRedactionPatterns` | Additional regex patterns for redaction                                                                     |
 | `debug`                   | Log events to stderr                                                                                        |
 | `dryRun`                  | Log without sending to Amplitude                                                                            |
@@ -670,16 +670,16 @@ Three content modes control what data is sent to Amplitude:
 
 ### FULL mode (default)
 
-Message content is captured and sent to Amplitude. When you opt in with `redactPii: true`, built-in PII redaction patterns scrub emails, phone numbers, SSNs, credit card numbers, and base64 image data before the event leaves your process:
+Message content is captured and sent to Amplitude. PII redaction is **on by default** — built-in patterns scrub emails, phone numbers, SSNs, credit card numbers, and base64 image data before the event leaves your process. Set `redactPii: false` to opt out:
 
 ```typescript
 const config = new AIConfig({
   contentMode: ContentMode.FULL,
-  redactPii: true,
+  redactPii: true, // default; pass false to disable
 });
 ```
 
-With `redactPii: true`, a message like `"Contact me at john@example.com or 555-123-4567"` is sanitized to `"Contact me at [email] or [phone]"` before being sent.
+With the default `redactPii: true`, a message like `"Contact me at john@example.com or 555-123-4567"` is sanitized to `"Contact me at [email] or [phone]"` before being sent.
 
 Built-in phone and SSN detection are currently tuned for common US formats. If you need broader international coverage, add explicit `customRedactionPatterns` for your locales.
 
@@ -1408,7 +1408,23 @@ Available patch functions: `patchOpenAI`, `patchAnthropic`, `patchAzureOpenAI`, 
 
 `patch()` returns a `string[]` of providers where at least one supported surface was successfully patched (e.g., `['openai', 'anthropic']`), matching the Python SDK's return signature.
 
-**Automatic tool call extraction:** `patch()` now automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed for basic tool tracking. For OpenAI Chat Completions, it scans `role: "assistant"` messages with `tool_calls` arrays and correlates with `role: "tool"` result messages. For OpenAI Responses API, it extracts `type: "function_call"` and `type: "function_call_output"` entries. For Anthropic Messages, it scans `type: "tool_use"` content blocks in assistant messages and correlates with `type: "tool_result"` blocks in subsequent user messages. Extracted tool calls are emitted with `latencyMs: 0` since execution timing isn't available through message inspection.
+**Automatic tool call extraction:** `patch()` automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed for basic tool tracking. For OpenAI Chat Completions, it scans `role: "assistant"` messages with `tool_calls` arrays and correlates with `role: "tool"` result messages. For OpenAI Responses API, it extracts `type: "function_call"` and `type: "function_call_output"` entries. For Anthropic Messages, it scans `type: "tool_use"` content blocks in assistant messages and correlates with `type: "tool_result"` blocks in subsequent user messages.
+
+**Real tool-call latency:** when tool execution happens between two patched LLM calls in the same session, the SDK measures latency from the timestamp at which the assistant emitted the `tool_use` / `tool_call` block to when its result is sent back on the next turn. Tool uses whose result never appears in a subsequent turn (or appear after the 10-minute TTL) fall back to `latencyMs: 0`.
+
+### Declaring expected providers (optional)
+
+If you already know which providers your app uses (for example from static config or feature flags), you can pass them to `patch()` as an optional sanity check. The SDK logs a one-time warning if the runtime-patched set drifts from what you declared — extra or missing providers — and continues patching either way:
+
+```typescript
+patch({
+  amplitudeAI: ai,
+  expectedProviders: ['openai', 'anthropic'],
+  appKey: 'my-app', // optional; used to deduplicate warnings per app
+});
+```
+
+This is purely a guardrail against accidental drift (e.g. a dependency quietly switching providers). It never blocks patching and is safe to omit.
 
 Patch surface notes:
 

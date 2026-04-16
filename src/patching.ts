@@ -19,6 +19,7 @@ import { _BedrockModule, BEDROCK_AVAILABLE } from './providers/bedrock.js';
 import { _GeminiModule, GEMINI_AVAILABLE } from './providers/gemini.js';
 import { _MistralModule, MISTRAL_AVAILABLE } from './providers/mistral.js';
 import { _OpenAIModule, OPENAI_AVAILABLE } from './providers/openai.js';
+import { warnIfProviderMismatch } from './utils/provider-detect.js';
 
 type PatchRecord = {
   module: unknown;
@@ -443,6 +444,19 @@ export function patchBedrock(options: {
 export function patch(options: {
   amplitudeAI: AmplitudeAI;
   modules?: Record<string, unknown>;
+  /**
+   * Optional list of provider names the caller expects to be patched
+   * (e.g. `['openai']`). When set, the SDK logs a one-time warning if
+   * the runtime-patched set differs. Useful for catching drift between
+   * declared configuration and what your code actually imports. No
+   * enforcement — patching always runs to completion.
+   */
+  expectedProviders?: string[] | null;
+  /**
+   * Optional application key used to deduplicate provider-mismatch
+   * warnings per application.
+   */
+  appKey?: string | null;
 }): string[] {
   const patched: string[] = [];
   const mods = options.modules ?? {};
@@ -503,6 +517,15 @@ export function patch(options: {
       // provider setup failed
     }
   }
+
+  if (options.expectedProviders && options.expectedProviders.length > 0) {
+    warnIfProviderMismatch({
+      expectedProviders: options.expectedProviders,
+      patchedProviders: patched,
+      appKey: options.appKey ?? null,
+    });
+  }
+
   return patched;
 }
 

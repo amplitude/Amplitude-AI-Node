@@ -15,6 +15,10 @@ import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import {
+  consumeToolUseLatencyMs,
+  recordToolUsesFromResponse,
+} from '../utils/tool-latency.js';
+import {
   applySessionContext,
   BaseAIProvider,
   contextFields,
@@ -193,6 +197,13 @@ export class WrappedMessages {
         topP: requestParams.top_p as number | undefined,
       });
 
+      // Record the moment each tool_use was emitted so the next turn's
+      // matching tool_result reports real latencyMs.
+      recordToolUsesFromResponse(extracted.toolCalls, {
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+      });
+
       return response as AnthropicResponse;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -337,6 +348,13 @@ export class WrappedMessages {
         maxOutputTokens: params.max_tokens as number | undefined,
         topP: params.top_p as number | undefined,
       });
+
+      // Record the moment each streamed tool_use was emitted so the next
+      // turn's matching tool_result reports real latencyMs.
+      recordToolUsesFromResponse(state.toolCalls, {
+        sessionId: sessionCtx.sessionId,
+        agentId: sessionCtx.agentId,
+      });
     }
   }
 
@@ -478,12 +496,18 @@ export class WrappedMessages {
                   .join('')
               : undefined;
 
+        const latencyMs = consumeToolUseLatencyMs({
+          sessionId: ctx.sessionId,
+          toolUseId,
+          agentId: ctx.agentId,
+        });
+
         trackToolCall({
           amplitude: this._amplitude,
           userId: ctx.userId as string,
           toolName,
           success: !isError,
-          latencyMs: 0,
+          latencyMs,
           sessionId: ctx.sessionId,
           traceId: ctx.traceId,
           turnId: ctx.turnId ?? undefined,

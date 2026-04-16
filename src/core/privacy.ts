@@ -67,7 +67,13 @@ export function redactBase64Content(value: unknown): unknown {
   return value;
 }
 
-export function redactPiiPatterns(text: string): string {
+export function redactPiiPatterns(text: unknown): string {
+  // No-op for non-string inputs. Callers sometimes forward content that
+  // hasn't been coerced to a string yet (tool outputs, typed null). This
+  // keeps PII redaction safe to enable without caller-side type gating.
+  if (typeof text !== 'string') {
+    return text as string;
+  }
   let result = text;
   result = result.replace(EMAIL_RE, '[email]');
   result = result.replace(PHONE_RE, '[phone]');
@@ -292,7 +298,7 @@ export class PrivacyConfig {
 
   constructor(options: PrivacyConfigOptions = {}) {
     this.privacyMode = options.privacyMode ?? false;
-    this.redactPii = options.redactPii ?? false;
+    this.redactPii = options.redactPii ?? true;
     this.validate = options.validate ?? false;
     this.debug = options.debug ?? false;
     this.customPatterns = options.customRedactionPatterns ?? [];
