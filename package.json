@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -42,6 +42,7 @@
     "./decorators": "./dist/decorators.js",
     "./exceptions": "./dist/exceptions.js",
     "./integrations/anthropic-managed": "./dist/integrations/anthropic-managed.js",
+    "./integrations/claude-agent-sdk": "./dist/integrations/claude-agent-sdk.js",
     "./integrations/anthropic-tools": "./dist/integrations/anthropic-tools.js",
     "./integrations/crewai": "./dist/integrations/crewai.js",
     "./integrations/langchain": "./dist/integrations/langchain.js",

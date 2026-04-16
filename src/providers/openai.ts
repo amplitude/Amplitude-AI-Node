@@ -8,7 +8,7 @@
  */
 
 import type { PrivacyConfig } from '../core/privacy.js';
-import { trackUserMessage } from '../core/tracking.js';
+import { trackToolCall, trackUserMessage } from '../core/tracking.js';
 import { getDefaultPropagateContext, injectContext } from '../propagation.js';
 import type {
   AmplitudeLike,
@@ -462,6 +462,12 @@ export class WrappedCompletions {
         privacyConfig: this._privacyConfig,
       });
     }
+
+    extractAndTrackToolCalls(msgs, {
+      amplitude: this._amplitude,
+      ctx,
+      privacyConfig: this._privacyConfig,
+    });
   }
 }
 
@@ -749,6 +755,12 @@ export class WrappedResponses {
         privacyConfig: this._privacyConfig,
       });
     }
+
+    extractAndTrackResponsesToolCalls(input, {
+      amplitude: this._amplitude,
+      ctx,
+      privacyConfig: this._privacyConfig,
+    });
   }
 }
 
@@ -844,6 +856,188 @@ function extractResponsesToolDefinitions(
   return Array.isArray(tools) && tools.length > 0
     ? (tools as Array<Record<string, unknown>>)
     : undefined;
+}
+
+interface ToolTrackContext {
+  amplitude: AmplitudeLike;
+  ctx: ProviderTrackOptions;
+  privacyConfig: PrivacyConfig | null;
+}
+
+/**
+ * Extract tool call events from OpenAI Chat Completions message arrays.
+ *
+ * In a tool-use conversation, the messages array contains:
+ *   { role: "assistant", tool_calls: [{ id, function: { name, arguments } }] }
+ *   { role: "tool", tool_call_id: "...", content: "..." }
+ *
+ * We scan for the most recent assistant->tool exchange and emit
+ * trackToolCall() for each tool result. Only the latest exchange is
+ * processed to avoid re-tracking in multi-turn loops.
+ */
+function extractAndTrackToolCalls(
+  msgs: ChatMessage[],
+  { amplitude, ctx, privacyConfig }: ToolTrackContext,
+): void {
+  if (ctx.userId == null || ctx.sessionId == null) return;
+
+  // Find the last assistant message that has tool_calls
+  let assistantIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (
+      m?.role === 'assistant' &&
+      Array.isArray(m.tool_calls) &&
+      m.tool_calls.length > 0
+    ) {
+      assistantIdx = i;
+      break;
+    }
+  }
+  if (assistantIdx < 0) return;
+
+  const assistantMsg = msgs[assistantIdx]!;
+  const toolCalls = assistantMsg.tool_calls as Array<{
+    id?: string;
+    function?: { name?: string; arguments?: string };
+  }>;
+
+  // Build lookup: tool_call_id -> { name, arguments }
+  const toolCallMap = new Map<string, { name: string; args: string }>();
+  for (const tc of toolCalls) {
+    if (tc.id && tc.function?.name) {
+      toolCallMap.set(tc.id, {
+        name: tc.function.name,
+        args: tc.function.arguments ?? '',
+      });
+    }
+  }
+
+  // Scan tool result messages immediately after the assistant
+  for (let i = assistantIdx + 1; i < msgs.length; i++) {
+    const msg = msgs[i];
+    if (msg?.role !== 'tool') break;
+
+    const toolCallId = (msg as unknown as Record<string, unknown>).tool_call_id as
+      | string
+      | undefined;
+    const matched = toolCallId ? toolCallMap.get(toolCallId) : undefined;
+    const toolName = matched?.name ?? 'unknown';
+    const toolInput = matched?.args;
+    const toolOutput =
+      typeof msg.content === 'string' ? msg.content : undefined;
+
+    trackToolCall({
+      amplitude,
+      userId: ctx.userId,
+      toolName,
+      success: true,
+      latencyMs: 0,
+      sessionId: ctx.sessionId,
+      traceId: ctx.traceId,
+      turnId: ctx.turnId ?? undefined,
+      toolInput: toolInput != null ? toolInput : undefined,
+      toolOutput,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      agentVersion: ctx.agentVersion,
+      context: ctx.context,
+      env: ctx.env,
+      groups: ctx.groups,
+      eventProperties: ctx.eventProperties,
+      privacyConfig: privacyConfig ?? undefined,
+    });
+  }
+}
+
+/**
+ * Extract tool call events from OpenAI Responses API input arrays.
+ *
+ * In the Responses API, tool results appear as entries with
+ * type: "function_call_output". We correlate with preceding
+ * type: "function_call" entries to get tool names and arguments.
+ */
+function extractAndTrackResponsesToolCalls(
+  input: unknown,
+  { amplitude, ctx, privacyConfig }: ToolTrackContext,
+): void {
+  if (ctx.userId == null || ctx.sessionId == null) return;
+  if (!Array.isArray(input)) return;
+
+  const entries = input as OpenAIResponseInput[];
+
+  // Find the last function_call entry (the most recent tool invocation)
+  let lastFnCallIdx = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e != null && typeof e !== 'string' && e.type === 'function_call') {
+      lastFnCallIdx = i;
+      break;
+    }
+  }
+  if (lastFnCallIdx < 0) return;
+
+  // Collect all function_call entries in the latest exchange
+  // (consecutive function_call + function_call_output blocks)
+  const fnCallMap = new Map<string, { name: string; args: string }>();
+  for (let i = lastFnCallIdx; i >= 0; i--) {
+    const e = entries[i];
+    if (e == null || typeof e === 'string') break;
+    if (e.type === 'function_call') {
+      const callId = (e as Record<string, unknown>).call_id as
+        | string
+        | undefined;
+      const name = (e as Record<string, unknown>).name as string | undefined;
+      const args = (e as Record<string, unknown>).arguments as
+        | string
+        | undefined;
+      if (callId && name) {
+        fnCallMap.set(callId, { name, args: args ?? '' });
+      }
+    } else if (e.type !== 'function_call_output') {
+      break;
+    }
+  }
+
+  // Now find function_call_output entries after the function_calls
+  for (let i = lastFnCallIdx + 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (e == null || typeof e === 'string') continue;
+    if (e.type !== 'function_call_output') continue;
+
+    const callId = (e as Record<string, unknown>).call_id as
+      | string
+      | undefined;
+    const matched = callId ? fnCallMap.get(callId) : undefined;
+    const toolName = matched?.name ?? 'unknown';
+    const toolInput = matched?.args;
+    const output = (e as Record<string, unknown>).output as
+      | string
+      | undefined;
+
+    trackToolCall({
+      amplitude,
+      userId: ctx.userId,
+      toolName,
+      success: true,
+      latencyMs: 0,
+      sessionId: ctx.sessionId,
+      traceId: ctx.traceId,
+      turnId: ctx.turnId ?? undefined,
+      toolInput: toolInput != null ? toolInput : undefined,
+      toolOutput: output,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      agentVersion: ctx.agentVersion,
+      context: ctx.context,
+      env: ctx.env,
+      groups: ctx.groups,
+      eventProperties: ctx.eventProperties,
+      privacyConfig: privacyConfig ?? undefined,
+    });
+  }
 }
 
 function extractResponsesUserInputs(input: unknown): string[] {

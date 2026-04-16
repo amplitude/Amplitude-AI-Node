@@ -3,7 +3,7 @@
  */
 
 import type { PrivacyConfig } from '../core/privacy.js';
-import { trackUserMessage } from '../core/tracking.js';
+import { trackToolCall, trackUserMessage } from '../core/tracking.js';
 import { getDefaultPropagateContext, injectContext } from '../propagation.js';
 import type {
   AmplitudeLike,
@@ -405,6 +405,101 @@ export class WrappedMessages {
         eventProperties: ctx.eventProperties,
         privacyConfig: this._privacyConfig,
       });
+    }
+
+    this._extractToolCalls(messages as Record<string, unknown>[], ctx);
+  }
+
+  /**
+   * Extract tool call events from Anthropic message arrays.
+   *
+   * Anthropic tool results appear as content blocks with type "tool_result"
+   * inside role: "user" messages. We correlate tool_use_id with tool_use
+   * blocks in the preceding assistant message to get tool names and inputs.
+   */
+  private _extractToolCalls(
+    messages: Record<string, unknown>[],
+    ctx: ProviderTrackOptions,
+  ): void {
+    // Find the last assistant message (same boundary as user message dedup)
+    const lastAssistantIdx = messages.findLastIndex(
+      (m) => m?.role === 'assistant',
+    );
+    if (lastAssistantIdx < 0) return;
+
+    const assistantMsg = messages[lastAssistantIdx]!;
+    const assistantContent = assistantMsg.content as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (!Array.isArray(assistantContent)) return;
+
+    // Build lookup: tool_use id -> { name, input }
+    const toolUseMap = new Map<
+      string,
+      { name: string; input: string }
+    >();
+    for (const block of assistantContent) {
+      if (block.type === 'tool_use' && block.id) {
+        toolUseMap.set(String(block.id), {
+          name: String(block.name ?? 'unknown'),
+          input:
+            typeof block.input === 'string'
+              ? block.input
+              : JSON.stringify(block.input ?? {}),
+        });
+      }
+    }
+    if (toolUseMap.size === 0) return;
+
+    // Scan messages after the assistant for tool_result blocks
+    for (let i = lastAssistantIdx + 1; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg?.role !== 'user') continue;
+      const content = msg.content;
+      if (!Array.isArray(content)) continue;
+
+      for (const block of content as Record<string, unknown>[]) {
+        if (block.type !== 'tool_result') continue;
+
+        const toolUseId = String(block.tool_use_id ?? '');
+        const matched = toolUseMap.get(toolUseId);
+        const toolName = matched?.name ?? 'unknown';
+        const toolInput = matched?.input;
+        const isError = block.is_error === true;
+        const output =
+          typeof block.content === 'string'
+            ? block.content
+            : Array.isArray(block.content)
+              ? (block.content as Record<string, unknown>[])
+                  .map((b) =>
+                    typeof b.text === 'string' ? b.text : '',
+                  )
+                  .join('')
+              : undefined;
+
+        trackToolCall({
+          amplitude: this._amplitude,
+          userId: ctx.userId!,
+          toolName,
+          success: !isError,
+          latencyMs: 0,
+          sessionId: ctx.sessionId,
+          traceId: ctx.traceId,
+          turnId: ctx.turnId ?? undefined,
+          toolInput: toolInput != null ? toolInput : undefined,
+          toolOutput: output,
+          errorMessage: isError ? output : undefined,
+          agentId: ctx.agentId,
+          parentAgentId: ctx.parentAgentId,
+          customerOrgId: ctx.customerOrgId,
+          agentVersion: ctx.agentVersion,
+          context: ctx.context,
+          env: ctx.env,
+          groups: ctx.groups,
+          eventProperties: ctx.eventProperties,
+          privacyConfig: this._privacyConfig,
+        });
+      }
     }
   }
 }
