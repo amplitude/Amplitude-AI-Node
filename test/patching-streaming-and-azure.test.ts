@@ -67,6 +67,7 @@ vi.mock('../src/context.js', () => ({
     context: { k: 'v' },
     groups: { org: 'org-1' },
   }),
+  isTrackerManaged: () => false,
 }));
 
 const { patchOpenAI, patchAzureOpenAI, patchGemini, patchBedrock, unpatch } =

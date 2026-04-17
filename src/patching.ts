@@ -6,7 +6,7 @@
  */
 
 import type { AmplitudeAI } from './client.js';
-import { getActiveContext } from './context.js';
+import { getActiveContext, isTrackerManaged } from './context.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
@@ -743,26 +743,28 @@ async function* _wrapPatchedStream(
     errorMessage = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    const latencyMs = performance.now() - startTime;
-    ai.trackAiMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId,
-      model,
-      provider: providerName,
-      latencyMs,
-      traceId: ctx.traceId,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      finishReason,
-      agentId: ctx.agentId,
-      env: ctx.env,
-      isStreaming: true,
-      isError,
-      errorMessage,
-      ..._contextExtras(ctx),
-    });
+    if (!isTrackerManaged()) {
+      const latencyMs = performance.now() - startTime;
+      ai.trackAiMessage({
+        userId: ctx.userId ?? 'unknown',
+        content,
+        sessionId: ctx.sessionId,
+        model,
+        provider: providerName,
+        latencyMs,
+        traceId: ctx.traceId,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        finishReason,
+        agentId: ctx.agentId,
+        env: ctx.env,
+        isStreaming: true,
+        isError,
+        errorMessage,
+        ..._contextExtras(ctx),
+      });
+    }
   }
 }
 
@@ -825,25 +827,27 @@ async function* _wrapPatchedAnthropicStream(
     errorMessage = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    const latencyMs = performance.now() - startTime;
-    ai.trackAiMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId,
-      model,
-      provider: 'anthropic',
-      latencyMs,
-      traceId: ctx.traceId,
-      inputTokens,
-      outputTokens,
-      finishReason,
-      agentId: ctx.agentId,
-      env: ctx.env,
-      isStreaming: true,
-      isError,
-      errorMessage,
-      ..._contextExtras(ctx),
-    });
+    if (!isTrackerManaged()) {
+      const latencyMs = performance.now() - startTime;
+      ai.trackAiMessage({
+        userId: ctx.userId ?? 'unknown',
+        content,
+        sessionId: ctx.sessionId,
+        model,
+        provider: 'anthropic',
+        latencyMs,
+        traceId: ctx.traceId,
+        inputTokens,
+        outputTokens,
+        finishReason,
+        agentId: ctx.agentId,
+        env: ctx.env,
+        isStreaming: true,
+        isError,
+        errorMessage,
+        ..._contextExtras(ctx),
+      });
+    }
   }
 }
 
@@ -897,25 +901,27 @@ async function* _wrapPatchedGeminiStream(
     errorMessage = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    ai.trackAiMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId,
-      model,
-      provider: 'gemini',
-      latencyMs: performance.now() - startTime,
-      traceId: ctx.traceId,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      finishReason,
-      agentId: ctx.agentId,
-      env: ctx.env,
-      isStreaming: true,
-      isError,
-      errorMessage,
-      ..._contextExtras(ctx),
-    });
+    if (!isTrackerManaged()) {
+      ai.trackAiMessage({
+        userId: ctx.userId ?? 'unknown',
+        content,
+        sessionId: ctx.sessionId,
+        model,
+        provider: 'gemini',
+        latencyMs: performance.now() - startTime,
+        traceId: ctx.traceId,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        finishReason,
+        agentId: ctx.agentId,
+        env: ctx.env,
+        isStreaming: true,
+        isError,
+        errorMessage,
+        ..._contextExtras(ctx),
+      });
+    }
   }
 }
 
@@ -971,25 +977,27 @@ async function* _wrapPatchedBedrockStream(
     errorMessage = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    ai.trackAiMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId,
-      model,
-      provider: 'bedrock',
-      latencyMs: performance.now() - startTime,
-      traceId: ctx.traceId,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      finishReason,
-      agentId: ctx.agentId,
-      env: ctx.env,
-      isStreaming: true,
-      isError,
-      errorMessage,
-      ..._contextExtras(ctx),
-    });
+    if (!isTrackerManaged()) {
+      ai.trackAiMessage({
+        userId: ctx.userId ?? 'unknown',
+        content,
+        sessionId: ctx.sessionId,
+        model,
+        provider: 'bedrock',
+        latencyMs: performance.now() - startTime,
+        traceId: ctx.traceId,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        finishReason,
+        agentId: ctx.agentId,
+        env: ctx.env,
+        isStreaming: true,
+        isError,
+        errorMessage,
+        ..._contextExtras(ctx),
+      });
+    }
   }
 }
 
@@ -1227,6 +1235,7 @@ function _trackCompletionResponse(
 
   const ctx = getActiveContext();
   if (ctx == null) return;
+  if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
   const usage = resp.usage as Record<string, number> | undefined;
@@ -1264,6 +1273,7 @@ function _trackAnthropicResponse(
 
   const ctx = getActiveContext();
   if (ctx == null) return;
+  if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
   const usage = resp.usage as Record<string, number> | undefined;
@@ -1298,6 +1308,7 @@ function _trackCompletionError(
 ): void {
   const ctx = getActiveContext();
   if (ctx == null) return;
+  if (isTrackerManaged()) return;
 
   const opts = requestOpts as Record<string, unknown> | undefined;
   const latencyMs = performance.now() - startTime;
@@ -1327,6 +1338,7 @@ function _trackGeminiResponse(
 
   const ctx = getActiveContext();
   if (ctx == null) return;
+  if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
   const respObj = (resp.response ?? resp) as Record<string, unknown>;
@@ -1362,6 +1374,7 @@ function _trackBedrockResponse(
 
   const ctx = getActiveContext();
   if (ctx == null) return;
+  if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
   const output = resp.output as Record<string, unknown> | undefined;
@@ -1403,6 +1416,7 @@ function _trackResponsesResponse(
   if (response == null || typeof response !== 'object') return;
   const ctx = getActiveContext();
   if (ctx == null) return;
+  if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
   const usage = resp.usage as Record<string, unknown> | undefined;
@@ -1498,25 +1512,27 @@ async function* _wrapPatchedResponsesStream(
     errorMessage = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    ai.trackAiMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId,
-      model,
-      provider: providerName,
-      latencyMs: performance.now() - startTime,
-      traceId: ctx.traceId,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      finishReason,
-      agentId: ctx.agentId,
-      env: ctx.env,
-      isStreaming: true,
-      isError,
-      errorMessage,
-      ..._contextExtras(ctx),
-    });
+    if (!isTrackerManaged()) {
+      ai.trackAiMessage({
+        userId: ctx.userId ?? 'unknown',
+        content,
+        sessionId: ctx.sessionId,
+        model,
+        provider: providerName,
+        latencyMs: performance.now() - startTime,
+        traceId: ctx.traceId,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        finishReason,
+        agentId: ctx.agentId,
+        env: ctx.env,
+        isStreaming: true,
+        isError,
+        errorMessage,
+        ..._contextExtras(ctx),
+      });
+    }
   }
 }
 

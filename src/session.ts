@@ -64,6 +64,14 @@ export interface SessionOptions {
    * - `undefined` (default) — auto-detect: flush if a serverless environment is detected
    */
   autoFlush?: boolean;
+  /**
+   * Emit `[Agent] Session End` when `run()` finishes.
+   *
+   * - `true` (default) — always emit session-end
+   * - `false` — suppress, useful for middleware/delegation contexts
+   *   where the caller manages session lifecycle externally
+   */
+  trackSessionEnd?: boolean;
 }
 
 export class Session {
@@ -74,6 +82,9 @@ export class Session {
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
   readonly autoFlush: boolean;
+  readonly trackSessionEnd: boolean;
+  /** @internal Set by `runAs()` to suppress auto user-message tracking in delegation contexts. */
+  _skipAutoUserTracking = false;
   private _agent: BoundAgent;
   private _enrichments: SessionEnrichments | null = null;
   private _sessionReplayId: string | null;
@@ -88,6 +99,7 @@ export class Session {
       opts.browserSessionId ??
       (agent._defaults.browserSessionId as string | null);
     this.autoFlush = opts.autoFlush ?? isServerless();
+    this.trackSessionEnd = opts.trackSessionEnd ?? true;
     this._agent = agent;
     this._sessionReplayId =
       this.deviceId && this.browserSessionId
@@ -118,6 +130,7 @@ export class Session {
         this.browserSessionId ?? (defaults.browserSessionId as string | null),
       nextTurnIdFn: () => ai._nextTurnId(sid),
       amplitude: ai.amplitude,
+      skipAutoUserTracking: this._skipAutoUserTracking,
     });
   }
 
@@ -144,12 +157,13 @@ export class Session {
    * after the handler returns.
    */
   async run<T>(fn: (session: Session) => T | Promise<T>): Promise<T> {
+    if (this.traceId == null) this.traceId = randomUUID();
     const ctx = this._buildSessionContext();
     try {
       const result = await _sessionStorage.run(ctx, () => fn(this));
       return result;
     } finally {
-      this._autoEnd();
+      if (this.trackSessionEnd) this._autoEnd();
       if (this.autoFlush) {
         await this._flush();
       }
@@ -167,11 +181,12 @@ export class Session {
     if (this.autoFlush) {
       _warnRunSyncAutoFlush();
     }
+    if (this.traceId == null) this.traceId = randomUUID();
     const ctx = this._buildSessionContext();
     try {
       return _sessionStorage.run(ctx, () => fn(this));
     } finally {
-      this._autoEnd();
+      if (this.trackSessionEnd) this._autoEnd();
     }
   }
 
@@ -202,8 +217,10 @@ export class Session {
       userId: this.userId,
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
+      trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
+    childSession._skipAutoUserTracking = true;
     const ctx = childSession._buildSessionContext();
     return await _sessionStorage.run(ctx, () => fn(childSession));
   }
@@ -220,8 +237,10 @@ export class Session {
       userId: this.userId,
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
+      trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
+    childSession._skipAutoUserTracking = true;
     const ctx = childSession._buildSessionContext();
     return _sessionStorage.run(ctx, () => fn(childSession));
   }

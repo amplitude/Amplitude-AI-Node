@@ -4,7 +4,7 @@
  * Provides shared tracking logic and session context integration.
  */
 
-import { getActiveContext } from '../context.js';
+import { getActiveContext, isTrackerManaged } from '../context.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
@@ -160,6 +160,8 @@ export abstract class BaseAIProvider {
   }
 
   protected _track(opts: Omit<TrackAiMessageOptions, 'amplitude'>): string {
+    if (isTrackerManaged()) return '';
+
     const merged = applySessionContext({
       userId: opts.userId,
       sessionId: opts.sessionId,
@@ -277,6 +279,8 @@ export class SimpleStreamingTracker {
   }
 
   finalize(overrides: ProviderTrackOptions = {}): string {
+    if (isTrackerManaged()) return '';
+
     const state = this.accumulator.getState();
     const ctx = applySessionContext(overrides);
 
@@ -309,8 +313,10 @@ export class SimpleStreamingTracker {
     // conversation. Mirrors provider wrappers' `_trackInputMessages()` so
     // custom streaming integrations get zero-instrumentation parity.
     // Idempotent across repeat finalize() calls via _autoUserTracked.
+    const activeCtx = getActiveContext();
     if (
       !this._skipAutoUserTracking &&
+      !activeCtx?.skipAutoUserTracking &&
       !this._autoUserTracked &&
       ctx.userId != null &&
       ctx.sessionId != null &&

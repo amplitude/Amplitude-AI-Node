@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 (2026-04-17)
+
+### Features
+
+- **`trackerManaged` deduplication**: `SessionContext` gains a `trackerManaged` flag and a new `isTrackerManaged()` helper. When a higher-level tracker (e.g. `AgentAnalyticsTracker`) sets `trackerManaged: true`, all `patch()`-level provider wrappers and `BaseAIProvider._track()` / `SimpleStreamingTracker.finalize()` silently skip event emission — eliminating duplicate `[Agent] AI Response` events.
+- **`skipAutoUserTracking` in delegation contexts**: `runAs()` / `runAsSync()` now set `skipAutoUserTracking` on the child session context, suppressing auto-emitted `[Agent] User Message` events for internal delegation messages that are not real user input.
+- **Auto-generated `traceId`**: `Session.run()` and `runSync()` now auto-generate a `traceId` (UUID v4) if none is set, ensuring every request within a session gets a unique trace for grouping.
+- **`trackSessionEnd` option**: `SessionOptions` gains `trackSessionEnd?: boolean` (default `true`). When `false`, `run()` / `runSync()` skip emitting `[Agent] Session End`. `runAs()` / `runAsSync()` default to `false` to prevent spurious session-end events from delegation contexts.
+
 ## 0.5.0 (2026-04-16)
 
 ### Breaking changes

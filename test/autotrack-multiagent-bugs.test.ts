@@ -245,10 +245,9 @@ describe('Multi-agent autotrack bug reproduction', () => {
       );
       console.log(`  Shopping-agent user messages: ${shoppingUserMsgs.length} (expected: 1 manual only)`);
 
-      // After fix: recipe-agent gets 1 manual + 1 autotrack (first create
-      // has [system, user] so user msg IS after last assistant).
-      // Subsequent iterations don't re-track because user msg is before assistant/tool.
-      expect(recipeUserMsgs.length).toBe(2);
+      // After fix: recipe-agent is inside runAs(), so skipAutoUserTracking
+      // is set — only the 1 manual trackUserMessage is emitted.
+      expect(recipeUserMsgs.length).toBe(1);
 
       // Shopping-agent: 1 manual only.  The first create() for the shopping
       // agent is NOT in this test path (only the sub-agent loop runs create).
@@ -408,9 +407,10 @@ describe('Multi-agent autotrack bug reproduction', () => {
       console.log(`\nAI Responses with finish_reason=tool_calls: ${toolCallAiResponses.length}`);
       console.log(`Of those, with empty $llm_message.text: ${emptyTextResponses.length}`);
 
-      // After fix: autotrack only fires once per agent (first create with
-      // user message after system), so total = 2 manual + 2 autotrack = 4
-      expect(userMsgEvents.length).toBe(4);
+      // After fix: autotrack fires for shopping-agent (first create with
+      // [system, user]), but NOT for recipe-agent (inside runAs, so
+      // skipAutoUserTracking is set). Total = 2 manual + 1 autotrack = 3.
+      expect(userMsgEvents.length).toBe(3);
 
       // After fix: tool_calls responses should NOT have $llm_message at all
       expect(emptyTextResponses.length).toBe(0);

@@ -51,6 +51,7 @@ export type {
 export {
   SessionContext,
   getActiveContext,
+  isTrackerManaged,
   runWithContext,
   runWithContextAsync,
 } from './context.js';
