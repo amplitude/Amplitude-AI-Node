@@ -18,6 +18,8 @@ export interface SessionContextOptions {
   browserSessionId?: string | null;
   nextTurnIdFn?: (() => number) | null;
   amplitude?: AmplitudeLike | null;
+  trackerManaged?: boolean;
+  skipAutoUserTracking?: boolean;
 }
 
 export class SessionContext {
@@ -36,6 +38,8 @@ export class SessionContext {
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
   readonly amplitude: AmplitudeLike | null;
+  readonly trackerManaged: boolean;
+  readonly skipAutoUserTracking: boolean;
   private readonly _nextTurnIdFn: (() => number) | null;
 
   constructor(options: SessionContextOptions) {
@@ -66,6 +70,8 @@ export class SessionContext {
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;
     this.amplitude = options.amplitude ?? null;
+    this.trackerManaged = options.trackerManaged ?? false;
+    this.skipAutoUserTracking = options.skipAutoUserTracking ?? false;
     this._nextTurnIdFn = options.nextTurnIdFn ?? null;
   }
 
@@ -79,6 +85,17 @@ const _sessionStorage = new AsyncLocalStorage<SessionContext | null>();
 
 export function getActiveContext(): SessionContext | null {
   return _sessionStorage.getStore() ?? null;
+}
+
+/**
+ * Return `true` when a higher-level tracker (e.g. `AgentAnalyticsTracker`)
+ * owns event emission for this context.
+ *
+ * `patch()` provider wrappers check this to avoid duplicate events.
+ */
+export function isTrackerManaged(): boolean {
+  const ctx = _sessionStorage.getStore();
+  return ctx != null && ctx.trackerManaged;
 }
 
 export function runWithContext<T>(ctx: SessionContext, fn: () => T): T {

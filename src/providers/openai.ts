@@ -7,6 +7,7 @@
  * to track AI response events via Amplitude.
  */
 
+import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { trackToolCall, trackUserMessage } from '../core/tracking.js';
 import { getDefaultPropagateContext, injectContext } from '../propagation.js';
@@ -445,6 +446,8 @@ export class WrappedCompletions {
   ): void {
     if (!shouldTrackInputMessages) return;
     if (ctx.userId == null || ctx.sessionId == null) return;
+    const activeCtx = getActiveContext();
+    if (activeCtx?.skipAutoUserTracking) return;
     if (!Array.isArray(messages)) return;
 
     const msgs = messages as ChatMessage[];
@@ -759,6 +762,8 @@ export class WrappedResponses {
   ): void {
     if (!shouldTrackInputMessages) return;
     if (ctx.userId == null || ctx.sessionId == null) return;
+    const activeCtx = getActiveContext();
+    if (activeCtx?.skipAutoUserTracking) return;
     for (const text of extractResponsesUserInputs(input)) {
       if (!text) continue;
       trackUserMessage({

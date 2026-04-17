@@ -2,6 +2,7 @@
  * Anthropic provider wrapper with automatic tracking.
  */
 
+import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { trackToolCall, trackUserMessage } from '../core/tracking.js';
 import { getDefaultPropagateContext, injectContext } from '../propagation.js';
@@ -379,6 +380,8 @@ export class WrappedMessages {
   ): void {
     if (!shouldTrackInputMessages) return;
     if (ctx.userId == null || ctx.sessionId == null) return;
+    const activeCtx = getActiveContext();
+    if (activeCtx?.skipAutoUserTracking) return;
     if (!Array.isArray(messages)) return;
 
     // In agent loops each create() re-sends the full conversation.

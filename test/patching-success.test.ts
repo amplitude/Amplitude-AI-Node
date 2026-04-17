@@ -56,6 +56,7 @@ vi.mock('../src/context.js', () => ({
     agentId: 'agent-1',
     env: 'test',
   }),
+  isTrackerManaged: () => false,
 }));
 
 const { patchOpenAI, unpatchOpenAI, unpatch } = await import(
