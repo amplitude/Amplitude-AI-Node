@@ -5,16 +5,8 @@ import {
   runWithContext,
 } from '../src/context.js';
 import { getActiveContext } from '../src/context.js';
-import {
-  EVENT_AI_RESPONSE,
-  EVENT_SESSION_END,
-  EVENT_USER_MESSAGE,
-  PROP_AGENT_ID,
-  PROP_SESSION_ID,
-} from '../src/core/constants.js';
+import { EVENT_SESSION_END } from '../src/core/constants.js';
 import { MockAmplitudeAI } from '../src/testing.js';
-
-type Props = Record<string, unknown>;
 
 describe('isTrackerManaged()', () => {
   it('returns false when no session context is active', (): void => {
