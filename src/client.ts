@@ -38,8 +38,7 @@ function _warnShortId(event: AmplitudeEvent, logger: Logger): void {
       if (!_shortIdWarned.has(val)) {
         _shortIdWarned.add(val);
         logger.warn(
-          `AmplitudeAI: ${field}="${val}" is shorter than ${_MIN_ID_LENGTH} characters. ` +
-            `Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
+          `AmplitudeAI: ${field}="${val}" is shorter than ${_MIN_ID_LENGTH} characters. Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
         );
       }
     }
