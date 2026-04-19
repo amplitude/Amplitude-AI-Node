@@ -35,8 +35,9 @@ function _warnShortId(event: AmplitudeEvent, logger: Logger): void {
   for (const field of ['user_id', 'device_id'] as const) {
     const val = (event as Record<string, unknown>)[field];
     if (typeof val === 'string' && val.length > 0 && val.length < _MIN_ID_LENGTH) {
-      if (!_shortIdWarned.has(val)) {
-        _shortIdWarned.add(val);
+      const key = `${field}:${val}`;
+      if (!_shortIdWarned.has(key)) {
+        _shortIdWarned.add(key);
         logger.warn(
           `AmplitudeAI: ${field}="${val}" is shorter than ${_MIN_ID_LENGTH} characters. Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
         );
