@@ -52,19 +52,18 @@ export class MockAmplitudeAI extends AmplitudeAI {
       config,
     });
 
+    // Replace the underlying track with in-memory capture.  The base
+    // constructor already ran _installTrackHook (which wraps the
+    // original no-op track), so we must re-install the hook so it
+    // wraps our capture function instead.  This keeps debug/dryRun
+    // output, short-ID warnings, and the default delivery callback
+    // functional in mock mode.
     this._amplitude.track = (event) => {
       this.events.push(event as MockEvent);
     };
-
-    if (
-      this._config.debug ||
-      this._config.dryRun ||
-      this._config.onEventCallback != null
-    ) {
-      (
-        this as unknown as { _installTrackHook: () => void }
-      )._installTrackHook?.();
-    }
+    (
+      this as unknown as { _installTrackHook: () => void }
+    )._installTrackHook();
   }
 
   getEvents(eventType?: string): MockEvent[] {

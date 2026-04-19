@@ -348,18 +348,18 @@ describe('AmplitudeAI.status', () => {
 });
 
 describe('Debug and dry-run hooks', () => {
-  it('debug mode logs events to stderr', () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('debug mode logs events to console.warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const mock = new MockAmplitudeAI(new AIConfig({ debug: true }));
 
     mock.trackUserMessage({ userId: 'u1', content: 'Hello', sessionId: 's1' });
 
-    expect(errSpy).toHaveBeenCalled();
-    errSpy.mockRestore();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it('dryRun mode logs but does not forward to amplitude.track', () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const trackFn = vi.fn();
     const mockAmplitude = {
       track: trackFn,
@@ -375,11 +375,11 @@ describe('Debug and dry-run hooks', () => {
     ai.trackUserMessage({ userId: 'u1', content: 'Hello', sessionId: 's1' });
 
     expect(trackFn).not.toHaveBeenCalled();
-    errSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('logs both debug and dryRun output when both enabled', () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const trackFn = vi.fn();
     const mockAmplitude = {
       track: trackFn,
@@ -395,8 +395,8 @@ describe('Debug and dry-run hooks', () => {
     ai.trackUserMessage({ userId: 'u1', content: 'Hello', sessionId: 's1' });
 
     expect(trackFn).not.toHaveBeenCalled();
-    expect(errSpy).toHaveBeenCalledTimes(2);
-    errSpy.mockRestore();
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    warnSpy.mockRestore();
   });
 });
 

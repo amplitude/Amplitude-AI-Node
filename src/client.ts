@@ -24,9 +24,32 @@ import type {
 } from './types.js';
 import { calculateCost } from './utils/costs.js';
 import { formatDebugLine, formatDryRunLine } from './utils/debug.js';
+import { type Logger, getLogger } from './utils/logger.js';
 import { tryRequire } from './utils/resolve-module.js';
 
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
+const _MIN_ID_LENGTH = 5;
+const _shortIdWarned = new Set<string>();
+
+function _warnShortId(event: AmplitudeEvent, logger: Logger): void {
+  for (const field of ['user_id', 'device_id'] as const) {
+    const val = (event as Record<string, unknown>)[field];
+    if (typeof val === 'string' && val.length > 0 && val.length < _MIN_ID_LENGTH) {
+      if (!_shortIdWarned.has(val)) {
+        _shortIdWarned.add(val);
+        logger.warn(
+          `AmplitudeAI: ${field}="${val}" is shorter than ${_MIN_ID_LENGTH} characters. ` +
+            `Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
+        );
+      }
+    }
+  }
+}
+
+/** @internal Exposed for testing only. */
+export function _resetShortIdWarned(): void {
+  _shortIdWarned.clear();
+}
 
 /**
  * Thin mutable wrapper around a potentially-frozen Amplitude client.
@@ -145,13 +168,12 @@ export class AmplitudeAI {
     this._privacyConfig = this._config.toPrivacyConfig();
     setDefaultPropagateContext(this._config.propagateContext);
 
-    if (
-      this._config.debug ||
-      this._config.dryRun ||
-      this._config.onEventCallback != null
-    ) {
-      this._installTrackHook();
-    }
+    // Always install the track hook — it handles the default delivery
+    // callback, short-ID warnings, debug/dry-run output, and the
+    // user-provided onEventCallback.  Previously this was gated on
+    // debug/dryRun/onEventCallback being set, but the default callback
+    // and short-ID warnings must always be active.
+    this._installTrackHook();
 
     this._installTrackCounter();
     _registerExitHook();
@@ -171,13 +193,17 @@ export class AmplitudeAI {
     const debug = this._config.debug;
     const dryRun = this._config.dryRun;
     const onEvent = this._config.onEventCallback;
+    const logger = getLogger();
     const clientWithConfig = this._amplitude as AmplitudeClientLike & {
       configuration?: { callback?: (...args: unknown[]) => void };
     };
     const existingCallback = clientWithConfig.configuration?.callback;
-    let callbackHandledByTransport = false;
 
-    if (onEvent != null && clientWithConfig.configuration != null) {
+    // Install a transport-level callback that fires after delivery.
+    // This handles: (a) the default delivery warning on 4xx/5xx,
+    // (b) the user-provided onEventCallback, and (c) the existing
+    // callback on the Amplitude client — composed together.
+    if (clientWithConfig.configuration != null) {
       clientWithConfig.configuration.callback = (...args: unknown[]) => {
         const event = args[0];
         const statusCode = typeof args[1] === 'number' ? args[1] : 0;
@@ -185,34 +211,50 @@ export class AmplitudeAI {
         if (typeof existingCallback === 'function') {
           try {
             existingCallback(...args);
-          } catch {
-            // preserve hook behavior even if customer callback throws
+          } catch (e) {
+            logger.debug(`Existing delivery callback raised: ${e}`);
           }
         }
-        try {
-          onEvent(event, statusCode, message);
-        } catch {
-          // swallow callback errors to avoid disrupting tracking
+        if (onEvent != null) {
+          try {
+            onEvent(event, statusCode, message);
+          } catch (e) {
+            logger.debug(`AI SDK onEventCallback raised: ${e}`);
+          }
+        }
+        // Default delivery callback — surface failures that the base
+        // SDK only logs at INFO (invisible under most configurations).
+        if (statusCode >= 400) {
+          const eventType =
+            (event as Record<string, unknown> | null)?.event_type ?? 'unknown';
+          const userId =
+            (event as Record<string, unknown> | null)?.user_id ?? '';
+          logger.warn(
+            `AmplitudeAI: event delivery failed — HTTP ${statusCode} for event=${String(eventType)} user_id=${String(userId)}: ${message ?? ''}`,
+          );
         }
       };
-      callbackHandledByTransport = true;
     }
 
     this._amplitude.track = (event: AmplitudeEvent) => {
+      // Short-ID warning — Amplitude server rejects user_id/device_id
+      // shorter than 5 characters with HTTP 400.
+      _warnShortId(event, logger);
+
       if (debug) {
-        console.error(formatDebugLine(event));
+        console.warn(formatDebugLine(event));
       }
       if (dryRun) {
-        console.error(formatDryRunLine(event));
+        console.warn(formatDryRunLine(event));
       }
       if (!dryRun) {
         originalTrack(event);
       }
-      if (onEvent != null && (!callbackHandledByTransport || dryRun)) {
+      if (onEvent != null && dryRun) {
         try {
-          onEvent(event, dryRun ? -1 : 0, dryRun ? 'dry-run' : null);
-        } catch {
-          // swallow callback errors to avoid disrupting tracking
+          onEvent(event, -1, 'dry-run');
+        } catch (e) {
+          logger.debug(`AI SDK onEventCallback raised in dry-run: ${e}`);
         }
       }
     };

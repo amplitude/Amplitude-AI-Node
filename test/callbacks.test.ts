@@ -57,6 +57,7 @@ describe('onEventCallback configuration', (): void => {
       track: vi.fn(),
       flush: vi.fn(),
       shutdown: vi.fn(),
+      configuration: { callback: undefined as ((...args: unknown[]) => void) | undefined },
     };
     const ai = new AmplitudeAI({
       amplitude,
@@ -65,9 +66,14 @@ describe('onEventCallback configuration', (): void => {
 
     ai.trackUserMessage({ userId: 'u1', content: 'hello', sessionId: 's1' });
 
+    // onEventCallback now fires via transport callback, simulate it
+    const cb = amplitude.configuration.callback;
+    expect(cb).toBeDefined();
+    cb!({ event_type: '[Agent] User Message', user_id: 'u1' }, 200, 'OK');
+
     expect(onEvent).toHaveBeenCalled();
     const last = onEvent.mock.calls[onEvent.mock.calls.length - 1];
-    expect(last?.[1]).toBe(0);
+    expect(last?.[1]).toBe(200);
   });
 
   it('passes dry-run status marker when dryRun is enabled', (): void => {
