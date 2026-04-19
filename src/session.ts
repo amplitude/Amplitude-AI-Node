@@ -280,7 +280,7 @@ export class Session {
         }
       }
     } catch (e) {
-      getLogger().debug(`Failed to flush after session ${this.sessionId}: ${e}`);
+      getLogger().warn(`Failed to flush after session ${this.sessionId}: ${e}`);
     }
   }
 

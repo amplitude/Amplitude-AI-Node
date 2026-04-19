@@ -108,7 +108,7 @@ describe('N1: TrackingProxy — frozen amplitude objects', () => {
   });
 
   it('debug hook works with frozen amplitude object', (): void => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const amp = Object.freeze({
       track: vi.fn(),
       flush: vi.fn(),
@@ -120,12 +120,12 @@ describe('N1: TrackingProxy — frozen amplitude objects', () => {
     });
     ai.trackUserMessage({ userId: 'u1', content: 'debug-test', sessionId: 's1' });
 
-    expect(errSpy).toHaveBeenCalled();
-    errSpy.mockRestore();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it('dryRun hook works with frozen amplitude object', (): void => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const originalTrack = vi.fn();
     const amp = Object.freeze({
       track: originalTrack,
@@ -139,7 +139,7 @@ describe('N1: TrackingProxy — frozen amplitude objects', () => {
     ai.trackUserMessage({ userId: 'u1', content: 'dry', sessionId: 's1' });
 
     expect(originalTrack).not.toHaveBeenCalled();
-    errSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('onEventCallback configuration.callback is set on proxy, not original', (): void => {

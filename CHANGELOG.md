@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 (2026-04-17)
+
+### Features
+
+- **Default delivery callback.** `AmplitudeAI` now installs a built-in transport-level callback that logs a `warn` for HTTP 4xx/5xx responses. The base `@amplitude/analytics-node` SDK logs all responses at info level regardless of status, making delivery failures invisible. Callers can still provide `onEventCallback` in `AIConfig` to add custom handling.
+- **Short identifier warning.** `track()` emits a one-time `warn` when `user_id` or `device_id` is shorter than 5 characters. Amplitude's server rejects these with HTTP 400 ("Invalid id length"), which was previously silent.
+- **Session flush failures elevated to `warn`.** `Session._flush()` now logs flush errors at `warn` (previously `debug`). Flush failures risk data loss and should be visible.
+- **Debug/dry-run output uses `console.warn`.** Previously used `console.error`, which could trigger error monitoring alerts for non-error diagnostic output.
+- **`_installTrackHook` always active.** The track hook (responsible for the default delivery callback, short-ID warnings, and debug/dry-run output) now runs unconditionally. Previously it was only installed when `debug`, `dryRun`, or `onEventCallback` was set.
+- **Callback error logging.** Composed delivery callbacks now log errors at `debug` instead of silently swallowing them.
+
 ## 0.5.1 (2026-04-17)
 
 ### Features

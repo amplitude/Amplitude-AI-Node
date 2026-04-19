@@ -97,27 +97,32 @@ describe('_installTrackHook', () => {
       errSpy.mockRestore();
     });
 
-    it('onEventCallback fires directly when transport callback not available', (): void => {
+    it('onEventCallback fires via transport callback when configuration available', (): void => {
       const amp = {
         track: vi.fn(),
         flush: vi.fn(),
+        configuration: { callback: undefined as ((...args: unknown[]) => void) | undefined },
       };
       const onEvent = vi.fn();
-      const ai = new AmplitudeAI({
+      const _ai = new AmplitudeAI({
         amplitude: amp,
         config: new AIConfig({ onEventCallback: onEvent }),
       });
-      ai.trackUserMessage({ userId: 'u1', content: 'direct', sessionId: 's1' });
+
+      // Simulate the transport invoking the callback after delivery
+      const cb = amp.configuration.callback;
+      expect(cb).toBeDefined();
+      cb!({ event_type: '[Agent] User Message', user_id: 'u1' }, 200, 'OK');
 
       expect(onEvent).toHaveBeenCalledOnce();
       const [event, code, msg] = onEvent.mock.calls[0];
       expect(event).toHaveProperty('event_type');
-      expect(code).toBe(0);
-      expect(msg).toBeNull();
+      expect(code).toBe(200);
+      expect(msg).toBe('OK');
     });
 
     it('dryRun fires onEventCallback with code -1 and "dry-run" message', (): void => {
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const onEvent = vi.fn();
       const ai = new AmplitudeAI({
         amplitude: { track: vi.fn(), flush: vi.fn() },
@@ -129,7 +134,7 @@ describe('_installTrackHook', () => {
       const [, code, msg] = onEvent.mock.calls[0];
       expect(code).toBe(-1);
       expect(msg).toBe('dry-run');
-      errSpy.mockRestore();
+      warnSpy.mockRestore();
     });
 
     it('swallows onEventCallback errors in track hook', (): void => {
