@@ -599,6 +599,9 @@ function _makeCompletionWrapper(
   return (original, ...args) => {
     const startTime = performance.now();
 
+    // Intentionally emit user-message and tool-call events before the API call.
+    // These record user intent — if original() throws synchronously,
+    // _trackCompletionError records the failure alongside these events.
     try {
       _extractAndTrackToolCalls(amplitudeAI, args[0], providerName);
       _trackInputUserMessages(amplitudeAI, args[0], providerName);
@@ -1395,11 +1398,15 @@ function _patchOpenAIClass(
   return didPatch;
 }
 
+const _AMP_INSTANCE_PATCHED = Symbol.for('amplitude.instancePatched');
+
 function _patchInstanceCompletions(
   instance: Record<string, unknown>,
   amplitudeAI: AmplitudeAI,
   providerName: string,
 ): void {
+  if ((instance as Record<symbol, unknown>)[_AMP_INSTANCE_PATCHED]) return;
+  (instance as Record<symbol, unknown>)[_AMP_INSTANCE_PATCHED] = true;
   try {
     const chat = instance.chat as Record<string, unknown> | undefined;
     const completions = chat?.completions as
@@ -1448,11 +1455,14 @@ function _makeResponsesWrapper(
   return (original, ...args) => {
     const startTime = performance.now();
 
+    // Intentionally emit user-message and tool-call events before the API call.
+    // These record user intent — if original() throws synchronously,
+    // _trackCompletionError records the failure alongside these events.
     try {
       _extractResponsesToolCallsFromInput(amplitudeAI, args[0]);
       _trackResponsesUserMessages(amplitudeAI, args[0]);
     } catch {
-      // Pre-call extraction is best-effort
+      // Pre-call extraction is best-effort — never block the actual API call
     }
 
     let result: unknown;
