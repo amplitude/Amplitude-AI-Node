@@ -1578,7 +1578,7 @@ function _probeNestedPrototype(
           probe = Object.create(Ctor.prototype);
         }
       }
-      _probeCache.set(cls, probe);
+      _probeCache.set(cls, probe!);
     }
 
     let current: unknown = probe;
@@ -2342,9 +2342,9 @@ function _extractResponsesToolCallsFromInput(
       customerOrgId: ctx.customerOrgId,
       env: ctx.env,
       toolName: tc.name,
-      toolCallId: callId,
-      toolOutput: result.output,
-      latencyMs: latencyMs > 0 ? latencyMs : undefined,
+      output: result.output,
+      latencyMs: latencyMs > 0 ? latencyMs : 0,
+      success: true,
     });
   }
 }

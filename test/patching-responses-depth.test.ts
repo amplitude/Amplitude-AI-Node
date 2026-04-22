@@ -270,8 +270,8 @@ describe('Responses API full event depth', () => {
     expect(ai.trackToolCall).toHaveBeenCalledTimes(1);
     const tc = ai.trackToolCall.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(tc.toolName).toBe('search');
-    expect(tc.toolCallId).toBe('call-1');
-    expect(tc.toolOutput).toBe('result');
+    expect(tc.toolName).toBe('search');
+    expect(tc.output).toBe('result');
   });
 
   it('skipAutoUserTracking suppresses user message and tool call tracking', async (): Promise<void> => {
