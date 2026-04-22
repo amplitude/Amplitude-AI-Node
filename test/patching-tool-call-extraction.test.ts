@@ -498,4 +498,26 @@ describe('auto [Agent] Tool Call extraction', () => {
     const call = ai.trackToolCall.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.latencyMs).toBeGreaterThan(15);
   });
+
+  it('OpenAI: user messages get messageSource="user" when no parentAgentId', async (): Promise<void> => {
+    mockOpenAICreate.mockResolvedValueOnce({
+      model: 'gpt-4o',
+      choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 2 },
+    });
+
+    patchOpenAI({ amplitudeAI: ai as never });
+
+    const client = new (FakeOpenAI as unknown as new () => {
+      chat: { completions: { create: (o: unknown) => Promise<unknown> } };
+    })();
+
+    await client.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+
+    const call = ai.trackUserMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.messageSource).toBe('user');
+  });
 });

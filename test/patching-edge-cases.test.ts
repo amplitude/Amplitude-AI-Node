@@ -809,4 +809,51 @@ describe('patching edge cases', () => {
     expect(call.isError).toBe(true);
     expect(call.provider).toBe('bedrock');
   });
+
+  it('OpenAI: user messages get messageSource="agent" when parentAgentId is set', async (): Promise<void> => {
+    mockCreate.mockResolvedValueOnce({
+      model: 'gpt-4o',
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 2 },
+    });
+    patchOpenAI({ amplitudeAI: ai as never });
+
+    const client = new (FakeOpenAI as unknown as new () => { chat: { completions: { create: (o: unknown) => Promise<unknown> } } })();
+    await client.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'delegated task' }],
+    });
+
+    expect(ai.trackUserMessage).toHaveBeenCalled();
+    const call = ai.trackUserMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.messageSource).toBe('agent');
+  });
+
+  it('OpenAI: user messages get messageSource="user" when parentAgentId is null', async (): Promise<void> => {
+    mockGetActiveContext.mockReturnValue({
+      userId: 'user-1',
+      sessionId: 'session-1',
+      traceId: 'trace-1',
+      agentId: 'agent-1',
+      parentAgentId: null,
+      customerOrgId: 'org-1',
+      env: 'test',
+    });
+    mockCreate.mockResolvedValueOnce({
+      model: 'gpt-4o',
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 2 },
+    });
+    patchOpenAI({ amplitudeAI: ai as never });
+
+    const client = new (FakeOpenAI as unknown as new () => { chat: { completions: { create: (o: unknown) => Promise<unknown> } } })();
+    await client.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'direct question' }],
+    });
+
+    expect(ai.trackUserMessage).toHaveBeenCalled();
+    const call = ai.trackUserMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.messageSource).toBe('user');
+  });
 });

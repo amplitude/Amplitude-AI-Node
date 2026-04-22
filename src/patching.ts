@@ -2198,6 +2198,7 @@ function _trackOpenAIUserMessages(
       parentAgentId: ctx.parentAgentId,
       customerOrgId: ctx.customerOrgId,
       env: ctx.env,
+      messageSource: ctx.parentAgentId ? 'agent' : 'user',
     });
   }
 }
@@ -2250,6 +2251,7 @@ function _trackAnthropicUserMessages(
       parentAgentId: ctx.parentAgentId,
       customerOrgId: ctx.customerOrgId,
       env: ctx.env,
+      messageSource: ctx.parentAgentId ? 'agent' : 'user',
     });
   }
 }
