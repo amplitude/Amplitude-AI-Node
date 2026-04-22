@@ -375,7 +375,7 @@ describe('patching edge cases', () => {
       stream: true,
     })) as AsyncIterable<unknown>;
 
-    for await (const _c of stream) {}
+    for await (const _c of stream) { /* drain */ }
 
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.isStreaming).toBe(true);
@@ -395,7 +395,7 @@ describe('patching edge cases', () => {
     const response = (await (model.generateContentStream as (o: unknown) => Promise<unknown>)({
       contents: [],
     })) as { stream: AsyncIterable<unknown> };
-    for await (const _c of response.stream) {}
+    for await (const _c of response.stream) { /* drain */ }
 
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.provider).toBe('gemini');
@@ -413,7 +413,7 @@ describe('patching edge cases', () => {
 
     const client = new (FakeBedrockClient as unknown as new () => { send: (c: unknown) => Promise<unknown> })();
     const resp = (await client.send(new ConverseStreamCommand())) as { stream: AsyncIterable<unknown> };
-    for await (const _e of resp.stream) {}
+    for await (const _e of resp.stream) { /* drain */ }
 
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.content).toBe('hi');
@@ -698,7 +698,7 @@ describe('patching edge cases', () => {
     })) as AsyncIterable<unknown>;
 
     await expect(async () => {
-      for await (const _c of stream) {}
+      for await (const _c of stream) { /* drain */ }
     }).rejects.toThrow('stream broke');
 
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -721,7 +721,7 @@ describe('patching edge cases', () => {
     })) as AsyncIterable<unknown>;
 
     await expect(async () => {
-      for await (const _e of stream) {}
+      for await (const _e of stream) { /* drain */ }
     }).rejects.toThrow('anthropic stream error');
 
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -744,7 +744,7 @@ describe('patching edge cases', () => {
     })) as { stream: AsyncIterable<unknown> };
 
     await expect(async () => {
-      for await (const _c of response.stream) {}
+      for await (const _c of response.stream) { /* drain */ }
     }).rejects.toThrow('gemini stream error');
 
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -765,7 +765,7 @@ describe('patching edge cases', () => {
       model: 'gpt-4o', messages: [], stream: true,
     })) as AsyncIterable<unknown>;
 
-    for await (const _c of stream) {}
+    for await (const _c of stream) { /* drain */ }
 
     expect(ai.trackAiMessage).not.toHaveBeenCalled();
   });
@@ -783,7 +783,7 @@ describe('patching edge cases', () => {
       model: 'claude-3-5-sonnet', messages: [], stream: true,
     })) as AsyncIterable<unknown>;
 
-    for await (const _e of stream) {}
+    for await (const _e of stream) { /* drain */ }
 
     expect(ai.trackAiMessage).not.toHaveBeenCalled();
   });
