@@ -1400,6 +1400,16 @@ function _patchOpenAIClass(
 
 const _AMP_INSTANCE_PATCHED = Symbol.for('amplitude.instancePatched');
 
+/**
+ * Patches completions/responses methods directly on an SDK *instance*.
+ * Used as the constructor-Proxy fallback when prototype-level patching
+ * isn't possible (plain-object namespaces with no shared prototype).
+ *
+ * NOTE: These per-instance wrappers survive unpatch(). unpatch() restores
+ * the class export (so new instances are clean), but instances created
+ * while patched retain their wrapped methods. Test teardown should not
+ * rely on unpatch() clearing already-constructed instances.
+ */
 function _patchInstanceCompletions(
   instance: Record<string, unknown>,
   amplitudeAI: AmplitudeAI,
@@ -1555,6 +1565,11 @@ function _getNestedPrototype(
 // Cache for _probeNestedPrototype — avoids re-instantiating the full SDK
 // constructor multiple times for the same class (e.g. OpenAI is probed
 // for both chat.completions and responses).
+// Keyed by class object (WeakMap), so entries are GC'd if the class is
+// dropped. The cache is never actively invalidated — if a host app
+// monkey-patches or replaces the SDK class *after* the first probe,
+// subsequent calls return a stale prototype. In practice classes are
+// process-singletons, so this is not a concern.
 const _probeCache = new WeakMap<object, Record<string, unknown>>();
 
 /**
@@ -2002,8 +2017,7 @@ function _trackResponsesResponse(
   const toolCalls = _extractResponsesOutputToolCalls(resp.output);
   const systemPrompt = typeof opts?.instructions === 'string'
     ? opts.instructions : undefined;
-  const toolDefs = Array.isArray(opts?.tools) && (opts.tools as unknown[]).length > 0
-    ? (opts.tools as Array<Record<string, unknown>>) : undefined;
+  const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
 
   ai.trackAiMessage({
     userId: ctx.userId ?? 'unknown',
@@ -2123,8 +2137,7 @@ async function* _wrapPatchedResponsesStream(
       const toolCalls = _extractResponsesOutputToolCalls(completedOutput);
       const systemPrompt = typeof opts?.instructions === 'string'
         ? opts.instructions : undefined;
-      const toolDefs = Array.isArray(opts?.tools) && (opts.tools as unknown[]).length > 0
-        ? (opts.tools as Array<Record<string, unknown>>) : undefined;
+      const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
 
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
@@ -2233,17 +2246,7 @@ function _trackResponsesUserMessages(
   if (input == null) return;
 
   if (typeof input === 'string') {
-    ai.trackUserMessage({
-      userId: ctx.userId ?? 'unknown',
-      content: input,
-      sessionId: ctx.sessionId ?? '',
-      traceId: ctx.traceId,
-      agentId: ctx.agentId,
-      parentAgentId: ctx.parentAgentId,
-      customerOrgId: ctx.customerOrgId,
-      env: ctx.env,
-      messageSource: ctx.parentAgentId ? 'agent' : 'user',
-    });
+    _emitUserMessage(ai, ctx, input);
     return;
   }
 
@@ -2257,49 +2260,19 @@ function _trackResponsesUserMessages(
 
   for (const entry of newEntries) {
     if (typeof entry === 'string') {
-      ai.trackUserMessage({
-        userId: ctx.userId ?? 'unknown',
-        content: entry,
-        sessionId: ctx.sessionId ?? '',
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        parentAgentId: ctx.parentAgentId,
-        customerOrgId: ctx.customerOrgId,
-        env: ctx.env,
-        messageSource: ctx.parentAgentId ? 'agent' : 'user',
-      });
+      _emitUserMessage(ai, ctx, entry);
       continue;
     }
     if (entry.role !== 'user') continue;
     const content = entry.content;
     if (typeof content === 'string') {
-      ai.trackUserMessage({
-        userId: ctx.userId ?? 'unknown',
-        content,
-        sessionId: ctx.sessionId ?? '',
-        traceId: ctx.traceId,
-        agentId: ctx.agentId,
-        parentAgentId: ctx.parentAgentId,
-        customerOrgId: ctx.customerOrgId,
-        env: ctx.env,
-        messageSource: ctx.parentAgentId ? 'agent' : 'user',
-      });
+      _emitUserMessage(ai, ctx, content);
     } else if (Array.isArray(content)) {
       for (const part of content) {
         const text = typeof part === 'string' ? part
           : (part as Record<string, unknown>)?.text;
         if (typeof text === 'string' && text.length > 0) {
-          ai.trackUserMessage({
-            userId: ctx.userId ?? 'unknown',
-            content: text,
-            sessionId: ctx.sessionId ?? '',
-            traceId: ctx.traceId,
-            agentId: ctx.agentId,
-            parentAgentId: ctx.parentAgentId,
-            customerOrgId: ctx.customerOrgId,
-            env: ctx.env,
-            messageSource: ctx.parentAgentId ? 'agent' : 'user',
-          });
+          _emitUserMessage(ai, ctx, text);
         }
       }
     }
@@ -2525,18 +2498,38 @@ function _trackInputUserMessages(
   }
 }
 
+interface _UserMsgCtx {
+  userId?: string | null;
+  sessionId?: string | null;
+  traceId?: string | null;
+  agentId?: string | null;
+  parentAgentId?: string | null;
+  customerOrgId?: string | null;
+  env?: string | null;
+}
+
+function _emitUserMessage(
+  ai: AmplitudeAI,
+  ctx: _UserMsgCtx,
+  content: string,
+): void {
+  ai.trackUserMessage({
+    userId: ctx.userId ?? 'unknown',
+    content,
+    sessionId: ctx.sessionId ?? '',
+    traceId: ctx.traceId,
+    agentId: ctx.agentId,
+    parentAgentId: ctx.parentAgentId,
+    customerOrgId: ctx.customerOrgId,
+    env: ctx.env,
+    messageSource: ctx.parentAgentId ? 'agent' : 'user',
+  });
+}
+
 function _trackOpenAIUserMessages(
   ai: AmplitudeAI,
   messages: Array<Record<string, unknown>>,
-  ctx: {
-    userId?: string | null;
-    sessionId?: string | null;
-    traceId?: string | null;
-    agentId?: string | null;
-    parentAgentId?: string | null;
-    customerOrgId?: string | null;
-    env?: string | null;
-  },
+  ctx: _UserMsgCtx,
 ): void {
   const lastReplyIdx = messages.findLastIndex(
     (m) => m?.role === 'assistant' || m?.role === 'tool',
@@ -2547,32 +2540,14 @@ function _trackOpenAIUserMessages(
     if (msg?.role !== 'user') continue;
     const content = msg.content;
     if (typeof content !== 'string' || content.length === 0) continue;
-    ai.trackUserMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId ?? '',
-      traceId: ctx.traceId,
-      agentId: ctx.agentId,
-      parentAgentId: ctx.parentAgentId,
-      customerOrgId: ctx.customerOrgId,
-      env: ctx.env,
-      messageSource: ctx.parentAgentId ? 'agent' : 'user',
-    });
+    _emitUserMessage(ai, ctx, content);
   }
 }
 
 function _trackAnthropicUserMessages(
   ai: AmplitudeAI,
   messages: Array<Record<string, unknown>>,
-  ctx: {
-    userId?: string | null;
-    sessionId?: string | null;
-    traceId?: string | null;
-    agentId?: string | null;
-    parentAgentId?: string | null;
-    customerOrgId?: string | null;
-    env?: string | null;
-  },
+  ctx: _UserMsgCtx,
 ): void {
   const lastReplyIdx = messages.findLastIndex(
     (m) => m?.role === 'assistant',
@@ -2600,17 +2575,7 @@ function _trackAnthropicUserMessages(
         ? rawContent
         : '';
     if (!content) continue;
-    ai.trackUserMessage({
-      userId: ctx.userId ?? 'unknown',
-      content,
-      sessionId: ctx.sessionId ?? '',
-      traceId: ctx.traceId,
-      agentId: ctx.agentId,
-      parentAgentId: ctx.parentAgentId,
-      customerOrgId: ctx.customerOrgId,
-      env: ctx.env,
-      messageSource: ctx.parentAgentId ? 'agent' : 'user',
-    });
+    _emitUserMessage(ai, ctx, content);
   }
 }
 
@@ -2634,7 +2599,9 @@ function _toolLatencyKey(
   return `${sessionId ?? ''}|${toolUseId}|${agentId ?? ''}`;
 }
 
-// Full-map walk is fine here — registry is capped at _TOOL_LATENCY_MAX (10k)
+// Full-map walk is fine here — registry is capped at _TOOL_LATENCY_MAX (10k).
+// Amortized: only sweeps every 32 _recordToolUses calls to avoid per-call overhead.
+let _evictOpCount = 0;
 function _evictExpiredToolLatencies(now: number): void {
   for (const [key, entry] of _toolLatencyRegistry) {
     if (now - entry.time > _TOOL_LATENCY_TTL_MS) {
@@ -2650,7 +2617,7 @@ function _recordToolUses(
 ): void {
   if (!toolCalls || toolCalls.length === 0) return;
   const now = performance.now();
-  _evictExpiredToolLatencies(now);
+  if (++_evictOpCount % 32 === 0) _evictExpiredToolLatencies(now);
   for (const tc of toolCalls) {
     const id = (tc.id as string) ?? '';
     if (!id) continue;
@@ -2902,4 +2869,5 @@ function _contextExtras(ctx: {
 /** @internal Test-only: clear the tool latency registry. */
 export function _resetToolLatencyForTests(): void {
   _toolLatencyRegistry.clear();
+  _evictOpCount = 0;
 }
