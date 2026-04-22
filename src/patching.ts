@@ -11,6 +11,7 @@ import {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
 } from './core/constants.js';
+import { calculateCost } from './utils/costs.js';
 import {
   _AnthropicModule,
   ANTHROPIC_AVAILABLE,
@@ -129,7 +130,9 @@ export function patchAnthropic(options: {
   if (!AnthropicClass?.prototype) return;
 
   let didPatch = false;
-  const messagesProto = _getNestedPrototype(AnthropicClass, ['messages']);
+  const messagesProto =
+    _getNestedPrototype(AnthropicClass, ['messages']) ??
+    _probeNestedPrototype(AnthropicClass, ['messages']);
   if (messagesProto) {
     const target = messagesProto as Record<string, unknown>;
     _patchMethod(
@@ -222,7 +225,7 @@ export function patchGemini(options: {
             if (result instanceof Promise) {
               return result
                 .then((response) => {
-                  _trackGeminiResponse(amplitudeAI, response, startTime);
+                  _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
                   return response;
                 })
                 .catch((err) => {
@@ -319,7 +322,9 @@ export function patchMistral(options: {
     | undefined;
   if (!MistralClass?.prototype) return;
 
-  const chatProto = _getNestedPrototype(MistralClass, ['chat']);
+  const chatProto =
+    _getNestedPrototype(MistralClass, ['chat']) ??
+    _probeNestedPrototype(MistralClass, ['chat']);
   let didPatch = false;
   if (chatProto) {
     const target = chatProto as Record<string, unknown>;
@@ -530,7 +535,7 @@ export function patch(options: {
 }
 
 export function unpatch(): void {
-  for (const record of _activePatches.reverse()) {
+  for (const record of [..._activePatches].reverse()) {
     const target = record.module as Record<string, unknown>;
     target[record.method] = record.original;
   }
@@ -593,7 +598,30 @@ function _makeCompletionWrapper(
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
     const startTime = performance.now();
-    const result = original(...args);
+
+    // Intentionally emit user-message and tool-call events before the API call.
+    // These record user intent — if original() throws synchronously,
+    // _trackCompletionError records the failure alongside these events.
+    try {
+      _extractAndTrackToolCalls(amplitudeAI, args[0], providerName);
+      _trackInputUserMessages(amplitudeAI, args[0], providerName);
+    } catch {
+      // Pre-call extraction is best-effort — never block the actual API call
+    }
+
+    let result: unknown;
+    try {
+      result = original(...args);
+    } catch (syncErr) {
+      _trackCompletionError(
+        amplitudeAI,
+        syncErr,
+        startTime,
+        args[0],
+        providerName,
+      );
+      throw syncErr;
+    }
     if (result instanceof Promise) {
       return result
         .then((response) => {
@@ -712,12 +740,16 @@ async function* _wrapPatchedStream(
     return;
   }
 
+  const req = requestOpts as Record<string, unknown> | undefined;
   let content = '';
-  let model = 'unknown';
+  let model = String(req?.model ?? 'unknown');
   let finishReason = '';
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let totalTokens: number | undefined;
+  let reasoningTokens: number | undefined;
+  let cachedTokens: number | undefined;
+  const streamToolCalls: Array<Record<string, unknown>> = [];
   let isError = false;
   let errorMessage: string | undefined;
 
@@ -728,13 +760,49 @@ async function* _wrapPatchedStream(
       const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
       if (delta?.content != null) content += String(delta.content);
       if (c.model != null) model = String(c.model);
+
+      const deltaToolCalls = delta?.tool_calls as
+        | Array<Record<string, unknown>>
+        | undefined;
+      if (Array.isArray(deltaToolCalls)) {
+        for (const call of deltaToolCalls) {
+          const idx = call.index as number | undefined;
+          if (idx == null) continue;
+          const id = call.id as string | undefined;
+          const fn = call.function as Record<string, unknown> | undefined;
+          streamToolCalls[idx] ??= {
+            type: 'function',
+            id: id ?? '',
+            function: { name: '', arguments: '' },
+          };
+          const entry = streamToolCalls[idx] as Record<string, unknown>;
+          if (id) entry.id = id;
+          const entryFn = entry.function as Record<string, unknown>;
+          if (fn?.name != null) entryFn.name = fn.name;
+          if (fn?.arguments) {
+            entryFn.arguments =
+              String(entryFn.arguments ?? '') + String(fn.arguments);
+          }
+        }
+      }
+
       if (choices?.[0]?.finish_reason != null)
         finishReason = String(choices[0].finish_reason);
-      const usage = c.usage as Record<string, number> | undefined;
+      const usage = c.usage as Record<string, unknown> | undefined;
       if (usage != null) {
-        inputTokens = usage.prompt_tokens;
-        outputTokens = usage.completion_tokens;
-        totalTokens = usage.total_tokens;
+        inputTokens = usage.prompt_tokens as number | undefined;
+        outputTokens = usage.completion_tokens as number | undefined;
+        totalTokens = usage.total_tokens as number | undefined;
+        const completionDetails = usage.completion_tokens_details as
+          | Record<string, number>
+          | undefined;
+        const promptDetails = usage.prompt_tokens_details as
+          | Record<string, number>
+          | undefined;
+        if (completionDetails?.reasoning_tokens != null)
+          reasoningTokens = completionDetails.reasoning_tokens;
+        if (promptDetails?.cached_tokens != null)
+          cachedTokens = promptDetails.cached_tokens;
       }
       yield chunk;
     }
@@ -745,6 +813,25 @@ async function* _wrapPatchedStream(
   } finally {
     if (!isTrackerManaged()) {
       const latencyMs = performance.now() - startTime;
+      const filteredToolCalls = streamToolCalls.filter(Boolean);
+
+      let costUsd: number | null = null;
+      if (inputTokens != null && outputTokens != null) {
+        try {
+          costUsd = calculateCost({
+            modelName: model,
+            inputTokens,
+            outputTokens,
+            reasoningTokens: reasoningTokens ?? 0,
+            cacheReadInputTokens: cachedTokens ?? 0,
+            defaultProvider:
+              providerName === 'azure-openai' ? 'openai' : providerName,
+          });
+        } catch {
+          // cost calculation is best-effort
+        }
+      }
+
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -756,7 +843,17 @@ async function* _wrapPatchedStream(
         inputTokens,
         outputTokens,
         totalTokens,
+        reasoningTokens,
+        cacheReadTokens: cachedTokens,
+        totalCostUsd: costUsd,
         finishReason,
+        toolCalls:
+          filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
+        systemPrompt: _extractSystemPrompt(req),
+        toolDefinitions: _extractToolDefinitions(req),
+        temperature: req?.temperature as number | undefined,
+        maxOutputTokens: (req?.max_tokens ?? req?.max_completion_tokens) as number | undefined,
+        topP: req?.top_p as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -764,6 +861,12 @@ async function* _wrapPatchedStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -781,10 +884,14 @@ async function* _wrapPatchedAnthropicStream(
   }
   const req = requestOpts as Record<string, unknown> | undefined;
   let content = '';
+  let reasoningContent = '';
   let model = String(req?.model ?? 'unknown');
   let finishReason = '';
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
+  let cacheRead = 0;
+  let cacheCreation = 0;
+  const streamToolCalls: Array<Record<string, unknown>> = [];
   let isError = false;
   let errorMessage: string | undefined;
   try {
@@ -797,17 +904,56 @@ async function* _wrapPatchedAnthropicStream(
         if (typeof usage?.input_tokens === 'number') {
           inputTokens = usage.input_tokens;
         }
+        if (typeof usage?.cache_read_input_tokens === 'number') {
+          cacheRead = usage.cache_read_input_tokens;
+        }
+        if (typeof usage?.cache_creation_input_tokens === 'number') {
+          cacheCreation = usage.cache_creation_input_tokens;
+        }
+      }
+      if (c.type === 'content_block_start') {
+        const block = c.content_block as
+          | Record<string, unknown>
+          | undefined;
+        if (block?.type === 'tool_use') {
+          streamToolCalls.push({
+            type: 'function',
+            id: block.id,
+            function: {
+              name: String(block.name ?? ''),
+              arguments:
+                typeof block.input === 'string'
+                  ? block.input
+                  : JSON.stringify(block.input ?? {}),
+            },
+          });
+        }
       }
       if (c.type === 'content_block_delta') {
         const delta = c.delta as Record<string, unknown> | undefined;
-        if (typeof delta?.text === 'string') content += delta.text;
+        if (delta?.type === 'text_delta' && typeof delta?.text === 'string') {
+          content += delta.text;
+        } else if (
+          delta?.type === 'thinking_delta' &&
+          typeof delta?.thinking === 'string'
+        ) {
+          reasoningContent += delta.thinking;
+        } else if (
+          delta?.type === 'input_json_delta' &&
+          typeof delta?.partial_json === 'string'
+        ) {
+          const lastTc = streamToolCalls[streamToolCalls.length - 1];
+          if (lastTc) {
+            const fn = lastTc.function as Record<string, unknown>;
+            fn.arguments = String(fn.arguments ?? '') + delta.partial_json;
+          }
+        }
       }
       if (c.type === 'message_delta') {
         const delta = c.delta as Record<string, unknown> | undefined;
         if (typeof delta?.stop_reason === 'string') {
           finishReason = delta.stop_reason;
         } else if (typeof c.stop_reason === 'string') {
-          // Backward-compatible fallback for alternate SDK payload shapes.
           finishReason = c.stop_reason;
         }
         const usage = c.usage as Record<string, unknown> | undefined;
@@ -829,6 +975,28 @@ async function* _wrapPatchedAnthropicStream(
   } finally {
     if (!isTrackerManaged()) {
       const latencyMs = performance.now() - startTime;
+      const rawInput = inputTokens ?? 0;
+      const normalizedInput =
+        cacheRead || cacheCreation
+          ? rawInput + cacheRead + cacheCreation
+          : rawInput;
+
+      let costUsd: number | null = null;
+      if (inputTokens != null && outputTokens != null) {
+        try {
+          costUsd = calculateCost({
+            modelName: model,
+            inputTokens: normalizedInput,
+            outputTokens,
+            cacheReadInputTokens: cacheRead,
+            cacheCreationInputTokens: cacheCreation,
+            defaultProvider: 'anthropic',
+          });
+        } catch {
+          // cost calculation is best-effort
+        }
+      }
+
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -837,9 +1005,19 @@ async function* _wrapPatchedAnthropicStream(
         provider: 'anthropic',
         latencyMs,
         traceId: ctx.traceId,
-        inputTokens,
+        inputTokens: normalizedInput || undefined,
         outputTokens,
+        cacheReadTokens: cacheRead || undefined,
+        totalCostUsd: costUsd,
         finishReason,
+        toolCalls:
+          streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        reasoningContent: reasoningContent || undefined,
+        systemPrompt: _extractAnthropicSystemPrompt(req?.system),
+        toolDefinitions: _extractToolDefinitions(req),
+        temperature: req?.temperature as number | undefined,
+        maxOutputTokens: req?.max_tokens as number | undefined,
+        topP: req?.top_p as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -847,6 +1025,12 @@ async function* _wrapPatchedAnthropicStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -855,7 +1039,7 @@ async function* _wrapPatchedGeminiStream(
   ai: AmplitudeAI,
   stream: AsyncIterable<unknown>,
   startTime: number,
-  _requestOpts: unknown,
+  requestOpts: unknown,
 ): AsyncGenerator<unknown> {
   const ctx = getActiveContext();
   if (ctx == null) {
@@ -870,6 +1054,7 @@ async function* _wrapPatchedGeminiStream(
   let totalTokens: number | undefined;
   let isError = false;
   let errorMessage: string | undefined;
+  const streamToolCalls: Array<Record<string, unknown>> = [];
   try {
     for await (const chunk of stream) {
       const c = chunk as Record<string, unknown>;
@@ -894,6 +1079,8 @@ async function* _wrapPatchedGeminiStream(
       if (typeof candidates?.[0]?.finishReason === 'string') {
         finishReason = candidates[0].finishReason;
       }
+      const chunkToolCalls = _extractGeminiToolCalls(respObj);
+      if (chunkToolCalls.length > 0) streamToolCalls.push(...chunkToolCalls);
       yield chunk;
     }
   } catch (error) {
@@ -902,6 +1089,29 @@ async function* _wrapPatchedGeminiStream(
     throw error;
   } finally {
     if (!isTrackerManaged()) {
+      let costUsd: number | null = null;
+      if (inputTokens != null && outputTokens != null) {
+        try {
+          costUsd = calculateCost({
+            modelName: model,
+            inputTokens,
+            outputTokens,
+            defaultProvider: 'gemini',
+          });
+        } catch {
+          // cost calculation is best-effort
+        }
+      }
+
+      const reqOpts = requestOpts as Record<string, unknown> | undefined;
+      const genConfig = reqOpts?.generationConfig as Record<string, unknown> | undefined;
+      const sysInstr = reqOpts?.systemInstruction;
+      const systemPrompt = typeof sysInstr === 'string'
+        ? sysInstr
+        : (sysInstr != null && typeof sysInstr === 'object'
+            ? String((sysInstr as Record<string, unknown>).text ?? '')
+            : undefined);
+
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -913,6 +1123,13 @@ async function* _wrapPatchedGeminiStream(
         inputTokens,
         outputTokens,
         totalTokens,
+        totalCostUsd: costUsd,
+        toolCalls: streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        systemPrompt: systemPrompt || undefined,
+        toolDefinitions: _extractToolDefinitions(reqOpts),
+        temperature: genConfig?.temperature as number | undefined,
+        maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
+        topP: genConfig?.topP as number | undefined,
         finishReason,
         agentId: ctx.agentId,
         env: ctx.env,
@@ -921,6 +1138,12 @@ async function* _wrapPatchedGeminiStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -943,6 +1166,8 @@ async function* _wrapPatchedBedrockStream(
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let totalTokens: number | undefined;
+  const streamToolCalls: Array<Record<string, unknown>> = [];
+  let currentToolUse: Record<string, unknown> | null = null;
   let isError = false;
   let errorMessage: string | undefined;
   try {
@@ -952,6 +1177,30 @@ async function* _wrapPatchedBedrockStream(
         event.contentBlockDelta as Record<string, unknown> | undefined
       )?.delta as Record<string, unknown> | undefined;
       if (typeof delta?.text === 'string') content += delta.text;
+      if (typeof delta?.toolUse === 'object' && delta.toolUse != null) {
+        const toolUseDelta = delta.toolUse as Record<string, unknown>;
+        if (typeof toolUseDelta.input === 'string' && currentToolUse) {
+          const fn = currentToolUse.function as Record<string, unknown>;
+          fn.arguments = String(fn.arguments ?? '') + toolUseDelta.input;
+        }
+      }
+
+      const blockStart = event.contentBlockStart as
+        | Record<string, unknown>
+        | undefined;
+      if (blockStart?.start != null) {
+        const start = blockStart.start as Record<string, unknown>;
+        if (start.toolUse != null) {
+          const tu = start.toolUse as Record<string, unknown>;
+          currentToolUse = {
+            type: 'function',
+            id: tu.toolUseId,
+            function: { name: String(tu.name ?? ''), arguments: '' },
+          };
+          streamToolCalls.push(currentToolUse);
+        }
+      }
+
       const messageStart = event.messageStart as
         | Record<string, unknown>
         | undefined;
@@ -978,18 +1227,41 @@ async function* _wrapPatchedBedrockStream(
     throw error;
   } finally {
     if (!isTrackerManaged()) {
+      const latencyMs = performance.now() - startTime;
+
+      let costUsd: number | null = null;
+      if (inputTokens != null && outputTokens != null) {
+        try {
+          costUsd = calculateCost({
+            modelName: model,
+            inputTokens,
+            outputTokens,
+            defaultProvider: 'bedrock',
+          });
+        } catch {
+          // cost calculation is best-effort
+        }
+      }
+
+      const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
         sessionId: ctx.sessionId,
         model,
         provider: 'bedrock',
-        latencyMs: performance.now() - startTime,
+        latencyMs,
         traceId: ctx.traceId,
         inputTokens,
         outputTokens,
         totalTokens,
+        totalCostUsd: costUsd,
         finishReason,
+        toolCalls:
+          streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        temperature: infConfig?.temperature as number | undefined,
+        maxOutputTokens: infConfig?.maxTokens as number | undefined,
+        topP: infConfig?.topP as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -997,6 +1269,12 @@ async function* _wrapPatchedBedrockStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -1067,10 +1345,11 @@ function _patchOpenAIClass(
     | undefined;
   if (!OpenAIClass?.prototype) return false;
 
-  const completionsProto = _getNestedPrototype(OpenAIClass, [
-    'chat',
-    'completions',
-  ]);
+  let didPatch = false;
+
+  const completionsProto =
+    _getNestedPrototype(OpenAIClass, ['chat', 'completions']) ??
+    _probeNestedPrototype(OpenAIClass, ['chat', 'completions']);
   if (completionsProto) {
     const target = completionsProto as Record<string, unknown>;
     _patchMethod(
@@ -1085,6 +1364,7 @@ function _patchOpenAIClass(
       _makeCompletionWrapper(amplitudeAI, providerName),
       providerName,
     );
+    didPatch = true;
   } else {
     _patchConstructor(
       OpenAIClass,
@@ -1093,9 +1373,12 @@ function _patchOpenAIClass(
       amplitudeAI,
       providerName,
     );
+    didPatch = true;
   }
 
-  const responsesProto = _getNestedPrototype(OpenAIClass, ['responses']);
+  const responsesProto =
+    _getNestedPrototype(OpenAIClass, ['responses']) ??
+    _probeNestedPrototype(OpenAIClass, ['responses']);
   if (responsesProto) {
     const target = responsesProto as Record<string, unknown>;
     _patchMethod(
@@ -1110,15 +1393,30 @@ function _patchOpenAIClass(
       _makeResponsesWrapper(amplitudeAI, providerName),
       providerName,
     );
+    didPatch = true;
   }
-  return true;
+  return didPatch;
 }
 
+const _AMP_INSTANCE_PATCHED = Symbol.for('amplitude.instancePatched');
+
+/**
+ * Patches completions/responses methods directly on an SDK *instance*.
+ * Used as the constructor-Proxy fallback when prototype-level patching
+ * isn't possible (plain-object namespaces with no shared prototype).
+ *
+ * NOTE: These per-instance wrappers survive unpatch(). unpatch() restores
+ * the class export (so new instances are clean), but instances created
+ * while patched retain their wrapped methods. Test teardown should not
+ * rely on unpatch() clearing already-constructed instances.
+ */
 function _patchInstanceCompletions(
   instance: Record<string, unknown>,
   amplitudeAI: AmplitudeAI,
   providerName: string,
 ): void {
+  if ((instance as Record<symbol, unknown>)[_AMP_INSTANCE_PATCHED]) return;
+  (instance as Record<symbol, unknown>)[_AMP_INSTANCE_PATCHED] = true;
   try {
     const chat = instance.chat as Record<string, unknown> | undefined;
     const completions = chat?.completions as
@@ -1166,7 +1464,30 @@ function _makeResponsesWrapper(
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
     const startTime = performance.now();
-    const result = original(...args);
+
+    // Intentionally emit user-message and tool-call events before the API call.
+    // These record user intent — if original() throws synchronously,
+    // _trackCompletionError records the failure alongside these events.
+    try {
+      _extractResponsesToolCallsFromInput(amplitudeAI, args[0]);
+      _trackResponsesUserMessages(amplitudeAI, args[0]);
+    } catch {
+      // Pre-call extraction is best-effort — never block the actual API call
+    }
+
+    let result: unknown;
+    try {
+      result = original(...args);
+    } catch (syncErr) {
+      _trackCompletionError(
+        amplitudeAI,
+        syncErr,
+        startTime,
+        args[0],
+        providerName,
+      );
+      throw syncErr;
+    }
     if (result instanceof Promise) {
       return result
         .then((response) => {
@@ -1207,6 +1528,11 @@ function _makeResponsesWrapper(
 // Internal helpers
 // ---------------------------------------------------------------
 
+/**
+ * Walk the prototype chain looking for `path` as own properties.
+ * This is the legacy approach; it only works for SDKs that define nested
+ * namespaces on the prototype (pre-v4 OpenAI, some Gemini versions).
+ */
 function _getNestedPrototype(
   cls: { prototype: Record<string, unknown> },
   path: string[],
@@ -1224,11 +1550,88 @@ function _getNestedPrototype(
   return current;
 }
 
+/**
+ * Modern SDKs (OpenAI v4+, Anthropic, Mistral) define nested namespaces
+ * (e.g. `client.chat.completions`, `client.messages`) as lazy *instance*
+ * properties via getters, not on the prototype. `_getNestedPrototype` fails
+ * silently for these because the properties don't exist until an instance
+ * is created.
+ *
+ * This function creates a disposable instance with dummy args, reads the
+ * nested property (which triggers the lazy getter), and returns its *shared
+ * prototype*. Patching the prototype covers all future and existing
+ * instances.
+ */
+// Cache for _probeNestedPrototype — avoids re-instantiating the full SDK
+// constructor multiple times for the same class (e.g. OpenAI is probed
+// for both chat.completions and responses).
+// Keyed by class object (WeakMap), so entries are GC'd if the class is
+// dropped. The cache is never actively invalidated — if a host app
+// monkey-patches or replaces the SDK class *after* the first probe,
+// subsequent calls return a stale prototype. In practice classes are
+// process-singletons, so this is not a concern.
+const _probeCache = new WeakMap<object, Record<string, unknown>>();
+
+/**
+ * NOTE: This runs the real SDK constructor via Reflect.construct, which
+ * has non-trivial side effects (reads process.env, allocates sub-namespace
+ * objects, initialises fetch shims). The instance is cached per class to
+ * avoid repeating this for multiple path lookups on the same SDK.
+ */
+function _probeNestedPrototype(
+  cls: { prototype: Record<string, unknown> },
+  path: string[],
+): unknown {
+  try {
+    let probe = _probeCache.get(cls);
+    if (!probe) {
+      const Ctor = cls as unknown as new (...args: unknown[]) => Record<
+        string,
+        unknown
+      >;
+      try {
+        probe = Reflect.construct(Ctor, [
+          { apiKey: 'amp-probe', baseURL: 'http://localhost' },
+        ]);
+      } catch {
+        try {
+          probe = Reflect.construct(Ctor, [{ apiKey: 'amp-probe' }]);
+        } catch {
+          // Constructor may throw (e.g. missing env var) — fall back to
+          // property access on the bare prototype which works if the getter
+          // is defined on the prototype.
+          probe = Object.create(Ctor.prototype) as Record<string, unknown>;
+        }
+      }
+      _probeCache.set(cls, probe);
+    }
+
+    let current: unknown = probe;
+    for (const key of path) {
+      if (current == null || typeof current !== 'object') return null;
+      const obj = current as Record<string, unknown>;
+      const nested = obj[key];
+      if (nested == null || typeof nested !== 'object') return null;
+      current = nested;
+    }
+
+    const proto = Object.getPrototypeOf(current);
+    if (proto != null && proto !== Object.prototype) {
+      return proto;
+    }
+    // Leaf is a plain object (Object.prototype) — no shared prototype to patch.
+    // Return null so the caller can fall back to constructor-wrapping.
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function _trackCompletionResponse(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
-  _requestOpts: unknown,
+  requestOpts: unknown,
   providerName: string,
 ): void {
   if (response == null || typeof response !== 'object') return;
@@ -1238,10 +1641,42 @@ function _trackCompletionResponse(
   if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
-  const usage = resp.usage as Record<string, number> | undefined;
+  const usage = resp.usage as Record<string, unknown> | undefined;
   const choices = resp.choices as Array<Record<string, unknown>> | undefined;
   const choice = choices?.[0];
   const message = choice?.message as Record<string, unknown> | undefined;
+  const toolCalls = message?.tool_calls as
+    | Array<Record<string, unknown>>
+    | undefined;
+  const req = requestOpts as Record<string, unknown> | undefined;
+
+  const promptDetails = usage?.prompt_tokens_details as
+    | Record<string, number>
+    | undefined;
+  const completionDetails = usage?.completion_tokens_details as
+    | Record<string, number>
+    | undefined;
+  const reasoningTokens = completionDetails?.reasoning_tokens;
+  const cachedTokens = promptDetails?.cached_tokens;
+  const inputTokens = usage?.prompt_tokens as number | undefined;
+  const outputTokens = usage?.completion_tokens as number | undefined;
+  const modelName = String(resp.model ?? req?.model ?? 'unknown');
+
+  let costUsd: number | null = null;
+  if (inputTokens != null && outputTokens != null) {
+    try {
+      costUsd = calculateCost({
+        modelName,
+        inputTokens,
+        outputTokens,
+        reasoningTokens: reasoningTokens ?? 0,
+        cacheReadInputTokens: cachedTokens ?? 0,
+        defaultProvider: providerName === 'azure-openai' ? 'openai' : providerName,
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
 
   const latencyMs = performance.now() - startTime;
 
@@ -1249,25 +1684,36 @@ function _trackCompletionResponse(
     userId: ctx.userId ?? 'unknown',
     content: String(message?.content ?? ''),
     sessionId: ctx.sessionId,
-    model: String(resp.model ?? 'unknown'),
+    model: modelName,
     provider: providerName,
     latencyMs,
     traceId: ctx.traceId,
-    inputTokens: usage?.prompt_tokens,
-    outputTokens: usage?.completion_tokens,
-    totalTokens: usage?.total_tokens,
+    inputTokens,
+    outputTokens,
+    totalTokens: usage?.total_tokens as number | undefined,
+    reasoningTokens,
+    cacheReadTokens: cachedTokens,
+    totalCostUsd: costUsd,
     finishReason: String(choice?.finish_reason ?? ''),
+    toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+    systemPrompt: _extractSystemPrompt(req),
+    toolDefinitions: _extractToolDefinitions(req),
+    temperature: req?.temperature as number | undefined,
+    maxOutputTokens: (req?.max_tokens ?? req?.max_completion_tokens) as number | undefined,
+    topP: req?.top_p as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(toolCalls, ctx.sessionId, ctx.agentId);
 }
 
 function _trackAnthropicResponse(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
-  _requestOpts: unknown,
+  requestOpts: unknown,
 ): void {
   if (response == null || typeof response !== 'object') return;
 
@@ -1276,9 +1722,39 @@ function _trackAnthropicResponse(
   if (isTrackerManaged()) return;
 
   const resp = response as Record<string, unknown>;
-  const usage = resp.usage as Record<string, number> | undefined;
-  const content = resp.content as Array<Record<string, unknown>> | undefined;
-  const textBlock = content?.find((b) => b.type === 'text');
+  const usage = resp.usage as Record<string, unknown> | undefined;
+  const contentBlocks = resp.content as
+    | Array<Record<string, unknown>>
+    | undefined;
+  const textBlock = contentBlocks?.find((b) => b.type === 'text');
+  const req = requestOpts as Record<string, unknown> | undefined;
+
+  const extracted = _extractAnthropicContent(contentBlocks);
+  const cacheRead = (usage?.cache_read_input_tokens as number) ?? 0;
+  const cacheCreation = (usage?.cache_creation_input_tokens as number) ?? 0;
+  const rawInput = (usage?.input_tokens as number) ?? 0;
+  const normalizedInput =
+    cacheRead || cacheCreation
+      ? rawInput + cacheRead + cacheCreation
+      : rawInput;
+  const outputTokens = usage?.output_tokens as number | undefined;
+  const modelName = String(resp.model ?? req?.model ?? 'unknown');
+
+  let costUsd: number | null = null;
+  if (rawInput != null && outputTokens != null) {
+    try {
+      costUsd = calculateCost({
+        modelName,
+        inputTokens: normalizedInput,
+        outputTokens,
+        cacheReadInputTokens: cacheRead,
+        cacheCreationInputTokens: cacheCreation,
+        defaultProvider: 'anthropic',
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
 
   const latencyMs = performance.now() - startTime;
 
@@ -1286,17 +1762,33 @@ function _trackAnthropicResponse(
     userId: ctx.userId ?? 'unknown',
     content: String(textBlock?.text ?? ''),
     sessionId: ctx.sessionId,
-    model: String(resp.model ?? 'unknown'),
+    model: modelName,
     provider: 'anthropic',
     latencyMs,
     traceId: ctx.traceId,
-    inputTokens: usage?.input_tokens,
-    outputTokens: usage?.output_tokens,
+    inputTokens: normalizedInput || undefined,
+    outputTokens,
+    cacheReadTokens: cacheRead || undefined,
+    totalCostUsd: costUsd,
     finishReason: String(resp.stop_reason ?? ''),
+    toolCalls:
+      extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
+    reasoningContent: extracted.reasoning,
+    systemPrompt: _extractAnthropicSystemPrompt(req?.system),
+    toolDefinitions: _extractToolDefinitions(req),
+    temperature: req?.temperature as number | undefined,
+    maxOutputTokens: req?.max_tokens as number | undefined,
+    topP: req?.top_p as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 function _trackCompletionError(
@@ -1333,6 +1825,7 @@ function _trackGeminiResponse(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
+  requestOpts?: unknown,
 ): void {
   if (response == null || typeof response !== 'object') return;
 
@@ -1344,8 +1837,34 @@ function _trackGeminiResponse(
   const respObj = (resp.response ?? resp) as Record<string, unknown>;
   const text = typeof respObj.text === 'function' ? String(respObj.text()) : '';
   const usage = respObj.usageMetadata as Record<string, number> | undefined;
+  const inputTokens = usage?.promptTokenCount;
+  const outputTokens = usage?.candidatesTokenCount;
 
+  let costUsd: number | null = null;
+  if (inputTokens != null && outputTokens != null) {
+    try {
+      costUsd = calculateCost({
+        modelName: 'gemini',
+        inputTokens,
+        outputTokens,
+        defaultProvider: 'gemini',
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
+
+  const toolCalls = _extractGeminiToolCalls(respObj);
   const latencyMs = performance.now() - startTime;
+
+  const reqOpts = requestOpts as Record<string, unknown> | undefined;
+  const genConfig = reqOpts?.generationConfig as Record<string, unknown> | undefined;
+  const sysInstr = reqOpts?.systemInstruction;
+  const systemPrompt = typeof sysInstr === 'string'
+    ? sysInstr
+    : (sysInstr != null && typeof sysInstr === 'object'
+        ? String((sysInstr as Record<string, unknown>).text ?? '')
+        : undefined);
 
   ai.trackAiMessage({
     userId: ctx.userId ?? 'unknown',
@@ -1355,13 +1874,26 @@ function _trackGeminiResponse(
     provider: 'gemini',
     latencyMs,
     traceId: ctx.traceId,
-    inputTokens: usage?.promptTokenCount,
-    outputTokens: usage?.candidatesTokenCount,
+    inputTokens,
+    outputTokens,
     totalTokens: usage?.totalTokenCount,
+    totalCostUsd: costUsd,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    systemPrompt: systemPrompt || undefined,
+    toolDefinitions: _extractToolDefinitions(reqOpts),
+    temperature: genConfig?.temperature as number | undefined,
+    maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
+    topP: genConfig?.topP as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    toolCalls.length > 0 ? toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 function _trackBedrockResponse(
@@ -1385,25 +1917,55 @@ function _trackBedrockResponse(
   const textBlock = content?.find((b) => b.text != null);
   const usage = resp.usage as Record<string, number> | undefined;
   const opts = requestOpts as Record<string, unknown> | undefined;
+  const modelName = String(opts?.modelId ?? 'unknown');
+  const inputTokens = usage?.inputTokens;
+  const outputTokens = usage?.outputTokens;
 
+  let costUsd: number | null = null;
+  if (inputTokens != null && outputTokens != null) {
+    try {
+      costUsd = calculateCost({
+        modelName,
+        inputTokens,
+        outputTokens,
+        defaultProvider: 'bedrock',
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
+
+  const toolCalls = _extractBedrockToolCalls(content);
+  const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
   const latencyMs = performance.now() - startTime;
 
   ai.trackAiMessage({
     userId: ctx.userId ?? 'unknown',
     content: String(textBlock?.text ?? ''),
     sessionId: ctx.sessionId,
-    model: String(opts?.modelId ?? 'unknown'),
+    model: modelName,
     provider: 'bedrock',
     latencyMs,
     traceId: ctx.traceId,
-    inputTokens: usage?.inputTokens,
-    outputTokens: usage?.outputTokens,
+    inputTokens,
+    outputTokens,
     totalTokens: usage?.totalTokens,
+    totalCostUsd: costUsd,
     finishReason: String(resp.stopReason ?? ''),
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    temperature: infConfig?.temperature as number | undefined,
+    maxOutputTokens: infConfig?.maxTokens as number | undefined,
+    topP: infConfig?.topP as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    toolCalls.length > 0 ? toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 function _trackResponsesResponse(
@@ -1425,23 +1987,48 @@ function _trackResponsesResponse(
       ? resp.output_text
       : _extractResponsesText(resp.output);
   const opts = requestOpts as Record<string, unknown> | undefined;
+  const modelName = String(resp.model ?? opts?.model ?? 'unknown');
+  const inputTokens = typeof usage?.input_tokens === 'number'
+    ? (usage.input_tokens as number) : undefined;
+  const outputTokens = typeof usage?.output_tokens === 'number'
+    ? (usage.output_tokens as number) : undefined;
+
+  let costUsd: number | null = null;
+  if (inputTokens != null && outputTokens != null) {
+    try {
+      const reasoningTokens = typeof (
+        usage?.output_tokens_details as Record<string, unknown> | undefined
+      )?.reasoning_tokens === 'number'
+        ? ((usage?.output_tokens_details as Record<string, unknown>)
+            .reasoning_tokens as number)
+        : 0;
+      costUsd = calculateCost({
+        modelName,
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        defaultProvider: 'openai',
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
+
+  const toolCalls = _extractResponsesOutputToolCalls(resp.output);
+  const systemPrompt = typeof opts?.instructions === 'string'
+    ? opts.instructions : undefined;
+  const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
 
   ai.trackAiMessage({
     userId: ctx.userId ?? 'unknown',
     content: outputText,
     sessionId: ctx.sessionId,
-    model: String(resp.model ?? opts?.model ?? 'unknown'),
+    model: modelName,
     provider: providerName,
     latencyMs: performance.now() - startTime,
     traceId: ctx.traceId,
-    inputTokens:
-      typeof usage?.input_tokens === 'number'
-        ? (usage.input_tokens as number)
-        : undefined,
-    outputTokens:
-      typeof usage?.output_tokens === 'number'
-        ? (usage.output_tokens as number)
-        : undefined,
+    inputTokens,
+    outputTokens,
     totalTokens:
       typeof usage?.total_tokens === 'number'
         ? (usage.total_tokens as number)
@@ -1453,11 +2040,24 @@ function _trackResponsesResponse(
         ? ((usage?.output_tokens_details as Record<string, unknown>)
             .reasoning_tokens as number)
         : undefined,
+    totalCostUsd: costUsd,
     finishReason: _extractResponsesFinishReason(resp),
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    systemPrompt,
+    toolDefinitions: toolDefs,
+    temperature: opts?.temperature as number | undefined,
+    maxOutputTokens: opts?.max_output_tokens as number | undefined,
+    topP: opts?.top_p as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    toolCalls.length > 0 ? toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 async function* _wrapPatchedResponsesStream(
@@ -1479,8 +2079,10 @@ async function* _wrapPatchedResponsesStream(
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let totalTokens: number | undefined;
+  let reasoningTokens: number | undefined;
   let isError = false;
   let errorMessage: string | undefined;
+  let completedOutput: unknown;
 
   try {
     for await (const event of stream) {
@@ -1502,8 +2104,12 @@ async function* _wrapPatchedResponsesStream(
           outputTokens = usage.output_tokens;
         if (typeof usage?.total_tokens === 'number')
           totalTokens = usage.total_tokens;
+        const outDetails = usage?.output_tokens_details as Record<string, unknown> | undefined;
+        if (typeof outDetails?.reasoning_tokens === 'number')
+          reasoningTokens = outDetails.reasoning_tokens;
         const status = response?.status;
         if (typeof status === 'string') finishReason = status;
+        completedOutput = response?.output;
       }
       yield event;
     }
@@ -1513,6 +2119,26 @@ async function* _wrapPatchedResponsesStream(
     throw error;
   } finally {
     if (!isTrackerManaged()) {
+      let costUsd: number | null = null;
+      if (inputTokens != null && outputTokens != null) {
+        try {
+          costUsd = calculateCost({
+            modelName: model,
+            inputTokens,
+            outputTokens,
+            reasoningTokens: reasoningTokens ?? 0,
+            defaultProvider: 'openai',
+          });
+        } catch {
+          // cost calculation is best-effort
+        }
+      }
+
+      const toolCalls = _extractResponsesOutputToolCalls(completedOutput);
+      const systemPrompt = typeof opts?.instructions === 'string'
+        ? opts.instructions : undefined;
+      const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
+
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -1524,7 +2150,15 @@ async function* _wrapPatchedResponsesStream(
         inputTokens,
         outputTokens,
         totalTokens,
+        reasoningTokens,
+        totalCostUsd: costUsd,
         finishReason,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        systemPrompt,
+        toolDefinitions: toolDefs,
+        temperature: opts?.temperature as number | undefined,
+        maxOutputTokens: opts?.max_output_tokens as number | undefined,
+        topP: opts?.top_p as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -1532,6 +2166,12 @@ async function* _wrapPatchedResponsesStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        toolCalls.length > 0 ? toolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -1564,6 +2204,636 @@ function _extractResponsesFinishReason(
   return typeof first?.status === 'string' ? first.status : undefined;
 }
 
+function _extractResponsesOutputToolCalls(
+  output: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(output)) return [];
+  const toolCalls: Array<Record<string, unknown>> = [];
+  for (const item of output) {
+    if (item == null || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    if (obj.type === 'function_call') {
+      toolCalls.push(obj);
+      continue;
+    }
+    const content = obj.content;
+    if (!Array.isArray(content)) continue;
+    for (const c of content) {
+      if (c == null || typeof c !== 'object') continue;
+      const cObj = c as Record<string, unknown>;
+      if (cObj.type === 'tool_call' || cObj.type === 'function_call') {
+        toolCalls.push(cObj);
+      }
+    }
+  }
+  return toolCalls;
+}
+
+function _trackResponsesUserMessages(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+): void {
+  if (typeof ai.trackUserMessage !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
+
+  const opts = requestOpts as Record<string, unknown> | undefined;
+  if (!opts) return;
+  const input = opts.input;
+  if (input == null) return;
+
+  if (typeof input === 'string') {
+    _emitUserMessage(ai, ctx, input);
+    return;
+  }
+
+  if (!Array.isArray(input)) return;
+  const entries = input as Array<Record<string, unknown>>;
+  const lastReplyIdx = entries.findLastIndex((e) => {
+    if (typeof e === 'string') return false;
+    return e.role === 'assistant' || e.type === 'function_call' || e.type === 'function_call_output';
+  });
+  const newEntries = entries.slice(lastReplyIdx + 1);
+
+  for (const entry of newEntries) {
+    if (typeof entry === 'string') {
+      _emitUserMessage(ai, ctx, entry);
+      continue;
+    }
+    if (entry.role !== 'user') continue;
+    const content = entry.content;
+    if (typeof content === 'string') {
+      _emitUserMessage(ai, ctx, content);
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        const text = typeof part === 'string' ? part
+          : (part as Record<string, unknown>)?.text;
+        if (typeof text === 'string' && text.length > 0) {
+          _emitUserMessage(ai, ctx, text);
+        }
+      }
+    }
+  }
+}
+
+function _extractResponsesToolCallsFromInput(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+): void {
+  if (typeof ai.trackToolCall !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
+
+  const opts = requestOpts as Record<string, unknown> | undefined;
+  if (!opts) return;
+  const input = opts.input;
+  if (!Array.isArray(input)) return;
+
+  const entries = input as Array<Record<string, unknown>>;
+  const toolCallMap = new Map<string, { name: string; callId: string }>();
+  const resultMap = new Map<string, { output: string }>();
+
+  for (const entry of entries) {
+    if (entry.type === 'function_call') {
+      const callId = (entry.call_id as string) ?? (entry.id as string) ?? '';
+      const name = (entry.name as string) ?? '';
+      if (callId) toolCallMap.set(callId, { name, callId });
+    } else if (entry.type === 'function_call_output') {
+      const callId = (entry.call_id as string) ?? '';
+      const output = typeof entry.output === 'string'
+        ? entry.output : JSON.stringify(entry.output ?? '');
+      if (callId) resultMap.set(callId, { output });
+    }
+  }
+
+  for (const [callId, tc] of toolCallMap) {
+    const result = resultMap.get(callId);
+    if (!result) continue;
+    const latencyMs = _consumeToolLatencyMs(ctx.sessionId, callId, ctx.agentId);
+    ai.trackToolCall({
+      userId: ctx.userId ?? 'unknown',
+      sessionId: ctx.sessionId ?? '',
+      traceId: ctx.traceId,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      env: ctx.env,
+      toolName: tc.name,
+      output: result.output,
+      latencyMs: latencyMs > 0 ? latencyMs : 0,
+      success: true,
+    });
+  }
+}
+
+// ---------------------------------------------------------------
+// Extraction helpers for rich event metadata
+// ---------------------------------------------------------------
+
+function _extractSystemPrompt(
+  req: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!req) return undefined;
+  const messages = req.messages as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!messages?.length) return undefined;
+  const systemMsg = messages.find(
+    (m) => m.role === 'system' || m.role === 'developer',
+  );
+  return systemMsg ? String(systemMsg.content ?? '') : undefined;
+}
+
+function _extractAnthropicSystemPrompt(
+  system: unknown,
+): string | undefined {
+  if (typeof system === 'string') return system;
+  if (Array.isArray(system)) {
+    return system
+      .map((block) => {
+        if (typeof block === 'string') return block;
+        if (typeof block === 'object' && block != null) {
+          return String((block as Record<string, unknown>).text ?? '');
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return undefined;
+}
+
+function _extractToolDefinitions(
+  req: Record<string, unknown> | undefined,
+): Array<Record<string, unknown>> | undefined {
+  if (!req) return undefined;
+  const tools = req.tools;
+  return Array.isArray(tools) && tools.length > 0
+    ? (tools as Array<Record<string, unknown>>)
+    : undefined;
+}
+
+function _extractAnthropicContent(
+  contentBlocks: Array<Record<string, unknown>> | undefined,
+): {
+  text: string;
+  reasoning: string | undefined;
+  toolCalls: Array<Record<string, unknown>>;
+} {
+  let text = '';
+  let reasoning: string | undefined;
+  const toolCalls: Array<Record<string, unknown>> = [];
+  if (!contentBlocks) return { text, reasoning, toolCalls };
+  for (const block of contentBlocks) {
+    if (block.type === 'text') {
+      text += String(block.text ?? '');
+    } else if (block.type === 'thinking') {
+      reasoning = (reasoning ?? '') + String(block.thinking ?? '');
+    } else if (block.type === 'tool_use') {
+      toolCalls.push({
+        type: 'function',
+        id: block.id,
+        function: {
+          name: String(block.name ?? ''),
+          arguments:
+            typeof block.input === 'string'
+              ? block.input
+              : JSON.stringify(block.input ?? {}),
+        },
+      });
+    }
+  }
+  return { text, reasoning, toolCalls };
+}
+
+function _extractGeminiToolCalls(
+  respObj: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  const toolCalls: Array<Record<string, unknown>> = [];
+  const candidates = respObj.candidates as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!candidates) return toolCalls;
+  for (const candidate of candidates) {
+    const content = candidate.content as Record<string, unknown> | undefined;
+    const parts = content?.parts as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (!parts) continue;
+    for (const part of parts) {
+      const functionCall = part.functionCall as
+        | Record<string, unknown>
+        | undefined;
+      if (functionCall) {
+        toolCalls.push({
+          type: 'function',
+          function: {
+            name: String(functionCall.name ?? ''),
+            arguments: JSON.stringify(functionCall.args ?? {}),
+          },
+        });
+      }
+    }
+  }
+  return toolCalls;
+}
+
+function _extractBedrockToolCalls(
+  content: Array<Record<string, unknown>> | undefined,
+): Array<Record<string, unknown>> {
+  const toolCalls: Array<Record<string, unknown>> = [];
+  if (!content) return toolCalls;
+  for (const block of content) {
+    if (block.toolUse != null) {
+      const tu = block.toolUse as Record<string, unknown>;
+      toolCalls.push({
+        type: 'function',
+        id: tu.toolUseId,
+        function: {
+          name: String(tu.name ?? ''),
+          arguments:
+            typeof tu.input === 'string'
+              ? tu.input
+              : JSON.stringify(tu.input ?? {}),
+        },
+      });
+    }
+  }
+  return toolCalls;
+}
+
+/**
+ * Before an LLM call, extract and track user messages from the request params.
+ * Mirrors the logic in explicit provider wrappers (WrappedCompletions, etc.)
+ * but adapted for the monkey-patch path where we only have the raw request args.
+ */
+function _trackInputUserMessages(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+  providerName: string,
+): void {
+  if (typeof ai.trackUserMessage !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
+
+  const req = requestOpts as Record<string, unknown> | undefined;
+  if (!req) return;
+
+  const messages = req.messages as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(messages)) return;
+
+  if (providerName === 'anthropic') {
+    _trackAnthropicUserMessages(ai, messages, ctx);
+  } else {
+    _trackOpenAIUserMessages(ai, messages, ctx);
+  }
+}
+
+interface _UserMsgCtx {
+  userId?: string | null;
+  sessionId?: string | null;
+  traceId?: string | null;
+  agentId?: string | null;
+  parentAgentId?: string | null;
+  customerOrgId?: string | null;
+  env?: string | null;
+}
+
+function _emitUserMessage(
+  ai: AmplitudeAI,
+  ctx: _UserMsgCtx,
+  content: string,
+): void {
+  ai.trackUserMessage({
+    userId: ctx.userId ?? 'unknown',
+    content,
+    sessionId: ctx.sessionId ?? '',
+    traceId: ctx.traceId,
+    agentId: ctx.agentId,
+    parentAgentId: ctx.parentAgentId,
+    customerOrgId: ctx.customerOrgId,
+    env: ctx.env,
+    messageSource: ctx.parentAgentId ? 'agent' : 'user',
+  });
+}
+
+function _trackOpenAIUserMessages(
+  ai: AmplitudeAI,
+  messages: Array<Record<string, unknown>>,
+  ctx: _UserMsgCtx,
+): void {
+  const lastReplyIdx = messages.findLastIndex(
+    (m) => m?.role === 'assistant' || m?.role === 'tool',
+  );
+  const newMessages = messages.slice(lastReplyIdx + 1);
+
+  for (const msg of newMessages) {
+    if (msg?.role !== 'user') continue;
+    const content = msg.content;
+    if (typeof content !== 'string' || content.length === 0) continue;
+    _emitUserMessage(ai, ctx, content);
+  }
+}
+
+function _trackAnthropicUserMessages(
+  ai: AmplitudeAI,
+  messages: Array<Record<string, unknown>>,
+  ctx: _UserMsgCtx,
+): void {
+  const lastReplyIdx = messages.findLastIndex(
+    (m) => m?.role === 'assistant',
+  );
+  const newMessages = messages.slice(lastReplyIdx + 1);
+
+  for (const msg of newMessages) {
+    if (msg?.role !== 'user') continue;
+    const rawContent = msg.content;
+    if (Array.isArray(rawContent)) {
+      const hasToolResult = rawContent.some(
+        (b) => typeof b === 'object' && b != null && (b as Record<string, unknown>).type === 'tool_result',
+      );
+      if (hasToolResult) continue;
+    }
+    const content = Array.isArray(rawContent)
+      ? rawContent
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            const text = (part as Record<string, unknown>)?.text;
+            return typeof text === 'string' ? text : '';
+          })
+          .join('')
+      : typeof rawContent === 'string'
+        ? rawContent
+        : '';
+    if (!content) continue;
+    _emitUserMessage(ai, ctx, content);
+  }
+}
+
+// ---------------------------------------------------------------
+// Tool latency registry — bounded, TTL-aware, mirrors Python SDK's
+// tool_latency.py. Records timestamps when tool_use blocks appear
+// in a response; consumed when the next request carries tool results.
+// ---------------------------------------------------------------
+
+const _TOOL_LATENCY_MAX = 10_000;
+const _TOOL_LATENCY_TTL_MS = 600_000; // 10 minutes
+
+type _ToolLatencyEntry = { time: number };
+const _toolLatencyRegistry = new Map<string, _ToolLatencyEntry>();
+
+function _toolLatencyKey(
+  sessionId: string | null | undefined,
+  toolUseId: string,
+  agentId: string | null | undefined,
+): string {
+  return `${sessionId ?? ''}|${toolUseId}|${agentId ?? ''}`;
+}
+
+// Full-map walk is fine here — registry is capped at _TOOL_LATENCY_MAX (10k).
+// Amortized: only sweeps every 32 _recordToolUses calls to avoid per-call overhead.
+let _evictOpCount = 0;
+function _evictExpiredToolLatencies(now: number): void {
+  for (const [key, entry] of _toolLatencyRegistry) {
+    if (now - entry.time > _TOOL_LATENCY_TTL_MS) {
+      _toolLatencyRegistry.delete(key);
+    }
+  }
+}
+
+function _recordToolUses(
+  toolCalls: Array<Record<string, unknown>> | undefined,
+  sessionId: string | null | undefined,
+  agentId: string | null | undefined,
+): void {
+  if (!toolCalls || toolCalls.length === 0) return;
+  const now = performance.now();
+  if (++_evictOpCount % 32 === 0) _evictExpiredToolLatencies(now);
+  for (const tc of toolCalls) {
+    const id = (tc.id as string) ?? '';
+    if (!id) continue;
+    const key = _toolLatencyKey(sessionId, id, agentId);
+    _toolLatencyRegistry.set(key, { time: now });
+    while (_toolLatencyRegistry.size > _TOOL_LATENCY_MAX) {
+      const oldest = _toolLatencyRegistry.keys().next().value;
+      if (oldest != null) _toolLatencyRegistry.delete(oldest);
+      else break;
+    }
+  }
+}
+
+function _consumeToolLatencyMs(
+  sessionId: string | null | undefined,
+  toolUseId: string,
+  agentId: string | null | undefined,
+): number {
+  const key = _toolLatencyKey(sessionId, toolUseId, agentId);
+  const entry = _toolLatencyRegistry.get(key);
+  if (!entry) return 0;
+  _toolLatencyRegistry.delete(key);
+  const now = performance.now();
+  if (now - entry.time > _TOOL_LATENCY_TTL_MS) return 0;
+  return Math.max(0, now - entry.time);
+}
+
+// ---------------------------------------------------------------
+// Auto-extract [Agent] Tool Call events from input messages
+// Mirrors Python SDK's _extract_and_track_tool_calls()
+// ---------------------------------------------------------------
+
+function _extractAndTrackToolCalls(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+  providerName: string,
+): void {
+  if (typeof ai.trackToolCall !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
+
+  const req = requestOpts as Record<string, unknown> | undefined;
+  if (!req) return;
+  const messages = req.messages as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(messages) || messages.length === 0) return;
+
+  if (providerName === 'anthropic') {
+    _extractAnthropicToolCalls(ai, messages, ctx);
+  } else {
+    _extractOpenAIToolCalls(ai, messages, ctx);
+  }
+}
+
+function _extractOpenAIToolCalls(
+  ai: AmplitudeAI,
+  messages: Array<Record<string, unknown>>,
+  ctx: {
+    userId?: string | null;
+    sessionId?: string | null;
+    traceId?: string | null;
+    agentId?: string | null;
+    parentAgentId?: string | null;
+    customerOrgId?: string | null;
+    env?: string | null;
+  },
+): void {
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant') {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastAssistantIdx < 0) return;
+
+  const assistantMsg = messages[lastAssistantIdx];
+  const toolCalls = assistantMsg?.tool_calls as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return;
+
+  const toolCallMap = new Map<string, { name: string; args: string }>();
+  for (const tc of toolCalls) {
+    const id = (tc.id as string) ?? '';
+    const fn = tc.function as Record<string, unknown> | undefined;
+    if (id && fn?.name) {
+      toolCallMap.set(id, {
+        name: String(fn.name),
+        args: String(fn.arguments ?? ''),
+      });
+    }
+  }
+
+  for (let i = lastAssistantIdx + 1; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg?.role !== 'tool') break;
+    const tcId = (msg.tool_call_id as string) ?? '';
+    const matched = toolCallMap.get(tcId);
+    const toolName = matched?.name ?? 'unknown';
+    const toolInput = matched?.args;
+    const toolOutput = msg.content;
+    const latencyMs = _consumeToolLatencyMs(
+      ctx.sessionId,
+      tcId,
+      ctx.agentId,
+    );
+
+    ai.trackToolCall({
+      userId: ctx.userId ?? 'unknown',
+      toolName,
+      success: true,
+      latencyMs,
+      input: toolInput,
+      output: toolOutput,
+      sessionId: ctx.sessionId ?? '',
+      traceId: ctx.traceId,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      env: ctx.env,
+    });
+  }
+}
+
+function _extractAnthropicToolCalls(
+  ai: AmplitudeAI,
+  messages: Array<Record<string, unknown>>,
+  ctx: {
+    userId?: string | null;
+    sessionId?: string | null;
+    traceId?: string | null;
+    agentId?: string | null;
+    parentAgentId?: string | null;
+    customerOrgId?: string | null;
+    env?: string | null;
+  },
+): void {
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant') {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastAssistantIdx < 0) return;
+
+  const assistantMsg = messages[lastAssistantIdx];
+  const content = assistantMsg?.content as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!Array.isArray(content)) return;
+
+  const toolUseMap = new Map<
+    string,
+    { name: string; input: string }
+  >();
+  for (const block of content) {
+    if (block.type === 'tool_use') {
+      const id = (block.id as string) ?? '';
+      if (id) {
+        toolUseMap.set(id, {
+          name: String(block.name ?? 'unknown'),
+          input:
+            typeof block.input === 'string'
+              ? block.input
+              : JSON.stringify(block.input ?? {}),
+        });
+      }
+    }
+  }
+  if (toolUseMap.size === 0) return;
+
+  for (let i = lastAssistantIdx + 1; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg?.role !== 'user') continue;
+    const msgContent = msg.content as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (!Array.isArray(msgContent)) continue;
+
+    for (const block of msgContent) {
+      if (block.type !== 'tool_result') continue;
+      const tuId = (block.tool_use_id as string) ?? '';
+      const matched = toolUseMap.get(tuId);
+      const toolName = matched?.name ?? 'unknown';
+      const toolInput = matched?.input;
+      const toolOutput = block.content;
+      const isError = block.is_error === true;
+      const latencyMs = _consumeToolLatencyMs(
+        ctx.sessionId,
+        tuId,
+        ctx.agentId,
+      );
+
+      ai.trackToolCall({
+        userId: ctx.userId ?? 'unknown',
+        toolName,
+        success: !isError,
+        latencyMs,
+        input: toolInput,
+        output: toolOutput,
+        sessionId: ctx.sessionId ?? '',
+        traceId: ctx.traceId,
+        agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
+        customerOrgId: ctx.customerOrgId,
+        env: ctx.env,
+        errorMessage: isError ? String(toolOutput ?? '') : undefined,
+      });
+    }
+  }
+}
+
 function _contextExtras(ctx: {
   parentAgentId?: string | null;
   customerOrgId?: string | null;
@@ -1594,4 +2864,10 @@ function _contextExtras(ctx: {
   }
 
   return extras;
+}
+
+/** @internal Test-only: clear the tool latency registry. */
+export function _resetToolLatencyForTests(): void {
+  _toolLatencyRegistry.clear();
+  _evictOpCount = 0;
 }
