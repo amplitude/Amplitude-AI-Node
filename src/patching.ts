@@ -1575,10 +1575,10 @@ function _probeNestedPrototype(
           // Constructor may throw (e.g. missing env var) — fall back to
           // property access on the bare prototype which works if the getter
           // is defined on the prototype.
-          probe = Object.create(Ctor.prototype);
+          probe = Object.create(Ctor.prototype) as Record<string, unknown>;
         }
       }
-      _probeCache.set(cls, probe!);
+      _probeCache.set(cls, probe);
     }
 
     let current: unknown = probe;
