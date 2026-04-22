@@ -225,7 +225,7 @@ export function patchGemini(options: {
             if (result instanceof Promise) {
               return result
                 .then((response) => {
-                  _trackGeminiResponse(amplitudeAI, response, startTime);
+                  _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
                   return response;
                 })
                 .catch((err) => {
@@ -535,7 +535,7 @@ export function patch(options: {
 }
 
 export function unpatch(): void {
-  for (const record of _activePatches.reverse()) {
+  for (const record of [..._activePatches].reverse()) {
     const target = record.module as Record<string, unknown>;
     target[record.method] = record.original;
   }
@@ -599,10 +599,26 @@ function _makeCompletionWrapper(
   return (original, ...args) => {
     const startTime = performance.now();
 
-    _extractAndTrackToolCalls(amplitudeAI, args[0], providerName);
-    _trackInputUserMessages(amplitudeAI, args[0], providerName);
+    try {
+      _extractAndTrackToolCalls(amplitudeAI, args[0], providerName);
+      _trackInputUserMessages(amplitudeAI, args[0], providerName);
+    } catch {
+      // Pre-call extraction is best-effort — never block the actual API call
+    }
 
-    const result = original(...args);
+    let result: unknown;
+    try {
+      result = original(...args);
+    } catch (syncErr) {
+      _trackCompletionError(
+        amplitudeAI,
+        syncErr,
+        startTime,
+        args[0],
+        providerName,
+      );
+      throw syncErr;
+    }
     if (result instanceof Promise) {
       return result
         .then((response) => {
@@ -748,21 +764,21 @@ async function* _wrapPatchedStream(
       if (Array.isArray(deltaToolCalls)) {
         for (const call of deltaToolCalls) {
           const idx = call.index as number | undefined;
+          if (idx == null) continue;
           const id = call.id as string | undefined;
           const fn = call.function as Record<string, unknown> | undefined;
-          if (idx != null && id && fn?.name != null) {
-            streamToolCalls[idx] = {
-              type: 'function',
-              id,
-              function: { name: fn.name, arguments: (fn.arguments as string) ?? '' },
-            };
-          } else if (idx != null && fn?.arguments) {
-            const existing = streamToolCalls[idx] as Record<string, unknown> | undefined;
-            const existingFn = existing?.function as Record<string, unknown> | undefined;
-            if (existingFn) {
-              existingFn.arguments =
-                String(existingFn.arguments ?? '') + String(fn.arguments);
-            }
+          streamToolCalls[idx] ??= {
+            type: 'function',
+            id: id ?? '',
+            function: { name: '', arguments: '' },
+          };
+          const entry = streamToolCalls[idx] as Record<string, unknown>;
+          if (id) entry.id = id;
+          const entryFn = entry.function as Record<string, unknown>;
+          if (fn?.name != null) entryFn.name = fn.name;
+          if (fn?.arguments) {
+            entryFn.arguments =
+              String(entryFn.arguments ?? '') + String(fn.arguments);
           }
         }
       }
@@ -1020,7 +1036,7 @@ async function* _wrapPatchedGeminiStream(
   ai: AmplitudeAI,
   stream: AsyncIterable<unknown>,
   startTime: number,
-  _requestOpts: unknown,
+  requestOpts: unknown,
 ): AsyncGenerator<unknown> {
   const ctx = getActiveContext();
   if (ctx == null) {
@@ -1035,6 +1051,7 @@ async function* _wrapPatchedGeminiStream(
   let totalTokens: number | undefined;
   let isError = false;
   let errorMessage: string | undefined;
+  const streamToolCalls: Array<Record<string, unknown>> = [];
   try {
     for await (const chunk of stream) {
       const c = chunk as Record<string, unknown>;
@@ -1059,6 +1076,8 @@ async function* _wrapPatchedGeminiStream(
       if (typeof candidates?.[0]?.finishReason === 'string') {
         finishReason = candidates[0].finishReason;
       }
+      const chunkToolCalls = _extractGeminiToolCalls(respObj);
+      if (chunkToolCalls.length > 0) streamToolCalls.push(...chunkToolCalls);
       yield chunk;
     }
   } catch (error) {
@@ -1081,6 +1100,15 @@ async function* _wrapPatchedGeminiStream(
         }
       }
 
+      const reqOpts = requestOpts as Record<string, unknown> | undefined;
+      const genConfig = reqOpts?.generationConfig as Record<string, unknown> | undefined;
+      const sysInstr = reqOpts?.systemInstruction;
+      const systemPrompt = typeof sysInstr === 'string'
+        ? sysInstr
+        : (sysInstr != null && typeof sysInstr === 'object'
+            ? String((sysInstr as Record<string, unknown>).text ?? '')
+            : undefined);
+
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -1093,6 +1121,12 @@ async function* _wrapPatchedGeminiStream(
         outputTokens,
         totalTokens,
         totalCostUsd: costUsd,
+        toolCalls: streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        systemPrompt: systemPrompt || undefined,
+        toolDefinitions: _extractToolDefinitions(reqOpts),
+        temperature: genConfig?.temperature as number | undefined,
+        maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
+        topP: genConfig?.topP as number | undefined,
         finishReason,
         agentId: ctx.agentId,
         env: ctx.env,
@@ -1101,6 +1135,12 @@ async function* _wrapPatchedGeminiStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -1302,6 +1342,8 @@ function _patchOpenAIClass(
     | undefined;
   if (!OpenAIClass?.prototype) return false;
 
+  let didPatch = false;
+
   const completionsProto =
     _getNestedPrototype(OpenAIClass, ['chat', 'completions']) ??
     _probeNestedPrototype(OpenAIClass, ['chat', 'completions']);
@@ -1319,6 +1361,7 @@ function _patchOpenAIClass(
       _makeCompletionWrapper(amplitudeAI, providerName),
       providerName,
     );
+    didPatch = true;
   } else {
     _patchConstructor(
       OpenAIClass,
@@ -1327,6 +1370,7 @@ function _patchOpenAIClass(
       amplitudeAI,
       providerName,
     );
+    didPatch = true;
   }
 
   const responsesProto =
@@ -1346,8 +1390,9 @@ function _patchOpenAIClass(
       _makeResponsesWrapper(amplitudeAI, providerName),
       providerName,
     );
+    didPatch = true;
   }
-  return true;
+  return didPatch;
 }
 
 function _patchInstanceCompletions(
@@ -1402,7 +1447,27 @@ function _makeResponsesWrapper(
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
     const startTime = performance.now();
-    const result = original(...args);
+
+    try {
+      _extractResponsesToolCallsFromInput(amplitudeAI, args[0]);
+      _trackResponsesUserMessages(amplitudeAI, args[0]);
+    } catch {
+      // Pre-call extraction is best-effort
+    }
+
+    let result: unknown;
+    try {
+      result = original(...args);
+    } catch (syncErr) {
+      _trackCompletionError(
+        amplitudeAI,
+        syncErr,
+        startTime,
+        args[0],
+        providerName,
+      );
+      throw syncErr;
+    }
     if (result instanceof Promise) {
       return result
         .then((response) => {
@@ -1477,26 +1542,43 @@ function _getNestedPrototype(
  * prototype*. Patching the prototype covers all future and existing
  * instances.
  */
+// Cache for _probeNestedPrototype — avoids re-instantiating the full SDK
+// constructor multiple times for the same class (e.g. OpenAI is probed
+// for both chat.completions and responses).
+const _probeCache = new WeakMap<object, Record<string, unknown>>();
+
+/**
+ * NOTE: This runs the real SDK constructor via Reflect.construct, which
+ * has non-trivial side effects (reads process.env, allocates sub-namespace
+ * objects, initialises fetch shims). The instance is cached per class to
+ * avoid repeating this for multiple path lookups on the same SDK.
+ */
 function _probeNestedPrototype(
   cls: { prototype: Record<string, unknown> },
   path: string[],
 ): unknown {
   try {
-    const Ctor = cls as unknown as new (...args: unknown[]) => Record<
-      string,
-      unknown
-    >;
-    const probe = Object.create(Ctor.prototype);
-    try {
-      Ctor.call(probe, { apiKey: 'amp-probe', baseURL: 'http://localhost' });
-    } catch {
+    let probe = _probeCache.get(cls);
+    if (!probe) {
+      const Ctor = cls as unknown as new (...args: unknown[]) => Record<
+        string,
+        unknown
+      >;
       try {
-        Ctor.call(probe, { apiKey: 'amp-probe' });
+        probe = Reflect.construct(Ctor, [
+          { apiKey: 'amp-probe', baseURL: 'http://localhost' },
+        ]);
       } catch {
-        // Constructor may throw (e.g. missing env var) — fall back to
-        // property access on the bare object which works if the getter
-        // is defined on the prototype.
+        try {
+          probe = Reflect.construct(Ctor, [{ apiKey: 'amp-probe' }]);
+        } catch {
+          // Constructor may throw (e.g. missing env var) — fall back to
+          // property access on the bare prototype which works if the getter
+          // is defined on the prototype.
+          probe = Object.create(Ctor.prototype);
+        }
       }
+      _probeCache.set(cls, probe);
     }
 
     let current: unknown = probe;
@@ -1512,7 +1594,9 @@ function _probeNestedPrototype(
     if (proto != null && proto !== Object.prototype) {
       return proto;
     }
-    return current;
+    // Leaf is a plain object (Object.prototype) — no shared prototype to patch.
+    // Return null so the caller can fall back to constructor-wrapping.
+    return null;
   } catch {
     return null;
   }
@@ -1716,6 +1800,7 @@ function _trackGeminiResponse(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
+  requestOpts?: unknown,
 ): void {
   if (response == null || typeof response !== 'object') return;
 
@@ -1747,6 +1832,15 @@ function _trackGeminiResponse(
   const toolCalls = _extractGeminiToolCalls(respObj);
   const latencyMs = performance.now() - startTime;
 
+  const reqOpts = requestOpts as Record<string, unknown> | undefined;
+  const genConfig = reqOpts?.generationConfig as Record<string, unknown> | undefined;
+  const sysInstr = reqOpts?.systemInstruction;
+  const systemPrompt = typeof sysInstr === 'string'
+    ? sysInstr
+    : (sysInstr != null && typeof sysInstr === 'object'
+        ? String((sysInstr as Record<string, unknown>).text ?? '')
+        : undefined);
+
   ai.trackAiMessage({
     userId: ctx.userId ?? 'unknown',
     content: text,
@@ -1760,6 +1854,11 @@ function _trackGeminiResponse(
     totalTokens: usage?.totalTokenCount,
     totalCostUsd: costUsd,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    systemPrompt: systemPrompt || undefined,
+    toolDefinitions: _extractToolDefinitions(reqOpts),
+    temperature: genConfig?.temperature as number | undefined,
+    maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
+    topP: genConfig?.topP as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
@@ -1863,23 +1962,49 @@ function _trackResponsesResponse(
       ? resp.output_text
       : _extractResponsesText(resp.output);
   const opts = requestOpts as Record<string, unknown> | undefined;
+  const modelName = String(resp.model ?? opts?.model ?? 'unknown');
+  const inputTokens = typeof usage?.input_tokens === 'number'
+    ? (usage.input_tokens as number) : undefined;
+  const outputTokens = typeof usage?.output_tokens === 'number'
+    ? (usage.output_tokens as number) : undefined;
+
+  let costUsd: number | null = null;
+  if (inputTokens != null && outputTokens != null) {
+    try {
+      const reasoningTokens = typeof (
+        usage?.output_tokens_details as Record<string, unknown> | undefined
+      )?.reasoning_tokens === 'number'
+        ? ((usage?.output_tokens_details as Record<string, unknown>)
+            .reasoning_tokens as number)
+        : 0;
+      costUsd = calculateCost({
+        modelName,
+        inputTokens,
+        outputTokens,
+        reasoningTokens,
+        defaultProvider: 'openai',
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
+
+  const toolCalls = _extractResponsesOutputToolCalls(resp.output);
+  const systemPrompt = typeof opts?.instructions === 'string'
+    ? opts.instructions : undefined;
+  const toolDefs = Array.isArray(opts?.tools) && (opts.tools as unknown[]).length > 0
+    ? (opts.tools as Array<Record<string, unknown>>) : undefined;
 
   ai.trackAiMessage({
     userId: ctx.userId ?? 'unknown',
     content: outputText,
     sessionId: ctx.sessionId,
-    model: String(resp.model ?? opts?.model ?? 'unknown'),
+    model: modelName,
     provider: providerName,
     latencyMs: performance.now() - startTime,
     traceId: ctx.traceId,
-    inputTokens:
-      typeof usage?.input_tokens === 'number'
-        ? (usage.input_tokens as number)
-        : undefined,
-    outputTokens:
-      typeof usage?.output_tokens === 'number'
-        ? (usage.output_tokens as number)
-        : undefined,
+    inputTokens,
+    outputTokens,
     totalTokens:
       typeof usage?.total_tokens === 'number'
         ? (usage.total_tokens as number)
@@ -1891,11 +2016,24 @@ function _trackResponsesResponse(
         ? ((usage?.output_tokens_details as Record<string, unknown>)
             .reasoning_tokens as number)
         : undefined,
+    totalCostUsd: costUsd,
     finishReason: _extractResponsesFinishReason(resp),
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    systemPrompt,
+    toolDefinitions: toolDefs,
+    temperature: opts?.temperature as number | undefined,
+    maxOutputTokens: opts?.max_output_tokens as number | undefined,
+    topP: opts?.top_p as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    toolCalls.length > 0 ? toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 async function* _wrapPatchedResponsesStream(
@@ -1917,8 +2055,10 @@ async function* _wrapPatchedResponsesStream(
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let totalTokens: number | undefined;
+  let reasoningTokens: number | undefined;
   let isError = false;
   let errorMessage: string | undefined;
+  let completedOutput: unknown;
 
   try {
     for await (const event of stream) {
@@ -1940,8 +2080,12 @@ async function* _wrapPatchedResponsesStream(
           outputTokens = usage.output_tokens;
         if (typeof usage?.total_tokens === 'number')
           totalTokens = usage.total_tokens;
+        const outDetails = usage?.output_tokens_details as Record<string, unknown> | undefined;
+        if (typeof outDetails?.reasoning_tokens === 'number')
+          reasoningTokens = outDetails.reasoning_tokens;
         const status = response?.status;
         if (typeof status === 'string') finishReason = status;
+        completedOutput = response?.output;
       }
       yield event;
     }
@@ -1951,6 +2095,27 @@ async function* _wrapPatchedResponsesStream(
     throw error;
   } finally {
     if (!isTrackerManaged()) {
+      let costUsd: number | null = null;
+      if (inputTokens != null && outputTokens != null) {
+        try {
+          costUsd = calculateCost({
+            modelName: model,
+            inputTokens,
+            outputTokens,
+            reasoningTokens: reasoningTokens ?? 0,
+            defaultProvider: 'openai',
+          });
+        } catch {
+          // cost calculation is best-effort
+        }
+      }
+
+      const toolCalls = _extractResponsesOutputToolCalls(completedOutput);
+      const systemPrompt = typeof opts?.instructions === 'string'
+        ? opts.instructions : undefined;
+      const toolDefs = Array.isArray(opts?.tools) && (opts.tools as unknown[]).length > 0
+        ? (opts.tools as Array<Record<string, unknown>>) : undefined;
+
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -1962,7 +2127,15 @@ async function* _wrapPatchedResponsesStream(
         inputTokens,
         outputTokens,
         totalTokens,
+        reasoningTokens,
+        totalCostUsd: costUsd,
         finishReason,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        systemPrompt,
+        toolDefinitions: toolDefs,
+        temperature: opts?.temperature as number | undefined,
+        maxOutputTokens: opts?.max_output_tokens as number | undefined,
+        topP: opts?.top_p as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -1970,6 +2143,12 @@ async function* _wrapPatchedResponsesStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        toolCalls.length > 0 ? toolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -2000,6 +2179,174 @@ function _extractResponsesFinishReason(
   if (!Array.isArray(output) || output.length === 0) return undefined;
   const first = output[0] as Record<string, unknown> | undefined;
   return typeof first?.status === 'string' ? first.status : undefined;
+}
+
+function _extractResponsesOutputToolCalls(
+  output: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(output)) return [];
+  const toolCalls: Array<Record<string, unknown>> = [];
+  for (const item of output) {
+    if (item == null || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    if (obj.type === 'function_call') {
+      toolCalls.push(obj);
+      continue;
+    }
+    const content = obj.content;
+    if (!Array.isArray(content)) continue;
+    for (const c of content) {
+      if (c == null || typeof c !== 'object') continue;
+      const cObj = c as Record<string, unknown>;
+      if (cObj.type === 'tool_call' || cObj.type === 'function_call') {
+        toolCalls.push(cObj);
+      }
+    }
+  }
+  return toolCalls;
+}
+
+function _trackResponsesUserMessages(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+): void {
+  if (typeof ai.trackUserMessage !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
+
+  const opts = requestOpts as Record<string, unknown> | undefined;
+  if (!opts) return;
+  const input = opts.input;
+  if (input == null) return;
+
+  if (typeof input === 'string') {
+    ai.trackUserMessage({
+      userId: ctx.userId ?? 'unknown',
+      content: input,
+      sessionId: ctx.sessionId ?? '',
+      traceId: ctx.traceId,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      env: ctx.env,
+      messageSource: ctx.parentAgentId ? 'agent' : 'user',
+    });
+    return;
+  }
+
+  if (!Array.isArray(input)) return;
+  const entries = input as Array<Record<string, unknown>>;
+  const lastReplyIdx = entries.findLastIndex((e) => {
+    if (typeof e === 'string') return false;
+    return e.role === 'assistant' || e.type === 'function_call' || e.type === 'function_call_output';
+  });
+  const newEntries = entries.slice(lastReplyIdx + 1);
+
+  for (const entry of newEntries) {
+    if (typeof entry === 'string') {
+      ai.trackUserMessage({
+        userId: ctx.userId ?? 'unknown',
+        content: entry,
+        sessionId: ctx.sessionId ?? '',
+        traceId: ctx.traceId,
+        agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
+        customerOrgId: ctx.customerOrgId,
+        env: ctx.env,
+        messageSource: ctx.parentAgentId ? 'agent' : 'user',
+      });
+      continue;
+    }
+    if (entry.role !== 'user') continue;
+    const content = entry.content;
+    if (typeof content === 'string') {
+      ai.trackUserMessage({
+        userId: ctx.userId ?? 'unknown',
+        content,
+        sessionId: ctx.sessionId ?? '',
+        traceId: ctx.traceId,
+        agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
+        customerOrgId: ctx.customerOrgId,
+        env: ctx.env,
+        messageSource: ctx.parentAgentId ? 'agent' : 'user',
+      });
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        const text = typeof part === 'string' ? part
+          : (part as Record<string, unknown>)?.text;
+        if (typeof text === 'string' && text.length > 0) {
+          ai.trackUserMessage({
+            userId: ctx.userId ?? 'unknown',
+            content: text,
+            sessionId: ctx.sessionId ?? '',
+            traceId: ctx.traceId,
+            agentId: ctx.agentId,
+            parentAgentId: ctx.parentAgentId,
+            customerOrgId: ctx.customerOrgId,
+            env: ctx.env,
+            messageSource: ctx.parentAgentId ? 'agent' : 'user',
+          });
+        }
+      }
+    }
+  }
+}
+
+function _extractResponsesToolCallsFromInput(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+): void {
+  if (typeof ai.trackToolCall !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
+
+  const opts = requestOpts as Record<string, unknown> | undefined;
+  if (!opts) return;
+  const input = opts.input;
+  if (!Array.isArray(input)) return;
+
+  const entries = input as Array<Record<string, unknown>>;
+  const toolCallMap = new Map<string, { name: string; callId: string }>();
+  const resultMap = new Map<string, { output: string }>();
+
+  for (const entry of entries) {
+    if (entry.type === 'function_call') {
+      const callId = (entry.call_id as string) ?? (entry.id as string) ?? '';
+      const name = (entry.name as string) ?? '';
+      if (callId) toolCallMap.set(callId, { name, callId });
+    } else if (entry.type === 'function_call_output') {
+      const callId = (entry.call_id as string) ?? '';
+      const output = typeof entry.output === 'string'
+        ? entry.output : JSON.stringify(entry.output ?? '');
+      if (callId) resultMap.set(callId, { output });
+    }
+  }
+
+  for (const [callId, tc] of toolCallMap) {
+    const result = resultMap.get(callId);
+    if (!result) continue;
+    const latencyMs = _consumeToolLatencyMs(ctx.sessionId, callId, ctx.agentId);
+    ai.trackToolCall({
+      userId: ctx.userId ?? 'unknown',
+      sessionId: ctx.sessionId ?? '',
+      traceId: ctx.traceId,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      env: ctx.env,
+      toolName: tc.name,
+      toolCallId: callId,
+      toolOutput: result.output,
+      latencyMs: latencyMs > 0 ? latencyMs : undefined,
+    });
+  }
 }
 
 // ---------------------------------------------------------------
@@ -2064,7 +2411,7 @@ function _extractAnthropicContent(
     if (block.type === 'text') {
       text += String(block.text ?? '');
     } else if (block.type === 'thinking') {
-      reasoning = String(block.thinking ?? '');
+      reasoning = (reasoning ?? '') + String(block.thinking ?? '');
     } else if (block.type === 'tool_use') {
       toolCalls.push({
         type: 'function',
@@ -2153,6 +2500,7 @@ function _trackInputUserMessages(
   if (ctx == null) return;
   if (isTrackerManaged()) return;
   if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
 
   const req = requestOpts as Record<string, unknown> | undefined;
   if (!req) return;
@@ -2276,6 +2624,7 @@ function _toolLatencyKey(
   return `${sessionId ?? ''}|${toolUseId}|${agentId ?? ''}`;
 }
 
+// Full-map walk is fine here — registry is capped at _TOOL_LATENCY_MAX (10k)
 function _evictExpiredToolLatencies(now: number): void {
   for (const [key, entry] of _toolLatencyRegistry) {
     if (now - entry.time > _TOOL_LATENCY_TTL_MS) {
@@ -2334,6 +2683,7 @@ function _extractAndTrackToolCalls(
   if (ctx == null) return;
   if (isTrackerManaged()) return;
   if (!ctx.userId || !ctx.sessionId) return;
+  if (ctx.skipAutoUserTracking) return;
 
   const req = requestOpts as Record<string, unknown> | undefined;
   if (!req) return;

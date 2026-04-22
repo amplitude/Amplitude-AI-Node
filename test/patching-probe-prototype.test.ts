@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * (OpenAI v4+, Anthropic, Mistral). The nested namespaces are instance
  * properties set in the constructor — NOT on the prototype — so
  * _getNestedPrototype returns null. Then _probeNestedPrototype creates a
- * temporary instance via Ctor.call(), walks the path, and finds the shared
- * prototype of the leaf object. Patching that shared prototype covers all
- * instances.
+ * temporary instance via Reflect.construct(), walks the path, and finds
+ * the shared prototype of the leaf object. Patching that shared prototype
+ * covers all instances.
  *
- * Uses function constructors (not ES classes) so Ctor.call() works.
+ * Includes both function-constructor fakes AND real ES-class fakes to
+ * verify Reflect.construct works for native class syntax.
  */
 
 const mockCreate = vi.fn();
@@ -206,5 +207,46 @@ describe('patching via _probeNestedPrototype (lazy-getter SDKs)', () => {
     const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.isError).toBe(true);
     expect(call.provider).toBe('openai');
+  });
+
+  it('_probeNestedPrototype works with ES-class Anthropic (Reflect.construct)', async (): Promise<void> => {
+    mockAnthropicCreate.mockResolvedValueOnce({
+      model: 'claude-3-5-sonnet',
+      content: [{ type: 'text', text: 'es-class' }],
+      usage: { input_tokens: 5, output_tokens: 3 },
+      stop_reason: 'end_turn',
+    });
+
+    patchAnthropic({ amplitudeAI: ai as never });
+
+    const client = new (FakeAnthropicLazy as unknown as new () => AnthropicClient)();
+    await client.messages.create({
+      model: 'claude-3-5-sonnet',
+      messages: [{ role: 'user', content: 'es-class test' }],
+    });
+
+    expect(ai.trackAiMessage).toHaveBeenCalled();
+    const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.provider).toBe('anthropic');
+  });
+
+  it('_probeNestedPrototype works with ES-class Mistral (Reflect.construct)', async (): Promise<void> => {
+    mockMistralComplete.mockResolvedValueOnce({
+      model: 'mistral-large',
+      choices: [{ message: { content: 'es-class' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+    });
+
+    patchMistral({ amplitudeAI: ai as never });
+
+    const client = new (FakeMistralLazy as unknown as new () => MistralClient)();
+    await client.chat.complete({
+      model: 'mistral-large',
+      messages: [{ role: 'user', content: 'es-class test' }],
+    });
+
+    expect(ai.trackAiMessage).toHaveBeenCalled();
+    const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.provider).toBe('mistral');
   });
 });
