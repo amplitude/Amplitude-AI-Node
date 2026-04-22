@@ -599,6 +599,7 @@ function _makeCompletionWrapper(
   return (original, ...args) => {
     const startTime = performance.now();
 
+    _extractAndTrackToolCalls(amplitudeAI, args[0], providerName);
     _trackInputUserMessages(amplitudeAI, args[0], providerName);
 
     const result = original(...args);
@@ -831,6 +832,9 @@ async function* _wrapPatchedStream(
           filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
         systemPrompt: _extractSystemPrompt(req),
         toolDefinitions: _extractToolDefinitions(req),
+        temperature: req?.temperature as number | undefined,
+        maxOutputTokens: (req?.max_tokens ?? req?.max_completion_tokens) as number | undefined,
+        topP: req?.top_p as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -838,6 +842,12 @@ async function* _wrapPatchedStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -986,6 +996,9 @@ async function* _wrapPatchedAnthropicStream(
         reasoningContent: reasoningContent || undefined,
         systemPrompt: _extractAnthropicSystemPrompt(req?.system),
         toolDefinitions: _extractToolDefinitions(req),
+        temperature: req?.temperature as number | undefined,
+        maxOutputTokens: req?.max_tokens as number | undefined,
+        topP: req?.top_p as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -993,6 +1006,12 @@ async function* _wrapPatchedAnthropicStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -1181,6 +1200,7 @@ async function* _wrapPatchedBedrockStream(
         }
       }
 
+      const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
       ai.trackAiMessage({
         userId: ctx.userId ?? 'unknown',
         content,
@@ -1196,6 +1216,9 @@ async function* _wrapPatchedBedrockStream(
         finishReason,
         toolCalls:
           streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        temperature: infConfig?.temperature as number | undefined,
+        maxOutputTokens: infConfig?.maxTokens as number | undefined,
+        topP: infConfig?.topP as number | undefined,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -1203,6 +1226,12 @@ async function* _wrapPatchedBedrockStream(
         errorMessage,
         ..._contextExtras(ctx),
       });
+
+      _recordToolUses(
+        streamToolCalls.length > 0 ? streamToolCalls : undefined,
+        ctx.sessionId,
+        ctx.agentId,
+      );
     }
   }
 }
@@ -1560,10 +1589,15 @@ function _trackCompletionResponse(
     toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
     systemPrompt: _extractSystemPrompt(req),
     toolDefinitions: _extractToolDefinitions(req),
+    temperature: req?.temperature as number | undefined,
+    maxOutputTokens: (req?.max_tokens ?? req?.max_completion_tokens) as number | undefined,
+    topP: req?.top_p as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(toolCalls, ctx.sessionId, ctx.agentId);
 }
 
 function _trackAnthropicResponse(
@@ -1633,10 +1667,19 @@ function _trackAnthropicResponse(
     reasoningContent: extracted.reasoning,
     systemPrompt: _extractAnthropicSystemPrompt(req?.system),
     toolDefinitions: _extractToolDefinitions(req),
+    temperature: req?.temperature as number | undefined,
+    maxOutputTokens: req?.max_tokens as number | undefined,
+    topP: req?.top_p as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 function _trackCompletionError(
@@ -1721,6 +1764,12 @@ function _trackGeminiResponse(
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    toolCalls.length > 0 ? toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 function _trackBedrockResponse(
@@ -1763,6 +1812,7 @@ function _trackBedrockResponse(
   }
 
   const toolCalls = _extractBedrockToolCalls(content);
+  const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
   const latencyMs = performance.now() - startTime;
 
   ai.trackAiMessage({
@@ -1779,10 +1829,19 @@ function _trackBedrockResponse(
     totalCostUsd: costUsd,
     finishReason: String(resp.stopReason ?? ''),
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    temperature: infConfig?.temperature as number | undefined,
+    maxOutputTokens: infConfig?.maxTokens as number | undefined,
+    topP: infConfig?.topP as number | undefined,
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),
   });
+
+  _recordToolUses(
+    toolCalls.length > 0 ? toolCalls : undefined,
+    ctx.sessionId,
+    ctx.agentId,
+  );
 }
 
 function _trackResponsesResponse(
@@ -2164,6 +2223,12 @@ function _trackAnthropicUserMessages(
   for (const msg of newMessages) {
     if (msg?.role !== 'user') continue;
     const rawContent = msg.content;
+    if (Array.isArray(rawContent)) {
+      const hasToolResult = rawContent.some(
+        (b) => typeof b === 'object' && b != null && (b as Record<string, unknown>).type === 'tool_result',
+      );
+      if (hasToolResult) continue;
+    }
     const content = Array.isArray(rawContent)
       ? rawContent
           .map((part) => {
@@ -2186,6 +2251,257 @@ function _trackAnthropicUserMessages(
       customerOrgId: ctx.customerOrgId,
       env: ctx.env,
     });
+  }
+}
+
+// ---------------------------------------------------------------
+// Tool latency registry — bounded, TTL-aware, mirrors Python SDK's
+// tool_latency.py. Records timestamps when tool_use blocks appear
+// in a response; consumed when the next request carries tool results.
+// ---------------------------------------------------------------
+
+const _TOOL_LATENCY_MAX = 10_000;
+const _TOOL_LATENCY_TTL_MS = 600_000; // 10 minutes
+
+type _ToolLatencyEntry = { time: number };
+const _toolLatencyRegistry = new Map<string, _ToolLatencyEntry>();
+
+function _toolLatencyKey(
+  sessionId: string | null | undefined,
+  toolUseId: string,
+  agentId: string | null | undefined,
+): string {
+  return `${sessionId ?? ''}|${toolUseId}|${agentId ?? ''}`;
+}
+
+function _evictExpiredToolLatencies(now: number): void {
+  for (const [key, entry] of _toolLatencyRegistry) {
+    if (now - entry.time > _TOOL_LATENCY_TTL_MS) {
+      _toolLatencyRegistry.delete(key);
+    }
+  }
+}
+
+function _recordToolUses(
+  toolCalls: Array<Record<string, unknown>> | undefined,
+  sessionId: string | null | undefined,
+  agentId: string | null | undefined,
+): void {
+  if (!toolCalls || toolCalls.length === 0) return;
+  const now = performance.now();
+  _evictExpiredToolLatencies(now);
+  for (const tc of toolCalls) {
+    const id = (tc.id as string) ?? '';
+    if (!id) continue;
+    const key = _toolLatencyKey(sessionId, id, agentId);
+    _toolLatencyRegistry.set(key, { time: now });
+    while (_toolLatencyRegistry.size > _TOOL_LATENCY_MAX) {
+      const oldest = _toolLatencyRegistry.keys().next().value;
+      if (oldest != null) _toolLatencyRegistry.delete(oldest);
+      else break;
+    }
+  }
+}
+
+function _consumeToolLatencyMs(
+  sessionId: string | null | undefined,
+  toolUseId: string,
+  agentId: string | null | undefined,
+): number {
+  const key = _toolLatencyKey(sessionId, toolUseId, agentId);
+  const entry = _toolLatencyRegistry.get(key);
+  if (!entry) return 0;
+  _toolLatencyRegistry.delete(key);
+  const now = performance.now();
+  if (now - entry.time > _TOOL_LATENCY_TTL_MS) return 0;
+  return Math.max(0, now - entry.time);
+}
+
+// ---------------------------------------------------------------
+// Auto-extract [Agent] Tool Call events from input messages
+// Mirrors Python SDK's _extract_and_track_tool_calls()
+// ---------------------------------------------------------------
+
+function _extractAndTrackToolCalls(
+  ai: AmplitudeAI,
+  requestOpts: unknown,
+  providerName: string,
+): void {
+  if (typeof ai.trackToolCall !== 'function') return;
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+  if (!ctx.userId || !ctx.sessionId) return;
+
+  const req = requestOpts as Record<string, unknown> | undefined;
+  if (!req) return;
+  const messages = req.messages as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(messages) || messages.length === 0) return;
+
+  if (providerName === 'anthropic') {
+    _extractAnthropicToolCalls(ai, messages, ctx);
+  } else {
+    _extractOpenAIToolCalls(ai, messages, ctx);
+  }
+}
+
+function _extractOpenAIToolCalls(
+  ai: AmplitudeAI,
+  messages: Array<Record<string, unknown>>,
+  ctx: {
+    userId?: string | null;
+    sessionId?: string | null;
+    traceId?: string | null;
+    agentId?: string | null;
+    parentAgentId?: string | null;
+    customerOrgId?: string | null;
+    env?: string | null;
+  },
+): void {
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant') {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastAssistantIdx < 0) return;
+
+  const assistantMsg = messages[lastAssistantIdx];
+  const toolCalls = assistantMsg?.tool_calls as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return;
+
+  const toolCallMap = new Map<string, { name: string; args: string }>();
+  for (const tc of toolCalls) {
+    const id = (tc.id as string) ?? '';
+    const fn = tc.function as Record<string, unknown> | undefined;
+    if (id && fn?.name) {
+      toolCallMap.set(id, {
+        name: String(fn.name),
+        args: String(fn.arguments ?? ''),
+      });
+    }
+  }
+
+  for (let i = lastAssistantIdx + 1; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg?.role !== 'tool') break;
+    const tcId = (msg.tool_call_id as string) ?? '';
+    const matched = toolCallMap.get(tcId);
+    const toolName = matched?.name ?? 'unknown';
+    const toolInput = matched?.args;
+    const toolOutput = msg.content;
+    const latencyMs = _consumeToolLatencyMs(
+      ctx.sessionId,
+      tcId,
+      ctx.agentId,
+    );
+
+    ai.trackToolCall({
+      userId: ctx.userId ?? 'unknown',
+      toolName,
+      success: true,
+      latencyMs,
+      input: toolInput,
+      output: toolOutput,
+      sessionId: ctx.sessionId ?? '',
+      traceId: ctx.traceId,
+      agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
+      customerOrgId: ctx.customerOrgId,
+      env: ctx.env,
+    });
+  }
+}
+
+function _extractAnthropicToolCalls(
+  ai: AmplitudeAI,
+  messages: Array<Record<string, unknown>>,
+  ctx: {
+    userId?: string | null;
+    sessionId?: string | null;
+    traceId?: string | null;
+    agentId?: string | null;
+    parentAgentId?: string | null;
+    customerOrgId?: string | null;
+    env?: string | null;
+  },
+): void {
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant') {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastAssistantIdx < 0) return;
+
+  const assistantMsg = messages[lastAssistantIdx];
+  const content = assistantMsg?.content as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!Array.isArray(content)) return;
+
+  const toolUseMap = new Map<
+    string,
+    { name: string; input: string }
+  >();
+  for (const block of content) {
+    if (block.type === 'tool_use') {
+      const id = (block.id as string) ?? '';
+      if (id) {
+        toolUseMap.set(id, {
+          name: String(block.name ?? 'unknown'),
+          input:
+            typeof block.input === 'string'
+              ? block.input
+              : JSON.stringify(block.input ?? {}),
+        });
+      }
+    }
+  }
+  if (toolUseMap.size === 0) return;
+
+  for (let i = lastAssistantIdx + 1; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg?.role !== 'user') continue;
+    const msgContent = msg.content as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (!Array.isArray(msgContent)) continue;
+
+    for (const block of msgContent) {
+      if (block.type !== 'tool_result') continue;
+      const tuId = (block.tool_use_id as string) ?? '';
+      const matched = toolUseMap.get(tuId);
+      const toolName = matched?.name ?? 'unknown';
+      const toolInput = matched?.input;
+      const toolOutput = block.content;
+      const isError = block.is_error === true;
+      const latencyMs = _consumeToolLatencyMs(
+        ctx.sessionId,
+        tuId,
+        ctx.agentId,
+      );
+
+      ai.trackToolCall({
+        userId: ctx.userId ?? 'unknown',
+        toolName,
+        success: !isError,
+        latencyMs,
+        input: toolInput,
+        output: toolOutput,
+        sessionId: ctx.sessionId ?? '',
+        traceId: ctx.traceId,
+        agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
+        customerOrgId: ctx.customerOrgId,
+        env: ctx.env,
+        errorMessage: isError ? String(toolOutput ?? '') : undefined,
+      });
+    }
   }
 }
 
@@ -2219,4 +2535,9 @@ function _contextExtras(ctx: {
   }
 
   return extras;
+}
+
+/** @internal Test-only: clear the tool latency registry. */
+export function _resetToolLatencyForTests(): void {
+  _toolLatencyRegistry.clear();
 }
