@@ -71,7 +71,8 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Version         | 0.3.10                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
-| Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, @pydantic/genai-prices (cost), tiktoken or js-tiktoken (token counting) |
+| Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
+| Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, tiktoken or js-tiktoken (token counting)                               |
 
 ## Table of Contents
 
@@ -774,7 +775,7 @@ The SDK tracks four token categories:
 - `[Agent] Cache Read Tokens` — tokens read from provider cache (cheap)
 - `[Agent] Cache Creation Tokens` — tokens written to provider cache (slightly expensive)
 
-Cost is auto-calculated when token counts are provided and the `@pydantic/genai-prices` package is installed. When genai-prices is not available, `calculateCost()` returns `0` (never `null`). You can also pass `totalCostUsd` directly if you compute cost yourself:
+Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If the package fails to load (e.g. in certain bundler environments), `calculateCost()` returns `0` and logs a warning. You can also pass `totalCostUsd` directly if you compute cost yourself:
 
 ```typescript
 s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
@@ -1734,7 +1735,7 @@ These rules match the Python `amplitude-ai` agent guide and affect how Agent Ana
 
 - **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** or **`opts.eventProperties`**, not as the only `content`, or session titles and segmentation will show raw JSON.
 - **Turn-level vs spans** — **`[Agent] User Message`** and **`[Agent] AI Response`** (with session + turn ids) drive **turn counts** and conversation views. **`observe()`** / **`trackSpan()`** add trace detail but **do not replace** those turn events; keep a user + AI pair for each user-visible cycle unless you intentionally document otherwise.
-- **Gateways / custom `baseURL`** — If you use stock `openai` (or another client) against a proxy, the SDK may not auto-wrap that path. Call **`trackAiMessage`** with **`usage`** token fields from the response (or stream end), pass the **actual routed model id** as the model argument, and set **`totalCostUsd`** if genai-prices cannot resolve the model string. Install **`@pydantic/genai-prices`** for automatic USD estimates when model + tokens are known.
+- **Gateways / custom `baseURL`** — If you use stock `openai` (or another client) against a proxy, the SDK may not auto-wrap that path. Call **`trackAiMessage`** with **`usage`** token fields from the response (or stream end), pass the **actual routed model id** as the model argument, and set **`totalCostUsd`** if genai-prices cannot resolve the model string. The `@pydantic/genai-prices` package is included as a dependency for automatic USD estimates when model + tokens are known.
 
 ## Integration Patterns
 
@@ -1989,7 +1990,7 @@ mock.reset();
 | Symptom                                            | Cause                                                             | Fix                                                                                                                                                                                          |
 | -------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No events in Amplitude                             | API key not set or incorrect                                      | Run `amplitude-ai doctor` — it checks `AMPLITUDE_AI_API_KEY` and reports a fix command                                                                                                       |
-| Events tracked but `[Agent] Cost USD` is $0        | Model not in the pricing database, or `total_cost_usd` not passed | Pass `totalCostUsd` explicitly, or check that `@pydantic/genai-prices` / `genai-prices` is installed                                                                                         |
+| Events tracked but `[Agent] Cost USD` is $0        | Model not in the pricing database, or `total_cost_usd` not passed | Pass `totalCostUsd` explicitly. If you see a `@pydantic/genai-prices not available` warning at startup, the pricing package failed to load (common in bundler environments) — check your build config |
 | `patch()` doesn't instrument calls                 | `patch()` called after the provider client was created            | Call `patch()` before importing or instantiating provider clients                                                                                                                            |
 | Session context missing on events                  | LLM calls made outside `session.run()`                            | Wrap your LLM calls inside `session.run(async () => { ... })`                                                                                                                                |
 | `flush()` hangs or times out in serverless         | Process exits before flush completes                              | Use `await ai.flush()` before returning from your Lambda/Cloud Function handler                                                                                                              |

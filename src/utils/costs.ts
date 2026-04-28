@@ -1,17 +1,26 @@
 /**
  * Cost calculation utilities.
  *
- * Uses the genai-prices package when available (npm: @pydantic/genai-prices).
- * Falls back to returning 0 when not installed.
+ * Uses the genai-prices package (npm: @pydantic/genai-prices) for pricing.
+ * This is a regular dependency and should be installed automatically.
+ * Falls back to returning 0 if the package fails to load (e.g. bundler issues).
  */
 
 import {
   inferProviderFromModel,
   tryInferProviderFromModel,
 } from './providers.js';
+import { getLogger } from './logger.js';
 import { tryRequire } from './resolve-module.js';
 
 const genaiPrices = tryRequire('@pydantic/genai-prices');
+
+if (genaiPrices == null) {
+  getLogger().warn(
+    '@pydantic/genai-prices not available. Cost calculation will return 0. ' +
+      'Install it with: npm install @pydantic/genai-prices',
+  );
+}
 
 let _livePricesEnabled = false;
 
