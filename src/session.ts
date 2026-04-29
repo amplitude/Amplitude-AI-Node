@@ -253,6 +253,7 @@ export class Session {
         idleTimeoutMinutes: this.idleTimeoutMinutes,
       };
       if (this.userId != null) endOpts.userId = this.userId;
+      if (this.deviceId != null) endOpts.deviceId = this.deviceId;
       this._agent.trackSessionEnd(this._inject(endOpts));
     } catch (e) {
       getLogger().debug(`Failed to auto-end session ${this.sessionId}: ${e}`);
@@ -291,6 +292,8 @@ export class Session {
       merged.traceId = this.traceId;
     if (this.userId != null && merged.userId == null)
       merged.userId = this.userId;
+    if (this.deviceId != null && merged.deviceId == null)
+      merged.deviceId = this.deviceId;
     if (this._sessionReplayId != null) {
       const existingEp = merged.eventProperties as
         | Record<string, unknown>

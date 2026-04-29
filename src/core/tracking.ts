@@ -109,6 +109,16 @@ function validateRequiredStr(value: unknown, fieldName: string): void {
   }
 }
 
+function validateIdentity(userId: unknown, deviceId: unknown): void {
+  const hasUser = typeof userId === 'string' && userId.length > 0;
+  const hasDevice = typeof deviceId === 'string' && deviceId.length > 0;
+  if (!hasUser && !hasDevice) {
+    throw new ValidationError(
+      'At least one of userId or deviceId must be a non-empty string',
+    );
+  }
+}
+
 function validateNonNegative(value: unknown, fieldName: string): void {
   if (typeof value === 'number' && value < 0) {
     throw new ValidationError(`${fieldName} must be >= 0, got ${value}`);
@@ -155,7 +165,8 @@ function withSdkManagedProperties(
 
 export interface TrackUserMessageOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   messageContent: string;
   sessionId?: string | null;
   traceId?: string | null;
@@ -185,7 +196,7 @@ export interface TrackUserMessageOptions {
 export function trackUserMessage(opts: TrackUserMessageOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.sessionId, 'sessionId');
   }
 
@@ -248,7 +259,8 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_USER_MESSAGE,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.userProperties) event.user_properties = opts.userProperties;
@@ -274,7 +286,8 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
 
 export interface TrackAiMessageOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   modelName: string;
   provider: string;
   responseContent: string;
@@ -327,7 +340,7 @@ export interface TrackAiMessageOptions {
 export function trackAiMessage(opts: TrackAiMessageOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.modelName, 'model');
     validateNonNegative(opts.latencyMs, 'latencyMs');
   }
@@ -447,7 +460,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_AI_RESPONSE,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.userProperties) event.user_properties = opts.userProperties;
@@ -473,7 +487,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
 
 export interface TrackToolCallOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   toolName: string;
   success: boolean;
   latencyMs: number;
@@ -504,7 +519,7 @@ export interface TrackToolCallOptions {
 export function trackToolCall(opts: TrackToolCallOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.toolName, 'toolName');
     validateNonNegative(opts.latencyMs, 'latencyMs');
   }
@@ -560,7 +575,8 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_TOOL_CALL,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.userProperties) event.user_properties = opts.userProperties;
@@ -584,7 +600,8 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
 
 export interface TrackConversationOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   messages: Array<Record<string, unknown>>;
   sessionId?: string | null;
   conversationId?: string | null;
@@ -614,6 +631,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
       trackUserMessage({
         amplitude: opts.amplitude,
         userId: opts.userId,
+        deviceId: opts.deviceId,
         messageContent: content,
         sessionId: effectiveSessionId,
         turnId,
@@ -633,6 +651,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
       trackAiMessage({
         amplitude: opts.amplitude,
         userId: opts.userId,
+        deviceId: opts.deviceId,
         modelName: String(message.model ?? 'unknown'),
         provider: String(message.provider ?? 'unknown'),
         responseContent: content,
@@ -667,7 +686,8 @@ export function trackConversation(opts: TrackConversationOptions): void {
 
 export interface TrackEmbeddingOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   model: string;
   provider: string;
   latencyMs: number;
@@ -692,7 +712,7 @@ export interface TrackEmbeddingOptions {
 export function trackEmbedding(opts: TrackEmbeddingOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateNonNegative(opts.latencyMs, 'latencyMs');
   }
 
@@ -730,7 +750,8 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_EMBEDDING,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
@@ -753,7 +774,8 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
 
 export interface TrackSpanOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   spanName: string;
   traceId: string;
   latencyMs: number;
@@ -779,7 +801,7 @@ export interface TrackSpanOptions {
 export function trackSpan(opts: TrackSpanOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateNonNegative(opts.latencyMs, 'latencyMs');
   }
 
@@ -827,7 +849,8 @@ export function trackSpan(opts: TrackSpanOptions): string {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_SPAN,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
@@ -850,7 +873,8 @@ export function trackSpan(opts: TrackSpanOptions): string {
 
 export interface TrackSessionEndOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   sessionId: string;
   enrichments?: SessionEnrichments | null;
   traceId?: string | null;
@@ -872,7 +896,7 @@ export interface TrackSessionEndOptions {
 export function trackSessionEnd(opts: TrackSessionEndOptions): void {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.sessionId, 'sessionId');
   }
 
@@ -910,7 +934,8 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_SESSION_END,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
@@ -933,7 +958,8 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
 
 export interface TrackSessionEnrichmentOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   sessionId: string;
   enrichments: SessionEnrichments;
   traceId?: string | null;
@@ -955,7 +981,7 @@ export function trackSessionEnrichment(
 ): void {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.sessionId, 'sessionId');
   }
 
@@ -987,7 +1013,8 @@ export function trackSessionEnrichment(
 
   const event: AmplitudeEvent = {
     event_type: EVENT_SESSION_ENRICHMENT,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
@@ -1010,7 +1037,8 @@ export function trackSessionEnrichment(
 
 export interface TrackScoreOptions {
   amplitude: AmplitudeLike;
-  userId: string;
+  userId?: string;
+  deviceId?: string | null;
   name: string;
   value: number;
   targetId: string;
@@ -1035,7 +1063,7 @@ export interface TrackScoreOptions {
 export function trackScore(opts: TrackScoreOptions): void {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
   if (pc.validate) {
-    validateRequiredStr(opts.userId, 'userId');
+    validateIdentity(opts.userId, opts.deviceId);
     validateNumeric(opts.value, 'value');
   }
 
@@ -1075,7 +1103,8 @@ export function trackScore(opts: TrackScoreOptions): void {
 
   const event: AmplitudeEvent = {
     event_type: EVENT_SCORE,
-    user_id: opts.userId,
+    user_id: opts.userId || undefined,
+    device_id: opts.deviceId || undefined,
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;

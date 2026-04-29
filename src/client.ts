@@ -302,7 +302,8 @@ export class AmplitudeAI {
   // ---------------------------------------------------------------
 
   trackUserMessage(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     content: string;
     sessionId: string;
     traceId?: string | null;
@@ -328,6 +329,7 @@ export class AmplitudeAI {
     return trackUserMessage({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       messageContent: opts.content,
       sessionId: opts.sessionId,
       traceId: opts.traceId,
@@ -353,7 +355,8 @@ export class AmplitudeAI {
   }
 
   trackAiMessage(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     content: string;
     sessionId: string;
     model: string;
@@ -424,6 +427,7 @@ export class AmplitudeAI {
     return trackAiMessage({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       modelName: opts.model,
       provider: opts.provider,
       responseContent: opts.content,
@@ -475,7 +479,8 @@ export class AmplitudeAI {
   // ---------------------------------------------------------------
 
   trackToolCall(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     toolName: string;
     latencyMs: number;
     success: boolean;
@@ -500,6 +505,7 @@ export class AmplitudeAI {
     return trackToolCall({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       toolName: opts.toolName,
       success: opts.success,
       latencyMs: opts.latencyMs,
@@ -525,7 +531,8 @@ export class AmplitudeAI {
   }
 
   trackEmbedding(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     model: string;
     provider: string;
     latencyMs: number;
@@ -548,6 +555,7 @@ export class AmplitudeAI {
     return trackEmbedding({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       model: opts.model,
       provider: opts.provider,
       latencyMs: opts.latencyMs,
@@ -571,7 +579,8 @@ export class AmplitudeAI {
   }
 
   trackSpan(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     spanName: string;
     traceId: string;
     latencyMs: number;
@@ -595,6 +604,7 @@ export class AmplitudeAI {
     return trackSpan({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       spanName: opts.spanName,
       traceId: opts.traceId,
       latencyMs: opts.latencyMs,
@@ -623,7 +633,8 @@ export class AmplitudeAI {
   // ---------------------------------------------------------------
 
   trackSessionEnd(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     sessionId: string;
     enrichments?: SessionEnrichments | null;
     traceId?: string | null;
@@ -643,6 +654,7 @@ export class AmplitudeAI {
     trackSessionEnd({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       sessionId: opts.sessionId,
       enrichments: opts.enrichments,
       traceId: opts.traceId,
@@ -664,7 +676,8 @@ export class AmplitudeAI {
   }
 
   trackSessionEnrichment(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     sessionId: string;
     enrichments: SessionEnrichments;
     traceId?: string | null;
@@ -682,6 +695,7 @@ export class AmplitudeAI {
     trackSessionEnrichment({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       sessionId: opts.sessionId,
       enrichments: opts.enrichments,
       traceId: opts.traceId,
@@ -704,7 +718,8 @@ export class AmplitudeAI {
   // ---------------------------------------------------------------
 
   score(opts: {
-    userId: string;
+    userId?: string;
+    deviceId?: string | null;
     name: string;
     value: number;
     targetId: string;
@@ -727,6 +742,7 @@ export class AmplitudeAI {
     trackScore({
       amplitude: this._amplitude,
       userId: opts.userId,
+      deviceId: opts.deviceId,
       name: opts.name,
       value: opts.value,
       targetId: opts.targetId,

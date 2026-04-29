@@ -36,6 +36,7 @@ import { StreamingAccumulator } from '../utils/streaming.js';
  */
 export interface ProviderTrackOptions {
   userId?: string | null;
+  deviceId?: string | null;
   sessionId?: string | null;
   traceId?: string | null;
   turnId?: number | null;
@@ -62,12 +63,13 @@ export interface ProviderTrackOptions {
  */
 export function applySessionContext(
   overrides: ProviderTrackOptions = {},
-): ProviderTrackOptions & { userId: string } {
+): ProviderTrackOptions {
   const ctx = getActiveContext();
   const result: Record<string, unknown> = { ...overrides };
 
   if (ctx != null) {
     if (!result.userId) result.userId = ctx.userId;
+    if (!result.deviceId) result.deviceId = ctx.deviceId;
     if (!result.sessionId) result.sessionId = ctx.sessionId;
     if (!result.traceId) result.traceId = ctx.traceId;
     if (!result.agentId) result.agentId = ctx.agentId;
@@ -101,7 +103,7 @@ export function applySessionContext(
     }
   }
 
-  return result as unknown as ProviderTrackOptions & { userId: string };
+  return result as unknown as ProviderTrackOptions;
 }
 
 /**
@@ -112,6 +114,7 @@ export function applySessionContext(
 export type TrackContextFields = Pick<
   TrackCallOptions,
   | 'userId'
+  | 'deviceId'
   | 'sessionId'
   | 'traceId'
   | 'turnId'
@@ -128,7 +131,8 @@ export type TrackContextFields = Pick<
 
 export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
   return {
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId,
     sessionId: ctx.sessionId,
     traceId: ctx.traceId,
     turnId: ctx.turnId ?? undefined,
@@ -164,6 +168,7 @@ export abstract class BaseAIProvider {
 
     const merged = applySessionContext({
       userId: opts.userId,
+      deviceId: opts.deviceId,
       sessionId: opts.sessionId,
       traceId: opts.traceId,
       turnId: opts.turnId,
@@ -182,6 +187,7 @@ export abstract class BaseAIProvider {
       ...opts,
       amplitude: this._amplitude,
       userId: merged.userId ?? opts.userId,
+      deviceId: merged.deviceId ?? opts.deviceId,
       sessionId: merged.sessionId ?? opts.sessionId,
       traceId: merged.traceId ?? opts.traceId,
       turnId: merged.turnId ?? opts.turnId,
