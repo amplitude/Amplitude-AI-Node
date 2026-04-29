@@ -121,6 +121,18 @@ describe('redactPiiPatterns expanded', () => {
     expect(redactPiiPatterns('use ::std::io')).toBe('use ::std::io');
   });
 
+  it('handles mixed IPv6 and scope-resolution in same string', () => {
+    expect(
+      redactPiiPatterns('Connect to 2001:db8::1 via std::net::TcpStream'),
+    ).toBe('Connect to [ip_address] via std::net::TcpStream');
+    expect(
+      redactPiiPatterns('server at fe80::1 running std::vector<int>'),
+    ).toBe('server at [ip_address] running std::vector<int>');
+    expect(redactPiiPatterns('::1 is localhost, not ::Module')).toBe(
+      '[ip_address] is localhost, not ::Module',
+    );
+  });
+
   it('redacts international phone numbers', () => {
     expect(redactPiiPatterns('Call +441234567890')).toBe('Call [phone]');
     expect(redactPiiPatterns('Number: +12025551234')).toBe('Number: [phone]');
