@@ -1138,7 +1138,7 @@ const enrichData = observe(async (data: unknown) => transform(data), {
 
 ### Custom Events in Agent Analytics
 
-Use `trackSpan()` as the escape hatch for any custom event you want to surface in Amplitude dashboards. Unlike raw `amplitude.track()`, `trackSpan()` automatically includes SDK metadata (session ID, agent ID, trace ID, SDK version) so your custom events appear correctly in Agent Analytics views:
+`trackSpan()` is the catch-all for any operation not covered by `trackUserMessage`, `trackAiMessage`, `trackToolCall`, or `trackEmbedding`. It emits an `[Agent] Span` event with full session context (session ID, agent ID, trace ID, SDK version) so custom events appear in Agent Analytics alongside auto-tracked events:
 
 ```typescript
 // Track a custom business event that shows up in Agent Analytics
