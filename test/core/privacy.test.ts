@@ -95,6 +95,13 @@ describe('redactPiiPatterns expanded', () => {
     );
   });
 
+  it('does NOT redact scope-resolution operators (::)', () => {
+    expect(redactPiiPatterns('std::vector<int>')).toBe('std::vector<int>');
+    expect(redactPiiPatterns('a[::2]')).toBe('a[::2]');
+    expect(redactPiiPatterns('::Module::Class')).toBe('::Module::Class');
+    expect(redactPiiPatterns('use ::std::io')).toBe('use ::std::io');
+  });
+
   it('redacts international phone numbers', () => {
     expect(redactPiiPatterns('Call +441234567890')).toBe('Call [phone]');
     expect(redactPiiPatterns('Number: +12025551234')).toBe('Number: [phone]');
