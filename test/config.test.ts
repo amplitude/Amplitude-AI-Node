@@ -42,6 +42,11 @@ describe('AIConfig', () => {
       const config = new AIConfig();
       expect(config.customRedactionPatterns).toEqual([]);
     });
+
+    it('uses customRedactionFn=null by default', (): void => {
+      const config = new AIConfig();
+      expect(config.customRedactionFn).toBeNull();
+    });
   });
 
   describe('custom values', () => {
@@ -83,6 +88,21 @@ describe('AIConfig', () => {
 
     it('accepts custom customRedactionPatterns', (): void => {
       const patterns = ['foo', 'bar'];
+      const config = new AIConfig({ customRedactionPatterns: patterns });
+      expect(config.customRedactionPatterns).toEqual(patterns);
+    });
+
+    it('accepts custom customRedactionFn', (): void => {
+      const fn = (text: string): string => text;
+      const config = new AIConfig({ customRedactionFn: fn });
+      expect(config.customRedactionFn).toBe(fn);
+    });
+
+    it('accepts named replacement patterns', (): void => {
+      const patterns = [
+        'foo',
+        { pattern: 'bar', replacement: '[bar_redacted]' },
+      ];
       const config = new AIConfig({ customRedactionPatterns: patterns });
       expect(config.customRedactionPatterns).toEqual(patterns);
     });
@@ -128,6 +148,14 @@ describe('AIConfig', () => {
       const privacy = config.toPrivacyConfig();
       expect(privacy.validate).toBe(true);
       expect(privacy.debug).toBe(true);
+    });
+
+    it('passes customRedactionFn to PrivacyConfig', (): void => {
+      const fn = (text: string): string => text;
+      const config = new AIConfig({ customRedactionFn: fn });
+      const privacy = config.toPrivacyConfig();
+      const result = privacy.sanitizeContent('test');
+      expect(result.$llm_message).toBeTruthy();
     });
   });
 });

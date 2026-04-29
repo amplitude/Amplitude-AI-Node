@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { redactPiiPatterns } from '../core/privacy.js';
 import { MockAmplitudeAI } from '../testing.js';
 import { PROVIDER_NPM_PACKAGES } from './providers.js';
 
@@ -109,6 +110,20 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
         ...(!flushOk && {
           fix: 'Check that AmplitudeAI is initialized correctly and flush() is called before exit',
         }),
+      });
+
+      const piiSample = 'user@test.com 123-45-6789 192.168.1.1';
+      const piiResult = redactPiiPatterns(piiSample);
+      const piiOk =
+        piiResult.includes('[email]') &&
+        piiResult.includes('[ssn]') &&
+        piiResult.includes('[ip_address]');
+      checks.push({
+        name: 'pii_redaction_smoke',
+        ok: piiOk,
+        detail: piiOk
+          ? 'PII patterns detected and redacted'
+          : `unexpected output: ${piiResult}`,
       });
     } catch (error) {
       checks.push({

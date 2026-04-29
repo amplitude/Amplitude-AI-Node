@@ -598,8 +598,9 @@ const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
 | Option                    | Description                                                                                                 |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `contentMode`             | `'full'` (default), `'metadata_only'`, or `'customer_enriched'`. Both `ContentMode.FULL` and `'full'` work. |
-| `redactPii`               | Redact email, phone, SSN, and credit-card patterns from tracked content. **Defaults to `true`** — set to `false` to opt out. |
-| `customRedactionPatterns` | Additional regex patterns for redaction                                                                     |
+| `redactPii`               | Redact email, phone, SSN, credit-card, and IP-address patterns from tracked content. **Defaults to `true`** — set to `false` to opt out. |
+| `customRedactionPatterns` | Additional regex patterns for redaction. Accepts strings (`[REDACTED]` label) or `{ pattern, replacement }` objects for named labels. |
+| `customRedactionFn`       | Optional `(text: string) => string` callback for custom redaction logic (e.g. compromise.js NER). Called after all regex-based redaction. |
 | `debug`                   | Log events to stderr                                                                                        |
 | `dryRun`                  | Log without sending to Amplitude                                                                            |
 | `validate`                | Enable strict validation of required fields                                                                 |
@@ -671,7 +672,7 @@ Three content modes control what data is sent to Amplitude:
 
 ### FULL mode (default)
 
-Message content is captured and sent to Amplitude. PII redaction is **on by default** — built-in patterns scrub emails, phone numbers, SSNs, credit card numbers, and base64 image data before the event leaves your process. Set `redactPii: false` to opt out:
+Message content is captured and sent to Amplitude. PII redaction is **on by default** — built-in patterns scrub emails, phone numbers (US and international E.164), SSNs (dashed and spaced), credit card numbers, IPv4/IPv6 addresses, and base64 image data before the event leaves your process. Set `redactPii: false` to opt out:
 
 ```typescript
 const config = new AIConfig({
@@ -682,15 +683,59 @@ const config = new AIConfig({
 
 With the default `redactPii: true`, a message like `"Contact me at john@example.com or 555-123-4567"` is sanitized to `"Contact me at [email] or [phone]"` before being sent.
 
-Built-in phone and SSN detection are currently tuned for common US formats. If you need broader international coverage, add explicit `customRedactionPatterns` for your locales.
+> **Upgrading to 0.7.0 with `redactPii: true`?** This release adds IPv4/IPv6 → `[ip_address]`, international phone → `[phone]`, and space-separated SSN → `[ssn]` placeholders. If any downstream pipeline or dashboard regex matches on raw IP or phone content in event properties, update those filters before upgrading.
 
-Add custom redaction patterns for domain-specific PII:
+Built-in patterns now include international phone numbers (E.164 `+country...`) and IPv4/IPv6 addresses. Add custom patterns for domain-specific PII:
 
 ```typescript
 const config = new AIConfig({
   contentMode: ContentMode.FULL,
   redactPii: true,
   customRedactionPatterns: ['ACCT-\\d{6,}', 'internal-key-[a-f0-9]+'],
+});
+```
+
+**Named replacements** — use `{ pattern, replacement }` objects for descriptive labels:
+
+```typescript
+const config = new AIConfig({
+  redactPii: true,
+  customRedactionPatterns: [
+    { pattern: '\\bACME-\\d+\\b', replacement: '[ticket_id]' },
+    { pattern: '\\bORD-[A-Z0-9]+\\b', replacement: '[order_id]' },
+  ],
+});
+```
+
+**Custom redaction function** — plug in any external PII engine:
+
+```typescript
+const config = new AIConfig({
+  redactPii: true,
+  customRedactionFn: myCustomScrubber, // (text: string) => string
+});
+```
+
+The function runs *after* all built-in and custom-pattern redaction, receives the partially-redacted text, and must return a string. If it throws an exception, the SDK logs a warning and preserves the text from prior tiers unchanged.
+
+**Recipe: compromise.js for name/address detection**
+
+```typescript
+import nlp from 'compromise';
+
+function redactNames(text: string): string {
+  const doc = nlp(text);
+  doc.people().replaceWith('[person]');
+  doc.places().replaceWith('[location]');
+  return doc.text();
+}
+
+const ai = new AmplitudeAI({
+  apiKey: 'YOUR_KEY',
+  config: new AIConfig({
+    redactPii: true,
+    customRedactionFn: redactNames,
+  }),
 });
 ```
 
@@ -1092,6 +1137,22 @@ const enrichData = observe(async (data: unknown) => transform(data), {
   agentId: 'enricher',
 });
 ```
+
+### Custom Events in Agent Analytics
+
+`trackSpan()` is the catch-all for any operation not covered by `trackUserMessage`, `trackAiMessage`, `trackToolCall`, or `trackEmbedding`. It emits an `[Agent] Span` event with full session context (session ID, agent ID, trace ID, SDK version) so custom events appear in Agent Analytics alongside auto-tracked events:
+
+```typescript
+// Track a custom business event that shows up in Agent Analytics
+const spanId = session.trackSpan({
+  spanName: 'subscription_check',
+  latencyMs: 45,
+  outputState: 'active',
+  eventProperties: { plan: 'enterprise', seats: 50 },
+});
+```
+
+`trackSpan()` is the recommended way to emit custom events. It supports parent-child nesting via `parentSpanId`, error tracking via `isError`, and all the standard session-level metadata.
 
 ## Scoring Patterns
 
@@ -1934,6 +1995,49 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 ```
+
+## Streaming Patterns
+
+When using streaming LLM responses (e.g. with the Vercel AI SDK's `streamText` or `streamObject`), the `session.run()` pattern doesn't fit because the response completes asynchronously after the callback exits.
+
+Use explicit event tracking with manual flush instead:
+
+```typescript
+import { streamText } from 'ai';
+
+export async function POST(req: Request) {
+  const { messages } = await req.json();
+  const session = agent.session({ userId, sessionId });
+
+  session.trackUserMessage({ content: messages.at(-1)?.content ?? '' });
+
+  const result = streamText({
+    model: openai('gpt-4o'),
+    messages,
+    onFinish: async ({ text, usage }) => {
+      session.trackAiMessage({
+        content: text,
+        model: 'gpt-4o',
+        provider: 'openai',
+        latencyMs: Date.now() - startTime,
+        usage: {
+          inputTokens: usage.promptTokens,
+          outputTokens: usage.completionTokens,
+        },
+      });
+      // Explicit flush — streaming completes after the session scope
+      await ai.flush();
+    },
+  });
+
+  return result.toDataStreamResponse();
+}
+```
+
+**Key points:**
+- `session.run()` auto-flushes on exit, but streaming responses may not be complete yet
+- Track the AI response in the streaming callback (e.g. `onFinish`) after content is fully accumulated
+- Always call `await ai.flush()` explicitly in serverless environments when not using `session.run()`
 
 ## Error Handling and Reliability
 

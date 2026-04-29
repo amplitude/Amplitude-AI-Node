@@ -101,7 +101,7 @@ Create `src/lib/amplitude.ts` (or the project's conventional lib path):
 
 **Choose `contentMode` based on privacy needs:**
 
-- **`full`** — captures full prompt/response text. Best for debugging and enrichment. `redactPii` defaults to `true` in this mode, so emails/phones/SSNs/credit cards are scrubbed automatically. Only set `redactPii: false` with explicit customer consent.
+- **`full`** — captures full prompt/response text. Best for debugging and enrichment. `redactPii` defaults to `true` in this mode, so emails, phone numbers (US and international E.164), SSNs, credit cards, and IPv4/IPv6 addresses are scrubbed automatically. Use `customRedactionPatterns` (strings or `{ pattern, replacement }` objects) and `customRedactionFn` for domain-specific PII. Only set `redactPii: false` with explicit customer consent.
 - **`metadata_only`** — captures token counts, latency, model, cost, but no text. Use for sensitive PII or regulated data.
 - **`customer_enriched`** — no text captured by default, but the customer can send enriched summaries via `trackSessionEnrichment()`.
 
@@ -468,7 +468,7 @@ Next steps:
 | API | What it does |
 |-----|-------------|
 | `new AmplitudeAI({ apiKey, config? })` | Initialize SDK |
-| `new AIConfig({ contentMode?, redactPii?, debug? })` | Privacy/debug config |
+| `new AIConfig({ contentMode?, redactPii?, customRedactionPatterns?, customRedactionFn?, debug? })` | Privacy/debug config |
 | `ai.agent(agentId, opts?)` | Create bound agent |
 | `agent.child(agentId, opts?)` | Create child agent |
 | `agent.session(opts?)` | Create session (`autoFlush` auto-detects serverless) |
@@ -525,6 +525,7 @@ All imported from `@amplitude/ai`:
 ### Vercel AI SDK
 - Provider wrappers instrument the underlying SDK (`openai`), not the Vercel abstraction
 - If only `@ai-sdk/openai` is present (no direct `openai`), recommend `patch()` or adding `openai` as a direct dep
+- For streaming responses (`streamText`, `streamObject`), see the **Streaming Patterns** section in README.md — use explicit `trackAiMessage` in `onFinish` + `await ai.flush()` instead of `session.run()`
 
 ### Edge Runtime / Cloudflare Workers
 - `session.run()` relies on `AsyncLocalStorage` which is unavailable in Edge Runtime
@@ -574,6 +575,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 
 - **Never modify unrelated files.** Only touch files with LLM call sites and the bootstrap file.
 - **Never duplicate instrumentation.** Check for existing `patch()` or wrapper calls before adding new ones.
+- **Never call the base SDK's `amplitude.track()` directly.** All event tracking must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.). The base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata — events sent this way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom event not covered by the other `track*` methods.
 - **Pause before Phase 3.** Always show the discovery report and get developer confirmation.
 - **Prefer additive changes.** Add imports and wrappers rather than rewriting entire files.
 - **Keep content mode explicit.** Default is `full` + `redactPii: true`. Never silently downgrade.

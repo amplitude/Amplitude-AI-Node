@@ -2,25 +2,15 @@
  * Cost calculation utilities.
  *
  * Uses the genai-prices package (npm: @pydantic/genai-prices) for pricing.
- * This is a regular dependency and should be installed automatically.
- * Falls back to returning 0 if the package fails to load (e.g. bundler issues).
+ * Static import ensures bundlers (Next.js, Vercel, Turbopack) properly
+ * resolve the module instead of silently failing via createRequire().
  */
 
 import {
   inferProviderFromModel,
   tryInferProviderFromModel,
 } from './providers.js';
-import { getLogger } from './logger.js';
-import { tryRequire } from './resolve-module.js';
-
-const genaiPrices = tryRequire('@pydantic/genai-prices');
-
-if (genaiPrices == null) {
-  getLogger().warn(
-    '@pydantic/genai-prices not available. Cost calculation will return 0. ' +
-      'Install it with: npm install @pydantic/genai-prices',
-  );
-}
+import { calcPrice, updatePrices } from '@pydantic/genai-prices';
 
 let _livePricesEnabled = false;
 
@@ -38,18 +28,14 @@ let _livePricesEnabled = false;
  * @param intervalMs - refresh interval in milliseconds (default: 1 hour)
  */
 export function enableLivePriceUpdates(intervalMs = 3_600_000): void {
-  if (_livePricesEnabled || genaiPrices == null) return;
+  if (_livePricesEnabled) return;
   _livePricesEnabled = true;
 
-  const prices = genaiPrices as Record<string, unknown>;
-  if (typeof prices.updatePrices !== 'function') return;
+  if (typeof updatePrices !== 'function') return;
 
   const doUpdate = () => {
     try {
-      (prices.updatePrices as (cb: (ctx: {
-        remoteDataUrl: string;
-        setProviderData: (data: unknown) => void;
-      }) => void) => void)(
+      updatePrices(
         async ({ remoteDataUrl, setProviderData }) => {
           try {
             const resp = await fetch(remoteDataUrl);
@@ -211,44 +197,32 @@ export function calculateCost(options: {
     defaultProvider,
   } = options;
 
-  if (genaiPrices != null) {
-    try {
-      const prices = genaiPrices as Record<string, unknown>;
-      if (typeof prices.calcPrice === 'function') {
-        const calcPriceFn = prices.calcPrice as (
-          usage: Record<string, number>,
-          modelId: string,
-          options?: Record<string, unknown>,
-        ) => { total_price?: number } | null;
+  try {
+    const usage = {
+      input_tokens: safeInt(inputTokens),
+      output_tokens: safeInt(outputTokens),
+      cache_read_tokens: safeInt(cacheReadInputTokens),
+      cache_write_tokens: safeInt(cacheCreationInputTokens),
+    };
 
-        const usage = {
-          input_tokens: safeInt(inputTokens),
-          output_tokens: safeInt(outputTokens),
-          cache_read_tokens: safeInt(cacheReadInputTokens),
-          cache_write_tokens: safeInt(cacheCreationInputTokens),
-        };
-
-        const candidates = getGenaiPriceLookupCandidates(
-          modelName,
-          defaultProvider,
-        );
-        for (const { model, providerId } of candidates) {
-          const opts: Record<string, unknown> = {};
-          if (providerId) opts.providerId = providerId;
-          const result = calcPriceFn(
-            usage,
-            model,
-            Object.keys(opts).length > 0 ? opts : undefined,
-          );
-          if (result?.total_price != null && result.total_price > 0) {
-            return result.total_price;
-          }
-        }
-        return 0;
+    const candidates = getGenaiPriceLookupCandidates(
+      modelName,
+      defaultProvider,
+    );
+    for (const { model, providerId } of candidates) {
+      const opts: Record<string, unknown> = {};
+      if (providerId) opts.providerId = providerId;
+      const result = calcPrice(
+        usage,
+        model,
+        Object.keys(opts).length > 0 ? opts : undefined,
+      );
+      if (result?.total_price != null && result.total_price > 0) {
+        return result.total_price;
       }
-    } catch {
-      // Fall through to 0
     }
+  } catch {
+    // Fall through to 0
   }
 
   return 0;

@@ -72,6 +72,175 @@ describe('redactPiiPatterns', () => {
   });
 });
 
+describe('redactPiiPatterns expanded', () => {
+  it('redacts SSNs with spaces', () => {
+    expect(redactPiiPatterns('SSN: 123 45 6789')).toBe('SSN: [ssn]');
+  });
+
+  it('redacts IPv4 addresses', () => {
+    expect(redactPiiPatterns('Server at 192.168.1.1 is down')).toBe(
+      'Server at [ip_address] is down',
+    );
+  });
+
+  it('redacts IPv6 full addresses', () => {
+    expect(
+      redactPiiPatterns('IPv6: 2001:0db8:85a3:0000:0000:8a2e:0370:7334'),
+    ).toBe('IPv6: [ip_address]');
+  });
+
+  it('redacts IPv6 loopback', () => {
+    expect(redactPiiPatterns('localhost is ::1')).toBe(
+      'localhost is [ip_address]',
+    );
+  });
+
+  it('redacts abbreviated IPv6 fully (not partially)', () => {
+    expect(redactPiiPatterns('addr fe80::1 here')).toBe(
+      'addr [ip_address] here',
+    );
+    expect(redactPiiPatterns('host 2001:db8::1')).toBe('host [ip_address]');
+  });
+
+  it('redacts bracket-enclosed IPv6 in URLs (RFC 2732)', () => {
+    expect(redactPiiPatterns('http://[::1]:8080/path')).toBe(
+      'http://[ip_address]:8080/path',
+    );
+    expect(redactPiiPatterns('https://[::1]/api')).toBe(
+      'https://[ip_address]/api',
+    );
+    expect(redactPiiPatterns('http://[::ffff:a:b]:443')).toBe(
+      'http://[ip_address]:443',
+    );
+  });
+
+  it('does NOT redact scope-resolution operators (::)', () => {
+    expect(redactPiiPatterns('std::vector<int>')).toBe('std::vector<int>');
+    expect(redactPiiPatterns('a[::2]')).toBe('a[::2]');
+    expect(redactPiiPatterns('::Module::Class')).toBe('::Module::Class');
+    expect(redactPiiPatterns('use ::std::io')).toBe('use ::std::io');
+  });
+
+  it('handles mixed IPv6 and scope-resolution in same string', () => {
+    expect(
+      redactPiiPatterns('Connect to 2001:db8::1 via std::net::TcpStream'),
+    ).toBe('Connect to [ip_address] via std::net::TcpStream');
+    expect(
+      redactPiiPatterns('server at fe80::1 running std::vector<int>'),
+    ).toBe('server at [ip_address] running std::vector<int>');
+    expect(redactPiiPatterns('::1 is localhost, not ::Module')).toBe(
+      '[ip_address] is localhost, not ::Module',
+    );
+  });
+
+  it('redacts international phone numbers', () => {
+    expect(redactPiiPatterns('Call +441234567890')).toBe('Call [phone]');
+    expect(redactPiiPatterns('Number: +12025551234')).toBe('Number: [phone]');
+  });
+
+  it('does NOT match +digits preceded by a word character', () => {
+    expect(redactPiiPatterns('result=5+1234567')).toBe('result=5+1234567');
+    expect(redactPiiPatterns('x+1234567')).toBe('x+1234567');
+    expect(redactPiiPatterns('ID:ABC+1234567')).toBe('ID:ABC+1234567');
+    expect(redactPiiPatterns('call (+1234567)')).toBe('call ([phone])');
+  });
+
+  it('handles multiple PII types in one string', () => {
+    const text = 'User user@test.com at 192.168.1.1 SSN 123-45-6789';
+    const result = redactPiiPatterns(text);
+    expect(result).toContain('[email]');
+    expect(result).toContain('[ip_address]');
+    expect(result).toContain('[ssn]');
+  });
+});
+
+describe('PrivacyConfig named replacements', () => {
+  it('applies named replacement objects', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: false,
+      customRedactionPatterns: [
+        { pattern: '\\bACME-\\d+\\b', replacement: '[ticket_id]' },
+      ],
+    });
+    const result = pc.sanitizeContent('See ACME-1234 for details');
+    const msg = result.$llm_message as Record<string, unknown>;
+    expect(msg.text).toBe('See [ticket_id] for details');
+  });
+
+  it('mixes string and object patterns', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: false,
+      customRedactionPatterns: [
+        'secret-\\d+',
+        { pattern: '\\bACME-\\d+\\b', replacement: '[ticket_id]' },
+      ],
+    });
+    const result = pc.sanitizeContent('secret-123 and ACME-456');
+    const msg = result.$llm_message as Record<string, unknown>;
+    expect(msg.text).toBe('[REDACTED] and [ticket_id]');
+  });
+});
+
+describe('PrivacyConfig customRedactionFn', () => {
+  it('applies custom redaction function', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: false,
+      customRedactionFn: (text) => text.replace('John', '[person]'),
+    });
+    const result = pc.sanitizeContent('Hello John');
+    const msg = result.$llm_message as Record<string, unknown>;
+    expect(msg.text).toBe('Hello [person]');
+  });
+
+  it('runs after built-in PII redaction', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: true,
+      customRedactionFn: (text) => text.replace('[email]', '[scrubbed_email]'),
+    });
+    const result = pc.sanitizeContent('Contact user@test.com please');
+    const msg = result.$llm_message as Record<string, unknown>;
+    expect(msg.text).toBe('Contact [scrubbed_email] please');
+  });
+
+  it('applies to system prompt', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: false,
+      customRedactionFn: (text) => text.replace('secret', '[HIDDEN]'),
+    });
+    const result = pc.sanitizeSystemPrompt('This is secret info');
+    expect(result['[Agent] System Prompt']).toBe('This is [HIDDEN] info');
+  });
+
+  it('handles exception gracefully', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: false,
+      customRedactionFn: () => {
+        throw new Error('boom');
+      },
+    });
+    const result = pc.sanitizeContent('safe text');
+    const msg = result.$llm_message as Record<string, unknown>;
+    expect(msg.text).toBe('safe text');
+  });
+
+  it('handles non-string return gracefully', () => {
+    const pc = new PrivacyConfig({
+      contentMode: 'full',
+      redactPii: false,
+      customRedactionFn: (() => 42) as unknown as (text: string) => string,
+    });
+    const result = pc.sanitizeContent('safe text');
+    const msg = result.$llm_message as Record<string, unknown>;
+    expect(msg.text).toBe('safe text');
+  });
+});
+
 describe('chunkContent', () => {
   it('returns text directly for short content', () => {
     const result = chunkContent('short text');

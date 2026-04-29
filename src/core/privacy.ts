@@ -30,6 +30,15 @@ const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const PHONE_RE = /\b\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\b/g;
 const CREDIT_CARD_RE = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
+const SSN_SPACE_RE = /\b\d{3} \d{2} \d{4}\b/g;
+const IPV4_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
+// Bare "::" is omitted; free-standing "::" abbreviations require whitespace/
+// start-of-string to avoid false positives on scope-resolution operators
+// (C++ std::vector, Ruby ::Module, Python a[::2]).  Bracket-enclosed forms
+// preceded by "//" are URL-context IPv6 (RFC 2732, e.g. http://[::1]:8080).
+const IPV6_RE =
+  /(?:(?<=\/\/)\[::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\]|(?<=\/\/)\[::1\]|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\b|(?<![^\s])::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b|(?<![^\s])::1\b)/g;
+const INTL_PHONE_RE = /(?<!\w)\+[1-9]\d{6,14}\b/g;
 const BASE64_DATA_URL_RE = /^data:([^;]+);base64,/;
 const RAW_BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
 
@@ -79,6 +88,10 @@ export function redactPiiPatterns(text: unknown): string {
   result = result.replace(PHONE_RE, '[phone]');
   result = result.replace(CREDIT_CARD_RE, '[credit_card]');
   result = result.replace(SSN_RE, '[ssn]');
+  result = result.replace(SSN_SPACE_RE, '[ssn]');
+  result = result.replace(IPV4_RE, '[ip_address]');
+  result = result.replace(IPV6_RE, '[ip_address]');
+  result = result.replace(INTL_PHONE_RE, '[phone]');
   return result;
 }
 
@@ -281,7 +294,8 @@ export function normalizeToolDefinitions(
 export interface PrivacyConfigOptions {
   privacyMode?: boolean;
   redactPii?: boolean;
-  customRedactionPatterns?: string[];
+  customRedactionPatterns?: Array<string | { pattern: string; replacement: string }>;
+  customRedactionFn?: (text: string) => string;
   contentMode?: string | null;
   validate?: boolean;
   debug?: boolean;
@@ -292,8 +306,9 @@ export class PrivacyConfig {
   readonly redactPii: boolean;
   readonly validate: boolean;
   readonly debug: boolean;
-  readonly customPatterns: string[];
-  private readonly _compiledCustomPatterns: RegExp[];
+  readonly customPatterns: Array<string | { pattern: string; replacement: string }>;
+  private readonly _compiledCustomPatterns: Array<{ regex: RegExp; replacement: string }>;
+  private readonly _customRedactionFn: ((text: string) => string) | null;
   private readonly _contentMode: string | null;
 
   constructor(options: PrivacyConfigOptions = {}) {
@@ -303,13 +318,25 @@ export class PrivacyConfig {
     this.debug = options.debug ?? false;
     this.customPatterns = options.customRedactionPatterns ?? [];
     this._compiledCustomPatterns = [];
+    this._customRedactionFn = options.customRedactionFn ?? null;
 
     for (const pattern of this.customPatterns) {
       try {
-        this._compiledCustomPatterns.push(new RegExp(pattern, 'g'));
+        if (typeof pattern === 'string') {
+          this._compiledCustomPatterns.push({
+            regex: new RegExp(pattern, 'g'),
+            replacement: '[REDACTED]',
+          });
+        } else {
+          this._compiledCustomPatterns.push({
+            regex: new RegExp(pattern.pattern, 'g'),
+            replacement: pattern.replacement,
+          });
+        }
       } catch (e) {
+        const raw = typeof pattern === 'string' ? pattern : pattern.pattern;
         getLogger().warn(
-          `Invalid custom redaction regex "${pattern}": ${e instanceof Error ? e.message : String(e)}`,
+          `Invalid custom redaction regex "${raw}": ${e instanceof Error ? e.message : String(e)}`,
         );
       }
     }
@@ -336,23 +363,43 @@ export class PrivacyConfig {
       return text;
     }
     let result = text;
-    for (const pattern of this._compiledCustomPatterns) {
+    for (const { regex, replacement } of this._compiledCustomPatterns) {
       try {
-        result = result.replace(pattern, '[REDACTED]');
+        result = result.replace(regex, replacement);
       } catch (e) {
         getLogger().warn(
-          `Invalid custom redaction regex "${pattern.source}": ${e instanceof Error ? e.message : String(e)}`,
+          `Custom redaction regex "${regex.source}" failed: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
     }
     return result;
   }
 
+  private _applyCustomFn(text: string): string {
+    if (this._customRedactionFn == null || typeof text !== 'string') {
+      return text;
+    }
+    try {
+      const result = this._customRedactionFn(text);
+      if (typeof result === 'string') return result;
+      getLogger().error(
+        `customRedactionFn returned ${typeof result} instead of string; skipping — PII may not be fully redacted for this event`,
+      );
+    } catch (e) {
+      getLogger().error(
+        `customRedactionFn raised an exception: ${e instanceof Error ? e.message : String(e)} — PII may not be fully redacted for this event`,
+      );
+    }
+    return text;
+  }
+
   private _applyCustomPatternsToLlmMessage(
     llmMessage: Record<string, unknown>,
   ): void {
     if ('text' in llmMessage) {
-      llmMessage.text = this._applyCustomPatterns(String(llmMessage.text));
+      let text = this._applyCustomPatterns(String(llmMessage.text));
+      text = this._applyCustomFn(text);
+      llmMessage.text = text;
       return;
     }
 
@@ -361,19 +408,21 @@ export class PrivacyConfig {
       for (let i = 0; i < n; i++) {
         const key = `c${i}`;
         if (key in llmMessage) {
-          llmMessage[key] = this._applyCustomPatterns(
-            String(llmMessage[key] ?? ''),
-          );
+          let text = this._applyCustomPatterns(String(llmMessage[key] ?? ''));
+          text = this._applyCustomFn(text);
+          llmMessage[key] = text;
         }
       }
     }
   }
 
   sanitizeContent(content: unknown): Record<string, unknown> {
+    const hasCustomRedaction = this.customPatterns.length > 0 || this._customRedactionFn != null;
+
     if (this._contentMode == null) {
       if (this.privacyMode) return {};
       const result = sanitizeAnyContent(content, false, this.redactPii);
-      if (this.customPatterns.length && '$llm_message' in result) {
+      if (hasCustomRedaction && '$llm_message' in result) {
         const msg = result.$llm_message as Record<string, unknown>;
         this._applyCustomPatternsToLlmMessage(msg);
       }
@@ -382,7 +431,7 @@ export class PrivacyConfig {
 
     if (this._contentMode === 'full') {
       const result = sanitizeAnyContent(content, false, this.redactPii);
-      if (this.customPatterns.length && '$llm_message' in result) {
+      if (hasCustomRedaction && '$llm_message' in result) {
         const msg = result.$llm_message as Record<string, unknown>;
         this._applyCustomPatternsToLlmMessage(msg);
       }
@@ -407,6 +456,7 @@ export class PrivacyConfig {
       let sanitized = systemPrompt;
       if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
       sanitized = this._applyCustomPatterns(sanitized);
+      sanitized = this._applyCustomFn(sanitized);
       result[PROP_SYSTEM_PROMPT] =
         sanitized.length > 10000 ? sanitized.slice(0, 10000) : sanitized;
     }
@@ -437,6 +487,7 @@ export class PrivacyConfig {
       let sanitized = reasoningContent;
       if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
       sanitized = this._applyCustomPatterns(sanitized);
+      sanitized = this._applyCustomFn(sanitized);
       result[PROP_REASONING_CONTENT] =
         sanitized.length > 10000 ? sanitized.slice(0, 10000) : sanitized;
     }
@@ -474,6 +525,7 @@ export class PrivacyConfig {
       let serialized = JSON.stringify(normalized);
       if (this.redactPii) serialized = redactPiiPatterns(serialized);
       serialized = this._applyCustomPatterns(serialized);
+      serialized = this._applyCustomFn(serialized);
       result[PROP_TOOL_DEFINITIONS] =
         serialized.length > 10000 ? serialized.slice(0, 10000) : serialized;
     }
