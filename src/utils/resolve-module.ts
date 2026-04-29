@@ -17,6 +17,8 @@ try {
   // Bundler environment — import.meta.url is invalid or createRequire unavailable.
 }
 
+export const isBundlerEnvironment = localRequire == null;
+
 export function tryRequire(name: string): Record<string, unknown> | null {
   if (localRequire == null) return null;
   try {

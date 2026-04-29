@@ -84,7 +84,7 @@ const buildInstrumentationGuidance = (
 
   const tierGuidance =
     contentTier === 'full'
-      ? 'Content tier (`full`): maximum insight and automatic server enrichments. Prefer `redactPii: true` (+ optional `customRedactionPatterns`).'
+      ? 'Content tier (`full`): maximum insight and automatic server enrichments. Prefer `redactPii: true` (+ optional `customRedactionPatterns` / `customRedactionFn`).'
       : contentTier === 'metadata_only'
         ? 'Content tier (`metadata_only`): no content leaves your infrastructure; keep token/cost/latency/session analytics.'
         : 'Content tier (`customer_enriched`): no content leaves infra; send your own labels via `trackSessionEnrichment(...)` for advanced analytics.';

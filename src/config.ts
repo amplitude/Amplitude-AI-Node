@@ -21,7 +21,8 @@ export const ContentMode = {
 export interface AIConfigOptions {
   contentMode?: ContentMode;
   redactPii?: boolean;
-  customRedactionPatterns?: string[];
+  customRedactionPatterns?: Array<string | { pattern: string; replacement: string }>;
+  customRedactionFn?: (text: string) => string;
   onEventCallback?: (
     event: unknown,
     statusCode: number,
@@ -51,7 +52,8 @@ export interface AIConfigOptions {
 export class AIConfig {
   readonly contentMode: ContentMode;
   readonly redactPii: boolean;
-  readonly customRedactionPatterns: string[];
+  readonly customRedactionPatterns: Array<string | { pattern: string; replacement: string }>;
+  readonly customRedactionFn: ((text: string) => string) | null;
   readonly onEventCallback:
     | ((event: unknown, statusCode: number, message: string | null) => void)
     | null;
@@ -64,6 +66,7 @@ export class AIConfig {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
     this.redactPii = options.redactPii ?? true;
     this.customRedactionPatterns = options.customRedactionPatterns ?? [];
+    this.customRedactionFn = options.customRedactionFn ?? null;
     this.onEventCallback = options.onEventCallback ?? null;
     this.debug = options.debug ?? false;
     this.dryRun = options.dryRun ?? false;
@@ -80,6 +83,7 @@ export class AIConfig {
       privacyMode,
       redactPii: this.redactPii,
       customRedactionPatterns: this.customRedactionPatterns,
+      customRedactionFn: this.customRedactionFn ?? undefined,
       contentMode: this.contentMode,
       validate: this.validate,
       debug: this.debug,

@@ -25,7 +25,7 @@ import type {
 import { calculateCost } from './utils/costs.js';
 import { formatDebugLine, formatDryRunLine } from './utils/debug.js';
 import { type Logger, getLogger } from './utils/logger.js';
-import { tryRequire } from './utils/resolve-module.js';
+import { isBundlerEnvironment, tryRequire } from './utils/resolve-module.js';
 
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
 const _MIN_ID_LENGTH = 5;
@@ -147,8 +147,15 @@ export class AmplitudeAI {
         | (AmplitudeClientLike & { init?: (apiKey: string) => unknown })
         | null;
       if (amplitudeNode == null || typeof amplitudeNode.init !== 'function') {
+        if (isBundlerEnvironment) {
+          throw new ConfigurationError(
+            'Could not resolve @amplitude/analytics-node (likely a bundler environment such as Turbopack or Webpack). ' +
+              "Pass a pre-initialized Amplitude client via the 'amplitude' option instead. " +
+              "Example: new AmplitudeAI({ amplitude: amplitudeNodeClient, apiKey: undefined })",
+          );
+        }
         throw new ConfigurationError(
-          '@amplitude/analytics-node is required. Install it as a dependency.',
+          '@amplitude/analytics-node is required. Install it as a dependency: npm install @amplitude/analytics-node',
         );
       }
       amplitudeNode.init(options.apiKey);
@@ -203,6 +210,13 @@ export class AmplitudeAI {
     // This handles: (a) the default delivery warning on 4xx/5xx,
     // (b) the user-provided onEventCallback, and (c) the existing
     // callback on the Amplitude client — composed together.
+    if (clientWithConfig.configuration == null && onEvent != null) {
+      logger.warn(
+        'AmplitudeAI: onEventCallback is set but the Amplitude client has no "configuration" property. ' +
+          'The callback will not fire. If you passed an external client, ensure it exposes a configuration object.',
+      );
+    }
+
     if (clientWithConfig.configuration != null) {
       clientWithConfig.configuration.callback = (...args: unknown[]) => {
         const event = args[0];

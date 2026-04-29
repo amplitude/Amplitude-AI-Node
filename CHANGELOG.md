@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+### Added
+- **Expanded PII redaction**: IPv4/IPv6 addresses (`[ip_address]`), international phone numbers E.164 (`[phone]`), SSNs with spaces (`[ssn]`)
+- **`customRedactionFn`**: Plug in any external PII engine (compromise.js, custom NER) via a callback on `AIConfigOptions`
+- **Named replacements**: `customRedactionPatterns` now accepts `{ pattern, replacement }` objects for descriptive redaction labels
+- **Turbopack error differentiation**: Bundler environments now get a specific error message suggesting the `amplitude` option instead of a misleading "install" message
+- **`onEventCallback` warning**: Logs a warning when `onEventCallback` is set but the external client has no `configuration` property (silent failure)
+- **Doctor CLI PII smoke test**: `amplitude-ai-doctor` now verifies PII redaction patterns are working
+- **Streaming patterns docs**: New section for Vercel AI SDK streaming patterns with explicit flush
+- **Custom events docs**: New section showing `trackSpan()` as the custom event escape hatch for Agent Analytics
+
 ## 0.5.2 (2026-04-17)
 
 ### Features
