@@ -683,6 +683,8 @@ const config = new AIConfig({
 
 With the default `redactPii: true`, a message like `"Contact me at john@example.com or 555-123-4567"` is sanitized to `"Contact me at [email] or [phone]"` before being sent.
 
+> **Upgrading to 0.7.0 with `redactPii: true`?** This release adds IPv4/IPv6 → `[ip_address]`, international phone → `[phone]`, and space-separated SSN → `[ssn]` placeholders. If any downstream pipeline or dashboard regex matches on raw IP or phone content in event properties, update those filters before upgrading.
+
 Built-in patterns now include international phone numbers (E.164 `+country...`) and IPv4/IPv6 addresses. Add custom patterns for domain-specific PII:
 
 ```typescript
