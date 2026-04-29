@@ -117,6 +117,7 @@ const buildInstrumentationGuidance = (
     '- wrapper/swap integration preserves fidelity while keeping implementation effort low.',
     `- ${tierGuidance}`,
     '- privacy controls apply before events leave your process.',
+    '- IMPORTANT: never call amplitude.track() from @amplitude/analytics-node directly — it bypasses [Agent] event types and session metadata. All events must flow through the AI SDK track* methods (trackUserMessage, trackAiMessage, trackToolCall, trackSpan, etc.). Use trackSpan() for custom events.',
     '',
     'Validate:',
     '- run `amplitude-ai doctor` and verify [Agent] session-scoped events.',
@@ -579,7 +580,7 @@ const createServer = (): McpServer => {
             role: 'user',
             content: {
               type: 'text',
-              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nBefore editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put large JSON / RAG / pipeline state in context or eventProperties — not JSON.stringify as the only content. Then use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.`,
+              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nBefore editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put large JSON / RAG / pipeline state in context or eventProperties — not JSON.stringify as the only content.\n\nIMPORTANT: all event tracking MUST go through the AI SDK's track* methods (trackUserMessage, trackAiMessage, trackToolCall, trackSpan, etc.) — never call amplitude.track() from the base @amplitude/analytics-node SDK directly. The base SDK does not attach [Agent] event types or session metadata, so raw track() events will not appear in Agent Analytics dashboards. Use trackSpan() for any custom event not covered by the other track* methods.\n\nThen use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.`,
             },
           },
         ],

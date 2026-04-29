@@ -575,6 +575,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 
 - **Never modify unrelated files.** Only touch files with LLM call sites and the bootstrap file.
 - **Never duplicate instrumentation.** Check for existing `patch()` or wrapper calls before adding new ones.
+- **Never call the base SDK's `amplitude.track()` directly.** All event tracking must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.). The base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata — events sent this way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom event not covered by the other `track*` methods.
 - **Pause before Phase 3.** Always show the discovery report and get developer confirmation.
 - **Prefer additive changes.** Add imports and wrappers rather than rewriting entire files.
 - **Keep content mode explicit.** Default is `full` + `redactPii: true`. Never silently downgrade.
