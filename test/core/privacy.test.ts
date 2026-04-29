@@ -102,6 +102,18 @@ describe('redactPiiPatterns expanded', () => {
     expect(redactPiiPatterns('host 2001:db8::1')).toBe('host [ip_address]');
   });
 
+  it('redacts bracket-enclosed IPv6 in URLs (RFC 2732)', () => {
+    expect(redactPiiPatterns('http://[::1]:8080/path')).toBe(
+      'http://[ip_address]:8080/path',
+    );
+    expect(redactPiiPatterns('https://[::1]/api')).toBe(
+      'https://[ip_address]/api',
+    );
+    expect(redactPiiPatterns('http://[::ffff:a:b]:443')).toBe(
+      'http://[ip_address]:443',
+    );
+  });
+
   it('does NOT redact scope-resolution operators (::)', () => {
     expect(redactPiiPatterns('std::vector<int>')).toBe('std::vector<int>');
     expect(redactPiiPatterns('a[::2]')).toBe('a[::2]');

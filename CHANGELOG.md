@@ -12,6 +12,12 @@
 - **Streaming patterns docs**: New section for Vercel AI SDK streaming patterns with explicit flush
 - **Custom events docs**: New section showing `trackSpan()` as the custom event escape hatch for Agent Analytics
 
+### Migration note
+- **New redaction placeholders**: If you already have `redactPii: true`, upgrading to 0.7.0 will begin
+  replacing IPv4/IPv6 addresses with `[ip_address]`, international phone numbers with `[phone]`, and
+  space-separated SSNs with `[ssn]` in event properties. If any downstream pipeline or dashboard regex
+  matches on raw IP/phone content, update those filters before upgrading.
+
 ## 0.5.2 (2026-04-17)
 
 ### Features
