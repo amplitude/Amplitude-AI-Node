@@ -95,6 +95,13 @@ describe('redactPiiPatterns expanded', () => {
     );
   });
 
+  it('redacts abbreviated IPv6 fully (not partially)', () => {
+    expect(redactPiiPatterns('addr fe80::1 here')).toBe(
+      'addr [ip_address] here',
+    );
+    expect(redactPiiPatterns('host 2001:db8::1')).toBe('host [ip_address]');
+  });
+
   it('does NOT redact scope-resolution operators (::)', () => {
     expect(redactPiiPatterns('std::vector<int>')).toBe('std::vector<int>');
     expect(redactPiiPatterns('a[::2]')).toBe('a[::2]');
