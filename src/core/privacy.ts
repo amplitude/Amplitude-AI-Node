@@ -38,7 +38,7 @@ const IPV4_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 // preceded by "//" are URL-context IPv6 (RFC 2732, e.g. http://[::1]:8080).
 const IPV6_RE =
   /(?:(?<=\/\/)\[::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\]|(?<=\/\/)\[::1\]|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){1,7}:\b|(?<![^\s])::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b|(?<![^\s])::1\b)/g;
-const INTL_PHONE_RE = /\+[1-9]\d{6,14}\b/g;
+const INTL_PHONE_RE = /(?<!\w)\+[1-9]\d{6,14}\b/g;
 const BASE64_DATA_URL_RE = /^data:([^;]+);base64,/;
 const RAW_BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
 
@@ -382,12 +382,12 @@ export class PrivacyConfig {
     try {
       const result = this._customRedactionFn(text);
       if (typeof result === 'string') return result;
-      getLogger().warn(
-        `customRedactionFn returned ${typeof result} instead of string; skipping`,
+      getLogger().error(
+        `customRedactionFn returned ${typeof result} instead of string; skipping — PII may not be fully redacted for this event`,
       );
     } catch (e) {
-      getLogger().warn(
-        `customRedactionFn raised an exception: ${e instanceof Error ? e.message : String(e)}`,
+      getLogger().error(
+        `customRedactionFn raised an exception: ${e instanceof Error ? e.message : String(e)} — PII may not be fully redacted for this event`,
       );
     }
     return text;

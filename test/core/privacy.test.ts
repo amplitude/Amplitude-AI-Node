@@ -126,6 +126,13 @@ describe('redactPiiPatterns expanded', () => {
     expect(redactPiiPatterns('Number: +12025551234')).toBe('Number: [phone]');
   });
 
+  it('does NOT match +digits preceded by a word character', () => {
+    expect(redactPiiPatterns('result=5+1234567')).toBe('result=5+1234567');
+    expect(redactPiiPatterns('x+1234567')).toBe('x+1234567');
+    expect(redactPiiPatterns('ID:ABC+1234567')).toBe('ID:ABC+1234567');
+    expect(redactPiiPatterns('call (+1234567)')).toBe('call ([phone])');
+  });
+
   it('handles multiple PII types in one string', () => {
     const text = 'User user@test.com at 192.168.1.1 SSN 123-45-6789';
     const result = redactPiiPatterns(text);
