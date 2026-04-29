@@ -53,6 +53,7 @@ export type ScoreOpts = Partial<
 
 const CONTEXT_FIELDS = [
   'userId',
+  'deviceId',
   'agentId',
   'parentAgentId',
   'customerOrgId',

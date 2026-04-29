@@ -410,7 +410,8 @@ export type TrackFn = (opts: TrackCallOptions) => string;
  * optional and populated when the provider returns that data.
  */
 export interface TrackCallOptions {
-  userId: string;
+  userId?: string;
+  deviceId?: string;
   modelName: string;
   provider: string;
   responseContent: string;

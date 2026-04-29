@@ -9,6 +9,7 @@ import {
 interface MockEvent {
   event_type?: string;
   user_id?: string;
+  device_id?: string;
   event_properties?: Record<string, unknown>;
   user_properties?: Record<string, unknown>;
   groups?: Record<string, unknown>;
@@ -73,9 +74,9 @@ export class MockAmplitudeAI extends AmplitudeAI {
 
   assertEventTracked(
     eventType: string,
-    options: { userId?: string; [key: string]: unknown } = {},
+    options: { userId?: string; deviceId?: string; [key: string]: unknown } = {},
   ): MockEvent {
-    const { userId, ...expectedProps } = options;
+    const { userId, deviceId, ...expectedProps } = options;
     const candidates = this.getEvents(eventType);
 
     if (!candidates.length) {
@@ -87,6 +88,7 @@ export class MockAmplitudeAI extends AmplitudeAI {
 
     for (const event of candidates) {
       if (userId != null && event.user_id !== userId) continue;
+      if (deviceId != null && event.device_id !== deviceId) continue;
 
       if (Object.keys(expectedProps).length > 0) {
         const props = event.event_properties ?? {};
@@ -100,6 +102,7 @@ export class MockAmplitudeAI extends AmplitudeAI {
 
     const filters = [];
     if (userId != null) filters.push(`userId=${userId}`);
+    if (deviceId != null) filters.push(`deviceId=${deviceId}`);
     for (const [k, v] of Object.entries(expectedProps)) {
       filters.push(`${k}=${String(v)}`);
     }
