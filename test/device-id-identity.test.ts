@@ -8,7 +8,6 @@ import {
   EVENT_SPAN,
   EVENT_TOOL_CALL,
   EVENT_USER_MESSAGE,
-  PROP_SESSION_ID,
 } from '../src/core/constants.js';
 import { SessionEnrichments } from '../src/core/enrichments.js';
 import {

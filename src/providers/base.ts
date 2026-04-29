@@ -132,7 +132,7 @@ export type TrackContextFields = Pick<
 export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
   return {
     userId: ctx.userId ?? undefined,
-    deviceId: ctx.deviceId,
+    deviceId: ctx.deviceId ?? undefined,
     sessionId: ctx.sessionId,
     traceId: ctx.traceId,
     turnId: ctx.turnId ?? undefined,
