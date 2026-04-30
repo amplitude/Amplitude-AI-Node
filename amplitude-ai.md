@@ -227,9 +227,15 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 
 **Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
 
-> **Cost tracking gotcha for proxies/gateways:** The SDK auto-calculates cost via genai-prices from model + token counts. If your proxy uses a non-standard model name (e.g. Vertex AI returns `claude-sonnet-4-6` instead of the canonical `claude-sonnet-4-20250514`), **`[Agent] Cost USD` will silently be 0**. Fix by either:
+> **Cost tracking for proxies/gateways:** `trackAiMessage` auto-calculates cost via genai-prices when `model` and token counts are provided. If cost is still 0 in your dashboard, the model name is likely unrecognized. Common causes:
+> - Vertex AI model aliases (e.g. `claude-sonnet-4-6` instead of canonical `claude-sonnet-4-20250514`)
+> - Internal gateway product labels (e.g. `my-company/gpt4` instead of `gpt-4o`)
+> - Brand-new models not yet in genai-prices
+>
+> Fix by either:
 > 1. Normalizing the model name to the canonical provider ID before passing to `trackAiMessage`
-> 2. Setting **`totalCostUsd`** explicitly in the `trackAiMessage` options from your provider's pricing
+> 2. Calling `calculateCost({ modelName, inputTokens, outputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
+> 3. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
 >
 > The Phase 4 data quality gate will catch this — `cost > 0` will fail if the model is unrecognized.
 

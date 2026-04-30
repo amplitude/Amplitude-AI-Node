@@ -6,6 +6,7 @@ import type {
   Attachment,
   ToolCallShape,
 } from '../types.js';
+import { calculateCost } from '../utils/costs.js';
 import { getLogger } from '../utils/logger.js';
 import { inferModelTier } from '../utils/model-tiers.js';
 import {
@@ -404,7 +405,23 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.cacheCreationInputTokens != null)
     properties[PROP_CACHE_CREATION_TOKENS] = opts.cacheCreationInputTokens;
 
-  if (opts.totalCostUsd != null) properties[PROP_COST_USD] = opts.totalCostUsd;
+  if (opts.totalCostUsd != null) {
+    properties[PROP_COST_USD] = opts.totalCostUsd;
+  } else if (opts.modelName && (opts.inputTokens || opts.outputTokens)) {
+    try {
+      const autoCost = calculateCost({
+        modelName: opts.modelName,
+        inputTokens: opts.inputTokens ?? 0,
+        outputTokens: opts.outputTokens ?? 0,
+        cacheReadInputTokens: opts.cacheReadInputTokens ?? 0,
+        cacheCreationInputTokens: opts.cacheCreationInputTokens ?? 0,
+      });
+      if (autoCost > 0) properties[PROP_COST_USD] = autoCost;
+    } catch {
+      // Best-effort — unknown model or missing pricing data
+    }
+  }
+
   if (opts.providerTtfbMs != null)
     properties[PROP_TTFB_MS] = opts.providerTtfbMs;
   if (opts.finishReason != null)
