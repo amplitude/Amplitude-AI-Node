@@ -225,7 +225,13 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-**Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label. Cost estimation uses **genai-prices** (via `@pydantic/genai-prices` when installed) from model + token counts; if the model string is not a known id, **`[Agent] Cost USD`** may stay **0** or be wrong unless you set **`totalCostUsd`** in the options object.
+**Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
+
+> **Cost tracking gotcha for proxies/gateways:** The SDK auto-calculates cost via genai-prices from model + token counts. If your proxy uses a non-standard model name (e.g. Vertex AI returns `claude-sonnet-4-6` instead of the canonical `claude-sonnet-4-20250514`), **`[Agent] Cost USD` will silently be 0**. Fix by either:
+> 1. Normalizing the model name to the canonical provider ID before passing to `trackAiMessage`
+> 2. Setting **`totalCostUsd`** explicitly in the `trackAiMessage` options from your provider's pricing
+>
+> The Phase 4 data quality gate will catch this — `cost > 0` will fail if the model is unrecognized.
 
 ### Step 3f: Managed and hosted agent architectures
 
@@ -403,6 +409,7 @@ Create `__amplitude_verify__.test.ts` that verifies:
 - Each agent emits `[Agent] User Message` with correct `[Agent] Agent ID`
 - Sessions are properly closed (`assertSessionClosed`)
 - Multi-agent delegation preserves session ID across `runAs`
+- **Data quality gate** — every `[Agent] AI Response` has the seven fields Agent Analytics needs
 
 ```typescript
 import { AIConfig, tool } from '@amplitude/ai';
@@ -421,6 +428,30 @@ mock.assertSessionClosed('s1');
 
 // For multi-agent: verify child agent events
 mock.eventsForAgent('child-agent-id');  // filter by agent
+
+// Data quality gate — catch silent instrumentation gaps that produce
+// broken dashboards without throwing any errors at runtime.
+const aiEvents = mock.eventsOfType('[Agent] AI Response');
+for (const e of aiEvents) {
+  const p = e.event_properties ?? {};
+  // Identity: at least one of userId or deviceId must be set
+  expect(e.user_id || e.device_id).toBeTruthy();
+  // Session grouping
+  expect(p['[Agent] Session ID']).toBeTruthy();
+  // Model must be a canonical provider ID (e.g. "claude-sonnet-4-20250514",
+  // not a gateway alias like "claude-sonnet-4-6") for cost calculation
+  expect(p['[Agent] Model']).toBeTruthy();
+  // Provider
+  expect(p['[Agent] Provider']).toBeTruthy();
+  // Latency
+  expect(p['[Agent] Latency Ms']).toBeGreaterThan(0);
+  // Tokens — needed for token analytics and cost estimation
+  expect(p['[Agent] Input Tokens']).toBeGreaterThan(0);
+  expect(p['[Agent] Output Tokens']).toBeGreaterThan(0);
+  // Cost — if 0 the model name is likely not in genai-prices.
+  // Fix: use the canonical model ID or set totalCostUsd explicitly.
+  expect(p['[Agent] Cost USD']).toBeGreaterThan(0);
+}
 ```
 
 ### Step 4b: Run verification
@@ -446,8 +477,16 @@ npm test            # Existing tests still pass
 
 ```
 Verification complete:
-  Doctor checks:        5/5 passed
+  Doctor checks:        6/6 passed
   Event sequence test:  PASSED (N events captured)
+  Data quality gate:    7/7 fields verified
+    Identity (userId/deviceId):  ✓ set
+    Session ID:                  ✓ set
+    Model:                       ✓ "gpt-4o-mini" (recognized by genai-prices)
+    Provider:                    ✓ "openai"
+    Latency:                     ✓ 150ms
+    Tokens:                      ✓ in=42, out=96
+    Cost:                        ✓ $0.0023
   TypeScript check:     PASSED
   Existing tests:       PASSED
 
@@ -458,6 +497,8 @@ Next steps:
   2. Keep __amplitude_verify__.test.ts for CI regression testing
   3. Deploy and verify live events in Amplitude
 ```
+
+> **If any data quality field fails:** `cost = $0` usually means the model name is not in genai-prices — use the canonical provider model ID (e.g. `claude-sonnet-4-20250514`, not `claude-sonnet-4-6`) or set `totalCostUsd` explicitly. `tokens = 0` means `usage` was not extracted from the LLM response. `identity missing` means neither `userId` nor `deviceId` was set on the tracking call.
 
 ---
 
