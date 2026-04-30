@@ -225,7 +225,26 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-**Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label. Cost estimation uses **genai-prices** (via `@pydantic/genai-prices` when installed) from model + token counts; if the model string is not a known id, **`[Agent] Cost USD`** may stay **0** or be wrong unless you set **`totalCostUsd`** in the options object.
+**Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
+
+> **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. Two things can cause `cost_usd: 0`:
+>
+> **1. Unrecognized model name.** Common causes:
+> - Vertex AI model aliases (e.g. `claude-sonnet-4-6` instead of canonical `claude-sonnet-4-20250514`)
+> - Internal gateway product labels (e.g. `my-company/gpt4` instead of `gpt-4o`)
+> - Brand-new models not yet in genai-prices
+>
+> **2. Incorrect `inputTokens` for Anthropic with prompt caching.** Provider APIs differ in what `input_tokens` means:
+> - **OpenAI:** `prompt_tokens` **already includes** `cached_tokens` — pass it directly as `inputTokens`
+> - **Anthropic:** `input_tokens` **excludes** cache tokens — you MUST add them: `inputTokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+>
+> Pass `cacheReadTokens` / `cacheCreationTokens` separately so the SDK applies differential pricing (cached tokens are cheaper).
+>
+> Fix cost issues by:
+> 1. Normalizing the model name to the canonical provider ID
+> 2. Normalizing `inputTokens` per the provider convention above
+> 3. Or calling `calculateCost({ modelName, inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
+> 4. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
 
 ### Step 3f: Managed and hosted agent architectures
 
@@ -403,6 +422,7 @@ Create `__amplitude_verify__.test.ts` that verifies:
 - Each agent emits `[Agent] User Message` with correct `[Agent] Agent ID`
 - Sessions are properly closed (`assertSessionClosed`)
 - Multi-agent delegation preserves session ID across `runAs`
+- **Data quality gate** — every `[Agent] AI Response` has the seven fields Agent Analytics needs
 
 ```typescript
 import { AIConfig, tool } from '@amplitude/ai';
@@ -421,6 +441,30 @@ mock.assertSessionClosed('s1');
 
 // For multi-agent: verify child agent events
 mock.eventsForAgent('child-agent-id');  // filter by agent
+
+// Data quality gate — catch silent instrumentation gaps that produce
+// broken dashboards without throwing any errors at runtime.
+const aiEvents = mock.eventsOfType('[Agent] AI Response');
+for (const e of aiEvents) {
+  const p = e.event_properties ?? {};
+  // Identity: at least one of userId or deviceId must be set
+  expect(e.user_id || e.device_id).toBeTruthy();
+  // Session grouping
+  expect(p['[Agent] Session ID']).toBeTruthy();
+  // Model must be a canonical provider ID (e.g. "claude-sonnet-4-20250514",
+  // not a gateway alias like "claude-sonnet-4-6") for cost calculation
+  expect(p['[Agent] Model']).toBeTruthy();
+  // Provider
+  expect(p['[Agent] Provider']).toBeTruthy();
+  // Latency
+  expect(p['[Agent] Latency Ms']).toBeGreaterThan(0);
+  // Tokens — needed for token analytics and cost estimation
+  expect(p['[Agent] Input Tokens']).toBeGreaterThan(0);
+  expect(p['[Agent] Output Tokens']).toBeGreaterThan(0);
+  // Cost — if 0 the model name is likely not in genai-prices.
+  // Fix: use the canonical model ID or set totalCostUsd explicitly.
+  expect(p['[Agent] Cost USD']).toBeGreaterThan(0);
+}
 ```
 
 ### Step 4b: Run verification
@@ -446,8 +490,16 @@ npm test            # Existing tests still pass
 
 ```
 Verification complete:
-  Doctor checks:        5/5 passed
+  Doctor checks:        6/6 passed
   Event sequence test:  PASSED (N events captured)
+  Data quality gate:    7/7 fields verified
+    Identity (userId/deviceId):  ✓ set
+    Session ID:                  ✓ set
+    Model:                       ✓ "gpt-4o-mini" (recognized by genai-prices)
+    Provider:                    ✓ "openai"
+    Latency:                     ✓ 150ms
+    Tokens:                      ✓ in=42, out=96
+    Cost:                        ✓ $0.0023
   TypeScript check:     PASSED
   Existing tests:       PASSED
 
@@ -458,6 +510,8 @@ Next steps:
   2. Keep __amplitude_verify__.test.ts for CI regression testing
   3. Deploy and verify live events in Amplitude
 ```
+
+> **If any data quality field fails:** `cost = $0` usually means the model name is not in genai-prices — use the canonical provider model ID (e.g. `claude-sonnet-4-20250514`, not `claude-sonnet-4-6`) or set `totalCostUsd` explicitly. `tokens = 0` means `usage` was not extracted from the LLM response. `identity missing` means neither `userId` nor `deviceId` was set on the tracking call.
 
 ---
 
@@ -528,8 +582,95 @@ All imported from `@amplitude/ai`:
 - For streaming responses (`streamText`, `streamObject`), see the **Streaming Patterns** section in README.md — use explicit `trackAiMessage` in `onFinish` + `await ai.flush()` instead of `session.run()`
 
 ### Edge Runtime / Cloudflare Workers
-- `session.run()` relies on `AsyncLocalStorage` which is unavailable in Edge Runtime
-- Use explicit context: `agent.trackUserMessage(content, { sessionId })` instead
+
+**CRITICAL:** `@amplitude/ai` (including subpath imports like `@amplitude/ai/client`) **cannot be bundled into a Cloudflare Worker**. The SDK transitively depends on `node:async_hooks`, `node:module`, and `node:crypto`, which cause Cloudflare Workers Builds to reject the upload — even with `nodejs_compat` / `nodejs_compat_v2` enabled. `@amplitude/analytics-node` also cannot run in Workers (depends on Node.js `http`).
+
+The only safe import is `import type { ... } from '@amplitude/ai/types'` (erased at compile time).
+
+**Solution: SDK-free tracking with `FetchAmplitudeClient`**
+
+Create a lightweight `fetch`-based transport and construct `[Agent]` events directly:
+
+```typescript
+import type { AmplitudeClientLike, AmplitudeEvent } from '@amplitude/ai/types';
+
+class FetchAmplitudeClient implements AmplitudeClientLike {
+  private _apiKey: string;
+  private _buffer: AmplitudeEvent[] = [];
+
+  constructor(apiKey: string) { this._apiKey = apiKey; }
+
+  track(event: AmplitudeEvent): void { this._buffer.push(event); }
+
+  async flush(): Promise<void> {
+    if (!this._buffer.length) return;
+    const events = this._buffer.splice(0);
+    try {
+      const resp = await fetch('https://api2.amplitude.com/2/httpapi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: this._apiKey, events }),
+      });
+      if (!resp.ok) console.error(`[Amplitude] Flush failed: ${resp.status}`);
+    } catch (err) {
+      console.error(`[Amplitude] Flush error: ${(err as Error).message}`);
+    }
+  }
+}
+```
+
+**Usage in a Worker request handler:**
+
+```typescript
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    if (env.AMPLITUDE_TRACKING_DISABLED) return handleRequest(request, env);
+
+    // Create per-request — Workers don't have persistent singletons
+    const transport = new FetchAmplitudeClient(env.AMPLITUDE_API_KEY);
+
+    // Construct [Agent] events directly — do NOT use AmplitudeAI or AIConfig
+    transport.track({
+      event_type: '[Agent] User Message',
+      user_id: userId,
+      event_properties: {
+        '[Agent] Session ID': sessionId,
+        '[Agent] Agent ID': 'my-agent',
+        '[Agent] Message Content': content,
+      },
+    });
+
+    // After LLM call completes:
+    transport.track({
+      event_type: '[Agent] AI Response',
+      user_id: userId,
+      event_properties: {
+        '[Agent] Session ID': sessionId,
+        '[Agent] Agent ID': 'my-agent',
+        '[Agent] AI Model': model,
+        '[Agent] AI Provider': 'anthropic',
+        '[Agent] Latency (ms)': latencyMs,
+        '[Agent] Message Content': responseText,
+      },
+    });
+
+    // Non-blocking flush — ensures events send before isolate terminates
+    ctx.waitUntil(transport.flush());
+    return new Response('ok');
+  }
+};
+```
+
+**Hybrid architecture:** If your project has both a Node.js server and a Worker entry point, use the full `@amplitude/ai` SDK on the server side and the SDK-free `FetchAmplitudeClient` pattern on the Worker side. See the [design-agent](https://github.com/amplitude/design-agent) for a working example of this split (`src/amplitude.ts` for server, `src/amplitude-worker.ts` + `src/amplitude-transport.ts` for Worker).
+
+**Key points:**
+- **Do NOT import `AmplitudeAI`, `AIConfig`, or any runtime export from `@amplitude/ai` in Worker code** — they pull in `node:async_hooks` / `node:module` which break Workers Builds
+- `import type { ... } from '@amplitude/ai/types'` is safe (erased at compile time)
+- Create `FetchAmplitudeClient` **per request** to avoid buffer leakage between requests
+- Error handling: log and drop (never block the request for telemetry)
+- For `insert_id` dedup, use `crypto.randomUUID()` (available via Workers' Web Crypto API)
+- Add `AMPLITUDE_TRACKING_DISABLED` env var as a kill switch for production safety
+- Use `[Agent]`-prefixed event types and properties to ensure events appear in Agent Analytics dashboards
 
 ### OpenAI Assistants API
 - Provider wrappers do NOT auto-instrument the Assistants API (async/polling-based)
@@ -537,9 +678,26 @@ All imported from `@amplitude/ai`:
 
 ### Anthropic Managed Agents
 - Provider wrappers do NOT work — LLM calls happen in Anthropic's cloud, not your code
-- Use manual tracking: `trackUserMessage()` when sending, `trackAiMessage()` / `trackToolCall()` when polling events from `client.beta.sessions`
-- Pass `inputTokens` / `outputTokens` from the event response for cost estimation
-- See Step 3f and `examples/anthropic-managed-agents-example.ts` for a complete pattern
+- **`ManagedAgentTracker` limitation:** The tracker expects simplified event types (`message`, `tool_use`) but `client.beta.sessions.events.list()` returns prefixed types. **Use manual tracking** until the tracker is updated.
+- **Event type mapping** from Anthropic's `events.list()` to SDK methods:
+  - `user.message` → `trackUserMessage(textContent)` — track when sending, not when polling
+  - `agent.message` → `trackAiMessage(textContent, model, 'anthropic', latencyMs)`
+  - `agent.tool_use` / `agent.mcp_tool_use` / `agent.custom_tool_use` → `trackToolCall(toolName, latencyMs, success)`
+  - `agent.tool_result` / `agent.mcp_tool_result` → skip (latency captured at tool_use time via pending map)
+  - `session.status_*` → no tracking (use `session.status_running` timestamp for latency calculation)
+  - `session.error` → `trackAiMessage(errorMsg, model, 'anthropic', latencyMs, { isError: true })`
+- **Event deduplication** — polling returns all events including previously seen ones. Maintain a `seenIds` Set:
+  ```typescript
+  const seenIds = new Set<string>(savedState.seenIds);
+  for (const event of response.data) {
+    if (seenIds.has(event.id)) continue;
+    seenIds.add(event.id);
+    // ... track event ...
+  }
+  ```
+- **Latency measurement** — track wall-clock time between `session.status_running` and the event's `processed_at`, not poll round-trip
+- **Cost/token limitation** — `events.list()` does NOT include `usage` or token counts. Cost tracking requires the Anthropic Admin API (separate endpoint)
+- See Step 3f and `examples/anthropic-managed-agents-example.ts` for the basic pattern
 
 ### Claude Agent SDK
 - Use `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk`

@@ -405,6 +405,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
     properties[PROP_CACHE_CREATION_TOKENS] = opts.cacheCreationInputTokens;
 
   if (opts.totalCostUsd != null) properties[PROP_COST_USD] = opts.totalCostUsd;
+
   if (opts.providerTtfbMs != null)
     properties[PROP_TTFB_MS] = opts.providerTtfbMs;
   if (opts.finishReason != null)

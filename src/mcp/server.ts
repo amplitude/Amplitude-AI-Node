@@ -75,8 +75,12 @@ const buildInstrumentationGuidance = (
       ? `use ${provider} wrapper/swap integration (for example: \`new ${provider === 'openai' ? 'OpenAI' : 'Anthropic'}({ amplitude: ai, ... })\`)`
       : `use the ${provider} provider wrapper class from @amplitude/ai`;
 
-  const frameworkStep =
-    framework === 'express' || framework === 'koa' || framework === 'fastify'
+  const isWorker = framework === 'cloudflare-workers' || framework === 'workers' || framework === 'hono';
+  const isManagedAgent = provider === 'anthropic-managed' || provider === 'anthropic-sessions';
+
+  const frameworkStep = isWorker
+    ? 'skip `session.run()` (needs AsyncLocalStorage, unavailable in Workers). Pass explicit `{ sessionId, userId }` on every tracking call. Use `ctx.waitUntil(ai.flush())` before the handler returns.'
+    : framework === 'express' || framework === 'koa' || framework === 'fastify'
       ? 'wire `createAmplitudeAIMiddleware()` for per-request identity propagation and run LLM calls inside session context'
       : framework === 'next' || framework === 'nextjs'
         ? 'wrap route handlers in `session.run()` so every LLM call inherits user/session lineage'
@@ -96,25 +100,47 @@ const buildInstrumentationGuidance = (
         ? 'if policy allows and you want zero eval-code overhead, consider `full` with redaction for automatic server enrichments.'
         : 'if policy prohibits content egress, switch to `metadata_only` or `customer_enriched` without changing session instrumentation.';
 
+  const installStep = isWorker
+    ? '1) install @amplitude/ai (do NOT install @amplitude/analytics-node — it cannot run in Workers)'
+    : '1) install @amplitude/ai and @amplitude/analytics-node';
+
+  const initStep = isWorker
+    ? '2) create a fetch-based `FetchAmplitudeClient` transport (see "Edge Runtime / Cloudflare Workers" in amplitude-ai.md). CRITICAL: do NOT import `AmplitudeAI` or `AIConfig` from `@amplitude/ai` — they pull in `node:async_hooks` / `node:module` which break Cloudflare Workers Builds. Only `import type { ... } from \'@amplitude/ai/types\'` is safe (erased at compile time). Construct `[Agent]` events directly via `transport.track({ event_type: \'[Agent] AI Response\', ... })`.'
+    : '2) initialize `AmplitudeAI` with API key';
+
+  const providerStep = isManagedAgent
+    ? '3) use manual tracking (trackUserMessage, trackAiMessage, trackToolCall) when polling events from `client.beta.sessions.events.list()` — provider wrappers do NOT work for managed agents. See "Anthropic Managed Agents" in amplitude-ai.md for the event type mapping.'
+    : `3) ${providerSetup}`;
+
+  const sessionStep = isWorker
+    ? '4) create `FetchAmplitudeClient` per request (no module-level singleton). Pass explicit `sessionId` and `userId` in every event\'s `event_properties`. Use `ctx.waitUntil(transport.flush())` before returning.'
+    : isManagedAgent
+      ? '4) track user messages when sending to `events.send()`, track AI responses/tools when polling from `events.list()` — maintain a seenIds Set for deduplication'
+      : '4) bind session context with `const session = ai.agent(...).session(...)` and run calls in `session.run(...)`';
+
   return [
     `Framework: ${framework}`,
     `Provider: ${provider}`,
     `Content tier: ${contentTier}`,
     '',
     'Now:',
-    '1) install @amplitude/ai and @amplitude/analytics-node',
-    '2) initialize `AmplitudeAI` with API key',
-    `3) ${providerSetup}`,
-    '4) bind session context with `const session = ai.agent(...).session(...)` and run calls in `session.run(...)`',
+    installStep,
+    initStep,
+    providerStep,
+    sessionStep,
     `5) ${frameworkStep}`,
     '',
     'Next:',
     `- ${nextForTier}`,
-    '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',
+    isManagedAgent
+      ? '- refine your poll-and-track loop with deduplication and latency measurement for production reliability.'
+      : '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',
     '',
     'Why:',
     '- session lineage unlocks scoring, enrichments, and reliable product-to-AI funnels.',
-    '- wrapper/swap integration preserves fidelity while keeping implementation effort low.',
+    isManagedAgent
+      ? '- manual event mapping from the managed agent API preserves field fidelity across all event types.'
+      : '- wrapper/swap integration preserves fidelity while keeping implementation effort low.',
     `- ${tierGuidance}`,
     '- privacy controls apply before events leave your process.',
     '- IMPORTANT: never call amplitude.track() from @amplitude/analytics-node directly — it bypasses [Agent] event types and session metadata. All events must flow through the AI SDK track* methods (trackUserMessage, trackAiMessage, trackToolCall, trackSpan, etc.). Use trackSpan() for custom events.',
