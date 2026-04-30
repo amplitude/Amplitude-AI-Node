@@ -227,17 +227,24 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 
 **Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
 
-> **Cost tracking for proxies/gateways:** `trackAiMessage` auto-calculates cost via genai-prices when `model` and token counts are provided. If cost is still 0 in your dashboard, the model name is likely unrecognized. Common causes:
+> **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. Two things can cause `cost_usd: 0`:
+>
+> **1. Unrecognized model name.** Common causes:
 > - Vertex AI model aliases (e.g. `claude-sonnet-4-6` instead of canonical `claude-sonnet-4-20250514`)
 > - Internal gateway product labels (e.g. `my-company/gpt4` instead of `gpt-4o`)
 > - Brand-new models not yet in genai-prices
 >
-> Fix by either:
-> 1. Normalizing the model name to the canonical provider ID before passing to `trackAiMessage`
-> 2. Calling `calculateCost({ modelName, inputTokens, outputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
-> 3. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
+> **2. Incorrect `inputTokens` for Anthropic with prompt caching.** Provider APIs differ in what `input_tokens` means:
+> - **OpenAI:** `prompt_tokens` **already includes** `cached_tokens` — pass it directly as `inputTokens`
+> - **Anthropic:** `input_tokens` **excludes** cache tokens — you MUST add them: `inputTokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
 >
-> The Phase 4 data quality gate will catch this — `cost > 0` will fail if the model is unrecognized.
+> Pass `cacheReadTokens` / `cacheCreationTokens` separately so the SDK applies differential pricing (cached tokens are cheaper).
+>
+> Fix cost issues by:
+> 1. Normalizing the model name to the canonical provider ID
+> 2. Normalizing `inputTokens` per the provider convention above
+> 3. Or calling `calculateCost({ modelName, inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
+> 4. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
 
 ### Step 3f: Managed and hosted agent architectures
 
