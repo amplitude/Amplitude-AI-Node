@@ -2693,6 +2693,7 @@ function _extractOpenAIToolCalls(
   messages: Array<Record<string, unknown>>,
   ctx: {
     userId?: string | null;
+    deviceId?: string | null;
     sessionId?: string | null;
     traceId?: string | null;
     agentId?: string | null;
@@ -2765,6 +2766,7 @@ function _extractAnthropicToolCalls(
   messages: Array<Record<string, unknown>>,
   ctx: {
     userId?: string | null;
+    deviceId?: string | null;
     sessionId?: string | null;
     traceId?: string | null;
     agentId?: string | null;

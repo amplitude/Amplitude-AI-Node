@@ -466,7 +466,7 @@ export class WrappedCompletions {
       if (typeof content !== 'string' || content.length === 0) continue;
       trackUserMessage({
         amplitude: this._amplitude,
-        userId: ctx.userId,
+        userId: ctx.userId ?? undefined,
         deviceId: ctx.deviceId ?? undefined,
         messageContent: content,
         sessionId: ctx.sessionId,
@@ -769,7 +769,7 @@ export class WrappedResponses {
       if (!text) continue;
       trackUserMessage({
         amplitude: this._amplitude,
-        userId: ctx.userId,
+        userId: ctx.userId ?? undefined,
         deviceId: ctx.deviceId ?? undefined,
         messageContent: text,
         sessionId: ctx.sessionId,
@@ -968,7 +968,7 @@ function extractAndTrackToolCalls(
 
     trackToolCall({
       amplitude,
-      userId: ctx.userId,
+      userId: ctx.userId ?? undefined,
       deviceId: ctx.deviceId ?? undefined,
       toolName,
       success: true,
@@ -1064,7 +1064,7 @@ function extractAndTrackResponsesToolCalls(
 
     trackToolCall({
       amplitude,
-      userId: ctx.userId,
+      userId: ctx.userId ?? undefined,
       deviceId: ctx.deviceId ?? undefined,
       toolName,
       success: true,

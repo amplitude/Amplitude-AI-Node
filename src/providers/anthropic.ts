@@ -410,7 +410,7 @@ export class WrappedMessages {
       if (!content) continue;
       trackUserMessage({
         amplitude: this._amplitude,
-        userId: ctx.userId,
+        userId: ctx.userId ?? undefined,
         deviceId: ctx.deviceId ?? undefined,
         messageContent: content,
         sessionId: ctx.sessionId,
