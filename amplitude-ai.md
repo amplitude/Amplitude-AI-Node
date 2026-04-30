@@ -529,12 +529,16 @@ All imported from `@amplitude/ai`:
 
 ### Edge Runtime / Cloudflare Workers
 
-`@amplitude/analytics-node` **cannot run in Workers** — it depends on Node.js `http`. The SDK's `session.run()` also requires `AsyncLocalStorage`, which is unavailable in edge runtimes.
+**CRITICAL:** `@amplitude/ai` (including subpath imports like `@amplitude/ai/client`) **cannot be bundled into a Cloudflare Worker**. The SDK transitively depends on `node:async_hooks`, `node:module`, and `node:crypto`, which cause Cloudflare Workers Builds to reject the upload — even with `nodejs_compat` / `nodejs_compat_v2` enabled. `@amplitude/analytics-node` also cannot run in Workers (depends on Node.js `http`).
 
-**Solution:** Create a lightweight `fetch`-based `AmplitudeClientLike` shim and pass it to the SDK constructor:
+The only safe import is `import type { ... } from '@amplitude/ai/types'` (erased at compile time).
+
+**Solution: SDK-free tracking with `FetchAmplitudeClient`**
+
+Create a lightweight `fetch`-based transport and construct `[Agent]` events directly:
 
 ```typescript
-import type { AmplitudeClientLike, AmplitudeEvent } from '@amplitude/ai';
+import type { AmplitudeClientLike, AmplitudeEvent } from '@amplitude/ai/types';
 
 class FetchAmplitudeClient implements AmplitudeClientLike {
   private _apiKey: string;
@@ -566,28 +570,53 @@ class FetchAmplitudeClient implements AmplitudeClientLike {
 ```typescript
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    if (env.AMPLITUDE_TRACKING_DISABLED) return handleRequest(request, env);
+
     // Create per-request — Workers don't have persistent singletons
     const transport = new FetchAmplitudeClient(env.AMPLITUDE_API_KEY);
-    const ai = new AmplitudeAI({ amplitude: transport, config: new AIConfig({ redactPii: true }) });
-    const agent = ai.agent('my-agent');
 
-    // Skip session.run() — use explicit sessionId + userId on every call
-    agent.trackUserMessage(content, { sessionId, userId });
-    agent.trackAiMessage(response, model, 'anthropic', latencyMs, { sessionId, userId });
+    // Construct [Agent] events directly — do NOT use AmplitudeAI or AIConfig
+    transport.track({
+      event_type: '[Agent] User Message',
+      user_id: userId,
+      event_properties: {
+        '[Agent] Session ID': sessionId,
+        '[Agent] Agent ID': 'my-agent',
+        '[Agent] Message Content': content,
+      },
+    });
+
+    // After LLM call completes:
+    transport.track({
+      event_type: '[Agent] AI Response',
+      user_id: userId,
+      event_properties: {
+        '[Agent] Session ID': sessionId,
+        '[Agent] Agent ID': 'my-agent',
+        '[Agent] AI Model': model,
+        '[Agent] AI Provider': 'anthropic',
+        '[Agent] Latency (ms)': latencyMs,
+        '[Agent] Message Content': responseText,
+      },
+    });
 
     // Non-blocking flush — ensures events send before isolate terminates
-    ctx.waitUntil(ai.flush() as Promise<void>);
+    ctx.waitUntil(transport.flush());
     return new Response('ok');
   }
 };
 ```
 
+**Hybrid architecture:** If your project has both a Node.js server and a Worker entry point, use the full `@amplitude/ai` SDK on the server side and the SDK-free `FetchAmplitudeClient` pattern on the Worker side. See the [design-agent](https://github.com/amplitude/design-agent) for a working example of this split (`src/amplitude.ts` for server, `src/amplitude-worker.ts` + `src/amplitude-transport.ts` for Worker).
+
 **Key points:**
-- Create `AmplitudeAI` **per request** to avoid buffer leakage between requests
+- **Do NOT import `AmplitudeAI`, `AIConfig`, or any runtime export from `@amplitude/ai` in Worker code** — they pull in `node:async_hooks` / `node:module` which break Workers Builds
+- `import type { ... } from '@amplitude/ai/types'` is safe (erased at compile time)
+- Create `FetchAmplitudeClient` **per request** to avoid buffer leakage between requests
 - Error handling: log and drop (never block the request for telemetry)
-- The SDK handles `insert_id` dedup automatically even with the custom transport
+- For `insert_id` dedup, use `crypto.randomUUID()` (available via Workers' Web Crypto API)
 - Add `AMPLITUDE_TRACKING_DISABLED` env var as a kill switch for production safety
-- **Gotcha:** `ai.flush()` returns `unknown`, not `Promise<void>`. Workers' `ctx.waitUntil()` expects a `Promise`. Cast: `ctx.waitUntil(ai.flush() as Promise<void>)`
+- Use `[Agent]`-prefixed event types and properties to ensure events appear in Agent Analytics dashboards
 
 ### OpenAI Assistants API
 - Provider wrappers do NOT auto-instrument the Assistants API (async/polling-based)

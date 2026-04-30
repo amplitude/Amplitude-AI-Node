@@ -105,7 +105,7 @@ const buildInstrumentationGuidance = (
     : '1) install @amplitude/ai and @amplitude/analytics-node';
 
   const initStep = isWorker
-    ? '2) create a fetch-based `AmplitudeClientLike` shim and pass it to `new AmplitudeAI({ amplitude: shim })` — see the "Edge Runtime / Cloudflare Workers" section in amplitude-ai.md'
+    ? '2) create a fetch-based `FetchAmplitudeClient` transport (see "Edge Runtime / Cloudflare Workers" in amplitude-ai.md). CRITICAL: do NOT import `AmplitudeAI` or `AIConfig` from `@amplitude/ai` — they pull in `node:async_hooks` / `node:module` which break Cloudflare Workers Builds. Only `import type { ... } from \'@amplitude/ai/types\'` is safe (erased at compile time). Construct `[Agent]` events directly via `transport.track({ event_type: \'[Agent] AI Response\', ... })`.'
     : '2) initialize `AmplitudeAI` with API key';
 
   const providerStep = isManagedAgent
@@ -113,7 +113,7 @@ const buildInstrumentationGuidance = (
     : `3) ${providerSetup}`;
 
   const sessionStep = isWorker
-    ? '4) create `AmplitudeAI` per request (no module-level singleton), pass explicit `{ sessionId, userId }` on every call'
+    ? '4) create `FetchAmplitudeClient` per request (no module-level singleton). Pass explicit `sessionId` and `userId` in every event\'s `event_properties`. Use `ctx.waitUntil(transport.flush())` before returning.'
     : isManagedAgent
       ? '4) track user messages when sending to `events.send()`, track AI responses/tools when polling from `events.list()` — maintain a seenIds Set for deduplication'
       : '4) bind session context with `const session = ai.agent(...).session(...)` and run calls in `session.run(...)`';
@@ -132,11 +132,15 @@ const buildInstrumentationGuidance = (
     '',
     'Next:',
     `- ${nextForTier}`,
-    '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',
+    isManagedAgent
+      ? '- refine your poll-and-track loop with deduplication and latency measurement for production reliability.'
+      : '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',
     '',
     'Why:',
     '- session lineage unlocks scoring, enrichments, and reliable product-to-AI funnels.',
-    '- wrapper/swap integration preserves fidelity while keeping implementation effort low.',
+    isManagedAgent
+      ? '- manual event mapping from the managed agent API preserves field fidelity across all event types.'
+      : '- wrapper/swap integration preserves fidelity while keeping implementation effort low.',
     `- ${tierGuidance}`,
     '- privacy controls apply before events leave your process.',
     '- IMPORTANT: never call amplitude.track() from @amplitude/analytics-node directly — it bypasses [Agent] event types and session metadata. All events must flow through the AI SDK track* methods (trackUserMessage, trackAiMessage, trackToolCall, trackSpan, etc.). Use trackSpan() for custom events.',

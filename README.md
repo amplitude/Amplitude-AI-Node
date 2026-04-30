@@ -1942,7 +1942,9 @@ await session.run(async (s) => {
 
 ## Serverless Environments
 
-The SDK auto-detects serverless environments (Vercel, AWS Lambda, Netlify, Google Cloud Functions, Azure Functions, Cloudflare Pages). When detected, `session.run()` automatically flushes all pending events before the promise resolves — no explicit `ai.flush()` needed. You can also control this explicitly via the `autoFlush` option on `session()`:
+The SDK auto-detects serverless environments (Vercel, AWS Lambda, Netlify, Google Cloud Functions, Azure Functions, Cloudflare Pages). When detected, `session.run()` automatically flushes all pending events before the promise resolves — no explicit `ai.flush()` needed. You can also control this explicitly via the `autoFlush` option on `session()`.
+
+> **Cloudflare Workers (edge isolates)** are different from Cloudflare Pages. The full `@amplitude/ai` SDK **cannot be bundled into a Worker** — it transitively depends on `node:async_hooks`, `node:module`, and `node:crypto` which cause Workers Builds to reject the upload. Use the SDK-free `FetchAmplitudeClient` pattern with direct event construction instead. See the **Edge Runtime / Cloudflare Workers** section in [amplitude-ai.md](./amplitude-ai.md) for the complete guide.
 
 ```typescript
 // Auto-detected: flushes automatically in serverless, skips in long-running servers
