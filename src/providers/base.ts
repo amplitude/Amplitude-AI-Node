@@ -324,7 +324,7 @@ export class SimpleStreamingTracker {
       !this._skipAutoUserTracking &&
       !activeCtx?.skipAutoUserTracking &&
       !this._autoUserTracked &&
-      ctx.userId != null &&
+      (ctx.userId != null || ctx.deviceId != null) &&
       ctx.sessionId != null &&
       this._inputMessages.length > 0
     ) {
@@ -386,7 +386,8 @@ export class SimpleStreamingTracker {
 
       trackUserMessage({
         amplitude: this._amplitude,
-        userId: ctx.userId as string,
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         messageContent: content,
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,

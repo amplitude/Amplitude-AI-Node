@@ -445,7 +445,7 @@ export class WrappedCompletions {
     shouldTrackInputMessages: boolean,
   ): void {
     if (!shouldTrackInputMessages) return;
-    if (ctx.userId == null || ctx.sessionId == null) return;
+    if ((ctx.userId == null && ctx.deviceId == null) || ctx.sessionId == null) return;
     const activeCtx = getActiveContext();
     if (activeCtx?.skipAutoUserTracking) return;
     if (!Array.isArray(messages)) return;
@@ -467,6 +467,7 @@ export class WrappedCompletions {
       trackUserMessage({
         amplitude: this._amplitude,
         userId: ctx.userId,
+        deviceId: ctx.deviceId ?? undefined,
         messageContent: content,
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
@@ -761,7 +762,7 @@ export class WrappedResponses {
     shouldTrackInputMessages: boolean,
   ): void {
     if (!shouldTrackInputMessages) return;
-    if (ctx.userId == null || ctx.sessionId == null) return;
+    if ((ctx.userId == null && ctx.deviceId == null) || ctx.sessionId == null) return;
     const activeCtx = getActiveContext();
     if (activeCtx?.skipAutoUserTracking) return;
     for (const text of extractResponsesUserInputs(input)) {
@@ -769,6 +770,7 @@ export class WrappedResponses {
       trackUserMessage({
         amplitude: this._amplitude,
         userId: ctx.userId,
+        deviceId: ctx.deviceId ?? undefined,
         messageContent: text,
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
@@ -909,7 +911,7 @@ function extractAndTrackToolCalls(
   msgs: ChatMessage[],
   { amplitude, ctx, privacyConfig }: ToolTrackContext,
 ): void {
-  if (ctx.userId == null || ctx.sessionId == null) return;
+  if ((ctx.userId == null && ctx.deviceId == null) || ctx.sessionId == null) return;
 
   // Find the last assistant message that has tool_calls
   let assistantIdx = -1;
@@ -967,6 +969,7 @@ function extractAndTrackToolCalls(
     trackToolCall({
       amplitude,
       userId: ctx.userId,
+      deviceId: ctx.deviceId ?? undefined,
       toolName,
       success: true,
       latencyMs,
@@ -999,7 +1002,7 @@ function extractAndTrackResponsesToolCalls(
   input: unknown,
   { amplitude, ctx, privacyConfig }: ToolTrackContext,
 ): void {
-  if (ctx.userId == null || ctx.sessionId == null) return;
+  if ((ctx.userId == null && ctx.deviceId == null) || ctx.sessionId == null) return;
   if (!Array.isArray(input)) return;
 
   const entries = input as OpenAIResponseInput[];
@@ -1062,6 +1065,7 @@ function extractAndTrackResponsesToolCalls(
     trackToolCall({
       amplitude,
       userId: ctx.userId,
+      deviceId: ctx.deviceId ?? undefined,
       toolName,
       success: true,
       latencyMs,

@@ -833,7 +833,8 @@ async function* _wrapPatchedStream(
       }
 
       ai.trackAiMessage({
-        userId: ctx.userId ?? 'unknown',
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         content,
         sessionId: ctx.sessionId,
         model,
@@ -998,7 +999,8 @@ async function* _wrapPatchedAnthropicStream(
       }
 
       ai.trackAiMessage({
-        userId: ctx.userId ?? 'unknown',
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         content,
         sessionId: ctx.sessionId,
         model,
@@ -1113,7 +1115,8 @@ async function* _wrapPatchedGeminiStream(
             : undefined);
 
       ai.trackAiMessage({
-        userId: ctx.userId ?? 'unknown',
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         content,
         sessionId: ctx.sessionId,
         model,
@@ -1245,7 +1248,8 @@ async function* _wrapPatchedBedrockStream(
 
       const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
       ai.trackAiMessage({
-        userId: ctx.userId ?? 'unknown',
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         content,
         sessionId: ctx.sessionId,
         model,
@@ -1681,7 +1685,8 @@ function _trackCompletionResponse(
   const latencyMs = performance.now() - startTime;
 
   ai.trackAiMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content: String(message?.content ?? ''),
     sessionId: ctx.sessionId,
     model: modelName,
@@ -1759,7 +1764,8 @@ function _trackAnthropicResponse(
   const latencyMs = performance.now() - startTime;
 
   ai.trackAiMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content: String(textBlock?.text ?? ''),
     sessionId: ctx.sessionId,
     model: modelName,
@@ -1806,7 +1812,8 @@ function _trackCompletionError(
   const latencyMs = performance.now() - startTime;
 
   ai.trackAiMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content: '',
     sessionId: ctx.sessionId,
     model: String(opts?.model ?? opts?.modelId ?? 'unknown'),
@@ -1867,7 +1874,8 @@ function _trackGeminiResponse(
         : undefined);
 
   ai.trackAiMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content: text,
     sessionId: ctx.sessionId,
     model: 'gemini',
@@ -1940,7 +1948,8 @@ function _trackBedrockResponse(
   const latencyMs = performance.now() - startTime;
 
   ai.trackAiMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content: String(textBlock?.text ?? ''),
     sessionId: ctx.sessionId,
     model: modelName,
@@ -2020,7 +2029,8 @@ function _trackResponsesResponse(
   const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
 
   ai.trackAiMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content: outputText,
     sessionId: ctx.sessionId,
     model: modelName,
@@ -2140,7 +2150,8 @@ async function* _wrapPatchedResponsesStream(
       const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
 
       ai.trackAiMessage({
-        userId: ctx.userId ?? 'unknown',
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         content,
         sessionId: ctx.sessionId,
         model,
@@ -2237,7 +2248,7 @@ function _trackResponsesUserMessages(
   const ctx = getActiveContext();
   if (ctx == null) return;
   if (isTrackerManaged()) return;
-  if (!ctx.userId || !ctx.sessionId) return;
+  if ((!ctx.userId && !ctx.deviceId) || !ctx.sessionId) return;
   if (ctx.skipAutoUserTracking) return;
 
   const opts = requestOpts as Record<string, unknown> | undefined;
@@ -2287,7 +2298,7 @@ function _extractResponsesToolCallsFromInput(
   const ctx = getActiveContext();
   if (ctx == null) return;
   if (isTrackerManaged()) return;
-  if (!ctx.userId || !ctx.sessionId) return;
+  if ((!ctx.userId && !ctx.deviceId) || !ctx.sessionId) return;
   if (ctx.skipAutoUserTracking) return;
 
   const opts = requestOpts as Record<string, unknown> | undefined;
@@ -2317,7 +2328,8 @@ function _extractResponsesToolCallsFromInput(
     if (!result) continue;
     const latencyMs = _consumeToolLatencyMs(ctx.sessionId, callId, ctx.agentId);
     ai.trackToolCall({
-      userId: ctx.userId ?? 'unknown',
+      userId: ctx.userId ?? undefined,
+      deviceId: ctx.deviceId ?? undefined,
       sessionId: ctx.sessionId ?? '',
       traceId: ctx.traceId,
       agentId: ctx.agentId,
@@ -2482,7 +2494,7 @@ function _trackInputUserMessages(
   const ctx = getActiveContext();
   if (ctx == null) return;
   if (isTrackerManaged()) return;
-  if (!ctx.userId || !ctx.sessionId) return;
+  if ((!ctx.userId && !ctx.deviceId) || !ctx.sessionId) return;
   if (ctx.skipAutoUserTracking) return;
 
   const req = requestOpts as Record<string, unknown> | undefined;
@@ -2500,6 +2512,7 @@ function _trackInputUserMessages(
 
 interface _UserMsgCtx {
   userId?: string | null;
+  deviceId?: string | null;
   sessionId?: string | null;
   traceId?: string | null;
   agentId?: string | null;
@@ -2514,7 +2527,8 @@ function _emitUserMessage(
   content: string,
 ): void {
   ai.trackUserMessage({
-    userId: ctx.userId ?? 'unknown',
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
     content,
     sessionId: ctx.sessionId ?? '',
     traceId: ctx.traceId,
@@ -2659,7 +2673,7 @@ function _extractAndTrackToolCalls(
   const ctx = getActiveContext();
   if (ctx == null) return;
   if (isTrackerManaged()) return;
-  if (!ctx.userId || !ctx.sessionId) return;
+  if ((!ctx.userId && !ctx.deviceId) || !ctx.sessionId) return;
   if (ctx.skipAutoUserTracking) return;
 
   const req = requestOpts as Record<string, unknown> | undefined;
@@ -2729,7 +2743,8 @@ function _extractOpenAIToolCalls(
     );
 
     ai.trackToolCall({
-      userId: ctx.userId ?? 'unknown',
+      userId: ctx.userId ?? undefined,
+      deviceId: ctx.deviceId ?? undefined,
       toolName,
       success: true,
       latencyMs,
@@ -2816,7 +2831,8 @@ function _extractAnthropicToolCalls(
       );
 
       ai.trackToolCall({
-        userId: ctx.userId ?? 'unknown',
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         toolName,
         success: !isError,
         latencyMs,
