@@ -408,6 +408,10 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.totalCostUsd != null) {
     properties[PROP_COST_USD] = opts.totalCostUsd;
   } else if (opts.modelName && (opts.inputTokens || opts.outputTokens)) {
+    // Best-effort auto-cost: assumes inputTokens is already the TOTAL
+    // (including cache tokens) per calculateCost's contract. Callers using
+    // Anthropic's raw input_tokens (which excludes cache) should normalize
+    // first or pass totalCostUsd explicitly for precise cache-aware pricing.
     try {
       const autoCost = calculateCost({
         modelName: opts.modelName,
@@ -418,7 +422,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
       });
       if (autoCost > 0) properties[PROP_COST_USD] = autoCost;
     } catch {
-      // Best-effort — unknown model or missing pricing data
+      // Unknown model or missing pricing data
     }
   }
 
