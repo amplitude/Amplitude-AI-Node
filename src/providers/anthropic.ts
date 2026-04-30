@@ -379,7 +379,7 @@ export class WrappedMessages {
     shouldTrackInputMessages: boolean,
   ): void {
     if (!shouldTrackInputMessages) return;
-    if (ctx.userId == null || ctx.sessionId == null) return;
+    if ((ctx.userId == null && ctx.deviceId == null) || ctx.sessionId == null) return;
     const activeCtx = getActiveContext();
     if (activeCtx?.skipAutoUserTracking) return;
     if (!Array.isArray(messages)) return;
@@ -410,7 +410,8 @@ export class WrappedMessages {
       if (!content) continue;
       trackUserMessage({
         amplitude: this._amplitude,
-        userId: ctx.userId,
+        userId: ctx.userId ?? undefined,
+        deviceId: ctx.deviceId ?? undefined,
         messageContent: content,
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
@@ -507,7 +508,8 @@ export class WrappedMessages {
 
         trackToolCall({
           amplitude: this._amplitude,
-          userId: ctx.userId as string,
+          userId: ctx.userId ?? undefined,
+          deviceId: ctx.deviceId ?? undefined,
           toolName,
           success: !isError,
           latencyMs,
