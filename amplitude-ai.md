@@ -528,8 +528,66 @@ All imported from `@amplitude/ai`:
 - For streaming responses (`streamText`, `streamObject`), see the **Streaming Patterns** section in README.md — use explicit `trackAiMessage` in `onFinish` + `await ai.flush()` instead of `session.run()`
 
 ### Edge Runtime / Cloudflare Workers
-- `session.run()` relies on `AsyncLocalStorage` which is unavailable in Edge Runtime
-- Use explicit context: `agent.trackUserMessage(content, { sessionId })` instead
+
+`@amplitude/analytics-node` **cannot run in Workers** — it depends on Node.js `http`. The SDK's `session.run()` also requires `AsyncLocalStorage`, which is unavailable in edge runtimes.
+
+**Solution:** Create a lightweight `fetch`-based `AmplitudeClientLike` shim and pass it to the SDK constructor:
+
+```typescript
+import type { AmplitudeClientLike, AmplitudeEvent } from '@amplitude/ai';
+
+class FetchAmplitudeClient implements AmplitudeClientLike {
+  private _apiKey: string;
+  private _buffer: AmplitudeEvent[] = [];
+
+  constructor(apiKey: string) { this._apiKey = apiKey; }
+
+  track(event: AmplitudeEvent): void { this._buffer.push(event); }
+
+  async flush(): Promise<void> {
+    if (!this._buffer.length) return;
+    const events = this._buffer.splice(0);
+    try {
+      const resp = await fetch('https://api2.amplitude.com/2/httpapi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: this._apiKey, events }),
+      });
+      if (!resp.ok) console.error(`[Amplitude] Flush failed: ${resp.status}`);
+    } catch (err) {
+      console.error(`[Amplitude] Flush error: ${(err as Error).message}`);
+    }
+  }
+}
+```
+
+**Usage in a Worker request handler:**
+
+```typescript
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    // Create per-request — Workers don't have persistent singletons
+    const transport = new FetchAmplitudeClient(env.AMPLITUDE_API_KEY);
+    const ai = new AmplitudeAI({ amplitude: transport, config: new AIConfig({ redactPii: true }) });
+    const agent = ai.agent('my-agent');
+
+    // Skip session.run() — use explicit sessionId + userId on every call
+    agent.trackUserMessage(content, { sessionId, userId });
+    agent.trackAiMessage(response, model, 'anthropic', latencyMs, { sessionId, userId });
+
+    // Non-blocking flush — ensures events send before isolate terminates
+    ctx.waitUntil(ai.flush() as Promise<void>);
+    return new Response('ok');
+  }
+};
+```
+
+**Key points:**
+- Create `AmplitudeAI` **per request** to avoid buffer leakage between requests
+- Error handling: log and drop (never block the request for telemetry)
+- The SDK handles `insert_id` dedup automatically even with the custom transport
+- Add `AMPLITUDE_TRACKING_DISABLED` env var as a kill switch for production safety
+- **Gotcha:** `ai.flush()` returns `unknown`, not `Promise<void>`. Workers' `ctx.waitUntil()` expects a `Promise`. Cast: `ctx.waitUntil(ai.flush() as Promise<void>)`
 
 ### OpenAI Assistants API
 - Provider wrappers do NOT auto-instrument the Assistants API (async/polling-based)
@@ -537,9 +595,26 @@ All imported from `@amplitude/ai`:
 
 ### Anthropic Managed Agents
 - Provider wrappers do NOT work — LLM calls happen in Anthropic's cloud, not your code
-- Use manual tracking: `trackUserMessage()` when sending, `trackAiMessage()` / `trackToolCall()` when polling events from `client.beta.sessions`
-- Pass `inputTokens` / `outputTokens` from the event response for cost estimation
-- See Step 3f and `examples/anthropic-managed-agents-example.ts` for a complete pattern
+- **`ManagedAgentTracker` limitation:** The tracker expects simplified event types (`message`, `tool_use`) but `client.beta.sessions.events.list()` returns prefixed types. **Use manual tracking** until the tracker is updated.
+- **Event type mapping** from Anthropic's `events.list()` to SDK methods:
+  - `user.message` → `trackUserMessage(textContent)` — track when sending, not when polling
+  - `agent.message` → `trackAiMessage(textContent, model, 'anthropic', latencyMs)`
+  - `agent.tool_use` / `agent.mcp_tool_use` / `agent.custom_tool_use` → `trackToolCall(toolName, latencyMs, success)`
+  - `agent.tool_result` / `agent.mcp_tool_result` → skip (latency captured at tool_use time via pending map)
+  - `session.status_*` → no tracking (use `session.status_running` timestamp for latency calculation)
+  - `session.error` → `trackAiMessage(errorMsg, model, 'anthropic', latencyMs, { isError: true })`
+- **Event deduplication** — polling returns all events including previously seen ones. Maintain a `seenIds` Set:
+  ```typescript
+  const seenIds = new Set<string>(savedState.seenIds);
+  for (const event of response.data) {
+    if (seenIds.has(event.id)) continue;
+    seenIds.add(event.id);
+    // ... track event ...
+  }
+  ```
+- **Latency measurement** — track wall-clock time between `session.status_running` and the event's `processed_at`, not poll round-trip
+- **Cost/token limitation** — `events.list()` does NOT include `usage` or token counts. Cost tracking requires the Anthropic Admin API (separate endpoint)
+- See Step 3f and `examples/anthropic-managed-agents-example.ts` for the basic pattern
 
 ### Claude Agent SDK
 - Use `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk`
