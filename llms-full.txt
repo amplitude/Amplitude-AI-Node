@@ -441,7 +441,7 @@ Full guide: `amplitude-ai.md` or MCP resource `amplitude-ai://instrument-guide`.
 - `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
 - **Do not** pass large JSON blobs, RAG context packs, or internal pipeline state as the **only** user message body — the product will show that JSON as the session title and break down charts by raw JSON.
 - **Do** pass a **short natural-language** line (the real end-user prompt, or a canonical summary for headless jobs, e.g. `"Summarize the attached design doc and list open questions"`).
-- Put structured data in the **options** object: **`context`** (object → `[Agent] Context` JSON) or **`eventProperties`** — not in place of the human-readable message.
+- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
 
 ```typescript
 // GOOD: readable user line + structured state in context
