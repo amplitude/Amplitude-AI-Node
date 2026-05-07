@@ -656,7 +656,10 @@ const child = parent.child('researcher', {
 // Child keys override parent keys; parent keys absent from the child are preserved.
 ```
 
-**Querying in Amplitude:** The `[Agent] Context` property is a JSON string. Use Amplitude's JSON property parsing to extract individual keys for charts, cohorts, and funnels. For example, group by `[Agent] Context.agent_type` to see metrics by agent role.
+**Querying in Amplitude:** The `[Agent] Context` property is a JSON string. To query individual keys:
+- **Group-by**: Select `[Agent] Context` as the property, then use dot notation (e.g., `[Agent] Context.agent_type`) to extract a specific key.
+- **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
+- **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
 > **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Evaluation`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
 
@@ -1151,6 +1154,8 @@ const spanId = session.trackSpan({
   eventProperties: { plan: 'enterprise', seats: 50 },
 });
 ```
+
+> **Note:** `eventProperties` adds flat top-level properties to the Amplitude event. On managed `[Agent]` event types, properties not in the schema may not be queryable in charts. For custom segmentation dimensions you want to chart, prefer `context` instead — it maps to the pre-registered `[Agent] Context` JSON property. Use `eventProperties` only when you have explicitly registered the properties in your project's tracking plan.
 
 `trackSpan()` is the recommended way to emit custom events. It supports parent-child nesting via `parentSpanId`, error tracking via `isError`, and all the standard session-level metadata.
 
@@ -1794,7 +1799,7 @@ Your Application
 
 These rules match the Python `amplitude-ai` agent guide and affect how Agent Analytics labels sessions and computes costs:
 
-- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** or **`opts.eventProperties`**, not as the only `content`, or session titles and segmentation will show raw JSON.
+- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** (preferred — maps to the registered `[Agent] Context` property, always queryable in charts), not as the only `content`, or session titles and segmentation will show raw JSON. Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
 - **Turn-level vs spans** — **`[Agent] User Message`** and **`[Agent] AI Response`** (with session + turn ids) drive **turn counts** and conversation views. **`observe()`** / **`trackSpan()`** add trace detail but **do not replace** those turn events; keep a user + AI pair for each user-visible cycle unless you intentionally document otherwise.
 - **Gateways / custom `baseURL`** — If you use stock `openai` (or another client) against a proxy, the SDK may not auto-wrap that path. Call **`trackAiMessage`** with **`usage`** token fields from the response (or stream end), pass the **actual routed model id** as the model argument, and set **`totalCostUsd`** if genai-prices cannot resolve the model string. The `@pydantic/genai-prices` package is included as a dependency for automatic USD estimates when model + tokens are known.
 
