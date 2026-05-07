@@ -2588,7 +2588,6 @@ When you use this SDK, the following are managed automatically. If you send even
 | -------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | **HTTP V2 API**            | Real-time, low-to-medium volume                   | [HTTP V2 API docs](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/)          |
 | **Batch Event Upload API** | High volume, backfills                            | [Batch API docs](https://www.docs.developers.amplitude.com/analytics/apis/batch-event-upload-api/) |
-| **Amazon S3 Import**       | Bulk historical import, warehouse-first workflows | [S3 Import docs](https://amplitude.com/docs/data/source-catalog/amazon-s3)                         |
 
 ### Minimal HTTP API example
 
