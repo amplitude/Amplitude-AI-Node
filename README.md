@@ -656,7 +656,10 @@ const child = parent.child('researcher', {
 // Child keys override parent keys; parent keys absent from the child are preserved.
 ```
 
-**Querying in Amplitude:** The `[Agent] Context` property is a JSON string. Use Amplitude's JSON property parsing to extract individual keys for charts, cohorts, and funnels. For example, group by `[Agent] Context.agent_type` to see metrics by agent role.
+**Querying in Amplitude:** The `[Agent] Context` property is a JSON string. To query individual keys:
+- **Group-by**: Select `[Agent] Context` as the property, then use dot notation (e.g., `[Agent] Context.agent_type`) to extract a specific key.
+- **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
+- **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
 > **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Evaluation`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
 
@@ -1151,6 +1154,8 @@ const spanId = session.trackSpan({
   eventProperties: { plan: 'enterprise', seats: 50 },
 });
 ```
+
+> **Note:** `eventProperties` adds flat top-level properties to the Amplitude event. On managed `[Agent]` event types, properties not in the schema may not be queryable in charts. For custom segmentation dimensions you want to chart, prefer `context` instead — it maps to the pre-registered `[Agent] Context` JSON property. Use `eventProperties` only when you have explicitly registered the properties in your project's tracking plan.
 
 `trackSpan()` is the recommended way to emit custom events. It supports parent-child nesting via `parentSpanId`, error tracking via `isError`, and all the standard session-level metadata.
 
