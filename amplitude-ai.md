@@ -629,14 +629,17 @@ export default {
     // Create per-request — Workers don't have persistent singletons
     const transport = new FetchAmplitudeClient(env.AMPLITUDE_API_KEY);
 
-    // Construct [Agent] events directly — do NOT use AmplitudeAI or AIConfig
+    // Construct [Agent] events directly — do NOT use AmplitudeAI or AIConfig.
+    // IMPORTANT: Use `$llm_message: { text }` for message content — this is the
+    // property the ingestion pipeline reads for conversation text. `[Agent] Session ID`
+    // and `[Agent] Agent ID` are standard metadata properties.
     transport.track({
       event_type: '[Agent] User Message',
       user_id: userId,
       event_properties: {
         '[Agent] Session ID': sessionId,
         '[Agent] Agent ID': 'my-agent',
-        '[Agent] Message Content': content,
+        '$llm_message': { text: content },
       },
     });
 
@@ -647,10 +650,10 @@ export default {
       event_properties: {
         '[Agent] Session ID': sessionId,
         '[Agent] Agent ID': 'my-agent',
-        '[Agent] AI Model': model,
-        '[Agent] AI Provider': 'anthropic',
-        '[Agent] Latency (ms)': latencyMs,
-        '[Agent] Message Content': responseText,
+        '[Agent] Model Name': model,
+        '[Agent] Provider': 'anthropic',
+        '[Agent] Latency Ms': latencyMs,
+        '$llm_message': { text: responseText },
       },
     });
 
