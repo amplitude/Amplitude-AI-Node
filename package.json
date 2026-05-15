@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -42,8 +42,8 @@
     "./decorators": "./dist/decorators.js",
     "./exceptions": "./dist/exceptions.js",
     "./integrations/anthropic-managed": "./dist/integrations/anthropic-managed.js",
-    "./integrations/claude-agent-sdk": "./dist/integrations/claude-agent-sdk.js",
     "./integrations/anthropic-tools": "./dist/integrations/anthropic-tools.js",
+    "./integrations/claude-agent-sdk": "./dist/integrations/claude-agent-sdk.js",
     "./integrations/crewai": "./dist/integrations/crewai.js",
     "./integrations/langchain": "./dist/integrations/langchain.js",
     "./integrations/llamaindex": "./dist/integrations/llamaindex.js",
@@ -78,10 +78,12 @@
     "./utils/debug": "./dist/utils/debug.js",
     "./utils/logger": "./dist/utils/logger.js",
     "./utils/model-tiers": "./dist/utils/model-tiers.js",
+    "./utils/provider-detect": "./dist/utils/provider-detect.js",
     "./utils/providers": "./dist/utils/providers.js",
     "./utils/resolve-module": "./dist/utils/resolve-module.js",
     "./utils/streaming": "./dist/utils/streaming.js",
     "./utils/tokens": "./dist/utils/tokens.js",
+    "./utils/tool-latency": "./dist/utils/tool-latency.js",
     "./wrappers": "./dist/wrappers.js",
     "./package.json": "./package.json"
   },
