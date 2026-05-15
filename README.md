@@ -2587,7 +2587,6 @@ When you use this SDK, the following are managed automatically. If you send even
 | Method                     | Best for                                          | Docs                                                                                               |
 | -------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | **HTTP V2 API**            | Real-time, low-to-medium volume                   | [HTTP V2 API docs](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/)          |
-| **Batch Event Upload API** | High volume, backfills                            | [Batch API docs](https://www.docs.developers.amplitude.com/analytics/apis/batch-event-upload-api/) |
 
 ### Minimal HTTP API example
 
