@@ -93,6 +93,30 @@ describe('serializeToJsonString', () => {
     expect(serializeToJsonString({ a: 1 })).toBe('{"a":1}');
   });
 
+  it('returns plain strings as-is', () => {
+    expect(serializeToJsonString('hello world')).toBe('hello world');
+  });
+
+  it('does not double-encode JSON strings', () => {
+    const jsonStr = '{"error":"timeout","message":"query cancelled"}';
+    const result = serializeToJsonString(jsonStr);
+    expect(result).toBe(jsonStr);
+    expect(result).not.toMatch(/^"/);
+  });
+
+  it('does not double-encode JSON strings with nested quotes', () => {
+    const jsonStr = '{"message":"select \\"col\\" from \\"table\\""}';
+    expect(serializeToJsonString(jsonStr)).toBe(jsonStr);
+  });
+
+  it('returns empty string as-is', () => {
+    expect(serializeToJsonString('')).toBe('');
+  });
+
+  it('serializes arrays to JSON', () => {
+    expect(serializeToJsonString([1, 'two', 3])).toBe('[1,"two",3]');
+  });
+
   it('truncates long strings', () => {
     const longStr = 'x'.repeat(20000);
     const result = serializeToJsonString(longStr, 100);
