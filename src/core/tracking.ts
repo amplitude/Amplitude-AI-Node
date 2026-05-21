@@ -138,10 +138,17 @@ export function serializeToJsonString(
   maxLength = MAX_SERIALIZED_LENGTH,
 ): string {
   let serialized: string;
-  try {
-    serialized = JSON.stringify(value);
-  } catch {
-    serialized = String(value);
+  if (typeof value === 'string') {
+    // Strings are already scalar values that Amplitude will not flatten.
+    // Wrapping them with JSON.stringify would double-encode any string that
+    // already contains JSON (e.g. tool output from MCP tools).
+    serialized = value;
+  } else {
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      serialized = String(value);
+    }
   }
 
   if (serialized.length > maxLength) {
