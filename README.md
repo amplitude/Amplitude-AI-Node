@@ -235,7 +235,7 @@ ai.trackScore({
 | `user_satisfaction` | Did the user seem satisfied based on conversation signals? | 0–2 |
 | `agent_confusion` | Did the agent misunderstand or go off track? | 0–2 |
 
-Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure` (agent failed to deliver), `data_quality_issues`, and `behavioral_patterns` (clarification loops, topic drift). All results are emitted as `[Agent] Score` events with `source: 'ai'`.
+Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure` (agent failed to deliver), `data_quality_issues`, and `user_friction` (clarification loops, topic drift). All results are emitted as `[Agent] Score` events with `source: 'ai'`.
 
 **All three layers use the same `[Agent] Score` event type**, differentiated by `[Agent] Evaluation Source` (`'user'`, `'ai'`, or `'reviewer'`). One chart shows user feedback alongside automated evals. No joins, no separate tables.
 
@@ -1349,7 +1349,7 @@ This produces the same Amplitude event properties as Amplitude's built-in server
 - **Rubrics**: `rubrics` — array of `RubricScore` with name, score, rationale, and evidence
 - **Failure Signals**: `hasNegativeFeedback`, `hasDataQualityIssues`, `hasTechnicalFailure`
 - **Error Analysis**: `errorCategories`, `technicalErrorCount`
-- **Behavioral**: `behavioralPatterns`, `negativeFeedbackPhrases`, `dataQualityIssues`
+- **Behavioral**: `userFriction`, `negativeFeedbackPhrases`, `dataQualityIssues`
 - **Agent Topology**: `agentChain`, `rootAgentName`
 - **Complexity**: `requestComplexity`
 - **Labels**: `messageLabels` — per-message labels keyed by message ID
@@ -2435,7 +2435,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Task Failure Type` | string | No | Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete'). |
 | `[Agent] Technical Error Count` | number | No | Count of technical errors that occurred during the session. |
 | `[Agent] Error Categories` | string[] | No | Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings. |
-| `[Agent] Behavioral Patterns` | string[] | No | Detected behavioral anti-patterns (e.g., 'retry_storm', 'clarification_loop', 'early_abandonment'). JSON array of strings. |
+| `[Agent] User Friction` | string[] | No | Detected user friction patterns (e.g., 'retry_storm', 'clarification_loop', 'early_abandonment'). JSON array of strings. |
 | `[Agent] Session Cost USD` | number | No | Total LLM cost in USD for this AI session (aggregated from per-message costs). |
 | `[Agent] Enrichment Cost USD` | number | No | Cost in USD of running the enrichment pipeline's LLM inference for this session. Distinct from the session's own LLM cost. |
 | `[Agent] Quality Score` | number | No | Overall quality score (0.0-1.0) computed by the enrichment pipeline for this session. |
@@ -2459,9 +2459,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Session Safety Rationale` | string | No | Brief rationale for the session safety classification. |
 | `[Agent] User Intent` | string | No | OOTB classifier result for user's primary intent (e.g., 'Information Request', 'Task Execution', 'Content Creation'). |
 | `[Agent] User Intent Rationale` | string | No | Brief rationale for the user intent classification. |
-| `[Agent] Has Behavioral Patterns` | boolean | No | OOTB detector result: whether conversation exhibited anti-patterns (retry storms, clarification loops, etc.). |
-| `[Agent] Behavioral Patterns Rationale` | string | No | Brief rationale for behavioral patterns detection. |
-| `[Agent] Detected Behavioral Patterns` | string[] | No | Specific behavioral anti-patterns detected (e.g., 'retry_storm', 'tool_cascade_fail'). JSON array. |
+| `[Agent] Has User Friction` | boolean | No | OOTB detector result: whether conversation exhibited user friction patterns (retry storms, clarification loops, etc.). |
+| `[Agent] User Friction Rationale` | string | No | Brief rationale for user friction detection. |
+| `[Agent] Detected User Friction` | string[] | No | Specific user friction patterns detected (e.g., 'retry_storm', 'tool_cascade_fail'). JSON array. |
 | `[Agent] Detected Data Quality Issues` | string[] | No | Specific data quality issues detected. JSON array. |
 
 ### Server-Side: Topic Classification Properties (Deprecated)
