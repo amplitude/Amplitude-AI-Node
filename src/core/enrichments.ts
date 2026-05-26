@@ -158,6 +158,8 @@ export interface SessionEnrichmentsOptions {
   hasDataQualityIssues?: boolean;
   hasTechnicalFailure?: boolean;
   errorCategories?: string[];
+  userFriction?: string[];
+  /** @deprecated Use userFriction instead */
   behavioralPatterns?: string[];
   customMetadata?: Record<string, unknown>;
   schemaVersion?: string;
@@ -183,7 +185,7 @@ export class SessionEnrichments {
   readonly hasDataQualityIssues: boolean;
   readonly hasTechnicalFailure: boolean;
   readonly errorCategories: string[] | null;
-  readonly behavioralPatterns: string[] | null;
+  readonly userFriction: string[] | null;
   readonly customMetadata: Record<string, unknown> | null;
   readonly schemaVersion: string;
   readonly qualityScore: number | null;
@@ -207,7 +209,7 @@ export class SessionEnrichments {
     this.hasDataQualityIssues = options.hasDataQualityIssues ?? false;
     this.hasTechnicalFailure = options.hasTechnicalFailure ?? false;
     this.errorCategories = options.errorCategories ?? null;
-    this.behavioralPatterns = options.behavioralPatterns ?? null;
+    this.userFriction = options.userFriction ?? options.behavioralPatterns ?? null;
     this.customMetadata = options.customMetadata ?? null;
     this.schemaVersion = options.schemaVersion ?? '2.0';
     this.qualityScore = options.qualityScore ?? null;
@@ -251,8 +253,8 @@ export class SessionEnrichments {
 
     if (this.errorCategories != null)
       result.error_categories = this.errorCategories;
-    if (this.behavioralPatterns != null)
-      result.behavioral_patterns = this.behavioralPatterns;
+    if (this.userFriction != null)
+      result.user_friction = this.userFriction;
     if (this.customMetadata != null)
       result.custom_metadata = this.customMetadata;
 
