@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 3,
-    "generated_at": "2026-03-25T22:00:10.579458+00:00",
+    "schema_version": 13,
+    "generated_at": "2026-05-22T23:13:52.722179+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -1073,6 +1073,11 @@
           "description": "Epoch milliseconds when this enrichment/evaluation was computed."
         },
         {
+          "name": "[Agent] Evaluator Model",
+          "type": "string",
+          "description": "LLM model identifier used to produce this evaluator output."
+        },
+        {
           "name": "[Agent] Score Label",
           "type": "string",
           "description": "Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only."
@@ -1096,10 +1101,15 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Org ID",
+          "type": "string",
+          "description": "The Amplitude organization ID owning the project where this event is tracked.",
+          "is_required": true
+        },
+        {
           "name": "[Agent] Customer Org ID",
           "type": "string",
-          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics.",
-          "is_required": true
+          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
         },
         {
           "name": "[Agent] Evaluation Source",
@@ -1117,12 +1127,6 @@
           "name": "[Agent] Evaluated At",
           "type": "number",
           "description": "Epoch milliseconds when this enrichment/evaluation was computed.",
-          "is_required": true
-        },
-        {
-          "name": "[Agent] Overall Outcome",
-          "type": "string",
-          "description": "Session outcome classification: 'success', 'partial_success', 'failure', 'abandoned', 'response_provided', etc.",
           "is_required": true
         },
         {
@@ -1264,12 +1268,95 @@
           "name": "[Agent] Agent Description",
           "type": "string",
           "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
+          "name": "[Agent] Task Completed",
+          "type": "string",
+          "description": "OOTB detector result: 'True' if agent completed user's request, 'False' otherwise."
+        },
+        {
+          "name": "[Agent] Task Completed Rationale",
+          "type": "string",
+          "description": "Brief rationale for the task completion determination."
+        },
+        {
+          "name": "[Agent] Task Completed Evidence",
+          "type": "string",
+          "description": "Supporting evidence for the task completion determination."
+        },
+        {
+          "name": "[Agent] Response Quality",
+          "type": "string",
+          "description": "OOTB detector result: 'True' if response was accurate/clear/helpful, 'False' otherwise."
+        },
+        {
+          "name": "[Agent] Response Quality Rationale",
+          "type": "string",
+          "description": "Brief rationale for the response quality determination."
+        },
+        {
+          "name": "[Agent] Response Quality Evidence",
+          "type": "string",
+          "description": "Supporting evidence for the response quality determination."
+        },
+        {
+          "name": "[Agent] Session Outcome",
+          "type": "string",
+          "description": "OOTB classifier result for how the session ended (e.g., 'Response Provided', 'Unable to Complete', 'Escalated')."
+        },
+        {
+          "name": "[Agent] Session Outcome Rationale",
+          "type": "string",
+          "description": "Brief rationale for the session outcome classification."
+        },
+        {
+          "name": "[Agent] Session Safety",
+          "type": "string",
+          "description": "OOTB classifier result for session safety (e.g., 'normal', 'off_topic', 'prompt_injection', 'abuse')."
+        },
+        {
+          "name": "[Agent] Session Safety Rationale",
+          "type": "string",
+          "description": "Brief rationale for the session safety classification."
+        },
+        {
+          "name": "[Agent] User Intent",
+          "type": "string",
+          "description": "OOTB classifier result for user's primary intent (e.g., 'Information Request', 'Task Execution', 'Content Creation')."
+        },
+        {
+          "name": "[Agent] User Intent Rationale",
+          "type": "string",
+          "description": "Brief rationale for the user intent classification."
+        },
+        {
+          "name": "[Agent] Has Behavioral Patterns",
+          "type": "boolean",
+          "description": "OOTB detector result: whether conversation exhibited anti-patterns (retry storms, clarification loops, etc.)."
+        },
+        {
+          "name": "[Agent] Behavioral Patterns Rationale",
+          "type": "string",
+          "description": "Brief rationale for behavioral patterns detection."
+        },
+        {
+          "name": "[Agent] Detected Behavioral Patterns",
+          "type": "string",
+          "description": "Specific behavioral anti-patterns detected (e.g., 'retry_storm', 'tool_cascade_fail'). JSON array.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Detected Data Quality Issues",
+          "type": "string",
+          "description": "Specific data quality issues detected. JSON array.",
+          "is_array_type": true
         }
       ]
     },
     {
       "event_type": "[Agent] Topic Classification",
-      "description": "Fired once per topic model per session by the server-side enrichment pipeline. A session with 3 topic models (e.g., query_intent, product_area, error_domain) produces 3 of these events. Property names are always the same; the topic model name goes in the value. Enables funnels like 'AI session about charts -> Chart Created'.",
+      "deprecated": true,
+      "description": "DEPRECATED: Replaced by [Agent] Evaluation Result. Previously fired once per topic model per session by the server-side enrichment pipeline. A session with 3 topic models (e.g., query_intent, product_area, error_domain) produced 3 of these events. Property names are always the same; the topic model name goes in the value.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1284,9 +1371,9 @@
           "is_required": true
         },
         {
-          "name": "[Agent] Customer Org ID",
+          "name": "[Agent] Org ID",
           "type": "string",
-          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics.",
+          "description": "The Amplitude organization ID owning the project where this event is tracked.",
           "is_required": true
         },
         {
@@ -1320,12 +1407,12 @@
           "is_required": true
         },
         {
-          "name": "[Agent] Primary",
+          "name": "[Agent] Primary Label",
           "type": "string",
           "description": "Primary classification value (e.g., 'charts', 'billing_issues')."
         },
         {
-          "name": "[Agent] Secondary",
+          "name": "[Agent] Secondary Label",
           "type": "string",
           "description": "Secondary classifications for multi-label topics. JSON array of strings.",
           "is_array_type": true
@@ -1335,6 +1422,132 @@
           "type": "string",
           "description": "Subcategories for finer classification within the primary topic (e.g., 'TREND_ANALYSIS', 'WRONG_EVENT'). JSON array of strings.",
           "is_array_type": true
+        },
+        {
+          "name": "[Agent] Evaluator Model",
+          "type": "string",
+          "description": "LLM model identifier used to produce this evaluator output."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Evaluation Result",
+      "description": "Fired once per custom evaluator per session. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on Session Evaluation).",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Agent ID",
+          "type": "string",
+          "description": "Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston').",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Org ID",
+          "type": "string",
+          "description": "The Amplitude organization ID owning the project where this event is tracked.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluation Source",
+          "type": "string",
+          "description": "Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluator Version",
+          "type": "string",
+          "description": "Config version ID that produced this result.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluated At",
+          "type": "number",
+          "description": "Epoch milliseconds when this enrichment/evaluation was computed.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluator Name",
+          "type": "string",
+          "description": "Human-readable evaluator name (primary group-by for users).",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Evaluator Output Type",
+          "type": "string",
+          "description": "Discriminator for the evaluator kind: 'classification', 'score', or 'binary'.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Selection Mode",
+          "type": "string",
+          "description": "Whether this evaluator uses 'single' or 'multiple' selection. Classification only."
+        },
+        {
+          "name": "[Agent] Primary Label",
+          "type": "string",
+          "description": "Primary classification label. Classification only."
+        },
+        {
+          "name": "[Agent] Secondary Label",
+          "type": "string",
+          "description": "Secondary labels for multi-label evaluators. Classification only.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Subcategories",
+          "type": "string",
+          "description": "Finer classification within the primary label. Classification only.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Binary Label",
+          "type": "boolean",
+          "description": "Whether the condition was detected. Binary only."
+        },
+        {
+          "name": "[Agent] Score Value",
+          "type": "number",
+          "description": "Numeric score assigned by the evaluator. Score only."
+        },
+        {
+          "name": "[Agent] Score Label",
+          "type": "string",
+          "description": "Human-readable tier (e.g., 'good', 'poor'). Score only."
+        },
+        {
+          "name": "[Agent] Target ID",
+          "type": "string",
+          "description": "ID of the scored entity (session_id). Score only."
+        },
+        {
+          "name": "[Agent] Target Type",
+          "type": "string",
+          "description": "Type of scored entity (e.g., 'session'). Score only."
+        },
+        {
+          "name": "[Agent] Improvement Opportunities",
+          "type": "string",
+          "description": "Suggestions for how the agent could improve. Score only."
+        },
+        {
+          "name": "[Agent] Rationale",
+          "type": "string",
+          "description": "LLM-generated explanation for the result."
+        },
+        {
+          "name": "[Agent] Evidence",
+          "type": "string",
+          "description": "Supporting evidence (quotes, observations) for the result."
+        },
+        {
+          "name": "[Agent] Evaluator Model",
+          "type": "string",
+          "description": "LLM model identifier used to produce this evaluator output."
         }
       ]
     }

@@ -134,6 +134,7 @@ Prompt:
 
 - `[Agent] AI Response`
 - `[Agent] Embedding`
+- `[Agent] Evaluation Result`
 - `[Agent] Score`
 - `[Agent] Session End`
 - `[Agent] Session Enrichment`
