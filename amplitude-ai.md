@@ -706,7 +706,7 @@ export default {
 - Use `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk`
 - **Essential fields** — two fields are required for events to be useful in Amplitude:
   - **`agentId`** (on `ai.agent()`) — identifies *which* AI feature produced the events. Without it, all events are lumped together with no way to filter by feature. This is the key the LLM Usage Application Registry maps to.
-  - **`userId` + `sessionId`** (on `agent.session()`) — ties all events into a single user conversation, powering funnels, retention, and conversation views. The session automatically emits `[Agent] Session Start` / `[Agent] Session End`.
+  - **`userId` + `sessionId`** (on `agent.session()`) — ties all events into a single user conversation, powering funnels, retention, and conversation views. The session automatically emits `[Agent] Session End` when it closes.
 - `tracker.hooks(session)` returns `PreToolUse`/`PostToolUse` hooks for `ClaudeAgentOptions` — tracks tool execution with precise latency
 - `tracker.process(session, message)` processes messages from `query()` stream to track AI responses and user messages
 

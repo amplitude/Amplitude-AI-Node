@@ -33,7 +33,7 @@ app.post('/chat', async (req, res) => {
   res.json({ response: result });
 });
 // Events: [Agent] User Message, [Agent] AI Response (with model, tokens, cost, latency),
-//         [Agent] Session Start, [Agent] Session End — all tied to userId and sessionId
+//         [Agent] Session End — all tied to userId and sessionId
 ```
 
 ## How to Get Started
@@ -201,7 +201,7 @@ Once AI events are in Amplitude alongside your product events:
 
 - **Cohorts.** "Users who had 3+ task failures in the last 30 days." "Users with low task completion scores." Target them with Guides, measure churn impact.
 - **Funnels.** "AI session about charts -> Chart Created." "Sign Up -> First AI Session -> Conversion." Measure whether AI drives feature adoption and onboarding.
-- **Retention.** Do users with successful AI sessions retain better than those with failures? Segment retention curves by `[Agent] Overall Outcome` or task completion score.
+- **Retention.** Do users with successful AI sessions retain better than those with failures? Segment retention curves by `[Agent] Session Outcome` or `[Agent] Task Completed`.
 - **Agent analytics.** Compare quality, cost, and failure rate across agents in one chart. Identify which agent in a multi-agent chain introduced a failure.
 
 ### How quality measurement works
@@ -264,7 +264,7 @@ The coding agent workflow defaults to **full instrumentation** — the top row b
 
 | Level | Events you get | What it unlocks in Amplitude |
 |---|---|---|
-| **Full** (agents + sessions + wrappers) | User Message, AI Response, Tool Call, Session Start/End, Score, Enrichments | Per-user funnels, cohorts, retention, session replay linking, quality scoring |
+| **Full** (agents + sessions + wrappers) | User Message, AI Response, Tool Call, Session End, Score, Enrichments | Per-user funnels, cohorts, retention, session replay linking, quality scoring |
 | **Wrappers only** (no sessions) | AI Response (with cost, tokens, latency) | Aggregate cost monitoring, model comparison |
 | **`patch()` only** (no wrappers, no sessions) | AI Response (basic) | Aggregate call counts — useful for verification only |
 
@@ -1709,7 +1709,7 @@ See `examples/anthropic-managed-agents-example.ts` and the coding agent guide (`
 
 Track tool calls with execution latency and AI messages from Claude Agent SDK.
 
-**Essential fields:** `agentId` (on `ai.agent()`) identifies which AI feature produced the events — it maps to the LLM Usage Application Registry. `userId` + `sessionId` (on `agent.session()`) tie all events into a single user conversation, powering funnels, retention, and conversation views. The session automatically emits `[Agent] Session Start` and `[Agent] Session End`.
+**Essential fields:** `agentId` (on `ai.agent()`) identifies which AI feature produced the events — it maps to the LLM Usage Application Registry. `userId` + `sessionId` (on `agent.session()`) tie all events into a single user conversation, powering funnels, retention, and conversation views. The session automatically emits `[Agent] Session End` when it closes.
 
 ```typescript
 import { AmplitudeAI } from '@amplitude/ai';
@@ -2227,7 +2227,8 @@ This is useful for backfilling historical conversations or importing data from e
 | `[Agent] Session Enrichment`   | SDK    | Session-level enrichment data                                                   |
 | `[Agent] Score`                | Both   | Evaluation score (quality, sentiment, etc.)                                     |
 | `[Agent] Session Evaluation`   | Server | Session-level summary: outcome, turn count, flags, cost. Emitted automatically. |
-| `[Agent] Topic Classification` | Server | One event per topic model per session. Emitted automatically.                   |
+| `[Agent] Evaluation Result`    | Server | One event per custom evaluator per session. Covers classifiers, detectors, scorers. |
+| `[Agent] Topic Classification` | Server | **Deprecated.** Replaced by `[Agent] Evaluation Result`. One event per topic model per session. |
 
 ## Event Property Reference
 
@@ -2404,6 +2405,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Comment` | string | No | Optional text explanation for the score (respects content_mode). |
 | `[Agent] Taxonomy Version` | string | No | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
 | `[Agent] Evaluated At` | number | No | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
 | `[Agent] Score Label` | string | No | Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only. |
 
 ### Server-Side: Session Evaluation Properties
@@ -2414,11 +2416,11 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 |----------|------|----------|-------------|
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
-| `[Agent] Customer Org ID` | string | Yes | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
+| `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
+| `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
 | `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
-| `[Agent] Overall Outcome` | string | Yes | Session outcome classification: 'success', 'partial_success', 'failure', 'abandoned', 'response_provided', etc. |
 | `[Agent] Turn Count` | number | Yes | Number of conversation turns in this session. |
 | `[Agent] Session Total Tokens` | number | No | Total LLM tokens consumed across all turns in this session. |
 | `[Agent] Session Avg Latency Ms` | number | No | Average AI response latency in milliseconds across the session. |
@@ -2445,8 +2447,26 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] User Score` | number | No | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
+| `[Agent] Task Completed` | string | No | OOTB detector result: 'True' if agent completed user's request, 'False' otherwise. |
+| `[Agent] Task Completed Rationale` | string | No | Brief rationale for the task completion determination. |
+| `[Agent] Task Completed Evidence` | string | No | Supporting evidence for the task completion determination. |
+| `[Agent] Response Quality` | string | No | OOTB detector result: 'True' if response was accurate/clear/helpful, 'False' otherwise. |
+| `[Agent] Response Quality Rationale` | string | No | Brief rationale for the response quality determination. |
+| `[Agent] Response Quality Evidence` | string | No | Supporting evidence for the response quality determination. |
+| `[Agent] Session Outcome` | string | No | OOTB classifier result for how the session ended (e.g., 'Response Provided', 'Unable to Complete', 'Escalated'). |
+| `[Agent] Session Outcome Rationale` | string | No | Brief rationale for the session outcome classification. |
+| `[Agent] Session Safety` | string | No | OOTB classifier result for session safety (e.g., 'normal', 'off_topic', 'prompt_injection', 'abuse'). |
+| `[Agent] Session Safety Rationale` | string | No | Brief rationale for the session safety classification. |
+| `[Agent] User Intent` | string | No | OOTB classifier result for user's primary intent (e.g., 'Information Request', 'Task Execution', 'Content Creation'). |
+| `[Agent] User Intent Rationale` | string | No | Brief rationale for the user intent classification. |
+| `[Agent] Has Behavioral Patterns` | boolean | No | OOTB detector result: whether conversation exhibited anti-patterns (retry storms, clarification loops, etc.). |
+| `[Agent] Behavioral Patterns Rationale` | string | No | Brief rationale for behavioral patterns detection. |
+| `[Agent] Detected Behavioral Patterns` | string[] | No | Specific behavioral anti-patterns detected (e.g., 'retry_storm', 'tool_cascade_fail'). JSON array. |
+| `[Agent] Detected Data Quality Issues` | string[] | No | Specific data quality issues detected. JSON array. |
 
-### Server-Side: Topic Classification Properties
+### Server-Side: Topic Classification Properties (Deprecated)
+
+> **Deprecated:** `[Agent] Topic Classification` is replaced by `[Agent] Evaluation Result`. It is still emitted for backward compatibility but will be removed in a future version.
 
 `[Agent] Topic Classification` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
 
@@ -2454,15 +2474,44 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 |----------|------|----------|-------------|
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
-| `[Agent] Customer Org ID` | string | Yes | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
+| `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
 | `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Topic` | string | Yes | Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain'). |
 | `[Agent] Selection Mode` | string | Yes | Whether this topic model uses 'single' (MECE) or 'multiple' (multi-label) selection. |
-| `[Agent] Primary` | string | No | Primary classification value (e.g., 'charts', 'billing_issues'). |
-| `[Agent] Secondary` | string[] | No | Secondary classifications for multi-label topics. JSON array of strings. |
+| `[Agent] Primary Label` | string | No | Primary classification value (e.g., 'charts', 'billing_issues'). |
+| `[Agent] Secondary Label` | string[] | No | Secondary classifications for multi-label topics. JSON array of strings. |
 | `[Agent] Subcategories` | string[] | No | Subcategories for finer classification within the primary topic (e.g., 'TREND_ANALYSIS', 'WRONG_EVENT'). JSON array of strings. |
+| `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
+
+### Server-Side: Evaluation Result Properties
+
+`[Agent] Evaluation Result` is emitted once per custom evaluator per session by the server-side enrichment pipeline. Covers classifiers, detectors, and scorers — distinguished by `[Agent] Evaluator Output Type`. OOTB evaluators are excluded (their results are de-normalized on Session Evaluation).
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
+| `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
+| `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Evaluator Version` | string | Yes | Config version ID that produced this result. |
+| `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Evaluator Name` | string | Yes | Human-readable evaluator name (primary group-by for users). |
+| `[Agent] Evaluator Output Type` | string | Yes | Discriminator for the evaluator kind: 'classification', 'score', or 'binary'. |
+| `[Agent] Selection Mode` | string | No | Whether this evaluator uses 'single' or 'multiple' selection. Classification only. |
+| `[Agent] Primary Label` | string | No | Primary classification label. Classification only. |
+| `[Agent] Secondary Label` | string[] | No | Secondary labels for multi-label evaluators. Classification only. |
+| `[Agent] Subcategories` | string[] | No | Finer classification within the primary label. Classification only. |
+| `[Agent] Binary Label` | boolean | No | Whether the condition was detected. Binary only. |
+| `[Agent] Score Value` | number | No | Numeric score assigned by the evaluator. Score only. |
+| `[Agent] Score Label` | string | No | Human-readable tier (e.g., 'good', 'poor'). Score only. |
+| `[Agent] Target ID` | string | No | ID of the scored entity (session_id). Score only. |
+| `[Agent] Target Type` | string | No | Type of scored entity (e.g., 'session'). Score only. |
+| `[Agent] Improvement Opportunities` | string | No | Suggestions for how the agent could improve. Score only. |
+| `[Agent] Rationale` | string | No | LLM-generated explanation for the result. |
+| `[Agent] Evidence` | string | No | Supporting evidence (quotes, observations) for the result. |
+| `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
 <!-- END EVENT PROPERTY REFERENCE -->
 
 ## Event JSON Examples
