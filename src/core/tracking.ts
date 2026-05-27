@@ -177,7 +177,7 @@ function applyBrowserSessionId(
   if (event.session_id != null) return;
   if (browserSessionId == null) return;
   const numericSessionId = Number(browserSessionId);
-  if (!isNaN(numericSessionId) && numericSessionId > 0) {
+  if (!Number.isNaN(numericSessionId) && numericSessionId > 0) {
     event.session_id = numericSessionId;
   }
 }
