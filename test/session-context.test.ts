@@ -444,3 +444,127 @@ describe('Session enrichments', () => {
     expect(enrichmentData.request_complexity).toBe('medium');
   });
 });
+
+describe('Browser session_id propagation via Session', () => {
+  it('sets event.session_id on all events when browserSessionId is valid', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', {
+      userId: 'u1',
+      deviceId: 'dev1',
+      browserSessionId: '1716835200000',
+    });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hello');
+      s.trackAiMessage('Hi', 'gpt-4', 'openai', 100);
+      s.trackToolCall('search', 50, true);
+    });
+
+    const allEvents = mock.eventsForSession('s1');
+    for (const event of allEvents) {
+      expect((event as Record<string, unknown>).session_id).toBe(1716835200000);
+    }
+  });
+
+  it('does not set session_id when browserSessionId is not provided', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hello');
+    });
+
+    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
+    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+  });
+
+  it('does not set session_id for invalid non-numeric browserSessionId', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', {
+      userId: 'u1',
+      deviceId: 'dev1',
+      browserSessionId: 'not-a-number',
+    });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hello');
+    });
+
+    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
+    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+  });
+
+  it('does not set session_id for zero browserSessionId', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', {
+      userId: 'u1',
+      deviceId: 'dev1',
+      browserSessionId: '0',
+    });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hello');
+    });
+
+    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
+    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+  });
+
+  it('does not set session_id for negative browserSessionId', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', {
+      userId: 'u1',
+      deviceId: 'dev1',
+      browserSessionId: '-100',
+    });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hello');
+    });
+
+    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
+    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+  });
+
+  it('session_id propagates to session end event', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', {
+      userId: 'u1',
+      deviceId: 'dev1',
+      browserSessionId: '1716835200000',
+    });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async () => {
+      // no-op — just triggers session end
+    });
+
+    const endEvent = mock.getEvents(EVENT_SESSION_END)[0];
+    expect((endEvent as Record<string, unknown>).session_id).toBe(1716835200000);
+  });
+
+  it('session_id propagates to score and embedding events', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', {
+      userId: 'u1',
+      deviceId: 'dev1',
+      browserSessionId: '1716835200000',
+    });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.score('quality', 0.9, 'msg-1');
+      s.trackEmbedding('text-embedding-3', 'openai', 50);
+    });
+
+    const scoreEvent = mock.getEvents(EVENT_SCORE)[0];
+    const embeddingEvent = mock.getEvents(EVENT_EMBEDDING)[0];
+    expect((scoreEvent as Record<string, unknown>).session_id).toBe(1716835200000);
+    expect((embeddingEvent as Record<string, unknown>).session_id).toBe(1716835200000);
+  });
+});

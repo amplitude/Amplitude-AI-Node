@@ -330,6 +330,56 @@ describe('BoundAgent', () => {
     });
   });
 
+  describe('browser session_id propagation', () => {
+    it('sets event.session_id when browserSessionId is a valid timestamp', (): void => {
+      const mock = createMock();
+      const agent = mock.agent('bot', {
+        userId: 'u1',
+        deviceId: 'dev1',
+        browserSessionId: '1716835200000',
+      });
+      agent.trackUserMessage('Hello', { sessionId: 's1' });
+      agent.trackAiMessage('Hi', 'gpt-4o', 'openai', 100, { sessionId: 's1' });
+
+      for (const event of mock.events) {
+        expect((event as Record<string, unknown>).session_id).toBe(1716835200000);
+      }
+    });
+
+    it('does not set session_id when browserSessionId is absent', (): void => {
+      const mock = createMock();
+      const agent = mock.agent('bot', { userId: 'u1' });
+      agent.trackUserMessage('Hello', { sessionId: 's1' });
+
+      expect((mock.events[0] as Record<string, unknown>).session_id).toBeUndefined();
+    });
+
+    it('does not set session_id for non-numeric browserSessionId', (): void => {
+      const mock = createMock();
+      const agent = mock.agent('bot', {
+        userId: 'u1',
+        deviceId: 'dev1',
+        browserSessionId: 'abc',
+      });
+      agent.trackUserMessage('Hello', { sessionId: 's1' });
+
+      expect((mock.events[0] as Record<string, unknown>).session_id).toBeUndefined();
+    });
+
+    it('child inherits browserSessionId and sets session_id', (): void => {
+      const mock = createMock();
+      const parent = mock.agent('parent', {
+        userId: 'u1',
+        deviceId: 'd1',
+        browserSessionId: '1716835200000',
+      });
+      const child = parent.child('child');
+
+      child.trackUserMessage('Inherited', { sessionId: 's1' });
+      expect((mock.events[0] as Record<string, unknown>).session_id).toBe(1716835200000);
+    });
+  });
+
   describe('session factory', () => {
     it('creates a session with inherited defaults', async (): Promise<void> => {
       const mock = createMock();

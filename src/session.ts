@@ -294,6 +294,8 @@ export class Session {
       merged.userId = this.userId;
     if (this.deviceId != null && merged.deviceId == null)
       merged.deviceId = this.deviceId;
+    if (this.browserSessionId != null && merged.browserSessionId == null)
+      merged.browserSessionId = this.browserSessionId;
     if (this._sessionReplayId != null) {
       const existingEp = merged.eventProperties as
         | Record<string, unknown>

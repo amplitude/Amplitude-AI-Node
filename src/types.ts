@@ -428,6 +428,7 @@ export interface TrackCallOptions {
   env?: string | null;
   groups?: Record<string, unknown> | null;
   eventProperties?: Record<string, unknown> | null;
+  browserSessionId?: string | number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
   totalTokens?: number | null;

@@ -166,6 +166,9 @@ export class BoundAgent {
         merged[field] = this._defaults[field];
       }
     }
+    if (merged.browserSessionId == null && this._defaults.browserSessionId != null) {
+      merged.browserSessionId = this._defaults.browserSessionId;
+    }
     const deviceId = this._defaults.deviceId as string | null;
     const browserSessionId = this._defaults.browserSessionId as string | null;
     if (deviceId && browserSessionId) {

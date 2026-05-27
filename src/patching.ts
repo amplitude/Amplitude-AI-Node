@@ -2870,6 +2870,10 @@ function _contextExtras(ctx: {
     groups: ctx.groups ?? undefined,
   };
 
+  if (ctx.browserSessionId != null) {
+    extras.browserSessionId = ctx.browserSessionId;
+  }
+
   const ep: Record<string, unknown> = {};
   if (ctx.idleTimeoutMinutes != null) {
     ep[PROP_IDLE_TIMEOUT_MINUTES] = ctx.idleTimeoutMinutes;
