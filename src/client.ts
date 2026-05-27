@@ -324,6 +324,7 @@ export class AmplitudeAI {
     labels?: MessageLabel[] | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): string {
     const effectiveTurnId = opts.turnId ?? this._nextTurnId(opts.sessionId);
     return trackUserMessage({
@@ -351,6 +352,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 
@@ -400,6 +402,7 @@ export class AmplitudeAI {
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     privacyConfig?: PrivacyConfig | null;
+    browserSessionId?: string | number | null;
   }): string {
     const effectiveTurnId = opts.turnId ?? this._nextTurnId(opts.sessionId);
 
@@ -471,6 +474,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: opts.privacyConfig ?? this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 
@@ -501,6 +505,7 @@ export class AmplitudeAI {
     errorMessage?: string | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): string {
     return trackToolCall({
       amplitude: this._amplitude,
@@ -527,6 +532,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 
@@ -551,6 +557,7 @@ export class AmplitudeAI {
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): string {
     return trackEmbedding({
       amplitude: this._amplitude,
@@ -575,6 +582,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 
@@ -600,6 +608,7 @@ export class AmplitudeAI {
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): string {
     return trackSpan({
       amplitude: this._amplitude,
@@ -625,6 +634,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 
@@ -650,6 +660,7 @@ export class AmplitudeAI {
     idleTimeoutMinutes?: number | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): void {
     trackSessionEnd({
       amplitude: this._amplitude,
@@ -671,6 +682,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
     this._sessionTurnCounters.delete(opts.sessionId);
   }
@@ -691,6 +703,7 @@ export class AmplitudeAI {
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): void {
     trackSessionEnrichment({
       amplitude: this._amplitude,
@@ -710,6 +723,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 
@@ -738,6 +752,7 @@ export class AmplitudeAI {
     env?: string | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
   }): void {
     trackScore({
       amplitude: this._amplitude,
@@ -762,6 +777,7 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
     });
   }
 

@@ -166,6 +166,22 @@ function withSdkManagedProperties(
   return { ...(eventProperties ?? {}), ...managedProperties };
 }
 
+/**
+ * Set `event.session_id` from a browser session ID when valid and positive.
+ * Idempotent: does not overwrite an existing `session_id`.
+ */
+function applyBrowserSessionId(
+  event: AmplitudeEvent,
+  browserSessionId: string | number | null | undefined,
+): void {
+  if (event.session_id != null) return;
+  if (browserSessionId == null) return;
+  const numericSessionId = Number(browserSessionId);
+  if (!isNaN(numericSessionId) && numericSessionId > 0) {
+    event.session_id = numericSessionId;
+  }
+}
+
 // --------------------------------------------------------
 // track_user_message
 // --------------------------------------------------------
@@ -198,6 +214,7 @@ export interface TrackUserMessageOptions {
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackUserMessage(opts: TrackUserMessageOptions): string {
@@ -272,6 +289,7 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
   };
   if (opts.userProperties) event.user_properties = opts.userProperties;
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -342,6 +360,7 @@ export interface TrackAiMessageOptions {
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackAiMessage(opts: TrackAiMessageOptions): string {
@@ -474,6 +493,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   };
   if (opts.userProperties) event.user_properties = opts.userProperties;
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -522,6 +542,7 @@ export interface TrackToolCallOptions {
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackToolCall(opts: TrackToolCallOptions): string {
@@ -589,6 +610,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   };
   if (opts.userProperties) event.user_properties = opts.userProperties;
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -624,6 +646,7 @@ export interface TrackConversationOptions {
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackConversation(opts: TrackConversationOptions): void {
@@ -654,6 +677,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
         userProperties: opts.userProperties,
         groups: opts.groups,
         privacyConfig: opts.privacyConfig,
+        browserSessionId: opts.browserSessionId,
       });
     } else if (role === 'assistant' || role === 'ai') {
       trackAiMessage({
@@ -681,6 +705,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
         userProperties: opts.userProperties,
         groups: opts.groups,
         privacyConfig: opts.privacyConfig,
+        browserSessionId: opts.browserSessionId,
       });
     }
 
@@ -715,6 +740,7 @@ export interface TrackEmbeddingOptions {
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackEmbedding(opts: TrackEmbeddingOptions): string {
@@ -763,6 +789,7 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -804,6 +831,7 @@ export interface TrackSpanOptions {
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackSpan(opts: TrackSpanOptions): string {
@@ -862,6 +890,7 @@ export function trackSpan(opts: TrackSpanOptions): string {
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -899,6 +928,7 @@ export interface TrackSessionEndOptions {
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackSessionEnd(opts: TrackSessionEndOptions): void {
@@ -947,6 +977,7 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -982,6 +1013,7 @@ export interface TrackSessionEnrichmentOptions {
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackSessionEnrichment(
@@ -1026,6 +1058,7 @@ export function trackSessionEnrichment(
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);
@@ -1066,6 +1099,7 @@ export interface TrackScoreOptions {
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
+  browserSessionId?: string | number | null;
 }
 
 export function trackScore(opts: TrackScoreOptions): void {
@@ -1116,6 +1150,7 @@ export function trackScore(opts: TrackScoreOptions): void {
     event_properties: properties,
   };
   if (opts.groups) event.groups = opts.groups;
+  applyBrowserSessionId(event, opts.browserSessionId);
 
   try {
     opts.amplitude.track(event);

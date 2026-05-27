@@ -49,6 +49,7 @@ export interface ProviderTrackOptions {
   env?: string | null;
   groups?: Record<string, unknown> | null;
   eventProperties?: Record<string, unknown> | null;
+  browserSessionId?: string | number | null;
   /**
    * Controls whether provider wrappers auto-track user input payloads.
    * Set to false when you already call `trackUserMessage()` explicitly.
@@ -80,6 +81,8 @@ export function applySessionContext(
     if (!result.context) result.context = ctx.context;
     if (!result.env) result.env = ctx.env;
     if (!result.groups) result.groups = ctx.groups;
+    if (result.browserSessionId == null && ctx.browserSessionId != null)
+      result.browserSessionId = ctx.browserSessionId;
 
     if (result.turnId == null) {
       const turnId = ctx.nextTurnId();
@@ -127,7 +130,7 @@ export type TrackContextFields = Pick<
   | 'env'
   | 'groups'
   | 'eventProperties'
->;
+> & { browserSessionId?: string | number | null };
 
 export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
   return {
@@ -145,6 +148,7 @@ export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
     env: ctx.env,
     groups: ctx.groups,
     eventProperties: ctx.eventProperties,
+    browserSessionId: ctx.browserSessionId,
   };
 }
 
@@ -181,6 +185,7 @@ export abstract class BaseAIProvider {
       env: opts.env,
       groups: opts.groups,
       eventProperties: opts.eventProperties,
+      browserSessionId: opts.browserSessionId,
     });
 
     return trackAiMessage({
@@ -200,6 +205,7 @@ export abstract class BaseAIProvider {
       env: merged.env ?? opts.env,
       groups: merged.groups ?? opts.groups,
       eventProperties: merged.eventProperties ?? opts.eventProperties,
+      browserSessionId: merged.browserSessionId ?? opts.browserSessionId,
       privacyConfig: this._privacyConfig,
     });
   }
@@ -401,6 +407,7 @@ export class SimpleStreamingTracker {
         env: ctx.env,
         groups: ctx.groups,
         eventProperties: ctx.eventProperties,
+        browserSessionId: ctx.browserSessionId,
         privacyConfig: this._privacyConfig,
       });
     }
