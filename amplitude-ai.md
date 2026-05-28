@@ -347,7 +347,8 @@ try {
     name: childAgentName,
     latencyMs: Date.now() - start,
     isError: true,
-    errorMessage: `${(e as Error).name}: ${(e as Error).message}`,
+    errorType: (e as Error).name,
+    errorMessage: (e as Error).message,
   });
   throw e;
 }

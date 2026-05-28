@@ -257,6 +257,11 @@
           "description": "Error message text when Is Error is true."
         },
         {
+          "name": "[Agent] Error Type",
+          "type": "string",
+          "description": "Exception class name when Is Error is true (e.g., 'ValidationError', 'TimeoutError'). Distinct from Error Message so downstream tooling can group failures by type without parsing the message."
+        },
+        {
           "name": "[Agent] Locale",
           "type": "string",
           "description": "User locale (e.g., 'en-US')."
@@ -525,6 +530,11 @@
           "description": "Error message text when Is Error is true."
         },
         {
+          "name": "[Agent] Error Type",
+          "type": "string",
+          "description": "Exception class name when Is Error is true (e.g., 'ValidationError', 'TimeoutError'). Distinct from Error Message so downstream tooling can group failures by type without parsing the message."
+        },
+        {
           "name": "[Agent] Locale",
           "type": "string",
           "description": "User locale (e.g., 'en-US')."
@@ -771,6 +781,11 @@
           "name": "[Agent] Error Message",
           "type": "string",
           "description": "Error message text when Is Error is true."
+        },
+        {
+          "name": "[Agent] Error Type",
+          "type": "string",
+          "description": "Exception class name when Is Error is true (e.g., 'ValidationError', 'TimeoutError'). Distinct from Error Message so downstream tooling can group failures by type without parsing the message."
         },
         {
           "name": "[Agent] Span ID",

@@ -398,6 +398,7 @@ export class AmplitudeAI {
     env?: string | null;
     isError?: boolean;
     errorMessage?: string | null;
+    errorType?: string | null;
     ttfbMs?: number | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
@@ -470,6 +471,7 @@ export class AmplitudeAI {
       env: opts.env,
       isError: opts.isError,
       errorMessage: opts.errorMessage,
+      errorType: opts.errorType,
       providerTtfbMs: opts.ttfbMs,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
@@ -503,6 +505,7 @@ export class AmplitudeAI {
     context?: Record<string, unknown> | null;
     env?: string | null;
     errorMessage?: string | null;
+    errorType?: string | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
@@ -529,6 +532,7 @@ export class AmplitudeAI {
       context: opts.context,
       env: opts.env,
       errorMessage: opts.errorMessage,
+      errorType: opts.errorType,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
@@ -597,6 +601,7 @@ export class AmplitudeAI {
     parentSpanId?: string | null;
     isError?: boolean;
     errorMessage?: string | null;
+    errorType?: string | null;
     sessionId?: string | null;
     turnId?: number | null;
     agentId?: string | null;
@@ -622,6 +627,7 @@ export class AmplitudeAI {
       parentSpanId: opts.parentSpanId,
       isError: opts.isError,
       errorMessage: opts.errorMessage,
+      errorType: opts.errorType,
       sessionId: opts.sessionId,
       turnId: opts.turnId,
       agentId: opts.agentId,

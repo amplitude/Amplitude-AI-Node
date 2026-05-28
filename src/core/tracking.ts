@@ -37,6 +37,7 @@ import {
   PROP_ENRICHMENTS,
   PROP_ENV,
   PROP_ERROR_MESSAGE,
+  PROP_ERROR_TYPE,
   PROP_EVALUATION_SOURCE,
   PROP_FINISH_REASON,
   PROP_HAS_ATTACHMENTS,
@@ -332,6 +333,7 @@ export interface TrackAiMessageOptions {
   providerTtfbMs?: number | null;
   isError?: boolean;
   errorMessage?: string | null;
+  errorType?: string | null;
   finishReason?: string | null;
   toolCalls?: Array<ToolCallShape | Record<string, unknown>> | null;
   reasoningContent?: string | null;
@@ -438,6 +440,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
     properties[PROP_FINISH_REASON] = opts.finishReason;
   if (opts.errorMessage != null)
     properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
+  if (opts.errorType != null) properties[PROP_ERROR_TYPE] = opts.errorType;
   if (opts.toolCalls != null)
     properties[PROP_TOOL_CALLS] = serializeToJsonString(opts.toolCalls);
 
@@ -535,6 +538,7 @@ export interface TrackToolCallOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   errorMessage?: string | null;
+  errorType?: string | null;
   env?: string | null;
   locale?: string | null;
   spanKind?: string | null;
@@ -584,6 +588,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
+  if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.locale) properties[PROP_LOCALE] = opts.locale;
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
@@ -819,6 +824,7 @@ export interface TrackSpanOptions {
   parentSpanId?: string | null;
   isError?: boolean;
   errorMessage?: string | null;
+  errorType?: string | null;
   sessionId?: string | null;
   turnId?: number | null;
   agentId?: string | null;
@@ -860,6 +866,7 @@ export function trackSpan(opts: TrackSpanOptions): string {
   if (opts.turnId != null) properties[PROP_TURN_ID] = opts.turnId;
   if (opts.parentSpanId) properties[PROP_PARENT_SPAN_ID] = opts.parentSpanId;
   if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
+  if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
   if (opts.agentId) properties[PROP_AGENT_ID] = opts.agentId;
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
