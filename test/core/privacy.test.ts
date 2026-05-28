@@ -363,9 +363,9 @@ describe('sanitizeReasoningContent', () => {
 
   it('truncates long reasoning content', () => {
     const pc = new PrivacyConfig({ contentMode: 'full', redactPii: false });
-    const longContent = 'x'.repeat(15000);
+    const longContent = 'x'.repeat(150_000);
     const result = pc.sanitizeReasoningContent(longContent, 500);
-    expect((result['[Agent] Reasoning Content'] as string).length).toBe(10000);
+    expect((result['[Agent] Reasoning Content'] as string).length).toBe(100_000);
   });
 });
 
@@ -451,12 +451,12 @@ describe('PrivacyConfig custom patterns', () => {
 });
 
 describe('sanitizeSystemPrompt advanced', () => {
-  it('truncates system prompt over 10000 chars', () => {
+  it('truncates system prompt over 100000 chars', () => {
     const pc = new PrivacyConfig({ contentMode: 'full', redactPii: false });
-    const longPrompt = 'x'.repeat(15000);
+    const longPrompt = 'x'.repeat(150_000);
     const result = pc.sanitizeSystemPrompt(longPrompt);
-    expect(result['[Agent] System Prompt Length']).toBe(15000);
-    expect((result['[Agent] System Prompt'] as string).length).toBe(10000);
+    expect(result['[Agent] System Prompt Length']).toBe(150_000);
+    expect((result['[Agent] System Prompt'] as string).length).toBe(100_000);
   });
 
   it('applies custom patterns to system prompt', () => {
@@ -577,12 +577,12 @@ describe('sanitizeSystemPrompt expanded', () => {
     expect(result['[Agent] System Prompt']).toBeUndefined();
   });
 
-  it('truncates at 10000 chars', (): void => {
+  it('truncates at 100000 chars', (): void => {
     const pc = new PrivacyConfig({ contentMode: 'full', redactPii: false });
-    const longPrompt = 'X'.repeat(12000);
+    const longPrompt = 'X'.repeat(120_000);
     const result = pc.sanitizeSystemPrompt(longPrompt);
-    expect(result['[Agent] System Prompt Length']).toBe(12000);
-    expect((result['[Agent] System Prompt'] as string).length).toBe(10000);
+    expect(result['[Agent] System Prompt Length']).toBe(120_000);
+    expect((result['[Agent] System Prompt'] as string).length).toBe(100_000);
   });
 
   it('with PII redaction enabled', (): void => {
