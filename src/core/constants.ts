@@ -127,4 +127,4 @@ export const SDK_VERSION: string = _sdkVersion;
 export const SDK_RUNTIME = 'node';
 
 // Serialization limits
-export const MAX_SERIALIZED_LENGTH = 10000;
+export const MAX_SERIALIZED_LENGTH = 100_000;

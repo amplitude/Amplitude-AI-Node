@@ -458,7 +458,7 @@ export class PrivacyConfig {
       sanitized = this._applyCustomPatterns(sanitized);
       sanitized = this._applyCustomFn(sanitized);
       result[PROP_SYSTEM_PROMPT] =
-        sanitized.length > 10000 ? sanitized.slice(0, 10000) : sanitized;
+        sanitized.length > 100_000 ? sanitized.slice(0, 100_000) : sanitized;
     }
 
     return result;
@@ -489,7 +489,7 @@ export class PrivacyConfig {
       sanitized = this._applyCustomPatterns(sanitized);
       sanitized = this._applyCustomFn(sanitized);
       result[PROP_REASONING_CONTENT] =
-        sanitized.length > 10000 ? sanitized.slice(0, 10000) : sanitized;
+        sanitized.length > 100_000 ? sanitized.slice(0, 100_000) : sanitized;
     }
 
     return result;
@@ -527,7 +527,7 @@ export class PrivacyConfig {
       serialized = this._applyCustomPatterns(serialized);
       serialized = this._applyCustomFn(serialized);
       result[PROP_TOOL_DEFINITIONS] =
-        serialized.length > 10000 ? serialized.slice(0, 10000) : serialized;
+        serialized.length > 100_000 ? serialized.slice(0, 100_000) : serialized;
     }
 
     return result;

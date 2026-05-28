@@ -242,7 +242,7 @@ describe('PrivacyConfig.sanitizeToolDefinitions', () => {
 
   it('truncates large definitions', () => {
     const pc = new PrivacyConfig({ privacyMode: false });
-    const largeDesc = 'x'.repeat(20000);
+    const largeDesc = 'x'.repeat(200_000);
     const tools = [
       {
         type: 'function',
@@ -251,7 +251,7 @@ describe('PrivacyConfig.sanitizeToolDefinitions', () => {
     ];
     const result = pc.sanitizeToolDefinitions(tools);
     expect((result[PROP_TOOL_DEFINITIONS] as string).length).toBeLessThanOrEqual(
-      10000,
+      100_000,
     );
   });
 });
