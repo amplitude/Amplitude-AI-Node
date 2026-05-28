@@ -2287,6 +2287,7 @@ Event-specific properties for `[Agent] AI Response` (in addition to common prope
 | `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
 | `[Agent] Is Error` | boolean | Yes | Whether this event represents an error condition. |
 | `[Agent] Error Message` | string | No | Error message text when Is Error is true. |
+| `[Agent] Error Type` | string | No | Exception class name when Is Error is true (e.g., 'ValidationError', 'TimeoutError'). Distinct from Error Message so downstream tooling can group failures by type without parsing the message. |
 | `[Agent] Locale` | string | No | User locale (e.g., 'en-US'). |
 | `[Agent] Span Kind` | string | No | Classification of the span type for OTEL bridge compatibility. |
 | `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
@@ -2333,6 +2334,7 @@ Event-specific properties for `[Agent] Tool Call` (in addition to common propert
 | `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
 | `[Agent] Is Error` | boolean | Yes | Whether this event represents an error condition. |
 | `[Agent] Error Message` | string | No | Error message text when Is Error is true. |
+| `[Agent] Error Type` | string | No | Exception class name when Is Error is true (e.g., 'ValidationError', 'TimeoutError'). Distinct from Error Message so downstream tooling can group failures by type without parsing the message. |
 | `[Agent] Locale` | string | No | User locale (e.g., 'en-US'). |
 | `[Agent] Span Kind` | string | No | Classification of the span type for OTEL bridge compatibility. |
 | `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
@@ -2367,6 +2369,7 @@ Event-specific properties for `[Agent] Span` (in addition to common properties a
 | `[Agent] Latency Ms` | number | Yes | Total wall-clock latency in milliseconds for this operation. |
 | `[Agent] Is Error` | boolean | Yes | Whether this event represents an error condition. |
 | `[Agent] Error Message` | string | No | Error message text when Is Error is true. |
+| `[Agent] Error Type` | string | No | Exception class name when Is Error is true (e.g., 'ValidationError', 'TimeoutError'). Distinct from Error Message so downstream tooling can group failures by type without parsing the message. |
 | `[Agent] Span ID` | string | Yes | Unique identifier for this span (UUID). |
 | `[Agent] Span Name` | string | Yes | Name of the operation (e.g., 'rag_pipeline', 'vector_search', 'rerank'). |
 | `[Agent] Parent Span ID` | string | No | Span ID of the parent span for nested pipeline steps. |

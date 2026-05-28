@@ -29,6 +29,7 @@ export const PROP_CACHE_CREATION_TOKENS = '[Agent] Cache Creation Tokens';
 export const PROP_COST_USD = '[Agent] Cost USD';
 export const PROP_IS_ERROR = '[Agent] Is Error';
 export const PROP_ERROR_MESSAGE = '[Agent] Error Message';
+export const PROP_ERROR_TYPE = '[Agent] Error Type';
 export const PROP_FINISH_REASON = '[Agent] Finish Reason';
 export const PROP_TOOL_CALLS = '[Agent] Tool Calls';
 export const PROP_TOOL_NAME = '[Agent] Tool Name';

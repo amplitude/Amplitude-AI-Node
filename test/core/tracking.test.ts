@@ -20,6 +20,7 @@ import {
   PROP_EDITED_MESSAGE_ID,
   PROP_ENRICHMENTS,
   PROP_ERROR_MESSAGE,
+  PROP_ERROR_TYPE,
   PROP_HAS_ATTACHMENTS,
   PROP_HAS_REASONING,
   PROP_IDLE_TIMEOUT_MINUTES,
@@ -285,6 +286,38 @@ describe('trackToolCall', () => {
     expect(props[PROP_IS_ERROR]).toBe(true);
     expect(props['[Agent] Error Message']).toBe('timeout');
   });
+
+  it('writes errorType and errorMessage as distinct properties so failures can be grouped by class without parsing the message', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'github_get_file_contents',
+      success: false,
+      latencyMs: 50,
+      errorType: 'ValidationError',
+      errorMessage: '1 validation error: path not found',
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_ERROR_TYPE]).toBe('ValidationError');
+    expect(props[PROP_ERROR_MESSAGE]).toBe('1 validation error: path not found');
+  });
+
+  it('omits errorType when not provided (no class-name-in-message smearing)', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'search',
+      success: true,
+      latencyMs: 10,
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_ERROR_TYPE]).toBeUndefined();
+    expect(props[PROP_ERROR_MESSAGE]).toBeUndefined();
+  });
 });
 
 describe('trackEmbedding', () => {
@@ -458,6 +491,24 @@ describe('trackSpan', () => {
     const props = amp.events[0].event_properties as Record<string, unknown>;
     expect(props[PROP_IS_ERROR]).toBe(true);
     expect(props[PROP_ERROR_MESSAGE]).toBe('connection timeout');
+  });
+
+  it('writes errorType alongside errorMessage on spans', () => {
+    const amp = createMockAmplitude();
+    trackSpan({
+      amplitude: amp,
+      userId: 'u1',
+      spanName: 'sub_agent.RootCauseInvestigator',
+      traceId: 'trace-span-err',
+      latencyMs: 500,
+      isError: true,
+      errorType: 'UsageLimitExceeded',
+      errorMessage: 'hit 10k input-token cap',
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_ERROR_TYPE]).toBe('UsageLimitExceeded');
+    expect(props[PROP_ERROR_MESSAGE]).toBe('hit 10k input-token cap');
   });
 
   it('includes parentSpanId when provided', () => {
@@ -719,6 +770,25 @@ describe('trackAiMessage advanced', () => {
     const props = amp.events[0].event_properties as Record<string, unknown>;
     expect(props[PROP_IS_ERROR]).toBe(true);
     expect(props[PROP_ERROR_MESSAGE]).toBe('rate limit exceeded');
+  });
+
+  it('writes errorType alongside errorMessage on AI Response events', () => {
+    const amp = createMockAmplitude();
+    trackAiMessage({
+      amplitude: amp,
+      userId: 'u1',
+      modelName: 'claude-sonnet-4',
+      provider: 'anthropic',
+      responseContent: '',
+      latencyMs: 100,
+      isError: true,
+      errorType: 'APIError',
+      errorMessage: 'upstream 503',
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_ERROR_TYPE]).toBe('APIError');
+    expect(props[PROP_ERROR_MESSAGE]).toBe('upstream 503');
   });
 
   it('includes reasoning content in full mode', () => {
