@@ -221,12 +221,21 @@ export class Bedrock extends BaseAIProvider {
 
         const metadata = event.metadata as Record<string, unknown> | undefined;
         const usage = metadata?.usage as Record<string, unknown> | undefined;
+        const rawInput = usage?.inputTokens as number | undefined;
+        const cacheRead = usage?.cacheReadInputTokens as number | undefined;
+        const cacheWrite = usage?.cacheWriteInputTokens as number | undefined;
+        // Bedrock's `inputTokens` excludes cache tokens; pre-sum so both the
+        // emitted token count and cost are cache-inclusive (AA-151026 C1).
+        const inputTokens =
+          rawInput != null && (cacheRead || cacheWrite)
+            ? rawInput + (cacheRead ?? 0) + (cacheWrite ?? 0)
+            : rawInput;
         accumulator.setUsage({
-          inputTokens: usage?.inputTokens as number | undefined,
+          inputTokens,
           outputTokens: usage?.outputTokens as number | undefined,
           totalTokens: usage?.totalTokens as number | undefined,
-          cacheReadTokens: usage?.cacheReadInputTokens as number | undefined,
-          cacheCreationTokens: usage?.cacheWriteInputTokens as number | undefined,
+          cacheReadTokens: cacheRead,
+          cacheCreationTokens: cacheWrite,
         });
 
         yield rawEvent;
@@ -311,6 +320,19 @@ export function extractBedrockResponse(response: unknown): {
       (b) => (b as Record<string, unknown>).toolUse as Record<string, unknown>,
     );
   const usage = resp.usage;
+  const rawInputTokens = usage?.inputTokens;
+  const cacheReadTokens = (usage as Record<string, unknown> | undefined)
+    ?.cacheReadInputTokens as number | undefined;
+  const cacheWriteTokens = (usage as Record<string, unknown> | undefined)
+    ?.cacheWriteInputTokens as number | undefined;
+  // Bedrock's Converse API reports `inputTokens` as the non-cached prompt only
+  // (cache read/write are separate), matching Anthropic's raw API. Both
+  // `calculateCost` and the emitted [Agent] Input Tokens expect the
+  // cache-inclusive TOTAL, so pre-sum the cache buckets (AA-151026 C1).
+  const inputTokens =
+    rawInputTokens != null && (cacheReadTokens || cacheWriteTokens)
+      ? rawInputTokens + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0)
+      : rawInputTokens;
   const respAny = resp as Record<string, unknown>;
   const metrics = respAny.metrics as Record<string, unknown> | undefined;
   const additionalModelResponseFields =
@@ -330,13 +352,11 @@ export function extractBedrockResponse(response: unknown): {
 
   return {
     text: String(textBlock?.text ?? ''),
-    inputTokens: usage?.inputTokens,
+    inputTokens,
     outputTokens: usage?.outputTokens,
     totalTokens: usage?.totalTokens,
-    cacheReadTokens: (usage as Record<string, unknown> | undefined)
-      ?.cacheReadInputTokens as number | undefined,
-    cacheWriteTokens: (usage as Record<string, unknown> | undefined)
-      ?.cacheWriteInputTokens as number | undefined,
+    cacheReadTokens,
+    cacheWriteTokens,
     stopReason: resp.stopReason,
     toolCalls: toolCalls ?? [],
     systemPrompt,

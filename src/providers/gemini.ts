@@ -74,6 +74,7 @@ export class Gemini extends BaseAIProvider {
             modelName: model,
             inputTokens: extracted.inputTokens,
             outputTokens: extracted.outputTokens,
+            cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
             defaultProvider: 'google',
           });
         } catch {
@@ -91,6 +92,7 @@ export class Gemini extends BaseAIProvider {
         inputTokens: extracted.inputTokens,
         outputTokens: extracted.outputTokens,
         totalTokens: extracted.totalTokens,
+        cacheReadInputTokens: extracted.cacheReadTokens,
         totalCostUsd: costUsd,
         finishReason: extracted.finishReason,
         toolCalls: extracted.functionCalls?.length
@@ -201,6 +203,7 @@ export class Gemini extends BaseAIProvider {
           inputTokens: extracted.inputTokens,
           outputTokens: extracted.outputTokens,
           totalTokens: extracted.totalTokens,
+          cacheReadTokens: extracted.cacheReadTokens,
         });
         yield chunk;
       }
@@ -217,6 +220,7 @@ export class Gemini extends BaseAIProvider {
             inputTokens: extractedFinal.inputTokens,
             outputTokens: extractedFinal.outputTokens,
             totalTokens: extractedFinal.totalTokens,
+            cacheReadTokens: extractedFinal.cacheReadTokens,
           });
           if (extractedFinal.finishReason != null) {
             accumulator.finishReason = String(extractedFinal.finishReason);
@@ -242,6 +246,7 @@ export class Gemini extends BaseAIProvider {
             modelName: model,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
+            cacheReadInputTokens: state.cacheReadTokens ?? 0,
             defaultProvider: 'google',
           });
         } catch {
@@ -258,6 +263,7 @@ export class Gemini extends BaseAIProvider {
         inputTokens: state.inputTokens,
         outputTokens: state.outputTokens,
         totalTokens: state.totalTokens,
+        cacheReadInputTokens: state.cacheReadTokens,
         totalCostUsd: costUsd,
         finishReason: state.finishReason,
         toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
@@ -280,6 +286,7 @@ export function extractGeminiResponse(response: unknown): {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  cacheReadTokens?: number;
   finishReason?: string;
   functionCalls?: Array<Record<string, unknown>>;
 } {
@@ -305,9 +312,13 @@ export function extractGeminiResponse(response: unknown): {
 
   return {
     text,
+    // Gemini's promptTokenCount already includes cached tokens; cachedContentTokenCount
+    // is a subset reported separately so the cache-read discount can be applied
+    // (AA-151026 C2). Pass it through to calculateCost as cacheReadInputTokens.
     inputTokens: usage?.promptTokenCount,
     outputTokens: usage?.candidatesTokenCount,
     totalTokens: usage?.totalTokenCount,
+    cacheReadTokens: usage?.cachedContentTokenCount,
     finishReason,
     functionCalls: functionCalls?.length ? functionCalls : undefined,
   };

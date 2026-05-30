@@ -73,6 +73,39 @@ describe('Gemini provider', () => {
       expect(result.totalTokens).toBe(30);
     });
 
+    // AA-151026 C2: cachedContentTokenCount is a subset of promptTokenCount
+    // reported separately; surface it as cacheReadTokens so the cache discount
+    // is applied during pricing.
+    it('captures cachedContentTokenCount as cacheReadTokens (C2)', (): void => {
+      const response = {
+        response: {
+          text: () => '',
+          usageMetadata: {
+            promptTokenCount: 5000,
+            candidatesTokenCount: 100,
+            totalTokenCount: 5100,
+            cachedContentTokenCount: 4500,
+          },
+          candidates: [],
+        },
+      };
+      const result = extractGeminiResponse(response);
+      expect(result.inputTokens).toBe(5000);
+      expect(result.cacheReadTokens).toBe(4500);
+    });
+
+    it('leaves cacheReadTokens unset without cachedContentTokenCount (C2)', (): void => {
+      const response = {
+        response: {
+          text: () => '',
+          usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 100 },
+          candidates: [],
+        },
+      };
+      const result = extractGeminiResponse(response);
+      expect(result.cacheReadTokens).toBeUndefined();
+    });
+
     it('extracts finish reason from candidates', (): void => {
       const response = {
         response: {

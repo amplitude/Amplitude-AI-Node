@@ -30,6 +30,7 @@ import {
   PROP_IS_REGENERATION,
   PROP_IS_STREAMING,
   PROP_LATENCY_MS,
+  PROP_LOCALE,
   PROP_MAX_OUTPUT_TOKENS,
   PROP_MESSAGE_ID,
   PROP_MODEL_NAME,
@@ -674,6 +675,72 @@ describe('trackConversation', () => {
     const aiProps = amp.events[1].event_properties as Record<string, unknown>;
     expect(userProps.$llm_message).toBeUndefined();
     expect(aiProps.$llm_message).toBeUndefined();
+  });
+
+  // AA-151026 B4: previously dropped 'tool' messages silently and ignored locale.
+  it('emits a Tool Call event for tool-role messages instead of dropping them', () => {
+    const amp = createMockAmplitude();
+    trackConversation({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 'conv-tool',
+      messages: [
+        { role: 'user', content: 'search please' },
+        {
+          role: 'tool',
+          tool_name: 'web_search',
+          success: true,
+          tool_input: { q: 'amplitude' },
+          tool_output: 'results',
+        },
+      ],
+    });
+
+    expect(amp.track).toHaveBeenCalledTimes(2);
+    expect(amp.events[0].event_type).toBe(EVENT_USER_MESSAGE);
+    expect(amp.events[1].event_type).toBe(EVENT_TOOL_CALL);
+    const toolProps = amp.events[1].event_properties as Record<string, unknown>;
+    expect(toolProps[PROP_TOOL_NAME]).toBe('web_search');
+  });
+
+  it('skips system-role messages without emitting an event', () => {
+    const amp = createMockAmplitude();
+    trackConversation({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 'conv-system',
+      messages: [
+        { role: 'system', content: 'you are helpful' },
+        { role: 'user', content: 'Hi' },
+      ],
+    });
+
+    expect(amp.track).toHaveBeenCalledTimes(1);
+    expect(amp.events[0].event_type).toBe(EVENT_USER_MESSAGE);
+  });
+
+  it('forwards locale to every emitted message', () => {
+    const amp = createMockAmplitude();
+    trackConversation({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 'conv-locale',
+      locale: 'fr-FR',
+      messages: [
+        { role: 'user', content: 'Bonjour' },
+        {
+          role: 'assistant',
+          content: 'Salut!',
+          model: 'gpt-4o',
+          provider: 'openai',
+        },
+      ],
+    });
+
+    for (const event of amp.events) {
+      const props = event.event_properties as Record<string, unknown>;
+      expect(props[PROP_LOCALE]).toBe('fr-FR');
+    }
   });
 });
 

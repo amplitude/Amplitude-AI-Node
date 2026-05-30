@@ -8,7 +8,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 
 1. Read `package.json` for dependencies
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
-3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL`, in-house gateway, or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`.
+3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL`, in-house gateway, or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
 5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
@@ -234,9 +234,10 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 > - Internal gateway product labels (e.g. `my-company/gpt4` instead of `gpt-4o`)
 > - Brand-new models not yet in genai-prices
 >
-> **2. Incorrect `inputTokens` for Anthropic with prompt caching.** Provider APIs differ in what `input_tokens` means:
+> **2. Incorrect `inputTokens` with prompt caching.** `calculateCost` always expects `inputTokens` to be the **cache-inclusive total** (cache tokens are a subset, never additive). The built-in provider wrappers normalize this for you; only manual `trackAiMessage` callers need to handle it. Provider conventions for the raw API values:
 > - **OpenAI:** `prompt_tokens` **already includes** `cached_tokens` — pass it directly as `inputTokens`
-> - **Anthropic:** `input_tokens` **excludes** cache tokens — you MUST add them: `inputTokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+> - **Anthropic / Bedrock (Converse):** raw `input_tokens` **excludes** cache tokens — add them: `inputTokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. The Anthropic and Bedrock wrappers do this internally (AA-151026).
+> - **Gemini:** `promptTokenCount` **already includes** cached tokens; cache reads are reported separately as `cachedContentTokenCount`. The Gemini wrapper now captures it so the cache discount is applied (AA-151026).
 >
 > Pass `cacheReadTokens` / `cacheCreationTokens` separately so the SDK applies differential pricing (cached tokens are cheaper).
 >
