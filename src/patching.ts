@@ -21,6 +21,7 @@ import { _GeminiModule, GEMINI_AVAILABLE } from './providers/gemini.js';
 import { _MistralModule, MISTRAL_AVAILABLE } from './providers/mistral.js';
 import { _OpenAIModule, OPENAI_AVAILABLE } from './providers/openai.js';
 import { warnIfProviderMismatch } from './utils/provider-detect.js';
+import { tryRequire } from './utils/resolve-module.js';
 
 type PatchRecord = {
   module: unknown;
@@ -185,17 +186,33 @@ export function patchAzureOpenAI(options: {
 export function patchGemini(options: {
   amplitudeAI: AmplitudeAI;
   module?: unknown;
+  /** The new `@google/genai` module (injectable for tests). */
+  genAiModule?: unknown;
 }): void {
   const { amplitudeAI } = options;
   const mod =
     (options.module as Record<string, unknown> | null) ?? _GeminiModule;
+  // The new @google/genai package has a different client shape
+  // (`new GoogleGenAI().models.generateContent`). Patch it too (B7).
+  const genAiMod =
+    (options.genAiModule as Record<string, unknown> | null) ??
+    (tryRequire('@google/genai') as Record<string, unknown> | null);
 
-  if (mod == null) {
+  if (mod == null && genAiMod == null) {
     throw new Error(
-      '@google/generative-ai is not installed. Install it with: npm install @google/generative-ai — or pass the module via the modules option.',
+      'No Gemini SDK installed. Install @google/generative-ai or @google/genai — or pass the module via the modules option.',
     );
   }
   _assertPatchOwner('gemini', amplitudeAI);
+
+  if (genAiMod != null) {
+    _patchGoogleGenAIClient(genAiMod, amplitudeAI);
+  }
+
+  if (mod == null) {
+    // Only the new @google/genai package is present; legacy patch is N/A.
+    return;
+  }
 
   const GeminiClass = mod.GoogleGenerativeAI as
     | { prototype: Record<string, unknown> }
@@ -300,6 +317,150 @@ export function patchGemini(options: {
   if (_isMethodPatched(proto, 'getGenerativeModel')) {
     _patchedProviders.add('gemini');
   }
+}
+
+/**
+ * Patch the new `@google/genai` client shape (B7).
+ *
+ * Unlike the legacy `@google/generative-ai` package (which exposes
+ * `getGenerativeModel().generateContent`), `@google/genai` calls run through
+ * `new GoogleGenAI().models.generateContent` / `.generateContentStream`. The
+ * `models` namespace is an instance property, so we probe its shared prototype
+ * and patch the methods there — covering all current and future clients.
+ */
+function _patchGoogleGenAIClient(
+  mod: Record<string, unknown>,
+  amplitudeAI: AmplitudeAI,
+): void {
+  const GoogleGenAI = mod.GoogleGenAI as
+    | { prototype: Record<string, unknown> }
+    | undefined;
+  if (!GoogleGenAI?.prototype) return;
+
+  const modelsProto =
+    (_getNestedPrototype(GoogleGenAI, ['models']) as Record<
+      string,
+      unknown
+    > | null) ??
+    (_probeNestedPrototype(GoogleGenAI, ['models']) as Record<
+      string,
+      unknown
+    > | null);
+  if (!modelsProto) return;
+
+  _patchMethod(
+    modelsProto,
+    'generateContent',
+    (original, ...args) => {
+      const startTime = performance.now();
+      return _handleGenAIGenerate(
+        amplitudeAI,
+        original(...args),
+        startTime,
+        args[0],
+      );
+    },
+    'gemini',
+  );
+
+  _patchMethod(
+    modelsProto,
+    'generateContentStream',
+    (original, ...args) => {
+      const startTime = performance.now();
+      return _handleGenAIGenerateStream(
+        amplitudeAI,
+        original(...args),
+        startTime,
+        args[0],
+      );
+    },
+    'gemini',
+  );
+
+  if (
+    _isMethodPatched(modelsProto, 'generateContent') ||
+    _isMethodPatched(modelsProto, 'generateContentStream')
+  ) {
+    _patchedProviders.add('gemini');
+  }
+}
+
+/**
+ * Track a `@google/genai` non-streaming generate result. Handles both the
+ * normal Promise return and a defensive non-Promise return (B7) so a
+ * synchronously-returned response is not silently left untracked.
+ */
+function _handleGenAIGenerate(
+  ai: AmplitudeAI,
+  result: unknown,
+  startTime: number,
+  requestOpts: unknown,
+): unknown {
+  if (result instanceof Promise) {
+    return result
+      .then((response) => {
+        _trackGeminiResponse(ai, response, startTime, requestOpts);
+        return response;
+      })
+      .catch((err) => {
+        _trackCompletionError(ai, err, startTime, requestOpts, 'gemini');
+        throw err;
+      });
+  }
+  if (result != null && typeof result === 'object') {
+    _trackGeminiResponse(ai, result, startTime, requestOpts);
+  }
+  return result;
+}
+
+/**
+ * Wrap a `@google/genai` streaming generate result. The new package resolves
+ * directly to an async iterable (not the legacy `{ stream }` envelope), and may
+ * — defensively — return one synchronously rather than via a Promise (B7).
+ */
+function _handleGenAIGenerateStream(
+  ai: AmplitudeAI,
+  result: unknown,
+  startTime: number,
+  requestOpts: unknown,
+): unknown {
+  if (result instanceof Promise) {
+    return result
+      .then((resolved) => {
+        if (_isAsyncIterable(resolved)) {
+          return _wrapPatchedStream(
+            ai,
+            resolved,
+            startTime,
+            requestOpts,
+            'gemini',
+          );
+        }
+        const env = resolved as Record<string, unknown> | null;
+        if (env != null && _isAsyncIterable(env.stream)) {
+          return {
+            ...env,
+            stream: _wrapPatchedStream(
+              ai,
+              env.stream as AsyncIterable<unknown>,
+              startTime,
+              requestOpts,
+              'gemini',
+            ),
+          };
+        }
+        return resolved;
+      })
+      .catch((err) => {
+        _trackCompletionError(ai, err, startTime, requestOpts, 'gemini');
+        throw err;
+      });
+  }
+  if (_isAsyncIterable(result)) {
+    return _wrapPatchedStream(ai, result, startTime, requestOpts, 'gemini');
+  }
+  return result;
 }
 
 export function patchMistral(options: {
@@ -1054,6 +1215,7 @@ async function* _wrapPatchedGeminiStream(
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let totalTokens: number | undefined;
+  let cacheReadTokens: number | undefined;
   let isError = false;
   let errorMessage: string | undefined;
   const streamToolCalls: Array<Record<string, unknown>> = [];
@@ -1061,8 +1223,10 @@ async function* _wrapPatchedGeminiStream(
     for await (const chunk of stream) {
       const c = chunk as Record<string, unknown>;
       const respObj = (c.response ?? c) as Record<string, unknown>;
-      const textFn = respObj.text;
-      if (typeof textFn === 'function') content += String(textFn());
+      // Legacy SDK: text() method. New @google/genai: text string getter.
+      const textVal = respObj.text;
+      if (typeof textVal === 'function') content += String(textVal());
+      else if (typeof textVal === 'string') content += textVal;
       const usage = respObj.usageMetadata as
         | Record<string, unknown>
         | undefined;
@@ -1074,6 +1238,9 @@ async function* _wrapPatchedGeminiStream(
       }
       if (typeof usage?.totalTokenCount === 'number') {
         totalTokens = usage.totalTokenCount;
+      }
+      if (typeof usage?.cachedContentTokenCount === 'number') {
+        cacheReadTokens = usage.cachedContentTokenCount;
       }
       const candidates = respObj.candidates as
         | Array<Record<string, unknown>>
@@ -1098,6 +1265,7 @@ async function* _wrapPatchedGeminiStream(
             modelName: model,
             inputTokens,
             outputTokens,
+            cacheReadInputTokens: cacheReadTokens ?? 0,
             defaultProvider: 'gemini',
           });
         } catch {
@@ -1126,6 +1294,7 @@ async function* _wrapPatchedGeminiStream(
         inputTokens,
         outputTokens,
         totalTokens,
+        cacheReadTokens,
         totalCostUsd: costUsd,
         toolCalls: streamToolCalls.length > 0 ? streamToolCalls : undefined,
         systemPrompt: systemPrompt || undefined,
@@ -1842,10 +2011,20 @@ function _trackGeminiResponse(
 
   const resp = response as Record<string, unknown>;
   const respObj = (resp.response ?? resp) as Record<string, unknown>;
-  const text = typeof respObj.text === 'function' ? String(respObj.text()) : '';
+  // Legacy @google/generative-ai exposes `text()` as a method; the new
+  // @google/genai package exposes `text` as a string getter.
+  const text =
+    typeof respObj.text === 'function'
+      ? String(respObj.text())
+      : typeof respObj.text === 'string'
+        ? respObj.text
+        : '';
   const usage = respObj.usageMetadata as Record<string, number> | undefined;
   const inputTokens = usage?.promptTokenCount;
   const outputTokens = usage?.candidatesTokenCount;
+  // cachedContentTokenCount is a subset of promptTokenCount; pass it so the
+  // cache-read discount applies (AA-151026 C2).
+  const cacheReadTokens = usage?.cachedContentTokenCount;
 
   let costUsd: number | null = null;
   if (inputTokens != null && outputTokens != null) {
@@ -1854,6 +2033,7 @@ function _trackGeminiResponse(
         modelName: 'gemini',
         inputTokens,
         outputTokens,
+        cacheReadInputTokens: cacheReadTokens ?? 0,
         defaultProvider: 'gemini',
       });
     } catch {
@@ -1885,6 +2065,7 @@ function _trackGeminiResponse(
     inputTokens,
     outputTokens,
     totalTokens: usage?.totalTokenCount,
+    cacheReadTokens,
     totalCostUsd: costUsd,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     systemPrompt: systemPrompt || undefined,

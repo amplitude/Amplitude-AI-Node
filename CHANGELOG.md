@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.10.0
+
+### Fixed (cost accuracy — AA-151026)
+- **Bedrock cache undercount (C1):** the Bedrock Converse wrapper now normalizes `inputTokens`
+  to be cache-inclusive (adds `cacheReadInputTokens` + `cacheWriteInputTokens`) before pricing,
+  matching what `calculateCost` expects. Previously cached input on Bedrock was priced as if it
+  never existed, undercounting cost. Both the non-streaming and streaming paths are fixed.
+- **Gemini cache overcount (C2):** the Gemini wrapper now captures `cachedContentTokenCount` as
+  `cacheReadTokens`, so the cache-read discount is applied. Previously cached Gemini input was
+  priced at the full input rate. Applies to the provider wrapper and the zero-code patched path.
+
+### Added
+- **`@google/genai` patch coverage (B7):** `patch()` now instruments the new `@google/genai`
+  client shape (`new GoogleGenAI().models.generateContent` / `.generateContentStream`) in
+  addition to the legacy `@google/generative-ai` package. Streaming results that resolve directly
+  to an async iterable are wrapped and tracked, and a defensively non-Promise return is no longer
+  left untracked.
+- **`trackConversation` `locale` + tool/system roles (B4):** `trackConversation` now forwards
+  `locale` to every emitted message, emits a Tool Call event for `tool`-role messages (previously
+  dropped silently), and explicitly skips `system` messages with a debug log.
+
+### Changed
+- **Cache contract clarified:** `calculateCost` expects `inputTokens` to be the cache-inclusive
+  total for every provider; cache buckets are subsets, never additive. Provider wrappers now
+  guarantee this.
+
 ## 0.7.0
 
 ### Added

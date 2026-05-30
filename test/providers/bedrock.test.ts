@@ -187,5 +187,37 @@ describe('Bedrock provider', () => {
       const result = extractBedrockResponse(response);
       expect(result.text).toBe('');
     });
+
+    // AA-151026 C1: Bedrock's inputTokens excludes cache tokens, but
+    // calculateCost and the emitted token count expect the cache-inclusive
+    // total. The extractor must pre-sum the cache buckets.
+    it('pre-sums cache read/write into inputTokens (C1)', (): void => {
+      const response = {
+        output: { message: { content: [{ text: 'ok' }] } },
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 50,
+          cacheReadInputTokens: 4000,
+          cacheWriteInputTokens: 500,
+        },
+        stopReason: 'end_turn',
+      };
+      const result = extractBedrockResponse(response);
+      expect(result.inputTokens).toBe(5500);
+      expect(result.cacheReadTokens).toBe(4000);
+      expect(result.cacheWriteTokens).toBe(500);
+    });
+
+    it('leaves inputTokens unchanged when there are no cache tokens (C1)', (): void => {
+      const response = {
+        output: { message: { content: [{ text: 'ok' }] } },
+        usage: { inputTokens: 1000, outputTokens: 50, totalTokens: 1050 },
+        stopReason: 'end_turn',
+      };
+      const result = extractBedrockResponse(response);
+      expect(result.inputTokens).toBe(1000);
+      expect(result.cacheReadTokens).toBeUndefined();
+      expect(result.cacheWriteTokens).toBeUndefined();
+    });
   });
 });

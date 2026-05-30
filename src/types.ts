@@ -275,6 +275,12 @@ export interface GeminiUsageMetadata {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
   totalTokenCount?: number;
+  /**
+   * Cached prompt tokens served from context cache. This is a SUBSET of
+   * `promptTokenCount` (which is already cache-inclusive), used to apply the
+   * cheaper cache-read price.
+   */
+  cachedContentTokenCount?: number;
 }
 
 /**

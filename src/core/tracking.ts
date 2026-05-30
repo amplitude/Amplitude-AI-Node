@@ -647,6 +647,8 @@ export interface TrackConversationOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /** Locale tag (e.g. "en-US") forwarded to every emitted message. */
+  locale?: string | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -654,6 +656,14 @@ export interface TrackConversationOptions {
   browserSessionId?: string | number | null;
 }
 
+/**
+ * Track a complete conversation of user, assistant, and tool messages.
+ *
+ * Supported roles: `user`, `assistant`/`ai`, and `tool`. `system` messages are
+ * intentionally skipped (system content belongs on a response's `systemPrompt`,
+ * not a standalone event); any other role is skipped with a debug log rather
+ * than dropped silently.
+ */
 export function trackConversation(opts: TrackConversationOptions): void {
   const effectiveSessionId =
     opts.sessionId ?? opts.conversationId ?? randomUUID();
@@ -678,6 +688,7 @@ export function trackConversation(opts: TrackConversationOptions): void {
         description: opts.description,
         context: opts.context,
         env: opts.env,
+        locale: opts.locale,
         eventProperties: opts.eventProperties,
         userProperties: opts.userProperties,
         groups: opts.groups,
@@ -706,12 +717,51 @@ export function trackConversation(opts: TrackConversationOptions): void {
         description: opts.description,
         context: opts.context,
         env: opts.env,
+        locale: opts.locale,
         eventProperties: opts.eventProperties,
         userProperties: opts.userProperties,
         groups: opts.groups,
         privacyConfig: opts.privacyConfig,
         browserSessionId: opts.browserSessionId,
       });
+    } else if (role === 'tool') {
+      // Previously dropped silently (B4). Emit a tool-call event so tool turns
+      // in a conversation are not lost.
+      trackToolCall({
+        amplitude: opts.amplitude,
+        userId: opts.userId,
+        deviceId: opts.deviceId,
+        toolName: String(message.tool_name ?? message.name ?? ''),
+        success: message.success == null ? true : Boolean(message.success),
+        latencyMs: Number(message.latency_ms ?? 0),
+        sessionId: effectiveSessionId,
+        turnId,
+        toolInput: message.tool_input,
+        toolOutput: message.tool_output ?? content,
+        agentId: opts.agentId,
+        parentAgentId: opts.parentAgentId,
+        customerOrgId: opts.customerOrgId,
+        agentVersion: opts.agentVersion,
+        description: opts.description,
+        context: opts.context,
+        env: opts.env,
+        locale: opts.locale,
+        eventProperties: opts.eventProperties,
+        userProperties: opts.userProperties,
+        groups: opts.groups,
+        privacyConfig: opts.privacyConfig,
+        browserSessionId: opts.browserSessionId,
+      });
+    } else if (role === 'system') {
+      // System content is carried on a response's systemPrompt; there is no
+      // standalone system event. Skip explicitly (documented, not silent).
+      getLogger(opts.amplitude).debug(
+        "trackConversation: skipping 'system' message (no standalone event)",
+      );
+    } else {
+      getLogger(opts.amplitude).debug(
+        `trackConversation: skipping message with unhandled role '${role}'`,
+      );
     }
 
     turnId++;
