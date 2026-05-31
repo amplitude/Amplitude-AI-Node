@@ -128,7 +128,7 @@ export const openai = new OpenAI({
 
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
 
-> **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible.
+> **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible. `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock, and Mistral clients.
 
 ### Step 3c: Swap provider imports
 
@@ -556,9 +556,10 @@ All imported from `@amplitude/ai`:
 |----------|------------|
 | OpenAI | `new OpenAI({ apiKey, amplitude: ai })` |
 | Anthropic | `new Anthropic({ apiKey, amplitude: ai })` |
-| Gemini | `new Gemini({ apiKey, amplitude: ai })` |
+| Gemini (`@google/generative-ai`) | `new Gemini({ apiKey, amplitude: ai })` |
+| Google Gen AI (`@google/genai`) | `new GoogleGenAI({ apiKey, amplitude: ai })` |
 | AzureOpenAI | `new AzureOpenAI({ apiKey, amplitude: ai })` |
-| Bedrock | `new Bedrock({ amplitude: ai })` |
+| Bedrock | `new Bedrock({ amplitude: ai, client })` |
 | Mistral | `new Mistral({ apiKey, amplitude: ai })` |
 
 ### Other APIs
@@ -566,7 +567,7 @@ All imported from `@amplitude/ai`:
 | API | Usage |
 |-----|-------|
 | `patch({ amplitudeAI: ai })` / `unpatch()` | Zero-code instrumentation (also auto-extracts `[Agent] Tool Call` from message arrays — see below) |
-| `wrap(client, ai)` | Wrap existing provider client |
+| `wrap(client, ai)` | Wrap existing provider client (OpenAI, Azure OpenAI, Anthropic, Gemini, Google Gen AI, Bedrock, Mistral) |
 | `injectContext()` / `extractContext(headers)` | Cross-service propagation |
 | `createAmplitudeAIMiddleware(opts)` | Express/Fastify/Hono middleware |
 | `MockAmplitudeAI` (from `@amplitude/ai/testing`) | Deterministic test double |

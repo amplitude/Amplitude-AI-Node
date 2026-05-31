@@ -16,7 +16,11 @@ import {
   _AnthropicModule,
   ANTHROPIC_AVAILABLE,
 } from './providers/anthropic.js';
-import { _BedrockModule, BEDROCK_AVAILABLE } from './providers/bedrock.js';
+import {
+  _BedrockModule,
+  BEDROCK_AVAILABLE,
+  extractBedrockInvokeModelResponse,
+} from './providers/bedrock.js';
 import { _GeminiModule, GEMINI_AVAILABLE } from './providers/gemini.js';
 import { _MistralModule, MISTRAL_AVAILABLE } from './providers/mistral.js';
 import { _OpenAIModule, OPENAI_AVAILABLE } from './providers/openai.js';
@@ -537,9 +541,16 @@ export function patchBedrock(options: {
     (original, ...args) => {
       const command = args[0] as Record<string, unknown> | undefined;
       const commandName = String(command?.constructor?.name ?? '');
+      // InvokeModelWithResponseStreamCommand is intentionally excluded: its
+      // body is a chunked stream that the patch path does not parse. Use the
+      // Bedrock wrapper for streamed InvokeModel coverage.
+      const isInvokeModel =
+        commandName.includes('InvokeModelCommand') &&
+        !commandName.includes('WithResponseStream');
       const shouldTrack =
         commandName.includes('ConverseCommand') ||
-        commandName.includes('ConverseStreamCommand');
+        commandName.includes('ConverseStreamCommand') ||
+        isInvokeModel;
       const startTime = performance.now();
       const result = original(...args);
       if (result instanceof Promise) {
@@ -562,6 +573,13 @@ export function patchBedrock(options: {
                   ),
                 };
               }
+            } else if (isInvokeModel) {
+              _trackBedrockInvokeModelResponse(
+                amplitudeAI,
+                response,
+                startTime,
+                args[0],
+              );
             } else {
               _trackBedrockResponse(amplitudeAI, response, startTime, args[0]);
             }
@@ -2156,6 +2174,94 @@ function _trackBedrockResponse(
     ctx.sessionId,
     ctx.agentId,
   );
+}
+
+function _parseBedrockJson(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'object' && !(value instanceof Uint8Array)) {
+    return value as Record<string, unknown>;
+  }
+  const text =
+    value instanceof Uint8Array
+      ? new TextDecoder().decode(value)
+      : typeof value === 'string'
+        ? value
+        : '';
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed != null && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function _trackBedrockInvokeModelResponse(
+  ai: AmplitudeAI,
+  response: unknown,
+  startTime: number,
+  requestOpts: unknown,
+): void {
+  if (response == null || typeof response !== 'object') return;
+
+  const ctx = getActiveContext();
+  if (ctx == null) return;
+  if (isTrackerManaged()) return;
+
+  const command = requestOpts as Record<string, unknown> | undefined;
+  // Real AWS SDK commands carry params on `.input`; test fixtures may pass a
+  // plain params object directly.
+  const input = (command?.input ?? command ?? {}) as Record<string, unknown>;
+  const modelName = String(input.modelId ?? 'unknown');
+
+  const resp = response as Record<string, unknown>;
+  const requestBody = _parseBedrockJson(input.body);
+  const responseBody = _parseBedrockJson(resp.body);
+  const extracted = extractBedrockInvokeModelResponse(
+    modelName,
+    requestBody,
+    responseBody,
+  );
+
+  let costUsd: number | null = null;
+  if (extracted.inputTokens != null && extracted.outputTokens != null) {
+    try {
+      costUsd = calculateCost({
+        modelName,
+        inputTokens: extracted.inputTokens,
+        outputTokens: extracted.outputTokens,
+        defaultProvider: 'bedrock',
+      });
+    } catch {
+      // cost calculation is best-effort
+    }
+  }
+
+  ai.trackAiMessage({
+    userId: ctx.userId ?? undefined,
+    deviceId: ctx.deviceId ?? undefined,
+    content: extracted.text,
+    sessionId: ctx.sessionId,
+    model: modelName,
+    provider: 'bedrock',
+    latencyMs: performance.now() - startTime,
+    traceId: ctx.traceId,
+    inputTokens: extracted.inputTokens,
+    outputTokens: extracted.outputTokens,
+    totalTokens: extracted.totalTokens,
+    totalCostUsd: costUsd,
+    finishReason: extracted.stopReason,
+    temperature: extracted.temperature,
+    maxOutputTokens: extracted.maxOutputTokens,
+    topP: extracted.topP,
+    agentId: ctx.agentId,
+    env: ctx.env,
+    ..._contextExtras(ctx),
+  });
 }
 
 function _trackResponsesResponse(

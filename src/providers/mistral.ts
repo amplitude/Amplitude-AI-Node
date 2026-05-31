@@ -19,6 +19,12 @@ export interface MistralOptions {
   amplitude: AmplitudeOrAI;
   apiKey?: string;
   privacyConfig?: PrivacyConfig | null;
+  /**
+   * Adopt an already-constructed `Mistral` client instead of building a fresh
+   * one from `apiKey`. Used by `wrap()` so the caller's configured client
+   * (server URL, retry config, etc.) is preserved.
+   */
+  client?: unknown;
   /** Pass the `@mistralai/mistralai` module directly to bypass `tryRequire` (required in bundler environments). */
   mistralModule?: unknown;
 }
@@ -33,6 +39,12 @@ export class Mistral extends BaseAIProvider {
       privacyConfig: options.privacyConfig,
       providerName: 'mistral',
     });
+
+    if (options.client != null) {
+      this._client = options.client;
+      this.chat = new WrappedChat(this._client, this.trackFn());
+      return;
+    }
 
     const mod =
       (options.mistralModule as Record<string, unknown> | null) ??

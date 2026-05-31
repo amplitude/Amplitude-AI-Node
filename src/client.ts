@@ -287,12 +287,18 @@ export class AmplitudeAI {
       !this._sessionTurnCounters.has(sessionId) &&
       this._sessionTurnCounters.size >= _MAX_SESSION_TURN_COUNTERS
     ) {
-      const oldestKey = this._sessionTurnCounters.keys().next().value;
-      if (oldestKey != null) this._sessionTurnCounters.delete(oldestKey);
+      // Evict the least-recently-used session. Every access re-inserts its
+      // key at the back of the Map (below), so the front is the LRU entry —
+      // a long-lived session touched each turn is never evicted before idle
+      // sessions that happened to be inserted later.
+      const lruKey = this._sessionTurnCounters.keys().next().value;
+      if (lruKey != null) this._sessionTurnCounters.delete(lruKey);
     }
 
-    const current = this._sessionTurnCounters.get(sessionId) ?? 0;
-    const next = current + 1;
+    const next = (this._sessionTurnCounters.get(sessionId) ?? 0) + 1;
+    // delete + set moves the key to the back; Map.set alone keeps an existing
+    // key in place, which would defeat the LRU ordering.
+    this._sessionTurnCounters.delete(sessionId);
     this._sessionTurnCounters.set(sessionId, next);
     return next;
   }
@@ -563,6 +569,22 @@ export class AmplitudeAI {
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
   }): string {
+    // Auto-calculate cost from input tokens when not supplied, mirroring
+    // trackAiMessage. Embeddings have no output tokens, so outputTokens is 0.
+    // Best-effort: an unpriced model leaves the cost null.
+    let effectiveCost = opts.totalCostUsd ?? null;
+    if (effectiveCost == null && opts.inputTokens != null) {
+      try {
+        effectiveCost = calculateCost({
+          modelName: opts.model,
+          inputTokens: opts.inputTokens,
+          outputTokens: 0,
+          defaultProvider: opts.provider || undefined,
+        });
+      } catch {
+        // cost calculation is best-effort
+      }
+    }
     return trackEmbedding({
       amplitude: this._amplitude,
       userId: opts.userId,
@@ -572,7 +594,7 @@ export class AmplitudeAI {
       latencyMs: opts.latencyMs,
       inputTokens: opts.inputTokens,
       dimensions: opts.dimensions,
-      totalCostUsd: opts.totalCostUsd,
+      totalCostUsd: effectiveCost,
       sessionId: opts.sessionId,
       traceId: opts.traceId,
       turnId: opts.turnId,

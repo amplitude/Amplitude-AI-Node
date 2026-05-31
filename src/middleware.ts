@@ -10,14 +10,32 @@ import type { AmplitudeAI } from './client.js';
 import { _sessionStorage, SessionContext } from './context.js';
 import { getLogger } from './utils/logger.js';
 
+/** A static value or a `(req) => value` resolver for per-request values. */
+type ValueOrResolver<T> = T | ((req: unknown) => T | null) | null;
+
 export interface MiddlewareOptions {
   amplitudeAI: AmplitudeAI;
   userIdResolver: (req: unknown) => string | null;
   sessionIdResolver?: (req: unknown) => string;
   agentId?: string | null;
   env?: string | null;
+  /** Agent code version applied to every request's session. */
+  agentVersion?: string | null;
+  /** End-customer org for multi-tenant platforms (static or per-request). */
+  customerOrgId?: ValueOrResolver<string>;
+  /** Segmentation context dict (static or per-request). */
+  context?: ValueOrResolver<Record<string, unknown>>;
+  /** Group-analytics dict (static or per-request). */
+  groups?: ValueOrResolver<Record<string, unknown>>;
   trackSessionEvents?: boolean;
   flushOnResponse?: boolean;
+}
+
+function resolveOption<T>(value: ValueOrResolver<T>, req: unknown): T | null {
+  if (typeof value === 'function') {
+    return (value as (req: unknown) => T | null)(req) ?? null;
+  }
+  return value ?? null;
 }
 
 interface ExpressLikeRequest {
@@ -44,6 +62,10 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     sessionIdResolver = () => randomUUID(),
     agentId = null,
     env = null,
+    agentVersion = null,
+    customerOrgId = null,
+    context = null,
+    groups = null,
     trackSessionEvents = true,
     flushOnResponse = true,
   } = options;
@@ -64,12 +86,20 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     }
     if (!traceId) traceId = randomUUID();
 
+    const resolvedCustomerOrgId = resolveOption(customerOrgId, req);
+    const resolvedContext = resolveOption(context, req);
+    const resolvedGroups = resolveOption(groups, req);
+
     const ctx = new SessionContext({
       sessionId,
       traceId,
       userId,
       agentId,
       env,
+      agentVersion,
+      customerOrgId: resolvedCustomerOrgId,
+      context: resolvedContext,
+      groups: resolvedGroups,
       nextTurnIdFn: () => amplitudeAI._nextTurnId(sessionId),
       amplitude: amplitudeAI.amplitude,
     });
@@ -84,6 +114,10 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
               traceId: traceId ?? undefined,
               env,
               agentId,
+              agentVersion,
+              customerOrgId: resolvedCustomerOrgId,
+              context: resolvedContext,
+              groups: resolvedGroups,
             });
           } catch (error) {
             logger.warn(
