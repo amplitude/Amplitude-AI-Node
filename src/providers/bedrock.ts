@@ -723,16 +723,22 @@ export function extractBedrockInvokeModelResponse(
   const systemPrompt = extractInvokeModelSystemPrompt(req);
   const base = { systemPrompt, temperature, topP, maxOutputTokens };
 
-  // Anthropic Claude on Bedrock
-  if (id.includes('anthropic') || id.includes('claude') || resp.content != null) {
-    const content = resp.content as Array<Record<string, unknown>> | undefined;
+  // Anthropic Claude on Bedrock. The structural fallback (for callers passing a
+  // non-namespaced model_id) requires the Anthropic Messages shape — a `content`
+  // *array* plus an Anthropic-only marker — not merely the presence of a generic
+  // `content` key, which other families also use.
+  const content = resp.content as Array<Record<string, unknown>> | undefined;
+  const usage = resp.usage as Record<string, unknown> | undefined;
+  const looksAnthropic =
+    Array.isArray(content) &&
+    (resp.type === 'message' || (usage != null && 'input_tokens' in usage));
+  if (id.includes('anthropic') || id.includes('claude') || looksAnthropic) {
     const text = Array.isArray(content)
       ? content
           .filter((b) => b.type === 'text' || b.text != null)
           .map((b) => String(b.text ?? ''))
           .join('')
       : '';
-    const usage = resp.usage as Record<string, unknown> | undefined;
     const inputTokens = usage?.input_tokens as number | undefined;
     const outputTokens = usage?.output_tokens as number | undefined;
     return {
@@ -835,7 +841,7 @@ export function extractBedrockInvokeModelResponse(
  * Extract a single streaming delta from a decoded InvokeModel chunk. Returns
  * incremental text plus terminal usage/stop-reason when present.
  */
-function extractBedrockInvokeModelStreamDelta(
+export function extractBedrockInvokeModelStreamDelta(
   modelId: string,
   chunk: Record<string, unknown>,
 ): {
@@ -846,18 +852,30 @@ function extractBedrockInvokeModelStreamDelta(
 } {
   const id = modelId.toLowerCase();
 
-  // Anthropic on Bedrock: content_block_delta / message_delta events
+  // Anthropic on Bedrock: message_start / content_block_delta / message_delta.
+  // input_tokens arrive on message_start nested under `message.usage`;
+  // output_tokens arrive on message_delta under the top-level `usage`. The
+  // end-of-stream invocation metrics carry both under inputTokenCount/
+  // outputTokenCount as a final fallback. `??` preserves a legitimate 0.
   if (id.includes('anthropic') || id.includes('claude')) {
     const delta = chunk.delta as Record<string, unknown> | undefined;
+    const message = chunk.message as Record<string, unknown> | undefined;
     const usage =
       (chunk.usage as Record<string, unknown> | undefined) ??
-      ((chunk.delta as Record<string, unknown> | undefined)
-        ?.usage as Record<string, unknown> | undefined);
+      (delta?.usage as Record<string, unknown> | undefined) ??
+      (message?.usage as Record<string, unknown> | undefined);
+    const metrics = chunk['amazon-bedrock-invocationMetrics'] as
+      | Record<string, unknown>
+      | undefined;
     return {
       text: String(delta?.text ?? ''),
       stopReason: delta?.stop_reason as string | undefined,
-      inputTokens: usage?.input_tokens as number | undefined,
-      outputTokens: usage?.output_tokens as number | undefined,
+      inputTokens: (usage?.input_tokens ?? metrics?.inputTokenCount) as
+        | number
+        | undefined,
+      outputTokens: (usage?.output_tokens ?? metrics?.outputTokenCount) as
+        | number
+        | undefined,
     };
   }
 

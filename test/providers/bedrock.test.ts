@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   Bedrock,
   BEDROCK_AVAILABLE,
+  extractBedrockInvokeModelResponse,
+  extractBedrockInvokeModelStreamDelta,
   extractBedrockResponse,
 } from '../../src/providers/bedrock.js';
 
@@ -218,6 +220,102 @@ describe('Bedrock provider', () => {
       expect(result.inputTokens).toBe(1000);
       expect(result.cacheReadTokens).toBeUndefined();
       expect(result.cacheWriteTokens).toBeUndefined();
+    });
+  });
+
+  // AA-151040: InvokeModel response parsing must not misroute a generic
+  // top-level `content` key as Anthropic (it would mis-read token counts from a
+  // mismatched schema, breaking the "unrecognised family yields empty text"
+  // guarantee).
+  describe('extractBedrockInvokeModelResponse', () => {
+    it('does not parse a generic top-level content key as Anthropic', (): void => {
+      const result = extractBedrockInvokeModelResponse(
+        'some.unknown-model-v1',
+        undefined,
+        { content: 'not the anthropic shape', tokens: 5 },
+      );
+      expect(result.text).toBe('');
+      expect(result.inputTokens).toBeUndefined();
+      expect(result.outputTokens).toBeUndefined();
+    });
+
+    it('parses a genuine Anthropic Messages payload via structural match', (): void => {
+      const result = extractBedrockInvokeModelResponse('custom-alias', undefined, {
+        type: 'message',
+        content: [{ type: 'text', text: 'hello' }],
+        usage: { input_tokens: 4, output_tokens: 1 },
+        stop_reason: 'end_turn',
+      });
+      expect(result.text).toBe('hello');
+      expect(result.inputTokens).toBe(4);
+      expect(result.outputTokens).toBe(1);
+    });
+
+    it('still parses namespaced Anthropic models', (): void => {
+      const result = extractBedrockInvokeModelResponse(
+        'anthropic.claude-3-sonnet-20240229-v1:0',
+        undefined,
+        {
+          content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 3, output_tokens: 2 },
+        },
+      );
+      expect(result.text).toBe('hi');
+      expect(result.inputTokens).toBe(3);
+    });
+
+    it('routes a Nova-shaped response to the Nova branch', (): void => {
+      const result = extractBedrockInvokeModelResponse('amazon.nova-pro-v1', undefined, {
+        output: { message: { content: [{ text: 'nova reply' }] } },
+        usage: { inputTokens: 7, outputTokens: 3 },
+      });
+      expect(result.text).toBe('nova reply');
+      expect(result.inputTokens).toBe(7);
+    });
+  });
+
+  // AA-151040: Anthropic InvokeModel streaming carries input_tokens on the
+  // message_start event (message.usage), not the top-level usage key.
+  describe('extractBedrockInvokeModelStreamDelta', () => {
+    const model = 'anthropic.claude-3-sonnet-20240229-v1:0';
+
+    it('captures input_tokens from the message_start event', (): void => {
+      const delta = extractBedrockInvokeModelStreamDelta(model, {
+        type: 'message_start',
+        message: { usage: { input_tokens: 12, output_tokens: 1 } },
+      });
+      expect(delta.inputTokens).toBe(12);
+    });
+
+    it('captures output_tokens from the message_delta event', (): void => {
+      const delta = extractBedrockInvokeModelStreamDelta(model, {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn' },
+        usage: { output_tokens: 7 },
+      });
+      expect(delta.outputTokens).toBe(7);
+      expect(delta.stopReason).toBe('end_turn');
+    });
+
+    it('falls back to end-of-stream invocation metrics', (): void => {
+      const delta = extractBedrockInvokeModelStreamDelta(model, {
+        'amazon-bedrock-invocationMetrics': {
+          inputTokenCount: 12,
+          outputTokenCount: 7,
+        },
+      });
+      expect(delta.inputTokens).toBe(12);
+      expect(delta.outputTokens).toBe(7);
+    });
+
+    it('preserves a legitimate zero token count', (): void => {
+      const delta = extractBedrockInvokeModelStreamDelta(model, {
+        type: 'message_delta',
+        delta: {},
+        usage: { output_tokens: 0 },
+        'amazon-bedrock-invocationMetrics': { outputTokenCount: 99 },
+      });
+      expect(delta.outputTokens).toBe(0);
     });
   });
 });
