@@ -41,7 +41,14 @@ vi.mock('../src/providers/openai.js', () => ({ OPENAI_AVAILABLE: true, _OpenAIMo
 vi.mock('../src/providers/anthropic.js', () => ({ ANTHROPIC_AVAILABLE: true, _AnthropicModule: { Anthropic: FakeAnthropic } }));
 vi.mock('../src/providers/gemini.js', () => ({ GEMINI_AVAILABLE: true, _GeminiModule: { GoogleGenerativeAI: FakeGemini } }));
 vi.mock('../src/providers/mistral.js', () => ({ MISTRAL_AVAILABLE: true, _MistralModule: { Mistral: FakeMistral } }));
-vi.mock('../src/providers/bedrock.js', () => ({ BEDROCK_AVAILABLE: true, _BedrockModule: { BedrockRuntimeClient: FakeBedrockClient } }));
+vi.mock('../src/providers/bedrock.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/providers/bedrock.js')>();
+  return {
+    ...actual,
+    BEDROCK_AVAILABLE: true,
+    _BedrockModule: { BedrockRuntimeClient: FakeBedrockClient },
+  };
+});
 const mockGetActiveContext = vi.fn().mockReturnValue({
   userId: 'user-1',
   sessionId: 'session-1',
@@ -299,13 +306,56 @@ describe('patching edge cases', () => {
     expect(call.content).toBe('just text');
   });
 
-  it('Bedrock: non-Converse command is not tracked', async (): Promise<void> => {
-    class InvokeModelCommand {}
-    mockBedrockSend.mockResolvedValueOnce({ body: 'raw' });
+  it('Bedrock: non-LLM command is not tracked', async (): Promise<void> => {
+    class ListFoundationModelsCommand {}
+    mockBedrockSend.mockResolvedValueOnce({ modelSummaries: [] });
     patchBedrock({ amplitudeAI: ai as never });
 
     const client = new (FakeBedrockClient as unknown as new () => { send: (c: unknown) => Promise<unknown> })();
-    await client.send(new InvokeModelCommand());
+    await client.send(new ListFoundationModelsCommand());
+
+    expect(ai.trackAiMessage).not.toHaveBeenCalled();
+  });
+
+  it('Bedrock: InvokeModel command is tracked (Anthropic body)', async (): Promise<void> => {
+    class InvokeModelCommand {
+      input: Record<string, unknown>;
+      constructor(input: Record<string, unknown>) {
+        this.input = input;
+      }
+    }
+    mockBedrockSend.mockResolvedValueOnce({
+      body: JSON.stringify({
+        content: [{ type: 'text', text: 'claude reply' }],
+        usage: { input_tokens: 7, output_tokens: 4 },
+        stop_reason: 'end_turn',
+      }),
+    });
+    patchBedrock({ amplitudeAI: ai as never });
+
+    const client = new (FakeBedrockClient as unknown as new () => { send: (c: unknown) => Promise<unknown> })();
+    await client.send(
+      new InvokeModelCommand({
+        modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+      }),
+    );
+
+    const call = ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.content).toBe('claude reply');
+    expect(call.inputTokens).toBe(7);
+    expect(call.outputTokens).toBe(4);
+    expect(call.provider).toBe('bedrock');
+  });
+
+  it('Bedrock: InvokeModelWithResponseStream is not tracked via patch', async (): Promise<void> => {
+    // Streamed InvokeModel is covered by the Bedrock wrapper, not the patch path.
+    class InvokeModelWithResponseStreamCommand {}
+    mockBedrockSend.mockResolvedValueOnce({ body: (async function* () {})() });
+    patchBedrock({ amplitudeAI: ai as never });
+
+    const client = new (FakeBedrockClient as unknown as new () => { send: (c: unknown) => Promise<unknown> })();
+    await client.send(new InvokeModelWithResponseStreamCommand());
 
     expect(ai.trackAiMessage).not.toHaveBeenCalled();
   });

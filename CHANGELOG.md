@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.11.0
+
+### Added (AA-151040)
+- **`wrap()` now supports Gemini, Google Gen AI, Bedrock, and Mistral (B1):** in addition to
+  OpenAI/Azure/Anthropic, `wrap()` adopts an existing `@google/generative-ai`,
+  `@google/genai`, `@aws-sdk/client-bedrock-runtime`, or `@mistralai/mistralai` client
+  directly so its configured transport (Vertex AI project, AWS region/credentials, custom
+  server URL) is preserved instead of being reconstructed.
+- **`GoogleGenAI` provider wrapper (B2):** a dedicated wrapper for the new unified
+  `@google/genai` SDK (`ai.models.generateContent({ model, contents, config })`), exported
+  alongside the legacy `Gemini` wrapper. The new SDK exposes `response.text` as a string getter
+  and surfaces `functionCalls` directly, so it gets its own response extractor.
+- **Bedrock `InvokeModel` coverage (B4):** the `Bedrock` wrapper adds `invokeModel()` and
+  `invokeModelWithResponseStream()`, and `patch()` now tracks `InvokeModelCommand`. Request and
+  response bodies are parsed defensively across the common model families (Anthropic, Amazon
+  Nova/Titan, Meta Llama, Cohere, Mistral).
+- **Middleware propagates full session context (B9):** `createAmplitudeAIMiddleware` now
+  forwards `agentVersion`, `customerOrgId`, `context`, and `groups` into the per-request
+  session context and the `[Agent] Session End` event. `customerOrgId`/`context`/`groups`
+  accept a static value or a `(req) => value` resolver.
+
+### Fixed (AA-151040)
+- **True LRU eviction for session turn counters (B6):** `_nextTurnId` now moves the touched
+  session to the most-recently-used position, so a long-lived session is never evicted before
+  idle sessions inserted later.
+- **Auto-calculated embedding cost (B8):** `trackEmbedding` now estimates `totalCostUsd` from
+  `inputTokens` when a cost is not supplied (embeddings have no output tokens).
+
 ## 0.10.0
 
 ### Fixed (cost accuracy — AA-151026)

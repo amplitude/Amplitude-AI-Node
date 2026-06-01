@@ -19,6 +19,12 @@ export interface GeminiOptions {
   amplitude: AmplitudeOrAI;
   apiKey?: string;
   privacyConfig?: PrivacyConfig | null;
+  /**
+   * Adopt an already-constructed `GoogleGenerativeAI` client instead of
+   * building a fresh one from `apiKey`. Used by `wrap()` so the caller's
+   * configured client (custom transport, base URL, etc.) is preserved.
+   */
+  client?: unknown;
   /** Pass the `@google/generative-ai` module directly to bypass `tryRequire` (required in bundler environments). */
   geminiModule?: unknown;
 }
@@ -32,6 +38,11 @@ export class Gemini extends BaseAIProvider {
       privacyConfig: options.privacyConfig,
       providerName: 'gemini',
     });
+
+    if (options.client != null) {
+      this._client = options.client;
+      return;
+    }
 
     const mod =
       (options.geminiModule as Record<string, unknown> | null) ?? _GeminiModule;

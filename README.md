@@ -68,11 +68,11 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.3.10                                                                                                                                                                           |
+| Version         | 0.11.0                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
-| Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, tiktoken or js-tiktoken (token counting)                               |
+| Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @google/genai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, tiktoken or js-tiktoken (token counting)                               |
 
 ## Table of Contents
 
@@ -135,7 +135,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 npm install @amplitude/ai @amplitude/analytics-node
 ```
 
-Install provider SDKs based on what you use (for example: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@mistralai/mistralai`, `@aws-sdk/client-bedrock-runtime`).
+Install provider SDKs based on what you use (for example: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@mistralai/mistralai`, `@aws-sdk/client-bedrock-runtime`).
 
 ## Quick Start
 
@@ -164,7 +164,7 @@ const ai = new AmplitudeAI({
 | Area | Status |
 | ---- | ------ |
 | Runtime | Node.js only (no browser). Python SDK available separately ([amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)). |
-| Zero-code patching | OpenAI, Anthropic, Azure OpenAI, Gemini, Mistral, Bedrock (Converse/ConverseStream only). |
+| Zero-code patching | OpenAI, Anthropic, Azure OpenAI, Gemini, Mistral, Bedrock (Converse, ConverseStream, and InvokeModel). |
 | CrewAI | Python-only; the Node.js export throws `ProviderError` by design. Use LangChain or OpenTelemetry integrations instead. |
 | OTEL scope filtering | Not yet supported (Python SDK has `allowed_scopes`/`blocked_scopes`). |
 | Streaming cost tracking | Automatic for OpenAI and Anthropic. Manual token counts required for other providers' streamed responses. |
@@ -348,7 +348,7 @@ await session.run(async () => {
 });
 ```
 
-Or wrap an existing client instance (supports OpenAI, Azure OpenAI, and Anthropic):
+Or wrap an existing client instance (supports OpenAI, Azure OpenAI, Anthropic, Gemini, Google Gen AI, Bedrock, and Mistral):
 
 ```typescript
 import { wrap } from '@amplitude/ai';
@@ -367,7 +367,7 @@ wrap(client, ai); // AmplitudeAI instance
 wrap(client, ai.amplitude); // raw Amplitude client
 ```
 
-> **Note:** `wrap()` only supports OpenAI, Azure OpenAI, and Anthropic clients. For Gemini, Mistral, and Bedrock, use the SDK's provider classes directly (e.g., `new Gemini({ amplitude: ai })`).
+> **Note:** `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock (`@aws-sdk/client-bedrock-runtime`), and Mistral clients. OpenAI/Anthropic clients are reconstructed from extracted credentials; Gemini/Google Gen AI/Bedrock/Mistral clients are adopted directly so your configured transport (Vertex AI project, AWS region/credentials, custom server URL) is preserved.
 
 ### Full control
 
@@ -604,7 +604,7 @@ const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
 | `debug`                   | Log events to stderr                                                                                        |
 | `dryRun`                  | Log without sending to Amplitude                                                                            |
 | `validate`                | Enable strict validation of required fields                                                                 |
-| `onEventCallback`         | Callback invoked after every tracked event `(event, statusCode, message) => void`                           |
+| `onEventCallback`         | Callback invoked exactly once per tracked event `(event, statusCode, message) => void` — fired from the underlying Amplitude client's delivery path, so it is not double-invoked by provider wrappers or `patch()` |
 | `propagateContext`        | Enable cross-service context propagation                                                                    |
 
 ## Context Dict Conventions
@@ -897,14 +897,17 @@ s.trackAiMessage(
 
 Use instrumented provider wrappers for automatic tracking:
 
-| Provider    | Class         | Package                         |
-| ----------- | ------------- | ------------------------------- |
-| OpenAI      | `OpenAI`      | openai                          |
-| Anthropic   | `Anthropic`   | @anthropic-ai/sdk               |
-| Gemini      | `Gemini`      | @google/generative-ai           |
-| AzureOpenAI | `AzureOpenAI` | openai                          |
-| Bedrock     | `Bedrock`     | @aws-sdk/client-bedrock-runtime |
-| Mistral     | `Mistral`     | @mistralai/mistralai            |
+| Provider     | Class         | Package                         |
+| ------------ | ------------- | ------------------------------- |
+| OpenAI       | `OpenAI`      | openai                          |
+| Anthropic    | `Anthropic`   | @anthropic-ai/sdk               |
+| Gemini       | `Gemini`      | @google/generative-ai           |
+| Google Gen AI | `GoogleGenAI` | @google/genai                   |
+| AzureOpenAI  | `AzureOpenAI` | openai                          |
+| Bedrock      | `Bedrock`     | @aws-sdk/client-bedrock-runtime |
+| Mistral      | `Mistral`     | @mistralai/mistralai            |
+
+> `Gemini` targets the legacy `@google/generative-ai` SDK (`getGenerativeModel(...).generateContent(...)`). `GoogleGenAI` targets the new unified `@google/genai` SDK (`ai.models.generateContent({ model, contents, config })`). Pick the class that matches the package you installed.
 
 **Feature coverage by provider:**
 
@@ -1496,7 +1499,7 @@ This is purely a guardrail against accidental drift (e.g. a dependency quietly s
 Patch surface notes:
 
 - OpenAI/Azure OpenAI: `chat.completions.create`, `chat.completions.parse`, and Responses APIs are instrumented (including streaming shapes where exposed by the SDK).
-- Bedrock: only `ConverseCommand` and `ConverseStreamCommand` are instrumented when patching `client.send`.
+- Bedrock: `ConverseCommand`, `ConverseStreamCommand`, and `InvokeModelCommand` are instrumented when patching `client.send`. Streamed InvokeModel (`InvokeModelWithResponseStreamCommand`) is not tracked via `patch()` — use the `Bedrock` wrapper's `invokeModelWithResponseStream()` for streamed InvokeModel coverage. InvokeModel bodies are parsed defensively across the common model families (Anthropic, Amazon Nova/Titan, Meta Llama, Cohere, Mistral).
 
 ## Auto-Instrumentation CLI
 
@@ -2105,7 +2108,7 @@ mock.reset();
 | `patch()` doesn't instrument calls                 | `patch()` called after the provider client was created            | Call `patch()` before importing or instantiating provider clients                                                                                                                            |
 | Session context missing on events                  | LLM calls made outside `session.run()`                            | Wrap your LLM calls inside `session.run(async () => { ... })`                                                                                                                                |
 | `flush()` hangs or times out in serverless         | Process exits before flush completes                              | Use `await ai.flush()` before returning from your Lambda/Cloud Function handler                                                                                                              |
-| `wrap()` TypeScript type errors                    | Passing a non-supported client type                               | `wrap()` only supports OpenAI, AzureOpenAI, and Anthropic clients; use provider classes for others                                                                                           |
+| `wrap()` TypeScript type errors                    | Passing a non-supported client type                               | `wrap()` supports OpenAI, AzureOpenAI, Anthropic, Gemini, Google Gen AI, Bedrock, and Mistral clients; use provider classes for anything else                                                |
 | `MockAmplitudeAI` events are empty                 | Tracking calls not inside a session context                       | Use `mock.agent(...).session(...).run(...)` to wrap tracked calls                                                                                                                            |
 | `Cannot find module 'openai'` in Turbopack/Webpack | Bundler rewrites `import.meta.url`, breaking dynamic `require()`  | Pass the provider module directly: `new OpenAI({ amplitude: ai, apiKey, openaiModule: OpenAISDK })`. Same pattern for `Anthropic`, `Gemini`, etc. See each provider's `<name>Module` option. |
 
@@ -2165,6 +2168,14 @@ app.use(
       ] ?? randomUUID(),
     agentId: 'api-server',
     env: process.env.NODE_ENV ?? 'development',
+    // Optional session-context fields. Each accepts a static value or a
+    // (req) => value resolver, and propagates into every event tracked
+    // within the request — including the auto-emitted `[Agent] Session End`.
+    agentVersion: '2.1.0',
+    customerOrgId: (req) =>
+      (req as { headers: { 'x-org-id'?: string } }).headers['x-org-id'] ?? null,
+    context: (req) => ({ route: (req as { path?: string }).path }),
+    groups: { team: 'support' },
   }),
 );
 
@@ -2172,6 +2183,8 @@ app.post('/chat', async (req, res) => {
   // Session context available; trackUserMessage/trackAiMessage inherit sessionId, traceId
 });
 ```
+
+`createAmplitudeAIMiddleware` propagates `agentVersion`, `customerOrgId`, `context`, and `groups` (in addition to `userId`, `sessionId`, `traceId`, `agentId`, `env`) into the per-request session context and the `[Agent] Session End` event. `customerOrgId`, `context`, and `groups` accept either a static value or a `(req) => value` resolver.
 
 ## Bulk Conversation Import
 
@@ -2358,7 +2371,7 @@ Event-specific properties for `[Agent] Embedding` (in addition to common propert
 | `[Agent] Span ID` | string | Yes | Unique identifier for this embedding operation (UUID). |
 | `[Agent] Input Tokens` | number | No | Number of input tokens processed by the embedding model. |
 | `[Agent] Embedding Dimensions` | number | No | Dimensionality of the output embedding vector. |
-| `[Agent] Cost USD` | number | No | Estimated cost in USD for this embedding operation. |
+| `[Agent] Cost USD` | number | No | Estimated cost in USD for this embedding operation. Auto-calculated from `inputTokens` when `totalCostUsd` is omitted (embeddings have no output tokens); pass `totalCostUsd` to override. |
 
 ### Span Properties
 

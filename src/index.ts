@@ -259,6 +259,12 @@ export {
   extractGeminiResponse,
 } from './providers/gemini.js';
 export {
+  GoogleGenAI,
+  GOOGLE_GENAI_AVAILABLE,
+  extractGoogleGenAIResponse,
+} from './providers/google-genai.js';
+export type { GoogleGenAIOptions } from './providers/google-genai.js';
+export {
   AzureOpenAI,
   AZURE_OPENAI_AVAILABLE,
 } from './providers/azure-openai.js';

@@ -162,6 +162,10 @@ describe('createAmplitudeAIMiddleware', () => {
       traceId: 'trace-1',
       env: null,
       agentId: null,
+      agentVersion: null,
+      customerOrgId: null,
+      context: null,
+      groups: null,
     });
     expect(flushSpy).toHaveBeenCalledTimes(1);
   });

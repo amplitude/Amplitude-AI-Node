@@ -2,15 +2,21 @@
  * Convenience wrap() function for dependency injection.
  *
  * When the customer has already created a provider client, wrap()
- * extracts credentials and returns an instrumented SDK wrapper.
+ * returns an instrumented SDK wrapper. OpenAI/Anthropic/Azure clients are
+ * reconstructed from extracted credentials; Gemini/GoogleGenAI/Bedrock/Mistral
+ * clients are adopted directly so the caller's configured transport (Vertex AI
+ * project, AWS region/credentials, custom server URL) is preserved.
  *
- * Supported providers: OpenAI, Anthropic, AzureOpenAI.
  * Unsupported types raise AmplitudeAIWrapError.
  */
 
 import { AmplitudeAIError } from './exceptions.js';
 import { Anthropic as AmpAnthropic } from './providers/anthropic.js';
 import { AzureOpenAI as AmpAzureOpenAI } from './providers/azure-openai.js';
+import { Bedrock as AmpBedrock } from './providers/bedrock.js';
+import { Gemini as AmpGemini } from './providers/gemini.js';
+import { GoogleGenAI as AmpGoogleGenAI } from './providers/google-genai.js';
+import { Mistral as AmpMistral } from './providers/mistral.js';
 import { OpenAI as AmpOpenAI } from './providers/openai.js';
 import type { AmplitudeOrAI } from './types.js';
 import { tryRequire } from './utils/resolve-module.js';
@@ -59,12 +65,26 @@ export function wrap(
   client: unknown,
   amplitude: AmplitudeOrAI,
   opts?: WrapOpts,
-): AmpOpenAI | AmpAzureOpenAI | AmpAnthropic;
+):
+  | AmpOpenAI
+  | AmpAzureOpenAI
+  | AmpAnthropic
+  | AmpGemini
+  | AmpGoogleGenAI
+  | AmpBedrock
+  | AmpMistral;
 export function wrap(
   client: unknown,
   amplitude: AmplitudeOrAI,
   opts?: WrapOpts,
-): AmpOpenAI | AmpAzureOpenAI | AmpAnthropic {
+):
+  | AmpOpenAI
+  | AmpAzureOpenAI
+  | AmpAnthropic
+  | AmpGemini
+  | AmpGoogleGenAI
+  | AmpBedrock
+  | AmpMistral {
   const clientObj = client as Record<string, unknown>;
   const clientConstructor = (client as { constructor?: { name?: string } })
     ?.constructor;
@@ -128,9 +148,82 @@ export function wrap(
     }
   }
 
+  // Bedrock — adopt the AWS SDK client directly (it carries region/credentials).
+  const bedrockModule =
+    explicitModule && 'BedrockRuntimeClient' in explicitModule
+      ? explicitModule
+      : tryRequire('@aws-sdk/client-bedrock-runtime');
+  if (bedrockModule != null) {
+    const BedrockRuntimeClient = bedrockModule.BedrockRuntimeClient as
+      | (new (...args: unknown[]) => unknown)
+      | undefined;
+    if (BedrockRuntimeClient && client instanceof BedrockRuntimeClient) {
+      return new AmpBedrock({
+        amplitude,
+        client,
+        bedrockModule,
+      });
+    }
+  }
+
+  // New unified Google Gen AI SDK (`@google/genai`) — adopt the client.
+  const googleGenAIModule =
+    explicitModule && 'GoogleGenAI' in explicitModule
+      ? explicitModule
+      : tryRequire('@google/genai');
+  if (googleGenAIModule != null) {
+    const GoogleGenAIClass = googleGenAIModule.GoogleGenAI as
+      | (new (...args: unknown[]) => unknown)
+      | undefined;
+    if (GoogleGenAIClass && client instanceof GoogleGenAIClass) {
+      return new AmpGoogleGenAI({
+        amplitude,
+        client,
+        googleGenAIModule,
+      });
+    }
+  }
+
+  // Legacy Google Generative AI SDK (`@google/generative-ai`) — adopt the client.
+  const geminiModule =
+    explicitModule && 'GoogleGenerativeAI' in explicitModule
+      ? explicitModule
+      : tryRequire('@google/generative-ai');
+  if (geminiModule != null) {
+    const GoogleGenerativeAIClass = geminiModule.GoogleGenerativeAI as
+      | (new (...args: unknown[]) => unknown)
+      | undefined;
+    if (GoogleGenerativeAIClass && client instanceof GoogleGenerativeAIClass) {
+      return new AmpGemini({
+        amplitude,
+        client,
+        geminiModule,
+      });
+    }
+  }
+
+  // Mistral — adopt the client.
+  const mistralModule =
+    explicitModule && 'Mistral' in explicitModule
+      ? explicitModule
+      : tryRequire('@mistralai/mistralai');
+  if (mistralModule != null) {
+    const MistralClass = (mistralModule.Mistral ??
+      mistralModule.MistralClient) as
+      | (new (...args: unknown[]) => unknown)
+      | undefined;
+    if (MistralClass && client instanceof MistralClass) {
+      return new AmpMistral({
+        amplitude,
+        client,
+        mistralModule,
+      });
+    }
+  }
+
   const supported =
-    'openai.OpenAI, openai.AzureOpenAI, @anthropic-ai/sdk.Anthropic';
+    'openai.OpenAI, openai.AzureOpenAI, @anthropic-ai/sdk.Anthropic, @google/genai.GoogleGenAI, @google/generative-ai.GoogleGenerativeAI, @aws-sdk/client-bedrock-runtime.BedrockRuntimeClient, @mistralai/mistralai.Mistral';
   throw new AmplitudeAIWrapError(
-    `wrap() does not support ${clientName}. Supported types: ${supported}. For Gemini, Bedrock, and Mistral, use the SDK's provider classes directly.`,
+    `wrap() does not support ${clientName}. Supported types: ${supported}.`,
   );
 }

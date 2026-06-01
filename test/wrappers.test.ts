@@ -24,11 +24,19 @@ describe('wrap', () => {
     );
   });
 
-  it('error message mentions Gemini, Bedrock, and Mistral', (): void => {
+  it('error message lists the now-supported Gemini, Bedrock, and Mistral types', (): void => {
     const unsupportedClient = {};
 
+    // These providers were previously unsupported by wrap(); they are now
+    // adopted directly, so the supported-types list must mention them.
     expect(() => wrap(unsupportedClient, mockAmplitude)).toThrow(
-      /For Gemini, Bedrock, and Mistral/,
+      /@google\/genai\.GoogleGenAI/,
+    );
+    expect(() => wrap(unsupportedClient, mockAmplitude)).toThrow(
+      /@aws-sdk\/client-bedrock-runtime\.BedrockRuntimeClient/,
+    );
+    expect(() => wrap(unsupportedClient, mockAmplitude)).toThrow(
+      /@mistralai\/mistralai\.Mistral/,
     );
   });
 
