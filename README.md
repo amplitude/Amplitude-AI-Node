@@ -187,7 +187,7 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
 
-**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Score` events with rubric scores, `[Agent] Topic Classification` events with category labels, and `[Agent] Session Evaluation` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Score` events with rubric scores, `[Agent] Topic Classification` events with category labels, and `[Agent] Session Record` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
 
 **Quality signals from every source in one event type.** User thumbs up/down (`source: 'user'`), automated rubric scores from the enrichment pipeline (`source: 'ai'`), and reviewer assessments (`source: 'reviewer'`) all produce `[Agent] Score` events differentiated by `[Agent] Evaluation Source`. One chart shows all three side by side. Filter by source or view them together. Filter by `[Agent] Agent ID` for per-agent quality attribution.
 
@@ -661,7 +661,7 @@ const child = parent.child('researcher', {
 - **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
-> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Evaluation`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
+> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Record`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
 
 ## Privacy & Content Control
 
@@ -1770,7 +1770,7 @@ Your Application
             (immediate querying)           Pipeline (async)
                                                   │
                                                   ▼
-                                        [Agent] Session Evaluation
+                                        [Agent] Session Record
                                         [Agent] Score events
                                         (topic, rubric, outcome)
 ```
@@ -1778,7 +1778,7 @@ Your Application
 **Key points:**
 - All paths converge at the `AmplitudeAI` client, which batches and sends events.
 - Events are available for charting within seconds of ingestion.
-- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Evaluation` and `[Agent] Score`.
+- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Record` and `[Agent] Score`.
 - With `contentMode: 'customer_enriched'`, the enrichment pipeline is skipped — you provide your own enrichments via `trackSessionEnrichment()`.
 
 ## Integration Approaches
@@ -2239,9 +2239,9 @@ This is useful for backfilling historical conversations or importing data from e
 | `[Agent] Session End`          | SDK    | Session ended                                                                   |
 | `[Agent] Session Enrichment`   | SDK    | Session-level enrichment data                                                   |
 | `[Agent] Score`                | Both   | Evaluation score (quality, sentiment, etc.)                                     |
-| `[Agent] Session Evaluation`   | Server | Session-level summary: outcome, turn count, flags, cost. Emitted automatically. |
-| `[Agent] Evaluation Result`    | Server | One event per custom evaluator per session. Covers classifiers, detectors, scorers. |
-| `[Agent] Topic Classification` | Server | **Deprecated.** Replaced by `[Agent] Evaluation Result`. One event per topic model per session. |
+| `[Agent] Session Record`       | Server | Session-level summary: outcome, turn count, flags, cost. Emitted automatically. |
+| `[Agent] Evaluator Result`     | Server | One event per custom evaluator per session. Covers classifiers, detectors, scorers. |
+| `[Agent] Topic Classification` | Server | **Deprecated.** Replaced by `[Agent] Evaluator Result`. One event per topic model per session. |
 
 ## Event Property Reference
 
@@ -2424,9 +2424,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
 | `[Agent] Score Label` | string | No | Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only. |
 
-### Server-Side: Session Evaluation Properties
+### Server-Side: Session Record Properties
 
-`[Agent] Session Evaluation` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
+`[Agent] Session Record` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -2482,7 +2482,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 
 ### Server-Side: Topic Classification Properties (Deprecated)
 
-> **Deprecated:** `[Agent] Topic Classification` is replaced by `[Agent] Evaluation Result`. It is still emitted for backward compatibility but will be removed in a future version.
+> **Deprecated:** `[Agent] Topic Classification` is replaced by `[Agent] Evaluator Result`. It is still emitted for backward compatibility but will be removed in a future version.
 
 `[Agent] Topic Classification` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
 
@@ -2501,9 +2501,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Subcategories` | string[] | No | Subcategories for finer classification within the primary topic (e.g., 'TREND_ANALYSIS', 'WRONG_EVENT'). JSON array of strings. |
 | `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
 
-### Server-Side: Evaluation Result Properties
+### Server-Side: Evaluator Result Properties
 
-`[Agent] Evaluation Result` is emitted once per custom evaluator per session by the server-side enrichment pipeline. Covers classifiers, detectors, and scorers — distinguished by `[Agent] Evaluator Output Type`. OOTB evaluators are excluded (their results are de-normalized on Session Evaluation).
+`[Agent] Evaluator Result` is emitted once per custom evaluator per session by the server-side enrichment pipeline. Covers classifiers, detectors, and scorers — distinguished by `[Agent] Evaluator Output Type`. OOTB evaluators are excluded (their results are de-normalized on Session Record).
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -2645,7 +2645,7 @@ When you use this SDK, the following are managed automatically. If you send even
 | **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set a unique `insert_id` per event to prevent duplicates on retry                                                                             |
 | **Property prefixing**       | All properties are prefixed with `[Agent]`                                                                                                                                | You must include the `[Agent] ` prefix in every property name                                                                                 |
 | **Cost / token calculation** | Auto-computed from model and token counts                                                                                                                                 | Compute and send `[Agent] Cost USD`, `[Agent] Input Tokens`, etc. yourself                                                                    |
-| **Server-side enrichment**   | `[Agent] Session Evaluation`, `[Agent] Topic Classification`, and `[Agent] Score` events are emitted automatically by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Just send the SDK-level events and close the session with `[Agent] Session End`. |
+| **Server-side enrichment**   | `[Agent] Session Record`, `[Agent] Topic Classification`, and `[Agent] Score` events are emitted automatically by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Just send the SDK-level events and close the session with `[Agent] Session End`. |
 
 ### Ingestion methods
 

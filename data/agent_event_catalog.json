@@ -902,7 +902,7 @@
     },
     {
       "event_type": "[Agent] Session Enrichment",
-      "description": "Fired when a customer provides structured session classifications via track_session_enrichment(). Used with content_mode='customer_enriched' for teams who run their own classifiers. Distinct from the server-generated [Agent] Session Evaluation. Contains serialized SessionEnrichments (topics, rubrics, outcome, flags) as a single JSON property.",
+      "description": "Fired when a customer provides structured session classifications via track_session_enrichment(). Used with content_mode='customer_enriched' for teams who run their own classifiers. Distinct from the server-generated [Agent] Session Record. Contains serialized SessionEnrichments (topics, rubrics, outcome, flags) as a single JSON property.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1100,7 +1100,7 @@
       ]
     },
     {
-      "event_type": "[Agent] Session Evaluation",
+      "event_type": "[Agent] Session Record",
       "description": "Fired once per enriched session by the server-side enrichment pipeline. Contains session-level facts: overall outcome, turn count, boolean flags (has_task_failure, has_negative_feedback, has_technical_failure, has_data_quality_issues), cost, and user friction patterns. Enables cohorts like 'users with 3+ task failures in 30 days'.",
       "properties": [
         {
@@ -1371,7 +1371,7 @@
     {
       "event_type": "[Agent] Topic Classification",
       "deprecated": true,
-      "description": "DEPRECATED: Replaced by [Agent] Evaluation Result. Previously fired once per topic model per session by the server-side enrichment pipeline. A session with 3 topic models (e.g., query_intent, product_area, error_domain) produced 3 of these events. Property names are always the same; the topic model name goes in the value.",
+      "description": "DEPRECATED: Replaced by [Agent] Evaluator Result. Previously fired once per topic model per session by the server-side enrichment pipeline. A session with 3 topic models (e.g., query_intent, product_area, error_domain) produced 3 of these events. Property names are always the same; the topic model name goes in the value.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1446,8 +1446,8 @@
       ]
     },
     {
-      "event_type": "[Agent] Evaluation Result",
-      "description": "Fired once per custom evaluator per session. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on Session Evaluation).",
+      "event_type": "[Agent] Evaluator Result",
+      "description": "Fired once per custom evaluator per session. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on Session Record).",
       "properties": [
         {
           "name": "[Agent] Session ID",
