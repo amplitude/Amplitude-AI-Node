@@ -134,11 +134,11 @@ Prompt:
 
 - `[Agent] AI Response`
 - `[Agent] Embedding`
-- `[Agent] Evaluation Result`
+- `[Agent] Evaluator Result`
 - `[Agent] Score`
 - `[Agent] Session End`
 - `[Agent] Session Enrichment`
-- `[Agent] Session Evaluation`
+- `[Agent] Session Record`
 - `[Agent] Span`
 - `[Agent] Tool Call`
 - `[Agent] Topic Classification`
