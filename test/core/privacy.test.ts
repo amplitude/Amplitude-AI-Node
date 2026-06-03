@@ -23,11 +23,27 @@ describe('isBase64DataUrl', () => {
 
 describe('isRawBase64', () => {
   it('detects raw base64 strings', () => {
-    expect(isRawBase64('aGVsbG8gd29ybGQgdGhpcyBpcyBhIGxvbmcgc3RyaW5n')).toBe(
-      true,
-    );
+    // 1x1 transparent PNG, base64-encoded — contains `+/=` like any real image
+    expect(
+      isRawBase64(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+      ),
+    ).toBe(true);
     expect(isRawBase64('short')).toBe(false);
     expect(isRawBase64('https://example.com')).toBe(false);
+  });
+
+  // Regression: AA-151131 — ULIDs use Crockford base32, which is a subset of
+  // the base64 alphabet, so the old anchored alnum regex flagged them as
+  // images and rewrote tool inputs to "[base64 image redacted]".
+  it('does not flag ULIDs as base64', () => {
+    expect(isRawBase64('01KRESR2V3E22E29C3JBB8FR8Z')).toBe(false);
+    expect(isRawBase64('01ARZ3NDEKTSV4RRFFQ69G5FAV')).toBe(false);
+  });
+
+  it('does not flag hex tokens or UUIDs without dashes', () => {
+    expect(isRawBase64('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4')).toBe(false);
+    expect(isRawBase64('550e8400e29b41d4a716446655440000')).toBe(false);
   });
 });
 

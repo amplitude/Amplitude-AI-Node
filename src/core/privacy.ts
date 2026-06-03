@@ -60,7 +60,15 @@ export function isValidUrl(text: string): boolean {
 
 export function isRawBase64(text: string): boolean {
   if (isValidUrl(text)) return false;
-  return text.length > 20 && RAW_BASE64_RE.test(text);
+  // Standard base64 is always padded to a multiple of 4, and any payload
+  // longer than a few bytes of high-entropy data (i.e. anything image-sized)
+  // will contain `+`, `/`, or `=`. Requiring one of those characters keeps
+  // identifier-style strings that happen to use a subset of the base64
+  // alphabet — ULIDs, hex tokens, UUIDs without dashes — from being
+  // mis-redacted as base64 images. See AA-151131.
+  if (text.length <= 20 || text.length % 4 !== 0) return false;
+  if (!/[+/=]/.test(text)) return false;
+  return RAW_BASE64_RE.test(text);
 }
 
 export function createContentHash(content: unknown): string {
