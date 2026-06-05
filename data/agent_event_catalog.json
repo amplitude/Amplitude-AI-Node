@@ -562,6 +562,11 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Tool Type",
+          "type": "string",
+          "description": "Origin/class of the tool: 'python' (native in-process tool), 'mcp' (tool served by a connected MCP server), 'flow' (sub-agent delegation), or 'unknown'. Lets you segment native vs. MCP-connected tool usage without parsing the tool name or Context."
+        },
+        {
           "name": "[Agent] Tool Success",
           "type": "boolean",
           "description": "Whether the tool call completed successfully.",

@@ -34,6 +34,7 @@ export const PROP_FINISH_REASON = '[Agent] Finish Reason';
 export const PROP_TOOL_CALLS = '[Agent] Tool Calls';
 export const PROP_TOOL_NAME = '[Agent] Tool Name';
 export const PROP_TOOL_SUCCESS = '[Agent] Tool Success';
+export const PROP_TOOL_TYPE = '[Agent] Tool Type';
 export const PROP_INVOCATION_ID = '[Agent] Invocation ID';
 export const PROP_PARENT_MESSAGE_ID = '[Agent] Parent Message ID';
 export const PROP_AGENT_ID = '[Agent] Agent ID';
