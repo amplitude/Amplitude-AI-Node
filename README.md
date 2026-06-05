@@ -12,7 +12,7 @@ The canonical SDK reference lives in Amplitude Docs:
 
 **[amplitude.com/docs/amplitude-ai/agent-analytics/setup](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup)**
 
-That page covers installation, the full event taxonomy, sessions, tools, spans, scores, multi-agent delegation, streaming, edge runtimes (Cloudflare Workers, Vercel AI SDK), provider-specific notes (OpenAI, Anthropic, Gemini, Bedrock, Mistral, Anthropic Managed Agents, Claude Agent SDK), cost and prompt-cache handling, privacy modes, content shaping, verification with `MockAmplitudeAI`, and the complete API.
+That page covers installation, the full event taxonomy, sessions, tools, spans, scores, multi-agent delegation, streaming, edge runtimes (Cloudflare Workers, Vercel AI SDK), provider-specific notes (OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral, Anthropic Managed Agents, Claude Agent SDK), cost and prompt-cache handling, privacy modes, content shaping, verification with `MockAmplitudeAI`, and the complete API.
 
 ## Install
 
@@ -45,6 +45,16 @@ app.post('/chat', async (req, res) => {
 ```
 
 Emits `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` — tied to `userId` and `sessionId`. Auto-captures model, tokens, cost, and latency on the AI Response. Read the [setup guide](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) for the rest.
+
+## Provider wrappers
+
+Each wrapper records request, response, tokens, latency, and cost automatically:
+
+```typescript
+import { OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral } from '@amplitude/ai';
+```
+
+See [Auto-instrument provider calls](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#auto-instrument-provider-calls) for the full table and per-provider notes (Anthropic Managed Agents, Claude Agent SDK, Vercel AI SDK).
 
 ## Auto-instrument with an AI coding agent
 
