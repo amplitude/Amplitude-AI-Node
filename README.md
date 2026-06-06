@@ -2353,7 +2353,8 @@ Event-specific properties for `[Agent] Tool Call` (in addition to common propert
 | `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
 | `[Agent] Invocation ID` | string | Yes | Unique identifier for this tool invocation (UUID). Used to link tool calls to parent messages. |
 | `[Agent] Tool Name` | string | Yes | Name of the tool/function that was invoked (e.g., 'search_docs', 'web_search'). |
-| `[Agent] Tool Type` | string | No | Origin/class of the tool: 'python' (native in-process tool), 'mcp' (tool from an Amplitude-owned MCP server), 'mcp_customer' (tool from a customer-connected MCP server, e.g. a user's own server via the MCP gateway), 'flow' (sub-agent delegation), or 'unknown'. Lets you segment Amplitude-internal vs. customer-connected tool usage without parsing the tool name or Context. |
+| `[Agent] Tool Type` | string | No | Origin/class of the tool: 'python' (native in-process tool), 'mcp' (tool served by a connected MCP server), 'flow' (sub-agent delegation), or 'unknown'. Lets you segment native vs. MCP-connected tool usage without parsing the tool name or Context. |
+| `[Agent] Tool Owner` | string | No | Who owns the tool: 'amplitude' (Amplitude-built/operated — native tools, sub-agents, and Amplitude's own MCP servers) or 'customer' (a server the customer connected, e.g. their own MCP server via the gateway). Segments Amplitude-internal vs. customer-connected tool usage as a first-class property, without overloading [Agent] Tool Type. |
 | `[Agent] Tool Success` | boolean | Yes | Whether the tool call completed successfully. |
 | `[Agent] Tool Input` | string | No | Serialized JSON of the tool's input arguments. Only sent when content_mode='full'. |
 | `[Agent] Tool Output` | string | No | Serialized JSON of the tool's output/return value. Only sent when content_mode='full'. |
