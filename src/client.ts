@@ -494,6 +494,7 @@ export class AmplitudeAI {
     userId?: string;
     deviceId?: string | null;
     toolName: string;
+    toolType?: string | null;
     latencyMs: number;
     success: boolean;
     sessionId?: string | null;
@@ -521,6 +522,7 @@ export class AmplitudeAI {
       userId: opts.userId,
       deviceId: opts.deviceId,
       toolName: opts.toolName,
+      toolType: opts.toolType,
       success: opts.success,
       latencyMs: opts.latencyMs,
       sessionId: opts.sessionId,
