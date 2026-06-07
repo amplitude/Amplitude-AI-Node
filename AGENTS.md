@@ -133,6 +133,7 @@ Prompt:
 ## Event Schema (names)
 
 - `[Agent] AI Response`
+- `[Agent] Cluster Assignment`
 - `[Agent] Embedding`
 - `[Agent] Evaluator Result`
 - `[Agent] Score`
