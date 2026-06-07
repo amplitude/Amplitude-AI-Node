@@ -81,6 +81,7 @@ import {
   PROP_TOOL_NAME,
   PROP_TOOL_OUTPUT,
   PROP_TOOL_SUCCESS,
+  PROP_TOOL_TYPE,
   PROP_TOP_P,
   PROP_TOTAL_ATTACHMENT_SIZE,
   PROP_TOTAL_TOKENS,
@@ -521,6 +522,7 @@ export interface TrackToolCallOptions {
   userId?: string;
   deviceId?: string | null;
   toolName: string;
+  toolType?: string | null;
   success: boolean;
   latencyMs: number;
   sessionId?: string | null;
@@ -592,6 +594,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.locale) properties[PROP_LOCALE] = opts.locale;
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
+  if (opts.toolType) properties[PROP_TOOL_TYPE] = opts.toolType;
 
   let effectiveMode = pc.contentMode;
   if (effectiveMode == null)
