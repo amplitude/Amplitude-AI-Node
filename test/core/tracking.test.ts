@@ -53,6 +53,7 @@ import {
   PROP_TOOL_INPUT,
   PROP_TOOL_NAME,
   PROP_TOOL_OUTPUT,
+  PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
   PROP_TOP_P,
@@ -348,6 +349,21 @@ describe('trackToolCall', () => {
 
     const props = amp.events[0].event_properties as Record<string, unknown>;
     expect(props[PROP_TOOL_TYPE]).toBeUndefined();
+  });
+
+  it('emits [Agent] Tool Owner when toolOwner is provided so customer-connected tools are distinguishable from Amplitude-owned ones', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'search',
+      toolOwner: 'customer',
+      success: true,
+      latencyMs: 10,
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_TOOL_OWNER]).toBe('customer');
   });
 });
 

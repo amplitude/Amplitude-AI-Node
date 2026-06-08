@@ -107,6 +107,7 @@ export class ToolCallTracker {
 interface ToolOptions {
   name?: string;
   toolType?: string | null;
+  toolOwner?: string | null;
   amplitude?: AmplitudeLike | null;
   userId?: string | null;
   sessionId?: string | null;
@@ -342,6 +343,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           userId: r.userId,
           toolName,
           toolType: opts.toolType,
+          toolOwner: opts.toolOwner,
           success,
           latencyMs,
           sessionId: r.sessionId,
