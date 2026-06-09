@@ -987,7 +987,7 @@
     },
     {
       "event_type": "[Agent] Score",
-      "description": "Quality signal attached to a message or session. Covers user feedback (source='user', e.g., thumbs up/down), automated evals (source='ai', e.g., LLM-as-judge), human annotations (source='reviewer'), and server-generated rubric scores. All quality signals share this event type, enabling unified queries across signal sources.",
+      "description": "Quality signal attached to a message or session, sent by the customer via the SDK's score() method. Covers user feedback (source='user', e.g., thumbs up/down), customer-run automated evals (source='ai', e.g., LLM-as-judge), and human annotations (source='reviewer'). Server-side enrichment rubric scores are emitted as [Agent] Evaluator Result (output_type='score'), not this event type.",
       "properties": [
         {
           "name": "[Agent] Session ID",

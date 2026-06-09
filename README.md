@@ -187,9 +187,9 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
 
-**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Score` events with rubric scores, `[Agent] Topic Classification` events with category labels, and `[Agent] Session Record` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Evaluator Result` events with rubric scores (`output_type: 'score'`), `[Agent] Topic Classification` events with category labels, and `[Agent] Session Record` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
 
-**Quality signals from every source in one event type.** User thumbs up/down (`source: 'user'`), automated rubric scores from the enrichment pipeline (`source: 'ai'`), and reviewer assessments (`source: 'reviewer'`) all produce `[Agent] Score` events differentiated by `[Agent] Evaluation Source`. One chart shows all three side by side. Filter by source or view them together. Filter by `[Agent] Agent ID` for per-agent quality attribution.
+**Quality signals from multiple event types.** User thumbs up/down and customer-run evals produce `[Agent] Score` events via the SDK's `score()` method (`source: 'user'`, `source: 'ai'`, or `source: 'reviewer'`). Server-side enrichment rubric scores produce `[Agent] Evaluator Result` events (`output_type: 'score'`). Both are queryable in charts, cohorts, and funnels. Filter by `[Agent] Evaluation Source` or `[Agent] Agent ID` for per-agent quality attribution.
 
 **Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
 
@@ -1788,14 +1788,14 @@ Your Application
                                                   │
                                                   ▼
                                         [Agent] Session Record
-                                        [Agent] Score events
+                                        [Agent] Evaluator Result events
                                         (topic, rubric, outcome)
 ```
 
 **Key points:**
 - All paths converge at the `AmplitudeAI` client, which batches and sends events.
 - Events are available for charting within seconds of ingestion.
-- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Record` and `[Agent] Score`.
+- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Record` and `[Agent] Evaluator Result`.
 - With `contentMode: 'customer_enriched'`, the enrichment pipeline is skipped — you provide your own enrichments via `trackSessionEnrichment()`.
 
 ## Integration Approaches
