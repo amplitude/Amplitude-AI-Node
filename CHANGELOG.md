@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.1
+
+### Docs (AA-150651)
+- **Dual-event guidance for agentic business actions:** Step 3e of `amplitude-ai.md`
+  (and the README `tool()` section) now documents emitting both an `[Agent] Tool Call`
+  (operational) and the standard product event via the base SDK with a `journey_type`
+  discriminator (business attribution), so agent-driven and click-driven journeys are
+  comparable in the same funnel without joining. Reframes the Safety Rule from an absolute
+  ban on the base SDK's `track()` to scoped routing: agent telemetry via `track*`, business
+  product events via the base SDK. Docs-only; no code changes.
+
 ## 0.11.0
 
 ### Added (AA-151040)
