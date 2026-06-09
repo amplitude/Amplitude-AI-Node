@@ -1131,6 +1131,23 @@ const fetchWeather = tool(
 );
 ```
 
+#### Business attribution for agent actions
+
+When a tool performs a real business action (add to cart, purchase, signup), emit **two** events on two planes: the `[Agent] Tool Call` above for operational health, **and** the standard product event via the base Amplitude SDK for business attribution:
+
+```typescript
+import { track } from '@amplitude/analytics-node'; // or @amplitude/analytics-browser client-side
+
+// inside the tool, after the action succeeds:
+track(
+  'Product Added',                                              // reuse the product's existing event/property names
+  { product_id: productId, journey_type: 'agent' },
+  { user_id: currentUserId },                                   // same user_id as the [Agent] events
+);
+```
+
+The `journey_type` discriminator (`agent` / `web` / `mobile`) makes agent-driven and click-driven journeys comparable in the **same funnel** with no joining. This is the one case where the base SDK's `track()` is correct — it stays a non-`[Agent]` event so it lands in the standard product taxonomy. Only for actions with a click-driven equivalent (not read-only tools), and reuse the existing event name/properties — don't invent them. See Step 3e of `amplitude-ai.md`.
+
 ### observe()
 
 Wraps a function to track as `[Agent] Span`:

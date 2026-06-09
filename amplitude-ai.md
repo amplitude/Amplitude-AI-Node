@@ -215,6 +215,46 @@ const result = await searchProducts(query);
 // [Agent] Tool Call event automatically emitted with duration, success, input/output
 ```
 
+**Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
+
+1. **`[Agent] Tool Call`** (via `tool()` or `trackToolCall()`) — operational telemetry: latency, success/failure, error rate on the action itself.
+2. **The standard product event via the base Amplitude SDK** — business attribution, in the **same taxonomy as non-agent (web/mobile) journeys**.
+
+The bootstrap (`src/lib/amplitude.ts`) creates only the AI SDK, so the business event uses whatever base analytics SDK the product already runs — `@amplitude/analytics-node` server-side (shown here) or `@amplitude/analytics-browser` client-side. Do not introduce a second analytics pipeline.
+
+```typescript
+import { track } from '@amplitude/analytics-node';
+import { tool } from '@amplitude/ai';
+
+const addToCart = tool(
+  async (productId: string, quantity: number) => {
+    const result = await cartService.add(productId, quantity); // throws on failure → no false conversion
+    // Same event name + properties the web/mobile clients already send, plus one discriminator.
+    track(
+      'Product Added',
+      { product_id: productId, quantity, journey_type: 'agent' }, // distinguishes agent- from click-driven
+      { user_id: currentUserId },                                 // same user_id the [Agent] events use → join key
+    );
+    return result;
+  },
+  { name: 'add_to_cart' },
+);
+```
+
+This gives you, with no joining:
+
+- **Operational view:** `[Agent] Tool Call where tool_name="add_to_cart"` → latency, error rate, success rate on the action.
+- **Business view:** `Product Added where journey_type=agent` vs `journey_type=web` in the **same funnel** — comparable because they share event taxonomy and user.
+
+Rules to get this right (a coding agent must follow these, not guess):
+
+- **Only for business actions that have a click-driven equivalent** (add to cart, purchase, signup, form submit). Read-only tools (`search_products`, `get*`) emit **only** `[Agent] Tool Call` — no product event.
+- **Reuse the product's existing event name and property names — do not invent them.** Add only the `journey_type` discriminator. If you cannot locate/confirm the existing taxonomy in the codebase (common when instrumenting an agent-only service), **stop and ask the developer** rather than guess — inventing `Product Added`/property names silently forks the taxonomy and breaks the funnel join.
+- **Emit after the action succeeds**, attributed to the **same `user_id`** the `[Agent]` events use. Use a consistent enum across the codebase (`agent` / `web` / `mobile`).
+- `journey_type` is a new convention with no schema backstop — consistency is on you.
+
+> This is the **one** place the base SDK's `track()` is correct (see Safety Rules). It applies only to genuine business/product events for cross-journey attribution — never to agent telemetry, which must always go through `track*`.
+
 **Explicit AI response capture** (when provider wrappers can't auto-capture):
 
 ```typescript
@@ -739,7 +779,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 
 - **Never modify unrelated files.** Only touch files with LLM call sites and the bootstrap file.
 - **Never duplicate instrumentation.** Check for existing `patch()` or wrapper calls before adding new ones.
-- **Never call the base SDK's `amplitude.track()` directly.** All event tracking must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.). The base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata — events sent this way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom event not covered by the other `track*` methods.
+- **Route events by kind, not by convenience.** Agent telemetry must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.) — the base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata, so agent telemetry sent that way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom *agent* event not covered by the other `track*` methods. The base SDK's `track()` is correct in exactly one case: genuine **business/product events** (e.g. `Product Added`) emitted for cross-journey attribution, which must stay non-`[Agent]` so they join the standard web/mobile taxonomy (see Step 3e). Never send those through `track*`.
 - **Pause before Phase 3.** Always show the discovery report and get developer confirmation.
 - **Prefer additive changes.** Add imports and wrappers rather than rewriting entire files.
 - **Keep content mode explicit.** Default is `full` + `redactPii: true`. Never silently downgrade.
