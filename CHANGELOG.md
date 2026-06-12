@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.0
+
+### Added (AA-151269)
+- **Per-session idle timeout stamped on the first event:** `trackUserMessage` now
+  accepts `idleTimeoutMinutes`, and `Session` stamps its value on the first event
+  (typically the user message) in addition to `[Agent] Session End`. This closes the
+  window where the enrichment pipeline did not yet know a session's idle override and
+  could apply the org default before the explicit-end event arrived.
+
+### Changed (AA-151269)
+- **`idleTimeoutMinutes: -1` is now a 90-day backstop, not "never auto-close":** `-1`
+  means "rely on an explicit Session End," but the session still auto-closes after a
+  90-day inactivity backstop, so a session that is never explicitly ended can no longer
+  leak open forever. Positive values are honored up to 90 days (values above are
+  clamped). `agent.session()` still throws a `RangeError` for negative values other
+  than `-1`.
+
 ## 0.11.1
 
 ### Docs (AA-150651)
