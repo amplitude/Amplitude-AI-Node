@@ -52,6 +52,12 @@ export function _resetRunSyncWarning(): void {
 
 export interface SessionOptions {
   sessionId?: string | null;
+  /**
+   * Idle-timeout hint for the enrichment pipeline (minutes). Defaults to the
+   * pipeline default (~30 min); positive values are honored up to 90 days
+   * (129600). `-1` disables auto-close — the session is enriched only on an
+   * explicit `[Agent] Session End`. See {@link BoundAgent.session}.
+   */
   idleTimeoutMinutes?: number | null;
   userId?: string | null;
   deviceId?: string | null;
@@ -310,7 +316,14 @@ export class Session {
   }
 
   trackUserMessage(content: string, opts: UserMessageOpts = {}): string {
-    return this._agent.trackUserMessage(content, this._inject(opts));
+    // Stamp the session's idle-timeout hint on this (usually first) event so
+    // the enrichment pipeline learns it before any idle/max-duration close
+    // could fire. An explicit opt on the call still wins.
+    const merged = this._inject(opts);
+    if (this.idleTimeoutMinutes != null && merged.idleTimeoutMinutes == null) {
+      merged.idleTimeoutMinutes = this.idleTimeoutMinutes;
+    }
+    return this._agent.trackUserMessage(content, merged);
   }
 
   trackAiMessage(

@@ -328,6 +328,7 @@ export class AmplitudeAI {
     editedMessageId?: string | null;
     attachments?: Attachment[] | null;
     labels?: MessageLabel[] | null;
+    idleTimeoutMinutes?: number | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
@@ -355,6 +356,7 @@ export class AmplitudeAI {
       editedMessageId: opts.editedMessageId,
       attachments: opts.attachments,
       labels: opts.labels,
+      idleTimeoutMinutes: opts.idleTimeoutMinutes,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,

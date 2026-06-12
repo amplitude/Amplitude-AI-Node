@@ -213,6 +213,12 @@ export interface TrackUserMessageOptions {
   attachments?: Attachment[] | null;
   messageSource?: string | null;
   labels?: MessageLabel[] | null;
+  /**
+   * Session idle-timeout hint, stamped on this (typically first) event so the
+   * enrichment pipeline learns it early. `-1` disables auto-close (enrich only
+   * on an explicit Session End). See `BoundAgent.session`.
+   */
+  idleTimeoutMinutes?: number | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -281,6 +287,13 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
       opts.labels.map((lbl) => lbl.toDict()),
     );
   }
+
+  // Stamp the session's idle-timeout hint on the first event of a session
+  // (typically the user message) so the enrichment pipeline learns it before
+  // any idle/max-duration close could fire. -1 = "never auto-close; enrich
+  // only on explicit Session End".
+  if (opts.idleTimeoutMinutes != null)
+    properties[PROP_IDLE_TIMEOUT_MINUTES] = opts.idleTimeoutMinutes;
 
   Object.assign(properties, contentData);
 
