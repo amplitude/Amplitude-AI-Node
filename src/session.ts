@@ -55,8 +55,10 @@ export interface SessionOptions {
   /**
    * Idle-timeout hint for the enrichment pipeline (minutes). Defaults to the
    * pipeline default (~30 min); positive values are honored up to 90 days
-   * (129600). `-1` disables auto-close — the session is enriched only on an
-   * explicit `[Agent] Session End`. See {@link BoundAgent.session}.
+   * (129600, values above are clamped). `-1` means "rely on an explicit
+   * `[Agent] Session End`" — the session is enriched early on an explicit end,
+   * with a 90-day inactivity backstop so it never leaks open forever. See
+   * {@link BoundAgent.session}.
    */
   idleTimeoutMinutes?: number | null;
   userId?: string | null;

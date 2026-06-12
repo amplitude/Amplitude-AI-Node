@@ -290,8 +290,8 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
 
   // Stamp the session's idle-timeout hint on the first event of a session
   // (typically the user message) so the enrichment pipeline learns it before
-  // any idle/max-duration close could fire. -1 = "never auto-close; enrich
-  // only on explicit Session End".
+  // any idle/max-duration close could fire. -1 = "rely on an explicit Session
+  // End," with a 90-day inactivity backstop.
   if (opts.idleTimeoutMinutes != null)
     properties[PROP_IDLE_TIMEOUT_MINUTES] = opts.idleTimeoutMinutes;
 

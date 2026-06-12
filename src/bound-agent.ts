@@ -278,11 +278,12 @@ export class BoundAgent {
    *
    * `idleTimeoutMinutes` hints to the enrichment pipeline how long to wait
    * before considering the session idle. Defaults to the pipeline default
-   * (~30 min). Positive values up to 90 days (129600) are honored. Set to
-   * `-1` to disable auto-close entirely: the session is enriched **only** when
-   * an explicit `[Agent] Session End` is emitted (e.g. on `run`/`end`). With
-   * `-1`, a session that is never explicitly ended is never enriched, so use
-   * it only when your code reliably ends sessions.
+   * (~30 min). Positive values up to 90 days (129600) are honored; larger
+   * values are clamped to 90 days. Set to `-1` when you intend to end the
+   * session explicitly: it is enriched early when an explicit
+   * `[Agent] Session End` is emitted (e.g. on `run`/`end`), and otherwise
+   * auto-closes after a 90-day inactivity backstop — so a session that is never
+   * explicitly ended still flushes eventually rather than leaking open.
    *
    * @throws {RangeError} if `idleTimeoutMinutes` is a negative value other than
    *   the `-1` sentinel.
@@ -299,7 +300,7 @@ export class BoundAgent {
   ): Session {
     if (opts.idleTimeoutMinutes != null && opts.idleTimeoutMinutes < -1) {
       throw new RangeError(
-        `idleTimeoutMinutes must be >= 0, or -1 to disable auto-close; got ${opts.idleTimeoutMinutes}`,
+        `idleTimeoutMinutes must be >= 0, or -1 to rely on an explicit session end; got ${opts.idleTimeoutMinutes}`,
       );
     }
     return new Session(this, opts);
