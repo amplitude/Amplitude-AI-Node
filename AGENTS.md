@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.11.2
+Package: `@amplitude/ai` v0.12.0
 
 ## Install
 
