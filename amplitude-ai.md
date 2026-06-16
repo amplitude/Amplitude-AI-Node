@@ -156,8 +156,8 @@ const agent = ai.agent('chat-handler', {
 });
 
 export async function POST(req: Request) {
-  const { messages, userId } = await req.json();
-  return agent.session({ userId }).run(async (s) => {
+  const { messages, userId, sessionId } = await req.json();
+  return agent.session({ userId, sessionId }).run(async (s) => {
     s.trackUserMessage(messages[messages.length - 1].content);
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
     return Response.json(response);
@@ -166,6 +166,10 @@ export async function POST(req: Request) {
   // For non-serverless, or tracking outside session.run(), call: await ai.flush()
 }
 ```
+
+- Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
+- Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
+- Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
 
 <!-- llms-excerpt:content-shaping:start -->
 **User message text vs structured pipeline data (critical for Agent Analytics UI):**
