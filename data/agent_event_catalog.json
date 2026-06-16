@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 13,
-    "generated_at": "2026-05-22T23:13:52.722179+00:00",
+    "schema_version": 14,
+    "generated_at": "2026-06-16T06:59:48.396844+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -1293,6 +1293,11 @@
           "name": "[Agent] Agent Description",
           "type": "string",
           "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
         },
         {
           "name": "[Agent] Task Completed",

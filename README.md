@@ -661,7 +661,7 @@ const child = parent.child('researcher', {
 - **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
-> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Record`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
+> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `experiment_variant`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
 
 ## Privacy & Content Control
 
@@ -2482,6 +2482,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] User Score` | number | No | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
 | `[Agent] Task Completed` | string | No | OOTB detector result: 'True' if agent completed user's request, 'False' otherwise. |
 | `[Agent] Task Completed Rationale` | string | No | Brief rationale for the task completion determination. |
 | `[Agent] Task Completed Evidence` | string | No | Supporting evidence for the task completion determination. |
