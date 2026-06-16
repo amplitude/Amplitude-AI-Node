@@ -246,7 +246,7 @@ Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure
 | API key | Amplitude project settings | Events reach Amplitude |
 | userId | Your auth layer (JWT, session cookie, API token) | Per-user analytics, cohorts, retention |
 | agentId | Your choice (e.g. `'chat-handler'`) | Per-agent cost, latency, quality dashboards |
-| sessionId | Your conversation/thread/ticket ID | Multi-turn analysis, session enrichment, quality scores |
+| sessionId | Agent session ID — your thread, ticket, call, or run ID (see [What is an agent session?](#what-is-an-agent-session)) | Multi-turn analysis, session enrichment, quality scores |
 | *description* | *Your choice (e.g. `'Handles support queries via GPT-4o'`)* | *Human-readable agent registry from event streams* |
 | *contentMode + redactPii* | *Config (defaults work)* | *Server enrichment (automatic), PII scrubbing* |
 | *model, tokens, cost* | *Auto-captured by provider wrappers* | *Cost analytics, latency monitoring* |
@@ -481,6 +481,38 @@ app.use(
 
 ### Session
 
+#### What is an agent session?
+
+An **agent session** is not the same as Amplitude's standard analytics session.
+
+| | Agent session | Analytics session |
+|--|---------------|-------------------|
+| Property | `[Agent] Session ID` | `$session_id` (Browser SDK) |
+| SDK parameter | `sessionId` on `agent.session()` | `browserSessionId` on `agent.session()` |
+| Meaning | One unit of work the user hands the agent — a job with a real outcome | The user's app or web visit; powers Session Replay and standard product analytics |
+
+You can have **multiple agent sessions inside one analytics session**. For example: when you open Amplitude, you start an analytics session; when you launch Global Agent from within Amplitude, you start an agent session.
+
+**What counts as one agent session:** one job from start to finish. Pass the ID you already track as `sessionId`:
+
+- Chatbot / copilot → thread or conversation ID
+- Support agent → ticket ID
+- Coding agent → task or ticket ID
+- Voice agent → call ID
+- Background / autonomous agent → run or job ID
+
+You're not inventing a new identifier — use the thread, ticket, call, or run ID your app already has. Quickstart examples that omit `sessionId` (UUID auto-generation) are for demos only; production apps should pass your real job ID.
+
+##### When does an agent session end?
+
+**Close explicitly when the job is done (recommended).** Call `trackSessionEnd()` or let `session.run()` complete when the unit of work is finished (ticket resolved, call ended, run completed). This marks the session as complete and makes it **eligible for server-side enrichment immediately**.
+
+Closing does not block later events with the same `sessionId` — it is a completion marker, not a hard lock. If the user continues the **same job** (same thread or ticket), reusing the same `sessionId` is fine.
+
+**Idle timeout (automatic fallback).** If you don't close explicitly, the server marks the session eligible for enrichment after `idleTimeoutMinutes` of inactivity (default **30 minutes**). Raise it for jobs with long natural gaps — e.g. `240` for support tickets or coding agents with pauses between turns.
+
+**New goal → new session.** When the user starts a **different job**, use a **new `sessionId`**.
+
 Async context manager using `AsyncLocalStorage`. Use `session.run()` to execute a callback within session context; session end is tracked automatically on exit:
 
 ```typescript
@@ -512,19 +544,14 @@ const session = agent.session({
 
 Without this, sessions with long idle periods may be closed and enrichment may run earlier than expected. The default is 30 minutes.
 
-**Session lifecycle and enrichment.** You do **not** need to call `trackSessionEnd()` for sessions to work. Amplitude's server automatically closes sessions after 30 minutes of inactivity and queues them for enrichment (topic classification, quality scoring, session evaluation) at that point. The only reason to call `trackSessionEnd()` is to **trigger enrichment sooner** — for example, if you know the conversation is over and want evaluation results immediately rather than waiting for the idle timeout.
-
-"Closed" is a server-side concept meaning "queued for enrichment" — it does **not** prevent new events from flowing into the same session. If the user resumes a conversation after session end, new messages with the same `sessionId` are still associated with that session.
-
-If you use `session.run()`, session end is tracked automatically when the callback completes. For long-lived conversations (chatbots, support agents), you can skip explicit session end entirely and let the server handle it.
-
-**Link to Session Replay**: If your frontend uses Amplitude's [Session Replay](https://www.docs.developers.amplitude.com/session-replay/), pass the browser's `deviceId` and `browserSessionId` to link AI sessions to browser recordings:
+**Link to Session Replay**: If your frontend uses Amplitude's [Session Replay](https://www.docs.developers.amplitude.com/session-replay/), pass the browser's analytics `$session_id` as `browserSessionId` (separate from agent `sessionId`) plus `deviceId` to link agent sessions to browser recordings:
 
 ```typescript
 const session = agent.session({
   userId: 'user-123',
+  sessionId: req.headers['x-thread-id'], // agent job ID (thread, ticket, call, or run)
   deviceId: req.headers['x-amp-device-id'],
-  browserSessionId: req.headers['x-amp-session-id'],
+  browserSessionId: req.headers['x-amp-session-id'], // analytics $session_id for replay
 });
 
 await session.run(async (s) => {
@@ -657,7 +684,6 @@ const child = parent.child('researcher', {
 ```
 
 **Querying in Amplitude:** The `[Agent] Context` property is a JSON string. To query individual keys:
-- **Group-by**: Select `[Agent] Context` as the property, then use dot notation (e.g., `[Agent] Context.agent_type`) to extract a specific key.
 - **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
