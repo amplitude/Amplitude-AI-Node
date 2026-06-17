@@ -56,16 +56,6 @@ import { OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral } from '@ampli
 
 See [Auto-instrument provider calls](https://amplitude.com/docs/sdks/agent-analytics/sdk#auto-instrument-provider-calls) for the full table and per-provider notes (Anthropic Managed Agents, Claude Agent SDK, Vercel AI SDK).
 
-## Provider wrappers
-
-Each wrapper records request, response, tokens, latency, and cost automatically:
-
-```typescript
-import { OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral } from '@amplitude/ai';
-```
-
-See [Auto-instrument provider calls](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#auto-instrument-provider-calls) for the full table and per-provider notes (Anthropic Managed Agents, Claude Agent SDK, Vercel AI SDK).
-
 ## Auto-instrument with an AI coding agent
 
 ```bash
