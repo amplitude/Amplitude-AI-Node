@@ -10,7 +10,7 @@ Agent analytics for [Amplitude](https://amplitude.com). Track every LLM call, us
 
 The canonical SDK reference lives in Amplitude Docs:
 
-**[amplitude.com/docs/amplitude-ai/agent-analytics/setup](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup)**
+**[amplitude.com/docs/sdks/agent-analytics/sdk](https://amplitude.com/docs/sdks/agent-analytics/sdk)**
 
 That page covers installation, the full event taxonomy, sessions, tools, spans, scores, multi-agent delegation, streaming, edge runtimes (Cloudflare Workers, Vercel AI SDK), provider-specific notes (OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral, Anthropic Managed Agents, Claude Agent SDK), cost and prompt-cache handling, privacy modes, content shaping, verification with `MockAmplitudeAI`, and the complete API.
 
@@ -44,7 +44,7 @@ app.post('/chat', async (req, res) => {
 });
 ```
 
-Emits `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` — tied to `userId` and `sessionId`. Auto-captures model, tokens, cost, and latency on the AI Response. Read the [setup guide](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) for the rest.
+Emits `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` — tied to `userId` and `sessionId`. Auto-captures model, tokens, cost, and latency on the AI Response. Read the [SDK reference](https://amplitude.com/docs/sdks/agent-analytics/sdk) for the rest.
 
 ## Provider wrappers
 
@@ -54,7 +54,7 @@ Each wrapper records request, response, tokens, latency, and cost automatically:
 import { OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral } from '@amplitude/ai';
 ```
 
-See [Auto-instrument provider calls](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#auto-instrument-provider-calls) for the full table and per-provider notes (Anthropic Managed Agents, Claude Agent SDK, Vercel AI SDK).
+See [Auto-instrument provider calls](https://amplitude.com/docs/sdks/agent-analytics/sdk#auto-instrument-provider-calls) for the full table and per-provider notes (Anthropic Managed Agents, Claude Agent SDK, Vercel AI SDK).
 
 ## Auto-instrument with an AI coding agent
 
@@ -72,7 +72,7 @@ Three content modes control what reaches Amplitude:
 - `metadata_only` — token counts, latency, model, cost. No content.
 - `customer_enriched` — no content; you provide structured summaries via `trackSessionEnrichment()`.
 
-Full details and per-provider redaction recipes at [Choose a privacy mode](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#choose-a-privacy-mode).
+Full details and per-provider redaction recipes at [Choose a privacy mode](https://amplitude.com/docs/sdks/agent-analytics/sdk#choose-a-privacy-mode).
 
 ## License
 
@@ -80,4 +80,4 @@ Full details and per-provider redaction recipes at [Choose a privacy mode](https
 
 ---
 
-> **About this README.** The long-form SDK reference previously hosted here moved to the [canonical docs page](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) so npm, PyPI, and the in-product docs surface stay aligned. The full instrumentation guide consumed by AI coding agents is preserved at [`amplitude-ai.md`](amplitude-ai.md) in this repo.
+> **About this README.** The long-form SDK reference previously hosted here moved to the [canonical docs page](https://amplitude.com/docs/sdks/agent-analytics/sdk) so npm, PyPI, and the in-product docs surface stay aligned. The full instrumentation guide consumed by AI coding agents is preserved at [`amplitude-ai.md`](amplitude-ai.md) in this repo.
