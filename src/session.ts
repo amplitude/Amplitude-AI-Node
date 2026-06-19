@@ -232,6 +232,7 @@ export class Session {
       userId: this.userId,
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
+      tags: this.tags,
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
@@ -252,6 +253,7 @@ export class Session {
       userId: this.userId,
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
+      tags: this.tags,
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;

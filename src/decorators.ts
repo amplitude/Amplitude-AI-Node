@@ -592,9 +592,14 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
           let result: unknown = undefined;
           try {
             result = await fn.apply(this, args);
-            const outputState = _serializeState(result, params.privacyConfig);
-            if (outputState != null) {
-              span.setAttribute(AMP_OUTPUT_STATE, JSON.stringify(outputState));
+            const pc = params.privacyConfig;
+            const isMetadataOnly = pc != null &&
+              (pc.contentMode === 'metadata_only' || (pc.contentMode == null && pc.privacyMode));
+            if (!isMetadataOnly) {
+              const outputState = _serializeState(result, params.privacyConfig);
+              if (outputState != null) {
+                span.setAttribute(AMP_OUTPUT_STATE, JSON.stringify(outputState));
+              }
             }
             return result;
           } catch (exc) {
@@ -603,6 +608,22 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
             throw exc;
           } finally {
             span.end();
+            if (ownsSession && params.amplitude != null) {
+              try {
+                trackSessionEnd({
+                  amplitude: params.amplitude,
+                  userId: params.userId,
+                  sessionId,
+                  env: params.env,
+                  agentId: params.agentId || spanName,
+                  privacyConfig: params.privacyConfig,
+                });
+              } catch (e) {
+                getLogger().error(
+                  `Failed to end @observe session '${spanName}': ${e}`,
+                );
+              }
+            }
           }
         });
       }

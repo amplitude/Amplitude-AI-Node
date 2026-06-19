@@ -17,8 +17,12 @@ import {
   type TrackAiMessageOptions,
 } from '../core/tracking.js';
 import {
+  GENAI_ERROR_TYPE,
+  GENAI_FINISH_REASONS,
+  GENAI_INPUT_MESSAGES,
   GENAI_INPUT_TOKENS,
   GENAI_OPERATION_NAME,
+  GENAI_OUTPUT_MESSAGES,
   GENAI_OUTPUT_TOKENS,
   GENAI_PROVIDER_NAME,
   GENAI_REQUEST_MAX_TOKENS,
@@ -260,6 +264,26 @@ export abstract class BaseAIProvider {
         if (opts.temperature != null) spanAttrs[GENAI_REQUEST_TEMPERATURE] = opts.temperature;
         if (opts.maxOutputTokens != null) spanAttrs[GENAI_REQUEST_MAX_TOKENS] = opts.maxOutputTokens;
         if (opts.topP != null) spanAttrs[GENAI_REQUEST_TOP_P] = opts.topP;
+        const inputMsgs = (opts as Record<string, unknown>).inputMessages;
+        if (inputMsgs != null) {
+          spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(inputMsgs);
+        }
+        if (opts.responseContent != null) {
+          spanAttrs[GENAI_OUTPUT_MESSAGES] = JSON.stringify([
+            { role: 'assistant', content: opts.responseContent },
+          ]);
+        }
+        if (opts.finishReason != null) {
+          spanAttrs[GENAI_FINISH_REASONS] = [opts.finishReason];
+        }
+        if (opts.latencyMs != null) {
+          spanAttrs['amplitude.latency_ms'] = opts.latencyMs;
+        }
+        if (opts.isError && opts.errorType != null) {
+          spanAttrs[GENAI_ERROR_TYPE] = opts.errorType;
+        } else if (opts.isError && opts.errorMessage != null) {
+          spanAttrs[GENAI_ERROR_TYPE] = opts.errorMessage;
+        }
 
         const span = tracer.startSpan(`${opts.provider}.${OP_CHAT}`, { attributes: spanAttrs });
         if (opts.isError) {
@@ -269,6 +293,9 @@ export abstract class BaseAIProvider {
       } catch (e) {
         getLogger().debug(`Failed to create OTEL span for provider wrapper: ${e}`);
       }
+      // OTEL span created — the SpanEventMapper handles event emission.
+      // Return early so we don't also emit a direct trackAiMessage().
+      return '';
     }
 
     return trackAiMessage({
@@ -378,6 +405,43 @@ export class SimpleStreamingTracker {
 
     const state = this.accumulator.getState();
     const ctx = applySessionContext(overrides);
+
+    // When OTEL is active, emit a span instead of calling _trackFn directly.
+    const tracer = _getOtelTracer();
+    if (tracer != null) {
+      try {
+        const spanAttrs: Record<string, unknown> = {
+          [GENAI_OPERATION_NAME]: OP_CHAT,
+          [GENAI_REQUEST_MODEL]: this._modelName,
+          [GENAI_RESPONSE_MODEL]: this._modelName,
+          [GENAI_PROVIDER_NAME]: this._providerName,
+        };
+        if (state.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = state.inputTokens;
+        if (state.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = state.outputTokens;
+        if (state.finishReason != null) spanAttrs[GENAI_FINISH_REASONS] = [state.finishReason];
+        if (this._inputMessages.length > 0) {
+          spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(this._inputMessages);
+        }
+        if (state.content) {
+          spanAttrs[GENAI_OUTPUT_MESSAGES] = JSON.stringify([
+            { role: 'assistant', content: state.content },
+          ]);
+        }
+        if (this.accumulator.elapsedMs > 0) {
+          spanAttrs['amplitude.latency_ms'] = this.accumulator.elapsedMs;
+        }
+
+        const span = tracer.startSpan(`${this._providerName}.${OP_CHAT}`, { attributes: spanAttrs });
+        span.end();
+      } catch (e) {
+        getLogger().debug(`Failed to create OTEL span for streaming: ${e}`);
+      }
+      recordToolUsesFromResponse(state.toolCalls, {
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+      });
+      return '';
+    }
 
     const eventId = this._trackFn({
       ...contextFields(ctx),

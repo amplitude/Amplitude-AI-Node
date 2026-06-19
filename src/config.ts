@@ -95,6 +95,7 @@ export class AIConfig {
       contentMode: this.contentMode,
       validate: this.validate,
       debug: this.debug,
+      captureStackTrace: this.captureStackTrace,
     });
   }
 }

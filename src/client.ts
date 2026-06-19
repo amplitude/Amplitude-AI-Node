@@ -874,6 +874,7 @@ export class AmplitudeAI {
       defaultUserId: options?.defaultUserId,
       defaultDeviceId: options?.defaultDeviceId,
       otelEndpoint: options?.otelEndpoint,
+      privacyConfig: this._privacyConfig,
     });
 
     this._otelTracerProvider = provider;

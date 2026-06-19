@@ -21,7 +21,15 @@ import {
   PROP_SPAN_ID,
   PROP_TOOL_OWNER,
   PROP_TOOL_TYPE,
+  PROP_TAGS as CONST_PROP_TAGS,
+  PROP_STACK_TRACE as CONST_PROP_STACK_TRACE,
+  PROP_GIT_SHA as CONST_PROP_GIT_SHA,
+  PROP_GIT_REF as CONST_PROP_GIT_REF,
+  PROP_GIT_REPO as CONST_PROP_GIT_REPO,
+  PROP_ERROR_SOURCE as CONST_PROP_ERROR_SOURCE,
+  PROP_SPAN_KIND as CONST_PROP_SPAN_KIND,
 } from '../core/constants.js';
+import type { PrivacyConfig } from '../core/privacy.js';
 import { getGitMetadata } from '../utils/git_metadata.js';
 import {
   trackAiMessage,
@@ -97,12 +105,13 @@ import {
 
 const logger = getLogger();
 
-const PROP_TAGS = '[Agent] Tags';
-const PROP_GIT_SHA = '[Agent] Git SHA';
-const PROP_GIT_REF = '[Agent] Git Ref';
-const PROP_GIT_REPO = '[Agent] Git Repo';
-const PROP_STACK_TRACE = '[Agent] Stack Trace';
-const PROP_ERROR_SOURCE_PROP = '[Agent] Error Source';
+const PROP_TAGS = CONST_PROP_TAGS;
+const PROP_GIT_SHA = CONST_PROP_GIT_SHA;
+const PROP_GIT_REF = CONST_PROP_GIT_REF;
+const PROP_GIT_REPO = CONST_PROP_GIT_REPO;
+const PROP_STACK_TRACE = CONST_PROP_STACK_TRACE;
+const PROP_ERROR_SOURCE_PROP = CONST_PROP_ERROR_SOURCE;
+const PROP_SPAN_KIND_PROP = CONST_PROP_SPAN_KIND;
 
 export interface OtelSpanEvent {
   name?: string;
@@ -118,6 +127,7 @@ export interface OtelSpan {
   end_time?: number;
   startTimeUnixNano?: bigint | number;
   endTimeUnixNano?: bigint | number;
+  status?: { code?: number; message?: string };
   context?: { trace_id?: number; span_id?: number; traceId?: string; spanId?: string };
   spanContext?: () => { traceId?: string; spanId?: string };
   parent?: { span_id?: number; spanId?: string };
@@ -129,17 +139,20 @@ export interface SpanEventMapperOptions {
   amplitude: AmplitudeClientLike;
   defaultUserId?: string | null;
   defaultDeviceId?: string | null;
+  privacyConfig?: PrivacyConfig | null;
 }
 
 export class SpanEventMapper {
   private readonly _amplitude: AmplitudeClientLike;
   private readonly _defaultUserId: string | null;
   private readonly _defaultDeviceId: string | null;
+  private readonly _privacyConfig: PrivacyConfig | null;
 
   constructor(options: SpanEventMapperOptions) {
     this._amplitude = options.amplitude;
     this._defaultUserId = options.defaultUserId ?? null;
     this._defaultDeviceId = options.defaultDeviceId ?? null;
+    this._privacyConfig = options.privacyConfig ?? null;
   }
 
   mapAndTrack(span: OtelSpan): void {
@@ -212,9 +225,13 @@ export class SpanEventMapper {
       }
     }
 
-    const isError = Boolean(attrs[GENAI_ERROR_TYPE]);
-    const errorMessage = isError ? String(attrs[GENAI_ERROR_TYPE] ?? '') : null;
-    const errorType = isError ? String(attrs[GENAI_ERROR_TYPE] ?? '') : null;
+    // SpanStatusCode.ERROR = 2 per OTEL spec
+    const SPAN_STATUS_ERROR = 2;
+    const isError = Boolean(attrs[GENAI_ERROR_TYPE]) || span.status?.code === SPAN_STATUS_ERROR;
+    const errorMessage = isError
+      ? String(attrs[GENAI_ERROR_TYPE] ?? span.status?.message ?? '')
+      : null;
+    const errorType = attrs[GENAI_ERROR_TYPE] ? String(attrs[GENAI_ERROR_TYPE]) : null;
     const temperature = safeFloat(attrs[GENAI_REQUEST_TEMPERATURE]);
     const maxTokens = safeInt(attrs[GENAI_REQUEST_MAX_TOKENS]);
     const topP = safeFloat(attrs[GENAI_REQUEST_TOP_P]);
@@ -256,6 +273,7 @@ export class SpanEventMapper {
       context: contextDict ?? undefined,
       env: env ?? undefined,
       groups: groups ?? undefined,
+      privacyConfig: this._privacyConfig,
     };
 
     // --- Routing priority ---
@@ -609,7 +627,10 @@ export class SpanEventMapper {
     if (attrs[AMP_TOOL_OWNER]) extra[PROP_TOOL_OWNER] = String(attrs[AMP_TOOL_OWNER]);
 
     const ampSpanKind = attrs[AMP_SPAN_KIND];
-    if (ampSpanKind) extra[PROP_COMPONENT_TYPE] = String(ampSpanKind);
+    if (ampSpanKind) {
+      extra[PROP_COMPONENT_TYPE] = String(ampSpanKind);
+      extra[PROP_SPAN_KIND_PROP] = String(ampSpanKind);
+    }
 
     const otelSpanId = this._extractOtelSpanId(opts.span);
     if (otelSpanId) extra[PROP_SPAN_ID] = otelSpanId;
