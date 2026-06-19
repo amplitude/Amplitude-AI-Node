@@ -307,6 +307,7 @@ export interface PrivacyConfigOptions {
   contentMode?: string | null;
   validate?: boolean;
   debug?: boolean;
+  captureStackTrace?: boolean;
 }
 
 export class PrivacyConfig {
@@ -314,6 +315,7 @@ export class PrivacyConfig {
   readonly redactPii: boolean;
   readonly validate: boolean;
   readonly debug: boolean;
+  readonly captureStackTrace: boolean;
   readonly customPatterns: Array<string | { pattern: string; replacement: string }>;
   private readonly _compiledCustomPatterns: Array<{ regex: RegExp; replacement: string }>;
   private readonly _customRedactionFn: ((text: string) => string) | null;
@@ -324,6 +326,7 @@ export class PrivacyConfig {
     this.redactPii = options.redactPii ?? true;
     this.validate = options.validate ?? false;
     this.debug = options.debug ?? false;
+    this.captureStackTrace = options.captureStackTrace ?? false;
     this.customPatterns = options.customRedactionPatterns ?? [];
     this._compiledCustomPatterns = [];
     this._customRedactionFn = options.customRedactionFn ?? null;

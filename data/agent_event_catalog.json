@@ -62,6 +62,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -204,6 +209,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -226,6 +236,16 @@
           "type": "string",
           "description": "Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
         },
         {
           "name": "[Agent] Model Name",
@@ -495,6 +515,21 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -650,6 +685,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -762,6 +802,21 @@
           "name": "[Agent] Env",
           "type": "string",
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
         },
         {
           "name": "[Agent] SDK Version",
@@ -882,6 +937,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -966,6 +1026,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -1039,6 +1104,11 @@
           "name": "[Agent] Env",
           "type": "string",
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
           "name": "[Agent] SDK Version",

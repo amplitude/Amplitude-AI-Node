@@ -599,6 +599,126 @@ Next steps:
 
 > **If any data quality field fails:** `cost = $0` usually means the model name is not in genai-prices — use the canonical provider model ID (e.g. `claude-sonnet-4-20250514`, not `claude-sonnet-4-6`) or set `totalCostUsd` explicitly. `tokens = 0` means `usage` was not extracted from the LLM response. `identity missing` means neither `userId` nor `deviceId` was set on the tracking call.
 
+### Step 4f: Remediation loop
+
+If any fill rate is below 100% or any data quality gate fails,
+diagnose and fix before proceeding to Phase 5.
+
+Common issues and fixes:
+
+| Fill rate gap | What breaks in Agent Analytics | Fix |
+|---|---|---|
+| userId: 0% | Can't create cohorts or link to User Activity | Find where user identity is available in the request (auth token, header, session cookie) and pass it to `agent.session({ userId })` |
+| Session ID: 0% | Sessions page empty, signals don't run | Wrap the route handler in `agent.session({ sessionId })`. Use the app's existing conversation/thread/ticket ID. |
+| Agent ID: 0% | Agent filter on Monitor doesn't work | Create a named agent with `ai.agent('name')` and use it for sessions |
+| Session End missing | Signals never execute, no Session Record | Ensure `session.run()` completes (or call `trackSessionEnd()` explicitly) |
+| Cost USD: 0% | Monitor cost charts show $0 | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
+| Tokens: 0% | Token consumption charts empty | For manual `trackAiMessage`: pass `inputTokens`/`outputTokens` from the `response.usage` object. For provider wrappers: verify the response has a `.usage` field. |
+| Latency: 0% | Latency trend charts empty | Wrap the LLM call in `performance.now()` and pass `latencyMs` |
+| Content empty (metadata_only) | Thread tab empty, signals/evaluators can't judge | Switch to `contentMode: 'full'` with `redactPii: true`, or accept that LLM-based evaluators won't work |
+
+After each fix:
+  1. Update the verify test if needed
+  2. Re-run: `npx vitest run __amplitude_verify__.test.ts`
+  3. Check `mock.summary()` — all fill rates should be 100%
+  4. Repeat until "Ready to deploy"
+
+Do NOT proceed to Phase 5 with any data quality gate failing.
+
+---
+
+## Phase 5: Ship
+
+### Step 5a: Create branch and PR
+
+Create a branch for the instrumentation changes:
+
+  Branch name: `feat/amplitude-ai-instrumentation`
+
+PR title: `Add Amplitude AI agent analytics instrumentation`
+
+PR body should include:
+  - Summary: which agents, providers, and tools were instrumented
+  - The fill rate report from `mock.summary()` (paste the output)
+  - Content mode and privacy configuration chosen
+  - Checklist:
+    - [ ] `@amplitude/ai` added to dependencies
+    - [ ] `AMPLITUDE_AI_API_KEY` added to secrets/env management
+       (not committed to source)
+    - [ ] `__amplitude_verify__.test.ts` passes locally
+    - [ ] Existing tests still pass
+    - [ ] No `.env` files or API keys committed
+    - [ ] `.gitignore` includes `.env`
+
+### Step 5b: Reviewer guide
+
+Include in the PR description — what the reviewer should check:
+
+  1. Are `userId` and `sessionId` sourced from real request data
+     (not hardcoded test values)?
+  2. Is `contentMode` appropriate for the data sensitivity?
+     (`'full'` + `redactPii: true` for most; `'metadata_only'` for regulated data)
+  3. Are agent names descriptive? (They appear in dashboards and
+     the Application Registry.)
+  4. Does the verify test cover the main user-facing code paths?
+  5. Are existing tests unbroken?
+  6. Is `AMPLITUDE_AI_API_KEY` managed through the team's secrets
+     system (not `.env` committed to git)?
+
+### Step 5c: Post-deploy verification
+
+After the PR is merged and deployed:
+
+  1. Make 2-3 real requests to the instrumented endpoints
+  2. Open Amplitude > Agent Analytics > Sessions
+  3. Verify you see sessions with the correct:
+     - `userId` (matches your test user)
+     - `agentId` (matches what you configured)
+     - Event sequence: User Message > AI Response > Session End
+  4. Check AI Response events show non-zero `[Agent] Cost USD`
+     (if cost is $0, the model name may not be recognized —
+     see Step 4f remediation table)
+  5. If the app has multi-agent delegation, verify child agent
+     events share the parent's `sessionId`
+
+### Step 5d: Things to try in Agent Analytics
+
+  1. **Monitor** — landing page. Check agent health: session volume,
+     cost and latency trends, always-on signal results.
+     Filter by agent to compare agents side by side.
+
+  2. **Sessions** — browse every agent session. Filter by date, agent,
+     evaluator result, error type, or topic. Search interaction
+     content to find specific conversations.
+
+  3. **Inspect a session** — open any session to see:
+     - Thread: the full conversation (user messages + AI responses)
+     - Turns: turn-by-turn breakdown with nested tool calls and spans
+     - Evaluators: pass/fail results from always-on signals
+     - Info: metadata (model, cost, tokens, latency)
+
+  4. **Check always-on signals** — Amplitude runs these automatically on
+     every closed session (no configuration needed):
+     - Task completion
+     - Response quality
+     - User friction
+     - Negative feedback
+     - User intent
+     - Session safety
+     - Data quality check (code-based, not LLM)
+
+  5. **Create a cohort** — filter sessions (e.g., "failed task completion")
+     → create a cohort → use it in any Amplitude chart (funnel,
+     retention, segmentation). This is the core differentiator:
+     connect agent quality to product outcomes.
+
+  6. (Optional) **Create a custom evaluator** — define a judge prompt and
+     pass criteria for product-specific quality checks.
+
+  7. (Optional) **Set up Session Replay linking** — add `browserSessionId`
+     + `deviceId` from your frontend for one-click navigation from
+     AI session to browser replay.
+
 ---
 
 ## API Quick Reference

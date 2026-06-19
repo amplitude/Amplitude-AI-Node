@@ -32,6 +32,12 @@ export interface AIConfigOptions {
   dryRun?: boolean;
   validate?: boolean;
   propagateContext?: boolean;
+  /**
+   * When `true`, capture `error.stack` on error events and attach as
+   * `[Agent] Stack Trace`. Default: `false`. Only enable when explicitly
+   * opted in — stack traces may contain file paths and internal details.
+   */
+  captureStackTrace?: boolean;
 }
 
 /**
@@ -61,6 +67,7 @@ export class AIConfig {
   readonly dryRun: boolean;
   readonly validate: boolean;
   readonly propagateContext: boolean;
+  readonly captureStackTrace: boolean;
 
   constructor(options: AIConfigOptions = {}) {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
@@ -72,6 +79,7 @@ export class AIConfig {
     this.dryRun = options.dryRun ?? false;
     this.validate = options.validate ?? false;
     this.propagateContext = options.propagateContext ?? false;
+    this.captureStackTrace = options.captureStackTrace ?? false;
   }
 
   toPrivacyConfig(): PrivacyConfig {
@@ -87,6 +95,7 @@ export class AIConfig {
       contentMode: this.contentMode,
       validate: this.validate,
       debug: this.debug,
+      captureStackTrace: this.captureStackTrace,
     });
   }
 }

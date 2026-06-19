@@ -296,6 +296,7 @@ export class BoundAgent {
       deviceId?: string | null;
       browserSessionId?: string | null;
       autoFlush?: boolean;
+      tags?: string[] | null;
     } = {},
   ): Session {
     if (opts.idleTimeoutMinutes != null && opts.idleTimeoutMinutes < -1) {
