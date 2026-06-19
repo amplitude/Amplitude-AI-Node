@@ -348,8 +348,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
       };
 
       const captureStack = r.privacyConfig != null
-        && 'captureStackTrace' in r.privacyConfig
-        && (r.privacyConfig as Record<string, unknown>).captureStackTrace === true;
+        && r.privacyConfig.captureStackTrace === true;
 
       try {
         trackToolCall({
