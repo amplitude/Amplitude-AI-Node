@@ -29,10 +29,11 @@ describe('AmplitudeAI OTEL integration', () => {
     expect(ai.status().otel_enabled).toBe(false);
   });
 
-  it('enableOtel throws when @opentelemetry/api is not installed', () => {
+  it('enableOtel succeeds when @opentelemetry packages are installed', () => {
     const ai = new AmplitudeAI({ amplitude: mockClient });
-    // The actual setupOtel call will fail because @opentelemetry packages aren't installed
-    expect(() => ai.enableOtel()).toThrow(/OpenTelemetry/);
+    const result = ai.enableOtel();
+    expect(result).toBe(ai);
+    expect(ai.otelEnabled).toBe(true);
   });
 
   it('enableOtel is idempotent — second call is a no-op', () => {

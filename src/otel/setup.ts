@@ -25,7 +25,7 @@ export interface OtelSetupResult {
 }
 
 export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
-  let api: { trace: { getTracerProvider(): unknown; setTracerProvider(p: unknown): void } };
+  let api: { trace: { getTracerProvider(): unknown; setGlobalTracerProvider(p: unknown): boolean } };
   let TracerProviderCtor: { new(): { addSpanProcessor(p: unknown): void }; };
   let BatchSpanProcessorCtor: { new(exporter: unknown): unknown };
 
@@ -50,7 +50,7 @@ export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
     provider = existingProvider as InstanceType<typeof TracerProviderCtor>;
   } else {
     provider = new TracerProviderCtor();
-    api.trace.setTracerProvider(provider);
+    api.trace.setGlobalTracerProvider(provider);
   }
 
   const mapper = new SpanEventMapper({
