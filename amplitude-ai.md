@@ -188,6 +188,8 @@ s.trackUserMessage('Summarize the attached design doc and list open questions', 
 // BAD: entire pipeline state as the "user message" (shows up as session label / $llm_message.text)
 s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
+
+**Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
 <!-- llms-excerpt:content-shaping:end -->
 
 **Enrichment vs Agent Analytics UI:** A short **`content`** line plus structured data in **`context`** keeps session titles and segmentation readable. Amplitude’s **server-side LLM enrichment** builds eval input primarily from **turn text** stored on each session (`input_text` / `output_text` derived from `$llm_message`). If automated evaluators must reason over the **full** structured payload, keep essential facts in **`content`**, add **scalar event properties** for key fields, or coordinate a pipeline change to merge allowlisted **`context`** into enrichment input—do not assume enrichments automatically parse large JSON blobs only present in `[Agent] Context`.
@@ -198,9 +200,10 @@ If multi-agent signals were detected, add delegation with `runAs`:
 const orchestrator = ai.agent('shopping-agent', { description: 'Orchestrates shopping requests' });
 const recipeAgent = orchestrator.child('recipe-agent', { description: 'Finds recipes' });
 
-// Inside parent's session.run():
-const result = await s.runAs(recipeAgent, async (cs) => {
-  cs.trackUserMessage(delegatedQuery);
+// Inside parent's session.run() — track user message at orchestrator level,
+// then delegate. Auto user-message tracking is suppressed inside runAs.
+s.trackUserMessage(delegatedQuery);
+const result = await s.runAs(recipeAgent, async () => {
   return openai.chat.completions.create({ model: 'gpt-4o', messages: [...] });
 });
 ```
@@ -398,6 +401,43 @@ try {
   throw e;
 }
 ```
+
+### Step 3g-b: Fan-out LLM workflows (parallel child calls, single user turn)
+
+**When to use:** A single user action triggers 2+ parallel internal LLM calls (e.g. scoring + content generation + matching). Each parallel call is a child agent sharing the parent's session and trace — it must never create its own user message or trace.
+
+**Key invariants:**
+1. `newTrace()` is called **once** per user-visible interaction, at the orchestrator level.
+2. `trackUserMessage()` is called **once**, at the orchestrator level, before dispatching.
+3. Each parallel LLM call runs inside `runAs(child, fn)`. Auto user-message tracking is **suppressed** inside delegation (provider wrappers will not emit `[Agent] User Message` for internal `role: "user"` prompts).
+4. `trackAiMessage()` is called **once**, at the orchestrator level, with the assembled result.
+
+```typescript
+const orchestrator = ai.agent('orchestrator', { userId: uid });
+const scorer = orchestrator.child('focus-scorer');
+const matcher = orchestrator.child('catalog-matcher');
+
+await orchestrator.session({ sessionId }).run(async (s) => {
+  s.trackUserMessage('Generate plan from quiz results', { context: structuredState });
+
+  const [a, b] = await Promise.all([
+    s.runAs(scorer, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+    s.runAs(matcher, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+  ]);
+
+  s.trackAiMessage(assemble(a, b), {
+    model: 'gpt-4o', provider: 'openai',
+    latencyMs: latency, inputTokens: inTok, outputTokens: outTok,
+  });
+});
+```
+
+**Anti-patterns to avoid:**
+- Calling `newTrace()` or `trackUserMessage()` inside `runAs` — inflates trace and turn counts.
+- Passing raw JSON as the `content` string of `trackUserMessage()` — use `context` for structured data.
+- Not using `runAs` for parallel calls — provider wrappers will auto-emit a `[Agent] User Message` for every `role: "user"` message in the request, creating duplicate turns.
+
+> **Minimum SDK version:** `@amplitude/ai >= 0.11.0` for auto-suppression of user messages inside `runAs`.
 
 ### Step 3h: Add scoring
 

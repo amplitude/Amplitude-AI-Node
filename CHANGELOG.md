@@ -2,6 +2,14 @@
 
 ## 0.12.0
 
+### Docs (AA-151340)
+- **Fan-out LLM canonical pattern (Step 3g-b):** New instrumentation guide section
+  and MCP pattern (`fan-out-llm`) documenting the correct way to instrument parallel
+  child-agent workflows. `scan_project` now detects ≥2 LLM call sites in the same
+  function and recommends the fan-out pattern. Cross-references Python SDK parity where
+  `run_as` / `arun_as` now suppress auto user-message tracking (requires `amplitude-ai
+  >= 1.9.0`).
+
 ### Added (AA-151269)
 - **Per-session idle timeout stamped on the first event:** `trackUserMessage` now
   accepts `idleTimeoutMinutes`, and `Session` stamps its value on the first event

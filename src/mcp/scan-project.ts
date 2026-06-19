@@ -44,6 +44,7 @@ export interface ScanResult {
   uninstrumented_call_sites: number;
   is_multi_agent: boolean;
   multi_agent_signals: string[];
+  has_fan_out: boolean;
   has_streaming: boolean;
   has_vercel_ai_sdk: boolean;
   has_edge_runtime: boolean;
@@ -498,6 +499,38 @@ export function scanProject(rootPath: string): ScanResult {
     );
   }
 
+  // Fan-out LLM detection: ≥2 LLM call sites within the same function
+  // suggests a parallel/fan-out pattern that needs runAs delegation.
+  let hasFanOut = false;
+  for (const agent of agents) {
+    const fnCounts = new Map<string, number>();
+    for (const cs of agent.call_site_details) {
+      const fn = cs.containing_function;
+      if (fn) {
+        fnCounts.set(fn, (fnCounts.get(fn) ?? 0) + 1);
+      }
+    }
+    const fanOutFns = [...fnCounts.entries()]
+      .filter(([, count]) => count >= 2)
+      .map(([fn]) => fn);
+    if (fanOutFns.length > 0) {
+      hasFanOut = true;
+      multiAgentSignals.push(
+        `File ${agent.file}: fan-out pattern detected — ` +
+        `multiple LLM call sites in function(s): ${fanOutFns.join(', ')}. ` +
+        'Use runAs() to delegate each parallel call to a child agent.',
+      );
+    }
+  }
+
+  if (hasFanOut) {
+    recommendations.push(
+      'Fan-out LLM pattern detected: one function dispatches multiple LLM calls in parallel. ' +
+      'Use session.runAs(child, fn) for each sub-call so they share the parent traceId without ' +
+      'emitting duplicate user messages. See Step 3g-b in the instrumentation guide (amplitude-ai.md).',
+    );
+  }
+
   return {
     project_name: projectName,
     runtime: 'node',
@@ -518,6 +551,7 @@ export function scanProject(rootPath: string): ScanResult {
     uninstrumented_call_sites: uninstrumentedCallSites,
     is_multi_agent: isMultiAgent,
     multi_agent_signals: multiAgentSignals,
+    has_fan_out: hasFanOut,
     has_streaming: hasStreaming,
     has_vercel_ai_sdk: hasVercelAiSdk,
     has_edge_runtime: hasEdgeRuntime,

@@ -950,6 +950,8 @@ Use instrumented provider wrappers for automatic tracking:
 
 Provider wrappers use injected `TrackFn` callbacks instead of class hierarchy casts, enabling easier composition and custom tracking logic.
 
+**Provider wrappers + delegation:** Inside `session.runAs()`, provider wrappers suppress auto `[Agent] User Message` emission so that internal `role: "user"` prompts in delegation calls don't create spurious user turns.
+
 Bedrock model IDs like `us.anthropic.claude-3-5-sonnet` are automatically normalized for price lookup (e.g., to `claude-3-5-sonnet`).
 
 **OpenAI example:**
@@ -1986,10 +1988,30 @@ await session.run(async (s) => {
 
 - Shares the parent session's `sessionId`, `traceId`, and turn counter
 - Overrides `agentId` and `parentAgentId` in `AsyncLocalStorage` for the callback's duration
+- **Suppresses auto user-message tracking** — provider wrappers will not emit `[Agent] User Message` for `role: "user"` messages in internal delegation LLM calls
 - Provider wrappers automatically read the child's identity — no `amplitudeOverrides` needed
 - Does **not** emit `[Agent] Session End` (the child operates within the parent session)
 - Restores the parent context when the callback completes, even on errors
 - Supports nesting: `s.runAs(child, (cs) => cs.runAs(grandchild, ...))`
+
+### Pattern D: Fan-out LLM (parallel child calls, single user turn)
+
+When a single user action triggers multiple parallel LLM calls, use `runAs()` for each:
+
+```typescript
+await orchestrator.session({ sessionId }).run(async (s) => {
+  s.trackUserMessage('Generate plan from quiz results', { context: structuredState });
+
+  const [a, b] = await Promise.all([
+    s.runAs(scorer, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+    s.runAs(matcher, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+  ]);
+
+  s.trackAiMessage(assemble(a, b), { model: 'gpt-4o', provider: 'openai' });
+});
+```
+
+This ensures one trace, one user turn, one AI response — regardless of how many internal LLM calls are dispatched. See [Step 3g-b in the instrumentation guide](amplitude-ai.md) for details.
 
 ## Serverless Environments
 
