@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import {
   _sessionStorage,
   getActiveContext,
@@ -14,8 +15,15 @@ import {
 } from './context.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
+import {
+  AMP_INPUT_STATE,
+  AMP_OUTPUT_STATE,
+  AMP_SPAN_KIND,
+} from './otel/conventions.js';
 import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
+
+const _require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // ToolCallTracker — global config singleton (parity with Python)
@@ -406,8 +414,11 @@ async function _runWithTimeout(
 // observe() HOF — wraps a function to auto-track as [Agent] Span
 // ---------------------------------------------------------------------------
 
+export type ObserveSpanType = 'span' | 'tool' | 'agent' | 'llm';
+
 interface ObserveOptions {
   name?: string;
+  type?: ObserveSpanType;
   amplitude?: AmplitudeLike | null;
   userId?: string | null;
   agentId?: string | null;
@@ -492,8 +503,59 @@ function _serializeState(
   return { value: String(value) };
 }
 
+// ---------------------------------------------------------------------------
+// OTEL tracer detection — used by observe() to emit real OTEL spans when
+// the SDK's OTEL pipeline is active (so AmplitudeEventSpanProcessor handles
+// event emission instead of direct trackSpan calls).
+// ---------------------------------------------------------------------------
+
+interface OtelTracerLike {
+  startActiveSpan<T>(
+    name: string,
+    fn: (span: OtelSpanHandle) => T | Promise<T>,
+  ): T | Promise<T>;
+}
+
+interface OtelSpanHandle {
+  setAttribute(key: string, value: string | number | boolean): void;
+  setStatus(status: { code: number; message?: string }): void;
+  end(): void;
+}
+
+function _getOtelTracer(): OtelTracerLike | null {
+  try {
+    const api = _require('@opentelemetry/api') as {
+      trace: {
+        getTracerProvider(): {
+          getTracer?(name: string): OtelTracerLike;
+          _delegate?: { constructor?: { name?: string } };
+          constructor?: { name?: string };
+        };
+      };
+    };
+    const provider = api.trace.getTracerProvider();
+    // When a real provider (BasicTracerProvider/NodeTracerProvider) is
+    // registered, the global proxy's _delegate points to it.
+    const delegateName = provider._delegate?.constructor?.name;
+    const providerName = provider.constructor?.name;
+    const isReal =
+      delegateName === 'BasicTracerProvider' ||
+      delegateName === 'NodeTracerProvider' ||
+      providerName === 'BasicTracerProvider' ||
+      providerName === 'NodeTracerProvider';
+    if (isReal) {
+      const tracer = provider.getTracer?.('@amplitude/ai');
+      return tracer ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
   const spanName = opts.name || fn.name || 'anonymous';
+  const spanKind = opts.type ?? 'span';
 
   const wrapper = async function (
     this: unknown,
@@ -510,6 +572,35 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
         params.privacyConfig,
       );
 
+      // Try to use OTEL tracer if available — the span processor will
+      // handle event emission via the mapper.
+      const tracer = _getOtelTracer();
+      if (tracer != null) {
+        return tracer.startActiveSpan(spanName, async (span: OtelSpanHandle) => {
+          span.setAttribute(AMP_SPAN_KIND, spanKind);
+          if (inputState != null) {
+            span.setAttribute(AMP_INPUT_STATE, JSON.stringify(inputState));
+          }
+
+          let result: unknown = undefined;
+          try {
+            result = await fn.apply(this, args);
+            const outputState = _serializeState(result, params.privacyConfig);
+            if (outputState != null) {
+              span.setAttribute(AMP_OUTPUT_STATE, JSON.stringify(outputState));
+            }
+            return result;
+          } catch (exc) {
+            const msg = exc instanceof Error ? exc.message : String(exc);
+            span.setStatus({ code: 2, message: msg });
+            throw exc;
+          } finally {
+            span.end();
+          }
+        });
+      }
+
+      // Fallback: directly call trackSpan (no OTEL pipeline active).
       const start = performance.now();
       let isError = false;
       let errorMessage: string | null = null;

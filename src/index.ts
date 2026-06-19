@@ -221,7 +221,7 @@ export { wrap, AmplitudeAIWrapError } from './wrappers.js';
 
 // Decorators (tool/observe HOFs + ToolCallTracker)
 export { tool, observe, ToolCallTracker } from './decorators.js';
-export type { ToolWrapped, ObserveWrapped } from './decorators.js';
+export type { ToolWrapped, ObserveWrapped, ObserveSpanType } from './decorators.js';
 
 // Patching
 export {
@@ -318,3 +318,5 @@ export {
 } from './utils/model-tiers.js';
 export { inferProviderFromModel } from './utils/providers.js';
 export { enableLivePriceUpdates } from './utils/costs.js';
+export { getGitMetadata, _resetCache as _resetGitCache } from './utils/git_metadata.js';
+export type { GitMetadata } from './utils/git_metadata.js';

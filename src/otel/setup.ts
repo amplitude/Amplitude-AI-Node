@@ -26,31 +26,19 @@ export interface OtelSetupResult {
 
 export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
   let api: { trace: { getTracerProvider(): unknown; setGlobalTracerProvider(p: unknown): boolean } };
-  let TracerProviderCtor: { new(): { addSpanProcessor(p: unknown): void }; };
-  let BatchSpanProcessorCtor: { new(exporter: unknown): unknown };
+  // SDK v2 removed addSpanProcessor; processors must be passed via constructor
+  let TracerProviderCtor: new (opts: { spanProcessors: unknown[] }) => object;
 
   try {
     api = _require('@opentelemetry/api') as typeof api;
     const sdkTrace = _require('@opentelemetry/sdk-trace-base') as {
       BasicTracerProvider: typeof TracerProviderCtor;
-      BatchSpanProcessor: typeof BatchSpanProcessorCtor;
     };
     TracerProviderCtor = sdkTrace.BasicTracerProvider;
-    BatchSpanProcessorCtor = sdkTrace.BatchSpanProcessor;
   } catch {
     throw new Error(
       'OpenTelemetry SDK is not installed. Install with: npm install @opentelemetry/api @opentelemetry/sdk-trace-base',
     );
-  }
-
-  const existingProvider = api.trace.getTracerProvider();
-  let provider: InstanceType<typeof TracerProviderCtor>;
-
-  if (existingProvider != null && existingProvider.constructor?.name === 'BasicTracerProvider') {
-    provider = existingProvider as InstanceType<typeof TracerProviderCtor>;
-  } else {
-    provider = new TracerProviderCtor();
-    api.trace.setGlobalTracerProvider(provider);
   }
 
   const mapper = new SpanEventMapper({
@@ -60,7 +48,7 @@ export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
   });
 
   const processor = new AmplitudeEventSpanProcessor(mapper);
-  provider.addSpanProcessor(processor);
+  const spanProcessors: unknown[] = [processor];
 
   if (options.otelEndpoint) {
     try {
@@ -68,7 +56,10 @@ export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
         OTLPTraceExporter: new (opts: { url: string }) => unknown;
       };
       const otlpExporter = new otlpModule.OTLPTraceExporter({ url: options.otelEndpoint });
-      provider.addSpanProcessor(new BatchSpanProcessorCtor(otlpExporter));
+      const BatchSpanProcessorCtor = (_require('@opentelemetry/sdk-trace-base') as {
+        BatchSpanProcessor: new (exporter: unknown) => unknown;
+      }).BatchSpanProcessor;
+      spanProcessors.push(new BatchSpanProcessorCtor(otlpExporter));
       logger.info(`OTLP dual export enabled: ${options.otelEndpoint}`);
     } catch {
       logger.warn(
@@ -76,6 +67,9 @@ export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
       );
     }
   }
+
+  const provider = new TracerProviderCtor({ spanProcessors });
+  api.trace.setGlobalTracerProvider(provider);
 
   return { provider, mapper, processor };
 }

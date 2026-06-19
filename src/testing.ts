@@ -235,7 +235,7 @@ export class MockAmplitudeAI extends AmplitudeAI {
   summary(): string {
     const lines: string[] = [];
     const total = this.events.length;
-    lines.push(`=== AmplitudeAI Instrumentation Summary ===`);
+    lines.push('=== AmplitudeAI Instrumentation Summary ===');
     lines.push(`Total events: ${total}`);
     if (total === 0) {
       lines.push('No events tracked. Call track* methods or run your agent.');

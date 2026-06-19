@@ -22,6 +22,7 @@ import {
   PROP_TOOL_OWNER,
   PROP_TOOL_TYPE,
 } from '../core/constants.js';
+import { getGitMetadata } from '../utils/git_metadata.js';
 import {
   trackAiMessage,
   trackEmbedding,
@@ -232,6 +233,7 @@ export class SpanEventMapper {
       contextDict,
       otelAgentName: otelAgentName != null ? String(otelAgentName) : null,
       span,
+      sessionContext: ctx,
     });
 
     const shared = {
@@ -550,6 +552,7 @@ export class SpanEventMapper {
       contextDict: Record<string, unknown> | null;
       otelAgentName: string | null;
       span: OtelSpan;
+      sessionContext?: SessionContext | null;
     },
   ): Record<string, unknown> {
     const extra: Record<string, unknown> = {};
@@ -565,11 +568,25 @@ export class SpanEventMapper {
     const tags = attrs[AMP_TAGS];
     if (tags != null) {
       extra[PROP_TAGS] = typeof tags === 'string' ? tags : JSON.stringify(tags);
+    } else if (opts.sessionContext?.tags != null && opts.sessionContext.tags.length > 0) {
+      extra[PROP_TAGS] = JSON.stringify(opts.sessionContext.tags);
     }
 
-    if (attrs[AMP_GIT_SHA]) extra[PROP_GIT_SHA] = String(attrs[AMP_GIT_SHA]);
-    if (attrs[AMP_GIT_REF]) extra[PROP_GIT_REF] = String(attrs[AMP_GIT_REF]);
-    if (attrs[AMP_GIT_REPO]) extra[PROP_GIT_REPO] = String(attrs[AMP_GIT_REPO]);
+    if (attrs[AMP_GIT_SHA]) {
+      extra[PROP_GIT_SHA] = String(attrs[AMP_GIT_SHA]);
+    }
+    if (attrs[AMP_GIT_REF]) {
+      extra[PROP_GIT_REF] = String(attrs[AMP_GIT_REF]);
+    }
+    if (attrs[AMP_GIT_REPO]) {
+      extra[PROP_GIT_REPO] = String(attrs[AMP_GIT_REPO]);
+    }
+    if (!extra[PROP_GIT_SHA] || !extra[PROP_GIT_REF] || !extra[PROP_GIT_REPO]) {
+      const gitMeta = getGitMetadata();
+      if (!extra[PROP_GIT_SHA] && gitMeta.gitSha) extra[PROP_GIT_SHA] = gitMeta.gitSha;
+      if (!extra[PROP_GIT_REF] && gitMeta.gitRef) extra[PROP_GIT_REF] = gitMeta.gitRef;
+      if (!extra[PROP_GIT_REPO] && gitMeta.gitRepo) extra[PROP_GIT_REPO] = gitMeta.gitRepo;
+    }
     if (attrs[AMP_STACK_TRACE]) extra[PROP_STACK_TRACE] = String(attrs[AMP_STACK_TRACE]);
     if (attrs[AMP_ERROR_SOURCE]) extra[PROP_ERROR_SOURCE_PROP] = String(attrs[AMP_ERROR_SOURCE]);
     if (attrs[AMP_TOOL_TYPE]) extra[PROP_TOOL_TYPE] = String(attrs[AMP_TOOL_TYPE]);
