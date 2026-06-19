@@ -516,9 +516,7 @@ export function scanProject(rootPath: string): ScanResult {
     if (fanOutFns.length > 0) {
       hasFanOut = true;
       multiAgentSignals.push(
-        `File ${agent.file}: fan-out pattern detected — ` +
-        `multiple LLM call sites in function(s): ${fanOutFns.join(', ')}. ` +
-        'Use runAs() to delegate each parallel call to a child agent.',
+        `File ${agent.file}: fan-out pattern detected — multiple LLM call sites in function(s): ${fanOutFns.join(', ')}. Use runAs() to delegate each parallel call to a child agent.`,
       );
     }
   }
