@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { setupOtel, type OtelSetupOptions } from '../../src/otel/setup.js';
 import type { AmplitudeClientLike } from '../../src/types.js';
 import { AmplitudeEventSpanProcessor } from '../../src/otel/processor.js';
+import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
 import { trace, type Tracer } from '@opentelemetry/api';
 
 function createMockClient(): AmplitudeClientLike {
@@ -39,7 +40,6 @@ describe('setupOtel', () => {
   });
 
   it('reuses existing BasicTracerProvider and adds processor', () => {
-    const { BasicTracerProvider } = require('@opentelemetry/sdk-trace-base');
     const existingProvider = new BasicTracerProvider({ spanProcessors: [] });
     trace.setGlobalTracerProvider(existingProvider);
     cleanupProvider = () => trace.disable();
@@ -54,7 +54,6 @@ describe('setupOtel', () => {
   });
 
   it('deduplicates processors on repeated calls', () => {
-    const { BasicTracerProvider } = require('@opentelemetry/sdk-trace-base');
     const firstProcessor = new AmplitudeEventSpanProcessor(
       {} as ConstructorParameters<typeof AmplitudeEventSpanProcessor>[0],
     );
@@ -75,7 +74,7 @@ describe('setupOtel', () => {
       amplitude: createMockClient(),
       defaultUserId: 'u2',
     };
-    const result = setupOtel(opts);
+    setupOtel(opts);
 
     const tracer: Tracer = trace.getTracer('test-tracer');
     const span = tracer.startSpan('test-span');
@@ -92,6 +91,31 @@ describe('setupOtel', () => {
       privacyConfig: privacy,
     };
     const result = setupOtel(opts);
+    expect(result.mapper).toBeDefined();
+  });
+
+  it('handles otelEndpoint without OTLP exporter installed', () => {
+    trace.disable();
+    const opts: OtelSetupOptions = {
+      amplitude: createMockClient(),
+      otelEndpoint: 'http://localhost:4317',
+    };
+    const result = setupOtel(opts);
+    expect(result.provider).toBeDefined();
+    expect(result.processor).toBeInstanceOf(AmplitudeEventSpanProcessor);
+  });
+
+  it('sets up with null optional fields', () => {
+    trace.disable();
+    const opts: OtelSetupOptions = {
+      amplitude: createMockClient(),
+      defaultUserId: null,
+      defaultDeviceId: null,
+      otelEndpoint: null,
+      privacyConfig: null,
+    };
+    const result = setupOtel(opts);
+    expect(result.provider).toBeDefined();
     expect(result.mapper).toBeDefined();
   });
 });
