@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -58,6 +58,7 @@
     "./mcp/scan-project": "./dist/mcp/scan-project.js",
     "./mcp/server": "./dist/mcp/server.js",
     "./mcp/validate-file": "./dist/mcp/validate-file.js",
+    "./otel": "./dist/otel/index.js",
     "./middleware": "./dist/middleware.js",
     "./patching": "./dist/patching.js",
     "./propagation": "./dist/propagation.js",
@@ -148,6 +149,8 @@
     "@aws-sdk/client-bedrock-runtime": ">=3.0.0 <4.0.0",
     "@google/generative-ai": ">=0.21.0 <1.0.0",
     "@mistralai/mistralai": ">=1.3.6 <2.0.0",
+    "@opentelemetry/api": ">=1.0.0",
+    "@opentelemetry/sdk-trace-base": ">=1.0.0",
     "js-tiktoken": ">=1.0.0",
     "openai": ">=4.0.0 <7.0.0",
     "tiktoken": ">=1.0.0"
@@ -166,6 +169,12 @@
       "optional": true
     },
     "@mistralai/mistralai": {
+      "optional": true
+    },
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace-base": {
       "optional": true
     },
     "js-tiktoken": {
