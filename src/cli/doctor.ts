@@ -41,6 +41,73 @@ const collectDependencyNames = (
   return names;
 };
 
+type FillRateResult = {
+  total_events: number;
+  event_breakdown: Record<string, number>;
+  fill_rates: Record<string, { count: number; total: number; rate: string }>;
+  all_healthy: boolean;
+};
+
+const runFillRates = (_cwd: string): FillRateResult => {
+  const mock = new MockAmplitudeAI();
+  mock.trackUserMessage({
+    userId: 'doctor-user',
+    content: 'fill-rate probe',
+    sessionId: 'doctor-session',
+  });
+  mock.trackAiMessage({
+    userId: 'doctor-user',
+    content: 'response',
+    sessionId: 'doctor-session',
+    model: 'gpt-4o-mini',
+    provider: 'openai',
+    latencyMs: 150,
+    inputTokens: 42,
+    outputTokens: 96,
+  });
+
+  const events = mock.getEvents();
+  const breakdown: Record<string, number> = {};
+  for (const e of events) {
+    const t = e.event_type ?? 'unknown';
+    breakdown[t] = (breakdown[t] ?? 0) + 1;
+  }
+
+  const total = events.length;
+  const check = (
+    _field: string,
+    predicate: (e: Record<string, unknown>) => boolean,
+  ): { count: number; total: number; rate: string } => {
+    const count = events.filter((e) => predicate(e as Record<string, unknown>)).length;
+    const rate = total > 0 ? `${Math.round((count / total) * 100)}%` : '0%';
+    return { count, total, rate };
+  };
+
+  const fillRates: Record<string, { count: number; total: number; rate: string }> = {
+    user_id: check('user_id', (e) => Boolean(e.user_id)),
+    session_id: check('session_id', (e) => {
+      const props = e.event_properties as Record<string, unknown> | undefined;
+      return Boolean(props?.['[Agent] Session ID']);
+    }),
+    agent_id: check('agent_id', (e) => {
+      const props = e.event_properties as Record<string, unknown> | undefined;
+      return Boolean(props?.['[Agent] Agent ID']);
+    }),
+    model: check('model', (e) => {
+      const props = e.event_properties as Record<string, unknown> | undefined;
+      return Boolean(props?.['[Agent] Model']);
+    }),
+    latency_ms: check('latency_ms', (e) => {
+      const props = e.event_properties as Record<string, unknown> | undefined;
+      return (props?.['[Agent] Latency Ms'] as number) > 0;
+    }),
+  };
+
+  const allHealthy = Object.values(fillRates).every((r) => r.rate === '100%');
+
+  return { total_events: total, event_breakdown: breakdown, fill_rates: fillRates, all_healthy: allHealthy };
+};
+
 const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
   const checks: DoctorResult['checks'] = [];
 
@@ -139,4 +206,4 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
   return { ok, checks };
 };
 
-export { runDoctor, type DoctorResult, type DoctorOptions };
+export { runDoctor, runFillRates, type DoctorResult, type DoctorOptions, type FillRateResult };

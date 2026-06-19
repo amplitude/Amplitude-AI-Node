@@ -307,6 +307,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     const startTime = performance.now();
     let success = true;
     let errorMsg: string | null = null;
+    let errorStack: string | null = null;
     let result: unknown = undefined;
 
     try {
@@ -323,6 +324,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     } catch (e) {
       success = false;
       errorMsg = e instanceof Error ? e.message : String(e);
+      errorStack = e instanceof Error ? (e.stack ?? null) : null;
       if (opts.onError != null) {
         try {
           opts.onError(e instanceof Error ? e : new Error(String(e)), toolName);
@@ -345,6 +347,10 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
         ...extraProps,
       };
 
+      const captureStack = r.privacyConfig != null
+        && 'captureStackTrace' in r.privacyConfig
+        && (r.privacyConfig as Record<string, unknown>).captureStackTrace === true;
+
       try {
         trackToolCall({
           amplitude: r.amplitude,
@@ -360,6 +366,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           toolInput,
           toolOutput: success ? result : undefined,
           errorMessage: errorMsg,
+          stackTrace: captureStack && errorStack ? errorStack : undefined,
           env: r.env,
           agentId: r.agentId,
           parentAgentId: r.parentAgentId,

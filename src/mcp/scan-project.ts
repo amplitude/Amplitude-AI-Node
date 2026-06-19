@@ -52,6 +52,8 @@ export interface ScanResult {
   has_langgraph: boolean;
   message_queue_deps: string[];
   has_frontend_deps: boolean;
+  has_otel_deps: boolean;
+  otel_packages: string[];
   recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
@@ -113,6 +115,18 @@ const FRONTEND_DEPS = [
   '@angular/core',
 ];
 
+const OTEL_DEPS = [
+  '@opentelemetry/api',
+  '@opentelemetry/sdk-trace-base',
+  '@opentelemetry/sdk-trace-node',
+  '@opentelemetry/exporter-trace-otlp-grpc',
+  '@opentelemetry/exporter-trace-otlp-http',
+  '@opentelemetry/exporter-trace-otlp-proto',
+  '@opentelemetry/instrumentation',
+  '@opentelemetry/auto-instrumentations-node',
+  '@traceloop/node-server-sdk',
+];
+
 // Tightened to LLM-specific contexts: stream:true near model/messages, or Vercel AI SDK fns
 const STREAMING_RE = /streamText\s*\(|useChat\s*\(|stream\s*:\s*true/;
 
@@ -147,7 +161,7 @@ function collectSourceFiles(
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry)) continue;
     const fullPath = join(dir, entry);
-    let stat;
+    let stat: ReturnType<typeof statSync> | undefined;
     try {
       stat = statSync(fullPath);
     } catch {
@@ -431,6 +445,10 @@ export function scanProject(rootPath: string): ScanResult {
   // Frontend deps (browser-server linking signal)
   const hasFrontendDeps = FRONTEND_DEPS.some((dep) => allDeps.has(dep));
 
+  // OTEL deps
+  const otelPackages = OTEL_DEPS.filter((dep) => allDeps.has(dep));
+  const hasOtelDeps = otelPackages.length > 0;
+
   // Vercel AI SDK detection (dep-level)
   const hasVercelAiSdk = VERCEL_AI_SDK_DEPS.some((dep) => allDeps.has(dep)) || hasVercelAiSdkUsage;
 
@@ -489,6 +507,12 @@ export function scanProject(rootPath: string): ScanResult {
       'AmplitudeCallbackHandler, but graph orchestration events (node transitions, checkpoints, ' +
       'human-in-the-loop) are not yet instrumented.',
     );
+  }
+
+  if (hasOtelDeps) {
+      recommendations.push(
+        `OpenTelemetry dependencies detected (${otelPackages.join(', ')}). Consider calling \`ai.enableOtel()\` after initializing AmplitudeAI to route all instrumentation through OTEL spans. The AmplitudeEventSpanProcessor maps GenAI semantic convention spans into [Agent] events automatically. Use \`observe({ type: "agent" })\` on orchestration functions to capture delegation latency and errors as real OTEL spans.`,
+      );
   }
 
   if (globalHasAmplitudeImport && globalHasWrappers && globalHasSessionContext) {
@@ -557,6 +581,8 @@ export function scanProject(rootPath: string): ScanResult {
     has_langgraph: hasLanggraph,
     message_queue_deps: messageQueueDeps,
     has_frontend_deps: hasFrontendDeps,
+    has_otel_deps: hasOtelDeps,
+    otel_packages: otelPackages,
     recommendations,
     recommended_tier: recommendedTier,
   };

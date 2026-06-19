@@ -106,6 +106,9 @@ export const PROP_TOOL_DEFINITIONS = '[Agent] Tool Definitions';
 export const PROP_TOOL_DEFINITIONS_COUNT = '[Agent] Tool Definitions Count';
 export const PROP_TOOL_DEFINITIONS_HASH = '[Agent] Tool Definitions Hash';
 
+// Stack trace (v0.12.0) — opt-in error debugging
+export const PROP_STACK_TRACE = '[Agent] Stack Trace';
+
 // Session replay linking (v0.7.0)
 export const PROP_SESSION_REPLAY_ID = '[Amplitude] Session Replay ID';
 

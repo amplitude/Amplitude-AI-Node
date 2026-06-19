@@ -89,6 +89,7 @@ import {
   PROP_TRACE_ID,
   PROP_TTFB_MS,
   PROP_TURN_ID,
+  PROP_STACK_TRACE,
   PROP_WAS_CACHED,
   PROP_WAS_COPIED,
   SDK_RUNTIME,
@@ -373,6 +374,7 @@ export interface TrackAiMessageOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   spanKind?: string | null;
+  stackTrace?: string | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -456,6 +458,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.errorMessage != null)
     properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
   if (opts.errorType != null) properties[PROP_ERROR_TYPE] = opts.errorType;
+  if (opts.stackTrace != null)
+    properties[PROP_STACK_TRACE] = opts.stackTrace;
   if (opts.toolCalls != null)
     properties[PROP_TOOL_CALLS] = serializeToJsonString(opts.toolCalls);
 
@@ -556,6 +560,7 @@ export interface TrackToolCallOptions {
   context?: Record<string, unknown> | null;
   errorMessage?: string | null;
   errorType?: string | null;
+  stackTrace?: string | null;
   env?: string | null;
   locale?: string | null;
   spanKind?: string | null;
@@ -606,6 +611,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
   if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
+  if (opts.stackTrace) properties[PROP_STACK_TRACE] = opts.stackTrace;
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.locale) properties[PROP_LOCALE] = opts.locale;
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;

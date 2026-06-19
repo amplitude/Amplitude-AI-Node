@@ -104,6 +104,11 @@ const PROP_GIT_REPO = '[Agent] Git Repo';
 const PROP_STACK_TRACE = '[Agent] Stack Trace';
 const PROP_ERROR_SOURCE_PROP = '[Agent] Error Source';
 
+export interface OtelSpanEvent {
+  name?: string;
+  attributes?: Record<string, unknown>;
+}
+
 export interface OtelSpan {
   name?: string;
   attributes?: Record<string, unknown>;
@@ -117,6 +122,7 @@ export interface OtelSpan {
   spanContext?: () => { traceId?: string; spanId?: string };
   parent?: { span_id?: number; spanId?: string };
   parentSpanId?: string;
+  events?: OtelSpanEvent[];
 }
 
 export interface SpanEventMapperOptions {
@@ -148,7 +154,7 @@ export class SpanEventMapper {
     const attrs: Record<string, unknown> = { ...(span.attributes ?? {}) };
     const ctx = getActiveContext();
 
-    if (ctx != null && ctx.trackerManaged) {
+    if (ctx?.trackerManaged) {
       logger.debug('Skipping span — trackerManaged context is active');
       return;
     }
@@ -587,7 +593,17 @@ export class SpanEventMapper {
       if (!extra[PROP_GIT_REF] && gitMeta.gitRef) extra[PROP_GIT_REF] = gitMeta.gitRef;
       if (!extra[PROP_GIT_REPO] && gitMeta.gitRepo) extra[PROP_GIT_REPO] = gitMeta.gitRepo;
     }
-    if (attrs[AMP_STACK_TRACE]) extra[PROP_STACK_TRACE] = String(attrs[AMP_STACK_TRACE]);
+    if (attrs[AMP_STACK_TRACE]) {
+      extra[PROP_STACK_TRACE] = String(attrs[AMP_STACK_TRACE]);
+    } else if (opts.span.events?.length) {
+      const exceptionEvent = opts.span.events.find(
+        (e) => e.name === 'exception',
+      );
+      if (exceptionEvent?.attributes) {
+        const stacktrace = exceptionEvent.attributes['exception.stacktrace'];
+        if (stacktrace) extra[PROP_STACK_TRACE] = String(stacktrace);
+      }
+    }
     if (attrs[AMP_ERROR_SOURCE]) extra[PROP_ERROR_SOURCE_PROP] = String(attrs[AMP_ERROR_SOURCE]);
     if (attrs[AMP_TOOL_TYPE]) extra[PROP_TOOL_TYPE] = String(attrs[AMP_TOOL_TYPE]);
     if (attrs[AMP_TOOL_OWNER]) extra[PROP_TOOL_OWNER] = String(attrs[AMP_TOOL_OWNER]);
