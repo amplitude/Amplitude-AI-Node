@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -22,6 +22,14 @@ describe('doctor', (): void => {
         (check) => check.name === 'mock_flush_path' && check.ok === true,
       ),
     ).toBe(true);
+  });
+
+  it('reads dependencies from package.json when present', (): void => {
+    const cwd = mkdtempSync(join(tmpdir(), 'amp-ai-doctor-pkg-'));
+    const pkg = { dependencies: { '@amplitude/ai': '0.13.0', openai: '4.0.0' }, devDependencies: {} };
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify(pkg));
+    const result = runDoctor(cwd);
+    expect(result.checks.some((check) => check.name.includes('provider'))).toBe(true);
   });
 
   it('can skip mock checks when requested', (): void => {
