@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from './client.js';
-import { _sessionStorage, SessionContext } from './context.js';
+import { runWithContext, SessionContext } from './context.js';
 import { getLogger } from './utils/logger.js';
 
 /** A static value or a `(req) => value` resolver for per-request values. */
@@ -104,7 +104,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
       amplitude: amplitudeAI.amplitude,
     });
 
-    _sessionStorage.run(ctx, () => {
+    runWithContext(ctx, () => {
       res.on('finish', () => {
         if (trackSessionEvents && userId != null) {
           try {

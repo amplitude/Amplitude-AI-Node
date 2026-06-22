@@ -51,6 +51,7 @@ export type {
 export {
   SessionContext,
   getActiveContext,
+  pushContext,
   isTrackerManaged,
   runWithContext,
   runWithContextAsync,
