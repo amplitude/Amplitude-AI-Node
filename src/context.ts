@@ -112,4 +112,22 @@ export function runWithContextAsync<T>(
   return _sessionStorage.run(ctx, fn);
 }
 
+/**
+ * Set the active SessionContext for the current async scope.
+ *
+ * Returns a cleanup function that restores the previous context.
+ * Use this in middleware or interceptors where the context must outlive
+ * the call frame that created it.
+ *
+ * For scoped usage, prefer `agent.session()` (callback-based) or
+ * `runWithContext()`.
+ */
+export function pushContext(ctx: SessionContext | null): () => void {
+  const previous = _sessionStorage.getStore() ?? null;
+  _sessionStorage.enterWith(ctx);
+  return () => {
+    _sessionStorage.enterWith(previous);
+  };
+}
+
 export { _sessionStorage };
