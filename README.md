@@ -2319,7 +2319,7 @@ All event properties are prefixed with `[Agent]` (except `[Amplitude] Session Re
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
-| `[Agent] Trace ID` | string | No | Identifies one user-message-to-AI-response cycle within a session. |
+| `[Agent] Trace ID` | string | No | Groups events into a single "Turn" in the trace viewer. All events in one user-to-AI-response exchange share the same trace ID. Each distinct trace ID becomes a collapsible turn card. Events without a trace ID fall back to the session ID and collapse into Turn 1. |
 | `[Agent] Turn ID` | number | No | Monotonically increasing counter for event ordering within a session. |
 | `[Agent] Agent ID` | string | No | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Parent Agent ID` | string | No | For multi-agent orchestration: the agent that delegated to this agent. |

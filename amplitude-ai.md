@@ -439,6 +439,115 @@ await orchestrator.session({ sessionId }).run(async (s) => {
 
 > **Minimum SDK version:** `@amplitude/ai >= 0.11.0` for auto-suppression of user messages inside `runAs`.
 
+### Step 3g-c: Trace ID assignment and Turn grouping
+
+**`[Agent] Trace ID` controls how the trace tab groups events into visual "Turns."** Each distinct `[Agent] Trace ID` becomes one collapsible "Turn N" card in the Agent Analytics session viewer. Events without a `[Agent] Trace ID` fall back to using `[Agent] Session ID` as the trace ID — which causes every event without an explicit trace to collapse into a single "Turn 1."
+
+When using the SDK's session `.run()`, `newTrace()` handles this automatically. But if you are constructing events manually (e.g., via the HTTP API), you must assign trace IDs yourself:
+
+1. **One unique trace ID per user-to-response exchange.** All events within a single exchange (user message, AI response, tool calls, spans) share the same `[Agent] Trace ID`.
+2. **`[Agent] Session End` needs its own trace ID** (or be placed on the last turn's trace ID with the latest timestamp). Without one, it falls back to the session ID and appears under "Turn 1."
+3. **Opening AI messages (before the user's first input)** still need a trace ID. Assign them to a distinct trace (e.g., `${sessionId}-trace-0`) so they form their own turn.
+
+```typescript
+// SDK handles trace IDs automatically:
+await agent.session({ sessionId }).run(async (s) => {
+  s.newTrace(); // creates a unique trace ID for this turn
+  s.trackUserMessage('hello');
+  // ... LLM call ...
+  // AI Response auto-inherits the trace ID
+});
+
+// HTTP API: you must set [Agent] Trace ID explicitly on every event
+// All events in the same turn share the same trace ID
+const traceId = `${sessionId}-trace-${turnNumber}`;
+```
+
+### Step 3g-d: Span events for rich UI components
+
+When your agent renders **embedded UI components** — forms, accordions, suggestion panels, carousels, disclaimers — alongside text responses, use `[Agent] Span` events to capture the component metadata in the trace. This makes each component visible in the trace tab with its own identity and data payload.
+
+```typescript
+// After the AI response that triggered the UI render:
+s.trackSpan({
+  name: 'disclaimer-accordion',       // component type
+  latencyMs: 0,                        // rendering latency, or 0 for static
+  inputState: { disclaimerType: 'VA_loan', sections: ['eligibility', 'terms'] },
+  outputState: { userExpanded: true, accepted: false },
+});
+
+s.trackSpan({
+  name: 'suggestions',
+  latencyMs: 0,
+  inputState: { options: ['Buy a home', 'Refinance', 'Cash-out'] },
+  outputState: { selected: 'Buy a home' },
+});
+```
+
+**Key points:**
+- Use `name` as the component type (e.g., `disclaimer-accordion`, `suggestions`, `inline-form`).
+- Put the component's data payload in `inputState` (what was rendered) and user interaction data in `outputState` (what the user did).
+- These spans inherit the session's trace context, so they appear in the correct turn.
+- Span events appear in the **trace tab** but not in the **conversation view**. For the conversation view, the `[Agent] AI Response` with text content is what drives the chat bubbles.
+
+**Empty AI responses (when the agent renders a UI component instead of text):**
+If your agent's response is purely a UI component with no text, you still need an `[Agent] AI Response` event for turn counting. Put a brief description in the content so the session viewer shows a readable bubble:
+
+```typescript
+s.trackAiMessage('[Displayed: loan options comparison table]', {
+  model: 'gpt-4o', provider: 'openai', latencyMs: 200,
+});
+// Then emit the span with the full component data:
+s.trackSpan({
+  name: 'loan-comparison-table',
+  latencyMs: 200,
+  inputState: { loans: [{ type: '30yr-fixed', rate: 6.5 }, ...] },
+});
+```
+
+Sending an `[Agent] AI Response` with empty `$llm_message` content produces **no bubble** in the session viewer's conversation view and the turn's text is invisible to the enrichment pipeline (evaluators can't judge an empty response). Always include at least a placeholder description.
+
+### Step 3g-e: Sending `[Agent]` events without the SDK (HTTP API)
+
+For platform integrations where installing the SDK isn't practical (e.g., Sierra webhooks, Intercom bots, custom chat platforms), you can send `[Agent]` events directly to the [Amplitude HTTP V2 API](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/).
+
+**Required structure** — each event in the `events` array:
+
+```json
+{
+  "event_type": "[Agent] AI Response",
+  "user_id": "user-123",
+  "device_id": "anon-device-456",
+  "time": 1719446400000,
+  "event_properties": {
+    "[Agent] Session ID": "session-abc-123",
+    "[Agent] Trace ID": "session-abc-123-trace-1",
+    "[Agent] Turn ID": 2,
+    "[Agent] Agent ID": "my-agent",
+    "[Agent] SDK Version": "http-api/1.0",
+    "[Agent] Runtime": "custom",
+    "$llm_message": {"text": "Here's what I found..."}
+  }
+}
+```
+
+**Identity:** Set `user_id` and/or `device_id` at the top level. At least one is required for user-level analytics.
+
+**Content:** User and AI message text goes in `$llm_message.text` inside `event_properties`, not at the top level.
+
+**Trace grouping:** Set `[Agent] Trace ID` on every event (see Step 3g-c). Events without it are grouped into a single turn.
+
+**Session lifecycle:** You must send an explicit `[Agent] Session End` event when the conversation ends — there is no session context manager to auto-close for you.
+
+**Batching:** The HTTP V2 API accepts up to 2000 events per request and 20MB payload. For large sessions, batch events in groups (e.g., 10-50 per request). Event ordering is reconstructed from `[Agent] Turn ID` + `time` regardless of batch arrival order.
+
+**Event types to send** (minimum viable session):
+1. `[Agent] User Message` — one per user input
+2. `[Agent] AI Response` — one per AI output (never empty `$llm_message`)
+3. `[Agent] Session End` — one at session close
+4. `[Agent] Span` (optional) — for tool calls, UI components, or sub-operations
+5. `[Agent] Score` (optional) — for user feedback (thumbs up/down)
+
 ### Step 3h: Add scoring
 
 If feedback handlers were detected (thumbs up/down UI), add scoring. Check whether the handler receives a `messageId` — if so, target the specific message for finer-grained scoring. Otherwise fall back to session-level scoring:
