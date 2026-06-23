@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.14.0
+
+### Added (AA-151359)
+- **`pushContext()` public API for cross-SDK parity:** New `pushContext()` method on
+  the AI client allows callers to append context entries that are automatically
+  included on subsequent events within the session. Aligns the Node SDK surface with
+  the Python SDK's equivalent API.
+
+### Docs (AA-151367)
+- **Trace ID grouping, UI component spans, and HTTP API usage:** New instrumentation
+  guide sections documenting how `[Agent] Trace ID` controls turn grouping in the
+  session viewer, how to emit `[Agent] Span` events for rich UI components
+  (accordions, suggestion panels, forms), how to handle empty AI responses, and a
+  complete JSON reference for sending `[Agent]` events via the HTTP V2 API without
+  the SDK.
+
+## 0.13.0
+
+### Added (AA-151308)
+- **OTEL span-first instrumentation:** `observe()` decorator and provider wrappers now
+  emit OpenTelemetry spans alongside Amplitude events. Stack trace capture,
+  `doctor --fill-rates`, provider OTEL spans, and MCP OTEL detection included.
+  Session tags, git metadata, and SDK v2 compatibility layer added.
+
+### Fixed (AA-151308)
+- **Duplicate event deduplication, privacy, provider spans, and streaming fixes:**
+  Resolved duplicate event emission, privacy mode handling, provider span accuracy,
+  and streaming cost tracking edge cases.
+- **TS2352 type error in decorators.ts:** Fixed TypeScript type assertion error.
+
 ## 0.12.0
 
 ### Docs (AA-151340)
