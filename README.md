@@ -4,11 +4,23 @@
 [![CI](https://github.com/amplitude/Amplitude-AI-Node/actions/workflows/test.yml/badge.svg)](https://github.com/amplitude/Amplitude-AI-Node/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Agent analytics for [Amplitude](https://amplitude.com). Track every LLM call, user message, tool call, and quality signal as events in your Amplitude project — then build funnels, cohorts, and retention charts across AI and product behavior.
+Agent analytics for [Amplitude](https://amplitude.com). Track every LLM call, user message, tool call, and quality signal as events in your Amplitude project — then build funnels, cohorts, and retention charts across AI and product behavior alongside your existing product events.
+
+## 📘 Documentation
+
+The canonical SDK reference lives in Amplitude Docs:
+
+**[amplitude.com/docs/sdks/agent-analytics/sdk](https://amplitude.com/docs/sdks/agent-analytics/sdk)**
+
+That page covers installation, the full event taxonomy, sessions, tools, spans, scores, multi-agent delegation, streaming, edge runtimes (Cloudflare Workers, Vercel AI SDK), provider-specific notes (OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral, Anthropic Managed Agents, Claude Agent SDK), cost and prompt-cache handling, privacy modes, content shaping, verification with `MockAmplitudeAI`, and the complete API.
+
+## Install
 
 ```bash
 npm install @amplitude/ai @amplitude/analytics-node
 ```
+
+## Quick start
 
 ```typescript
 import { AmplitudeAI, OpenAI } from '@amplitude/ai';
@@ -19,7 +31,6 @@ const agent = ai.agent('my-agent');
 
 app.post('/chat', async (req, res) => {
   const session = agent.session({ userId: req.userId, sessionId: req.sessionId });
-
   const result = await session.run(async (s) => {
     s.trackUserMessage(req.body.message);
     const response = await openai.chat.completions.create({
@@ -28,14 +39,45 @@ app.post('/chat', async (req, res) => {
     });
     return response.choices[0].message.content;
   });
-
   await ai.flush();
   res.json({ response: result });
 });
-// Events: [Agent] User Message, [Agent] AI Response (with model, tokens, cost, latency),
-//         [Agent] Session End — all tied to userId and sessionId
 ```
 
-## How to Get Started
+Emits `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` — tied to `userId` and `sessionId`. Auto-captures model, tokens, cost, and latency on the AI Response. Read the [SDK reference](https://amplitude.com/docs/sdks/agent-analytics/sdk) for the rest.
 
-PLACEHOLDER_TRUNCATED_CONTENT
+## Provider wrappers
+
+Each wrapper records request, response, tokens, latency, and cost automatically:
+
+```typescript
+import { OpenAI, AzureOpenAI, Anthropic, Gemini, Bedrock, Mistral } from '@amplitude/ai';
+```
+
+See [Auto-instrument provider calls](https://amplitude.com/docs/sdks/agent-analytics/sdk#auto-instrument-provider-calls) for the full table and per-provider notes (Anthropic Managed Agents, Claude Agent SDK, Vercel AI SDK).
+
+## Auto-instrument with an AI coding agent
+
+```bash
+npx amplitude-ai
+```
+
+Paste the printed prompt into Cursor, Claude Code, GitHub Copilot, or Codex. The agent reads the in-repo instrumentation guide ([`amplitude-ai.md`](amplitude-ai.md)), scans your project, discovers your LLM call sites, and instruments everything — provider wrappers, sessions, multi-agent delegation, tools, scoring, and a verification test.
+
+## Privacy
+
+Three content modes control what reaches Amplitude:
+
+- `full` (default) — content captured, PII redacted by default.
+- `metadata_only` — token counts, latency, model, cost. No content.
+- `customer_enriched` — no content; you provide structured summaries via `trackSessionEnrichment()`.
+
+Full details and per-provider redaction recipes at [Choose a privacy mode](https://amplitude.com/docs/sdks/agent-analytics/sdk#choose-a-privacy-mode).
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+> **About this README.** The long-form SDK reference previously hosted here moved to the [canonical docs page](https://amplitude.com/docs/sdks/agent-analytics/sdk) so npm, PyPI, and the in-product docs surface stay aligned. The full instrumentation guide consumed by AI coding agents is preserved at [`amplitude-ai.md`](amplitude-ai.md) in this repo.
