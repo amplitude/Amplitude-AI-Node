@@ -13,6 +13,8 @@ import {
   trackUserMessage,
 } from './core/tracking.js';
 import { ConfigurationError } from './exceptions.js';
+import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
+import type { SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
 import { setDefaultPropagateContext } from './propagation.js';
 import { isServerless } from './serverless.js';
@@ -26,6 +28,19 @@ import { calculateCost } from './utils/costs.js';
 import { formatDebugLine, formatDryRunLine } from './utils/debug.js';
 import { type Logger, getLogger } from './utils/logger.js';
 import { isBundlerEnvironment, tryRequire } from './utils/resolve-module.js';
+import { createRequire } from 'node:module';
+
+import { setupOtel } from './otel/setup.js';
+
+const _require = createRequire(import.meta.url);
+
+interface OtelSpanLike {
+  isRecording(): boolean;
+  setAttribute(key: string, value: string): void;
+}
+interface OtelApi {
+  trace: { getActiveSpan(): OtelSpanLike | undefined };
+}
 
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
 const _MIN_ID_LENGTH = 5;
@@ -132,6 +147,12 @@ export class AmplitudeAI {
   protected _sessionTurnCounters: Map<string, number> = new Map();
   /** @internal Tracks events since last flush() — used by the exit warning. */
   _trackCountSinceFlush = 0;
+
+  // OTEL span-first fields
+  private _otelEnabled = false;
+  private _otelTracerProvider: unknown = null;
+  private _otelMapper: SpanEventMapper | null = null;
+  private _otelProcessor: AmplitudeEventSpanProcessor | null = null;
 
   constructor(options: {
     amplitude?: AmplitudeClientLike;
@@ -328,6 +349,7 @@ export class AmplitudeAI {
     editedMessageId?: string | null;
     attachments?: Attachment[] | null;
     labels?: MessageLabel[] | null;
+    idleTimeoutMinutes?: number | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
@@ -355,6 +377,7 @@ export class AmplitudeAI {
       editedMessageId: opts.editedMessageId,
       attachments: opts.attachments,
       labels: opts.labels,
+      idleTimeoutMinutes: opts.idleTimeoutMinutes,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: this._privacyConfig,
@@ -494,6 +517,8 @@ export class AmplitudeAI {
     userId?: string;
     deviceId?: string | null;
     toolName: string;
+    toolType?: string | null;
+    toolOwner?: string | null;
     latencyMs: number;
     success: boolean;
     sessionId?: string | null;
@@ -521,6 +546,8 @@ export class AmplitudeAI {
       userId: opts.userId,
       deviceId: opts.deviceId,
       toolName: opts.toolName,
+      toolType: opts.toolType,
+      toolOwner: opts.toolOwner,
       success: opts.success,
       latencyMs: opts.latencyMs,
       sessionId: opts.sessionId,
@@ -829,6 +856,93 @@ export class AmplitudeAI {
   }
 
   // ---------------------------------------------------------------
+  // OTEL span-first instrumentation
+  // ---------------------------------------------------------------
+
+  enableOtel(options?: {
+    defaultUserId?: string;
+    defaultDeviceId?: string;
+    otelEndpoint?: string;
+  }): this {
+    if (this._otelEnabled) {
+      getLogger().debug('enableOtel() called more than once — skipping');
+      return this;
+    }
+
+    const { provider, mapper, processor } = setupOtel({
+      amplitude: this._amplitude,
+      defaultUserId: options?.defaultUserId,
+      defaultDeviceId: options?.defaultDeviceId,
+      otelEndpoint: options?.otelEndpoint,
+      privacyConfig: this._privacyConfig,
+    });
+
+    this._otelTracerProvider = provider;
+    this._otelMapper = mapper;
+    this._otelProcessor = processor;
+    this._otelEnabled = true;
+    getLogger().info('OTEL span-first instrumentation enabled');
+    return this;
+  }
+
+  get otelEnabled(): boolean {
+    return this._otelEnabled;
+  }
+
+  usingAttributes<T>(attrs: Record<string, string>, fn: () => T): T {
+    if (this._otelEnabled) {
+      try {
+        const api = _require('@opentelemetry/api') as OtelApi;
+        const span = api.trace.getActiveSpan();
+        if (span && span.isRecording()) {
+          for (const [key, value] of Object.entries(attrs)) {
+            span.setAttribute(key, value);
+          }
+        }
+      } catch {
+        getLogger().debug('opentelemetry not available for usingAttributes');
+      }
+    }
+    return fn();
+  }
+
+  updateCurrentSpan(attrs: Record<string, string>): void {
+    if (!this._otelEnabled) {
+      getLogger().debug('updateCurrentSpan called but OTEL is not enabled');
+      return;
+    }
+    try {
+      const api = _require('@opentelemetry/api') as OtelApi;
+      const span = api.trace.getActiveSpan();
+      if (span && span.isRecording()) {
+        for (const [key, value] of Object.entries(attrs)) {
+          span.setAttribute(key, value);
+        }
+      }
+    } catch {
+      getLogger().debug('opentelemetry not available for updateCurrentSpan');
+    }
+  }
+
+  updateCurrentTrace(attrs: Record<string, string>): void {
+    if (!this._otelEnabled) {
+      getLogger().debug('updateCurrentTrace called but OTEL is not enabled');
+      return;
+    }
+    try {
+      const api = _require('@opentelemetry/api') as OtelApi;
+      const span = api.trace.getActiveSpan();
+      if (span && span.isRecording()) {
+        for (const [key, value] of Object.entries(attrs)) {
+          span.setAttribute(`amplitude.trace.${key}`, value);
+        }
+      }
+    } catch {
+      getLogger().debug('opentelemetry not available for updateCurrentTrace');
+    }
+  }
+
+  // ---------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------
 
@@ -864,6 +978,7 @@ export class AmplitudeAI {
       debug: this._config.debug,
       dry_run: this._config.dryRun,
       redact_pii: this._config.redactPii,
+      otel_enabled: this._otelEnabled,
       providers_available: availableProviders,
       patched_providers: patchedProviders(),
     };

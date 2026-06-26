@@ -273,6 +273,21 @@ export class BoundAgent {
     } as Parameters<AmplitudeAI['score']>[0]);
   }
 
+  /**
+   * Create a {@link Session}.
+   *
+   * `idleTimeoutMinutes` hints to the enrichment pipeline how long to wait
+   * before considering the session idle. Defaults to the pipeline default
+   * (~30 min). Positive values up to 90 days (129600) are honored; larger
+   * values are clamped to 90 days. Set to `-1` when you intend to end the
+   * session explicitly: it is enriched early when an explicit
+   * `[Agent] Session End` is emitted (e.g. on `run`/`end`), and otherwise
+   * auto-closes after a 90-day inactivity backstop — so a session that is never
+   * explicitly ended still flushes eventually rather than leaking open.
+   *
+   * @throws {RangeError} if `idleTimeoutMinutes` is a negative value other than
+   *   the `-1` sentinel.
+   */
   session(
     opts: {
       sessionId?: string | null;
@@ -281,8 +296,14 @@ export class BoundAgent {
       deviceId?: string | null;
       browserSessionId?: string | null;
       autoFlush?: boolean;
+      tags?: string[] | null;
     } = {},
   ): Session {
+    if (opts.idleTimeoutMinutes != null && opts.idleTimeoutMinutes < -1) {
+      throw new RangeError(
+        `idleTimeoutMinutes must be >= 0, or -1 to rely on an explicit session end; got ${opts.idleTimeoutMinutes}`,
+      );
+    }
     return new Session(this, opts);
   }
 

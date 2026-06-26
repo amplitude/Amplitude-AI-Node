@@ -52,6 +52,26 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
     snippet:
       'const orchestrator = ai.agent("orchestrator", { userId: "u1" });\nconst researcher = orchestrator.child("researcher");\nconst session = orchestrator.session({ sessionId: "s1" });\nawait session.run(async (s) => {\n  const result = await s.runAs(researcher, async (cs) => {\n    return openai.chat.completions.create({ model: "gpt-4o", messages: [...] });\n  });\n});',
   },
+  {
+    id: 'fan-out-llm',
+    title: 'Fan-out LLM pattern: parallel child calls, single user turn',
+    whenToUse:
+      'One user action triggers multiple parallel LLM calls (scoring, content generation, ' +
+      'matching). Each parallel call should be a child agent via runAs() sharing a single ' +
+      'trace — never emit separate user messages or traces for internal delegation.',
+    snippet:
+      'const orchestrator = ai.agent("orchestrator", { userId: uid });\n' +
+      'const scorer = orchestrator.child("focus-scorer");\n' +
+      'const matcher = orchestrator.child("catalog-matcher");\n\n' +
+      'await orchestrator.session({ sessionId }).run(async (s) => {\n' +
+      '  s.trackUserMessage("Generate plan from quiz results", { context: structuredState });\n\n' +
+      '  const [a, b] = await Promise.all([\n' +
+      '    s.runAs(scorer, () => openai.chat.completions.create({ model: "gpt-4o", messages: [...] })),\n' +
+      '    s.runAs(matcher, () => openai.chat.completions.create({ model: "gpt-4o", messages: [...] })),\n' +
+      '  ]);\n\n' +
+      '  s.trackAiMessage(assemble(a, b), { model: "gpt-4o", provider: "openai" });\n' +
+      '});',
+  },
 ];
 
 const getIntegrationPatterns = (): IntegrationPattern[] =>

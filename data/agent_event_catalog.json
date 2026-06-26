@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 13,
-    "generated_at": "2026-05-22T23:13:52.722179+00:00",
+    "schema_version": 14,
+    "generated_at": "2026-06-16T06:59:48.396844+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -60,6 +60,11 @@
           "name": "[Agent] Env",
           "type": "string",
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
           "name": "[Agent] SDK Version",
@@ -204,6 +209,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -226,6 +236,16 @@
           "type": "string",
           "description": "Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
         },
         {
           "name": "[Agent] Model Name",
@@ -495,6 +515,21 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -560,6 +595,16 @@
           "type": "string",
           "description": "Name of the tool/function that was invoked (e.g., 'search_docs', 'web_search').",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Tool Type",
+          "type": "string",
+          "description": "Origin/class of the tool: 'python' (native in-process tool), 'mcp' (tool served by a connected MCP server), 'flow' (sub-agent delegation), or 'unknown'. Lets you segment native vs. MCP-connected tool usage without parsing the tool name or Context."
+        },
+        {
+          "name": "[Agent] Tool Owner",
+          "type": "string",
+          "description": "Who owns the tool: 'amplitude' (Amplitude-built/operated — native tools, sub-agents, and Amplitude's own MCP servers) or 'customer' (a server the customer connected, e.g. their own MCP server via the gateway). Segments Amplitude-internal vs. customer-connected tool usage as a first-class property, without overloading [Agent] Tool Type."
         },
         {
           "name": "[Agent] Tool Success",
@@ -638,6 +683,11 @@
           "name": "[Agent] Env",
           "type": "string",
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
           "name": "[Agent] SDK Version",
@@ -752,6 +802,21 @@
           "name": "[Agent] Env",
           "type": "string",
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
         },
         {
           "name": "[Agent] SDK Version",
@@ -872,6 +937,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -956,6 +1026,11 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -977,7 +1052,7 @@
     },
     {
       "event_type": "[Agent] Score",
-      "description": "Quality signal attached to a message or session. Covers user feedback (source='user', e.g., thumbs up/down), automated evals (source='ai', e.g., LLM-as-judge), human annotations (source='reviewer'), and server-generated rubric scores. All quality signals share this event type, enabling unified queries across signal sources.",
+      "description": "Quality signal attached to a message or session, sent by the customer via the SDK's score() method. Covers user feedback (source='user', e.g., thumbs up/down), customer-run automated evals (source='ai', e.g., LLM-as-judge), and human annotations (source='reviewer'). Server-side enrichment rubric scores are emitted as [Agent] Evaluator Result (output_type='score'), not this event type.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1029,6 +1104,11 @@
           "name": "[Agent] Env",
           "type": "string",
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
+        },
+        {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
           "name": "[Agent] SDK Version",
@@ -1283,6 +1363,11 @@
           "name": "[Agent] Agent Description",
           "type": "string",
           "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
+        },
+        {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
         },
         {
           "name": "[Agent] Task Completed",

@@ -52,10 +52,22 @@ export function _resetRunSyncWarning(): void {
 
 export interface SessionOptions {
   sessionId?: string | null;
+  /**
+   * Idle-timeout hint for the enrichment pipeline (minutes). Defaults to the
+   * pipeline default (~30 min); positive values are honored up to 90 days
+   * (129600, values above are clamped). `-1` means "rely on an explicit
+   * `[Agent] Session End`" — the session is enriched early on an explicit end,
+   * with a 90-day inactivity backstop so it never leaks open forever. See
+   * {@link BoundAgent.session}.
+   */
   idleTimeoutMinutes?: number | null;
   userId?: string | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
+  /**
+   * User-defined tags for filtering/segmentation.
+   */
+  tags?: string[] | null;
   /**
    * Automatically flush pending events when `run()` completes.
    *
@@ -81,6 +93,7 @@ export class Session {
   readonly userId: string | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
+  readonly tags: string[] | null;
   readonly autoFlush: boolean;
   readonly trackSessionEnd: boolean;
   /** @internal Set by `runAs()` to suppress auto user-message tracking in delegation contexts. */
@@ -98,6 +111,7 @@ export class Session {
     this.browserSessionId =
       opts.browserSessionId ??
       (agent._defaults.browserSessionId as string | null);
+    this.tags = opts.tags ?? null;
     this.autoFlush = opts.autoFlush ?? isServerless();
     this.trackSessionEnd = opts.trackSessionEnd ?? true;
     this._agent = agent;
@@ -124,6 +138,7 @@ export class Session {
       description: defaults.description as string | null,
       context: defaults.context as Record<string, unknown> | null,
       groups: defaults.groups as Record<string, unknown> | null,
+      tags: this.tags,
       idleTimeoutMinutes: this.idleTimeoutMinutes,
       deviceId: this.deviceId ?? (defaults.deviceId as string | null),
       browserSessionId:
@@ -217,6 +232,7 @@ export class Session {
       userId: this.userId,
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
+      tags: this.tags,
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
@@ -237,6 +253,7 @@ export class Session {
       userId: this.userId,
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
+      tags: this.tags,
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
@@ -296,21 +313,31 @@ export class Session {
       merged.deviceId = this.deviceId;
     if (this.browserSessionId != null && merged.browserSessionId == null)
       merged.browserSessionId = this.browserSessionId;
-    if (this._sessionReplayId != null) {
+    if (this._sessionReplayId != null || this.tags != null) {
       const existingEp = merged.eventProperties as
         | Record<string, unknown>
         | undefined;
       const ep = existingEp != null ? { ...existingEp } : {};
-      if (!(PROP_SESSION_REPLAY_ID in ep)) {
+      if (this._sessionReplayId != null && !(PROP_SESSION_REPLAY_ID in ep)) {
         ep[PROP_SESSION_REPLAY_ID] = this._sessionReplayId;
-        merged.eventProperties = ep;
       }
+      if (this.tags != null && !('[Agent] Tags' in ep)) {
+        ep['[Agent] Tags'] = JSON.stringify(this.tags);
+      }
+      merged.eventProperties = ep;
     }
     return merged as T;
   }
 
   trackUserMessage(content: string, opts: UserMessageOpts = {}): string {
-    return this._agent.trackUserMessage(content, this._inject(opts));
+    // Stamp the session's idle-timeout hint on this (usually first) event so
+    // the enrichment pipeline learns it before any idle/max-duration close
+    // could fire. An explicit opt on the call still wins.
+    const merged = this._inject(opts);
+    if (this.idleTimeoutMinutes != null && merged.idleTimeoutMinutes == null) {
+      merged.idleTimeoutMinutes = this.idleTimeoutMinutes;
+    }
+    return this._agent.trackUserMessage(content, merged);
   }
 
   trackAiMessage(

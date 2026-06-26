@@ -34,6 +34,8 @@ export const PROP_FINISH_REASON = '[Agent] Finish Reason';
 export const PROP_TOOL_CALLS = '[Agent] Tool Calls';
 export const PROP_TOOL_NAME = '[Agent] Tool Name';
 export const PROP_TOOL_SUCCESS = '[Agent] Tool Success';
+export const PROP_TOOL_TYPE = '[Agent] Tool Type';
+export const PROP_TOOL_OWNER = '[Agent] Tool Owner';
 export const PROP_INVOCATION_ID = '[Agent] Invocation ID';
 export const PROP_PARENT_MESSAGE_ID = '[Agent] Parent Message ID';
 export const PROP_AGENT_ID = '[Agent] Agent ID';
@@ -103,6 +105,16 @@ export const PROP_MESSAGE_LABEL_MAP = '[Agent] Message Label Map';
 export const PROP_TOOL_DEFINITIONS = '[Agent] Tool Definitions';
 export const PROP_TOOL_DEFINITIONS_COUNT = '[Agent] Tool Definitions Count';
 export const PROP_TOOL_DEFINITIONS_HASH = '[Agent] Tool Definitions Hash';
+
+// Stack trace (v0.12.0) — opt-in error debugging
+export const PROP_STACK_TRACE = '[Agent] Stack Trace';
+export const PROP_ERROR_SOURCE = '[Agent] Error Source';
+
+// OTEL / git metadata
+export const PROP_TAGS = '[Agent] Tags';
+export const PROP_GIT_SHA = '[Agent] Git SHA';
+export const PROP_GIT_REF = '[Agent] Git Ref';
+export const PROP_GIT_REPO = '[Agent] Git Repo';
 
 // Session replay linking (v0.7.0)
 export const PROP_SESSION_REPLAY_ID = '[Amplitude] Session Replay ID';

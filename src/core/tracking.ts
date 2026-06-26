@@ -80,13 +80,16 @@ import {
   PROP_TOOL_INPUT,
   PROP_TOOL_NAME,
   PROP_TOOL_OUTPUT,
+  PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
+  PROP_TOOL_TYPE,
   PROP_TOP_P,
   PROP_TOTAL_ATTACHMENT_SIZE,
   PROP_TOTAL_TOKENS,
   PROP_TRACE_ID,
   PROP_TTFB_MS,
   PROP_TURN_ID,
+  PROP_STACK_TRACE,
   PROP_WAS_CACHED,
   PROP_WAS_COPIED,
   SDK_RUNTIME,
@@ -211,6 +214,12 @@ export interface TrackUserMessageOptions {
   attachments?: Attachment[] | null;
   messageSource?: string | null;
   labels?: MessageLabel[] | null;
+  /**
+   * Session idle-timeout hint, stamped on this (typically first) event so the
+   * enrichment pipeline learns it early. `-1` disables auto-close (enrich only
+   * on an explicit Session End). See `BoundAgent.session`.
+   */
+  idleTimeoutMinutes?: number | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -279,6 +288,13 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
       opts.labels.map((lbl) => lbl.toDict()),
     );
   }
+
+  // Stamp the session's idle-timeout hint on the first event of a session
+  // (typically the user message) so the enrichment pipeline learns it before
+  // any idle/max-duration close could fire. -1 = "rely on an explicit Session
+  // End," with a 90-day inactivity backstop.
+  if (opts.idleTimeoutMinutes != null)
+    properties[PROP_IDLE_TIMEOUT_MINUTES] = opts.idleTimeoutMinutes;
 
   Object.assign(properties, contentData);
 
@@ -358,6 +374,7 @@ export interface TrackAiMessageOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   spanKind?: string | null;
+  stackTrace?: string | null;
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -441,6 +458,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.errorMessage != null)
     properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
   if (opts.errorType != null) properties[PROP_ERROR_TYPE] = opts.errorType;
+  if (opts.stackTrace != null)
+    properties[PROP_STACK_TRACE] = opts.stackTrace;
   if (opts.toolCalls != null)
     properties[PROP_TOOL_CALLS] = serializeToJsonString(opts.toolCalls);
 
@@ -521,6 +540,8 @@ export interface TrackToolCallOptions {
   userId?: string;
   deviceId?: string | null;
   toolName: string;
+  toolType?: string | null;
+  toolOwner?: string | null;
   success: boolean;
   latencyMs: number;
   sessionId?: string | null;
@@ -539,6 +560,7 @@ export interface TrackToolCallOptions {
   context?: Record<string, unknown> | null;
   errorMessage?: string | null;
   errorType?: string | null;
+  stackTrace?: string | null;
   env?: string | null;
   locale?: string | null;
   spanKind?: string | null;
@@ -589,9 +611,12 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
   if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
+  if (opts.stackTrace) properties[PROP_STACK_TRACE] = opts.stackTrace;
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.locale) properties[PROP_LOCALE] = opts.locale;
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
+  if (opts.toolType) properties[PROP_TOOL_TYPE] = opts.toolType;
+  if (opts.toolOwner) properties[PROP_TOOL_OWNER] = opts.toolOwner;
 
   let effectiveMode = pc.contentMode;
   if (effectiveMode == null)

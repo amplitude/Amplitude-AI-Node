@@ -13,6 +13,7 @@ export interface SessionContextOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
+  tags?: string[] | null;
   idleTimeoutMinutes?: number | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
@@ -34,6 +35,7 @@ export class SessionContext {
   readonly description: string | null;
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
+  readonly tags: string[] | null;
   readonly idleTimeoutMinutes: number | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
@@ -66,6 +68,7 @@ export class SessionContext {
     this.description = options.description ?? null;
     this.context = options.context ?? null;
     this.groups = options.groups ?? null;
+    this.tags = options.tags ?? null;
     this.idleTimeoutMinutes = options.idleTimeoutMinutes ?? null;
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;
@@ -107,6 +110,24 @@ export function runWithContextAsync<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   return _sessionStorage.run(ctx, fn);
+}
+
+/**
+ * Set the active SessionContext for the current async scope.
+ *
+ * Returns a cleanup function that restores the previous context.
+ * Use this in middleware or interceptors where the context must outlive
+ * the call frame that created it.
+ *
+ * For scoped usage, prefer `agent.session()` (callback-based) or
+ * `runWithContext()`.
+ */
+export function pushContext(ctx: SessionContext | null): () => void {
+  const previous = _sessionStorage.getStore() ?? null;
+  _sessionStorage.enterWith(ctx);
+  return () => {
+    _sessionStorage.enterWith(previous);
+  };
 }
 
 export { _sessionStorage };

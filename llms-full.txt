@@ -1,5 +1,5 @@
 # llms-full.txt
-# @amplitude/ai 0.11.0 — Complete API Reference for AI Coding Agents
+# @amplitude/ai 0.14.0 — Complete API Reference for AI Coding Agents
 #
 # This file is the definitive guide for any coding agent instrumenting
 # a JavaScript/TypeScript AI application with @amplitude/ai.
@@ -452,3 +452,5 @@ s.trackUserMessage('Summarize the attached design doc and list open questions', 
 // BAD: entire pipeline state as the "user message" (shows up as session label / $llm_message.text)
 s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
+
+**Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.

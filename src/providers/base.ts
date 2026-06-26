@@ -4,6 +4,7 @@
  * Provides shared tracking logic and session context integration.
  */
 
+import { createRequire } from 'node:module';
 import { getActiveContext, isTrackerManaged } from '../context.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
@@ -15,6 +16,22 @@ import {
   trackUserMessage,
   type TrackAiMessageOptions,
 } from '../core/tracking.js';
+import {
+  GENAI_ERROR_TYPE,
+  GENAI_FINISH_REASONS,
+  GENAI_INPUT_MESSAGES,
+  GENAI_INPUT_TOKENS,
+  GENAI_OPERATION_NAME,
+  GENAI_OUTPUT_MESSAGES,
+  GENAI_OUTPUT_TOKENS,
+  GENAI_PROVIDER_NAME,
+  GENAI_REQUEST_MAX_TOKENS,
+  GENAI_REQUEST_MODEL,
+  GENAI_REQUEST_TEMPERATURE,
+  GENAI_REQUEST_TOP_P,
+  GENAI_RESPONSE_MODEL,
+  OP_CHAT,
+} from '../otel/conventions.js';
 import { recordToolUsesFromResponse } from '../utils/tool-latency.js';
 import {
   resolveAmplitude,
@@ -23,7 +40,10 @@ import {
   type TrackCallOptions,
   type TrackFn,
 } from '../types.js';
+import { getLogger } from '../utils/logger.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
+
+const _require = createRequire(import.meta.url);
 
 /**
  * Per-call context overrides for provider wrappers.
@@ -152,6 +172,45 @@ export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
   };
 }
 
+interface OtelTracerLike {
+  startSpan(name: string, options?: { attributes?: Record<string, unknown> }): OtelSpanHandle;
+}
+
+interface OtelSpanHandle {
+  setAttribute(key: string, value: string | number | boolean): void;
+  setStatus(status: { code: number; message?: string }): void;
+  end(): void;
+}
+
+function _getOtelTracer(): OtelTracerLike | null {
+  try {
+    const api = _require('@opentelemetry/api') as {
+      trace: {
+        getTracerProvider(): {
+          getTracer?(name: string): OtelTracerLike;
+          _delegate?: { constructor?: { name?: string } };
+          constructor?: { name?: string };
+        };
+      };
+    };
+    const provider = api.trace.getTracerProvider();
+    const delegateName = provider._delegate?.constructor?.name;
+    const providerName = provider.constructor?.name;
+    const isReal =
+      delegateName === 'BasicTracerProvider' ||
+      delegateName === 'NodeTracerProvider' ||
+      providerName === 'BasicTracerProvider' ||
+      providerName === 'NodeTracerProvider';
+    if (isReal) {
+      const tracer = provider.getTracer?.('@amplitude/ai');
+      return tracer ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export abstract class BaseAIProvider {
   protected _amplitude: AmplitudeLike;
   protected _privacyConfig: PrivacyConfig | null;
@@ -187,6 +246,57 @@ export abstract class BaseAIProvider {
       eventProperties: opts.eventProperties,
       browserSessionId: opts.browserSessionId,
     });
+
+    // When OTEL is active, emit a completed span with gen_ai.* attributes
+    // so the SpanEventMapper handles event creation. This enables provider
+    // wrapper events to show up in OTEL traces alongside observe() spans.
+    const tracer = _getOtelTracer();
+    if (tracer != null) {
+      try {
+        const spanAttrs: Record<string, unknown> = {
+          [GENAI_OPERATION_NAME]: OP_CHAT,
+          [GENAI_REQUEST_MODEL]: opts.modelName,
+          [GENAI_RESPONSE_MODEL]: opts.modelName,
+          [GENAI_PROVIDER_NAME]: opts.provider,
+        };
+        if (opts.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = opts.inputTokens;
+        if (opts.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = opts.outputTokens;
+        if (opts.temperature != null) spanAttrs[GENAI_REQUEST_TEMPERATURE] = opts.temperature;
+        if (opts.maxOutputTokens != null) spanAttrs[GENAI_REQUEST_MAX_TOKENS] = opts.maxOutputTokens;
+        if (opts.topP != null) spanAttrs[GENAI_REQUEST_TOP_P] = opts.topP;
+        const inputMsgs = (opts as Record<string, unknown>).inputMessages;
+        if (inputMsgs != null) {
+          spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(inputMsgs);
+        }
+        if (opts.responseContent != null) {
+          spanAttrs[GENAI_OUTPUT_MESSAGES] = JSON.stringify([
+            { role: 'assistant', content: opts.responseContent },
+          ]);
+        }
+        if (opts.finishReason != null) {
+          spanAttrs[GENAI_FINISH_REASONS] = [opts.finishReason];
+        }
+        if (opts.latencyMs != null) {
+          spanAttrs['amplitude.latency_ms'] = opts.latencyMs;
+        }
+        if (opts.isError && opts.errorType != null) {
+          spanAttrs[GENAI_ERROR_TYPE] = opts.errorType;
+        } else if (opts.isError && opts.errorMessage != null) {
+          spanAttrs[GENAI_ERROR_TYPE] = opts.errorMessage;
+        }
+
+        const span = tracer.startSpan(`${opts.provider}.${OP_CHAT}`, { attributes: spanAttrs });
+        if (opts.isError) {
+          span.setStatus({ code: 2, message: opts.errorMessage ?? 'error' });
+        }
+        span.end();
+      } catch (e) {
+        getLogger().debug(`Failed to create OTEL span for provider wrapper: ${e}`);
+      }
+      // OTEL span created — the SpanEventMapper handles event emission.
+      // Return early so we don't also emit a direct trackAiMessage().
+      return '';
+    }
 
     return trackAiMessage({
       ...opts,
@@ -295,6 +405,43 @@ export class SimpleStreamingTracker {
 
     const state = this.accumulator.getState();
     const ctx = applySessionContext(overrides);
+
+    // When OTEL is active, emit a span instead of calling _trackFn directly.
+    const tracer = _getOtelTracer();
+    if (tracer != null) {
+      try {
+        const spanAttrs: Record<string, unknown> = {
+          [GENAI_OPERATION_NAME]: OP_CHAT,
+          [GENAI_REQUEST_MODEL]: this._modelName,
+          [GENAI_RESPONSE_MODEL]: this._modelName,
+          [GENAI_PROVIDER_NAME]: this._providerName,
+        };
+        if (state.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = state.inputTokens;
+        if (state.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = state.outputTokens;
+        if (state.finishReason != null) spanAttrs[GENAI_FINISH_REASONS] = [state.finishReason];
+        if (this._inputMessages.length > 0) {
+          spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(this._inputMessages);
+        }
+        if (state.content) {
+          spanAttrs[GENAI_OUTPUT_MESSAGES] = JSON.stringify([
+            { role: 'assistant', content: state.content },
+          ]);
+        }
+        if (this.accumulator.elapsedMs > 0) {
+          spanAttrs['amplitude.latency_ms'] = this.accumulator.elapsedMs;
+        }
+
+        const span = tracer.startSpan(`${this._providerName}.${OP_CHAT}`, { attributes: spanAttrs });
+        span.end();
+      } catch (e) {
+        getLogger().debug(`Failed to create OTEL span for streaming: ${e}`);
+      }
+      recordToolUsesFromResponse(state.toolCalls, {
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+      });
+      return '';
+    }
 
     const eventId = this._trackFn({
       ...contextFields(ctx),

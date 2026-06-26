@@ -53,7 +53,9 @@ import {
   PROP_TOOL_INPUT,
   PROP_TOOL_NAME,
   PROP_TOOL_OUTPUT,
+  PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
+  PROP_TOOL_TYPE,
   PROP_TOP_P,
   PROP_TOTAL_ATTACHMENT_SIZE,
   PROP_TRACE_ID,
@@ -318,6 +320,50 @@ describe('trackToolCall', () => {
     const props = amp.events[0].event_properties as Record<string, unknown>;
     expect(props[PROP_ERROR_TYPE]).toBeUndefined();
     expect(props[PROP_ERROR_MESSAGE]).toBeUndefined();
+  });
+
+  it('emits [Agent] Tool Type when toolType is provided so MCP-connected tools are distinguishable from native tools without parsing the tool name', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'search',
+      toolType: 'mcp',
+      success: true,
+      latencyMs: 10,
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_TOOL_TYPE]).toBe('mcp');
+  });
+
+  it('omits [Agent] Tool Type when toolType is absent so manual callers do not emit an empty origin marker', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'search',
+      success: true,
+      latencyMs: 10,
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_TOOL_TYPE]).toBeUndefined();
+  });
+
+  it('emits [Agent] Tool Owner when toolOwner is provided so customer-connected tools are distinguishable from Amplitude-owned ones', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'search',
+      toolOwner: 'customer',
+      success: true,
+      latencyMs: 10,
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_TOOL_OWNER]).toBe('customer');
   });
 });
 

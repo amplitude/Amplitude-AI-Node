@@ -156,8 +156,8 @@ const agent = ai.agent('chat-handler', {
 });
 
 export async function POST(req: Request) {
-  const { messages, userId } = await req.json();
-  return agent.session({ userId }).run(async (s) => {
+  const { messages, userId, sessionId } = await req.json();
+  return agent.session({ userId, sessionId }).run(async (s) => {
     s.trackUserMessage(messages[messages.length - 1].content);
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
     return Response.json(response);
@@ -166,6 +166,10 @@ export async function POST(req: Request) {
   // For non-serverless, or tracking outside session.run(), call: await ai.flush()
 }
 ```
+
+- Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
+- Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
+- Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
 
 <!-- llms-excerpt:content-shaping:start -->
 **User message text vs structured pipeline data (critical for Agent Analytics UI):**
@@ -184,6 +188,8 @@ s.trackUserMessage('Summarize the attached design doc and list open questions', 
 // BAD: entire pipeline state as the "user message" (shows up as session label / $llm_message.text)
 s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
+
+**Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
 <!-- llms-excerpt:content-shaping:end -->
 
 **Enrichment vs Agent Analytics UI:** A short **`content`** line plus structured data in **`context`** keeps session titles and segmentation readable. Amplitude’s **server-side LLM enrichment** builds eval input primarily from **turn text** stored on each session (`input_text` / `output_text` derived from `$llm_message`). If automated evaluators must reason over the **full** structured payload, keep essential facts in **`content`**, add **scalar event properties** for key fields, or coordinate a pipeline change to merge allowlisted **`context`** into enrichment input—do not assume enrichments automatically parse large JSON blobs only present in `[Agent] Context`.
@@ -194,9 +200,10 @@ If multi-agent signals were detected, add delegation with `runAs`:
 const orchestrator = ai.agent('shopping-agent', { description: 'Orchestrates shopping requests' });
 const recipeAgent = orchestrator.child('recipe-agent', { description: 'Finds recipes' });
 
-// Inside parent's session.run():
-const result = await s.runAs(recipeAgent, async (cs) => {
-  cs.trackUserMessage(delegatedQuery);
+// Inside parent's session.run() — track user message at orchestrator level,
+// then delegate. Auto user-message tracking is suppressed inside runAs.
+s.trackUserMessage(delegatedQuery);
+const result = await s.runAs(recipeAgent, async () => {
   return openai.chat.completions.create({ model: 'gpt-4o', messages: [...] });
 });
 ```
@@ -214,6 +221,46 @@ const searchProducts = tool(searchDB, { name: 'search_products' });
 const result = await searchProducts(query);
 // [Agent] Tool Call event automatically emitted with duration, success, input/output
 ```
+
+**Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
+
+1. **`[Agent] Tool Call`** (via `tool()` or `trackToolCall()`) — operational telemetry: latency, success/failure, error rate on the action itself.
+2. **The standard product event via the base Amplitude SDK** — business attribution, in the **same taxonomy as non-agent (web/mobile) journeys**.
+
+The bootstrap (`src/lib/amplitude.ts`) creates only the AI SDK, so the business event uses whatever base analytics SDK the product already runs — `@amplitude/analytics-node` server-side (shown here) or `@amplitude/analytics-browser` client-side. Do not introduce a second analytics pipeline.
+
+```typescript
+import { track } from '@amplitude/analytics-node';
+import { tool } from '@amplitude/ai';
+
+const addToCart = tool(
+  async (productId: string, quantity: number) => {
+    const result = await cartService.add(productId, quantity); // throws on failure → no false conversion
+    // Same event name + properties the web/mobile clients already send, plus one discriminator.
+    track(
+      'Product Added',
+      { product_id: productId, quantity, journey_type: 'agent' }, // distinguishes agent- from click-driven
+      { user_id: currentUserId },                                 // same user_id the [Agent] events use → join key
+    );
+    return result;
+  },
+  { name: 'add_to_cart' },
+);
+```
+
+This gives you, with no joining:
+
+- **Operational view:** `[Agent] Tool Call where tool_name="add_to_cart"` → latency, error rate, success rate on the action.
+- **Business view:** `Product Added where journey_type=agent` vs `journey_type=web` in the **same funnel** — comparable because they share event taxonomy and user.
+
+Rules to get this right (a coding agent must follow these, not guess):
+
+- **Only for business actions that have a click-driven equivalent** (add to cart, purchase, signup, form submit). Read-only tools (`search_products`, `get*`) emit **only** `[Agent] Tool Call` — no product event.
+- **Reuse the product's existing event name and property names — do not invent them.** Add only the `journey_type` discriminator. If you cannot locate/confirm the existing taxonomy in the codebase (common when instrumenting an agent-only service), **stop and ask the developer** rather than guess — inventing `Product Added`/property names silently forks the taxonomy and breaks the funnel join.
+- **Emit after the action succeeds**, attributed to the **same `user_id`** the `[Agent]` events use. Use a consistent enum across the codebase (`agent` / `web` / `mobile`).
+- `journey_type` is a new convention with no schema backstop — consistency is on you.
+
+> This is the **one** place the base SDK's `track()` is correct (see Safety Rules). It applies only to genuine business/product events for cross-journey attribution — never to agent telemetry, which must always go through `track*`.
 
 **Explicit AI response capture** (when provider wrappers can't auto-capture):
 
@@ -354,6 +401,152 @@ try {
   throw e;
 }
 ```
+
+### Step 3g-b: Fan-out LLM workflows (parallel child calls, single user turn)
+
+**When to use:** A single user action triggers 2+ parallel internal LLM calls (e.g. scoring + content generation + matching). Each parallel call is a child agent sharing the parent's session and trace — it must never create its own user message or trace.
+
+**Key invariants:**
+1. `newTrace()` is called **once** per user-visible interaction, at the orchestrator level.
+2. `trackUserMessage()` is called **once**, at the orchestrator level, before dispatching.
+3. Each parallel LLM call runs inside `runAs(child, fn)`. Auto user-message tracking is **suppressed** inside delegation (provider wrappers will not emit `[Agent] User Message` for internal `role: "user"` prompts).
+4. `trackAiMessage()` is called **once**, at the orchestrator level, with the assembled result.
+
+```typescript
+const orchestrator = ai.agent('orchestrator', { userId: uid });
+const scorer = orchestrator.child('focus-scorer');
+const matcher = orchestrator.child('catalog-matcher');
+
+await orchestrator.session({ sessionId }).run(async (s) => {
+  s.trackUserMessage('Generate plan from quiz results', { context: structuredState });
+
+  const [a, b] = await Promise.all([
+    s.runAs(scorer, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+    s.runAs(matcher, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+  ]);
+
+  s.trackAiMessage(assemble(a, b), {
+    model: 'gpt-4o', provider: 'openai',
+    latencyMs: latency, inputTokens: inTok, outputTokens: outTok,
+  });
+});
+```
+
+**Anti-patterns to avoid:**
+- Calling `newTrace()` or `trackUserMessage()` inside `runAs` — inflates trace and turn counts.
+- Passing raw JSON as the `content` string of `trackUserMessage()` — use `context` for structured data.
+- Not using `runAs` for parallel calls — provider wrappers will auto-emit a `[Agent] User Message` for every `role: "user"` message in the request, creating duplicate turns.
+
+> **Minimum SDK version:** `@amplitude/ai >= 0.11.0` for auto-suppression of user messages inside `runAs`.
+
+### Step 3g-c: Trace ID assignment and Turn grouping
+
+**`[Agent] Trace ID` controls how the trace tab groups events into visual "Turns."** Each distinct `[Agent] Trace ID` becomes one collapsible "Turn N" card in the Agent Analytics session viewer. Events without a `[Agent] Trace ID` fall back to using `[Agent] Session ID` as the trace ID — which causes every event without an explicit trace to collapse into a single "Turn 1."
+
+When using the SDK's session `.run()`, `newTrace()` handles this automatically. But if you are constructing events manually (e.g., via the HTTP API), you must assign trace IDs yourself:
+
+1. **One unique trace ID per user-to-response exchange.** All events within a single exchange (user message, AI response, tool calls, spans) share the same `[Agent] Trace ID`.
+2. **`[Agent] Session End` needs its own trace ID** (or be placed on the last turn's trace ID with the latest timestamp). Without one, it falls back to the session ID and appears under "Turn 1."
+3. **Opening AI messages (before the user's first input)** still need a trace ID. Assign them to a distinct trace (e.g., `${sessionId}-trace-0`) so they form their own turn.
+
+```typescript
+// SDK handles trace IDs automatically:
+await agent.session({ sessionId }).run(async (s) => {
+  s.newTrace(); // creates a unique trace ID for this turn
+  s.trackUserMessage('hello');
+  // ... LLM call ...
+  // AI Response auto-inherits the trace ID
+});
+
+// HTTP API: you must set [Agent] Trace ID explicitly on every event
+// All events in the same turn share the same trace ID
+const traceId = `${sessionId}-trace-${turnNumber}`;
+```
+
+### Step 3g-d: Span events for rich UI components
+
+When your agent renders **embedded UI components** — forms, accordions, suggestion panels, carousels, disclaimers — alongside text responses, use `[Agent] Span` events to capture the component metadata in the trace. This makes each component visible in the trace tab with its own identity and data payload.
+
+```typescript
+// After the AI response that triggered the UI render:
+s.trackSpan({
+  name: 'disclaimer-accordion',       // component type
+  latencyMs: 0,                        // rendering latency, or 0 for static
+  inputState: { disclaimerType: 'VA_loan', sections: ['eligibility', 'terms'] },
+  outputState: { userExpanded: true, accepted: false },
+});
+
+s.trackSpan({
+  name: 'suggestions',
+  latencyMs: 0,
+  inputState: { options: ['Buy a home', 'Refinance', 'Cash-out'] },
+  outputState: { selected: 'Buy a home' },
+});
+```
+
+**Key points:**
+- Use `name` as the component type (e.g., `disclaimer-accordion`, `suggestions`, `inline-form`).
+- Put the component's data payload in `inputState` (what was rendered) and user interaction data in `outputState` (what the user did).
+- These spans inherit the session's trace context, so they appear in the correct turn.
+- Span events appear in the **trace tab** but not in the **conversation view**. For the conversation view, the `[Agent] AI Response` with text content is what drives the chat bubbles.
+
+**Empty AI responses (when the agent renders a UI component instead of text):**
+If your agent's response is purely a UI component with no text, you still need an `[Agent] AI Response` event for turn counting. Put a brief description in the content so the session viewer shows a readable bubble:
+
+```typescript
+s.trackAiMessage('[Displayed: loan options comparison table]', {
+  model: 'gpt-4o', provider: 'openai', latencyMs: 200,
+});
+// Then emit the span with the full component data:
+s.trackSpan({
+  name: 'loan-comparison-table',
+  latencyMs: 200,
+  inputState: { loans: [{ type: '30yr-fixed', rate: 6.5 }, ...] },
+});
+```
+
+Sending an `[Agent] AI Response` with empty `$llm_message` content produces **no bubble** in the session viewer's conversation view and the turn's text is invisible to the enrichment pipeline (evaluators can't judge an empty response). Always include at least a placeholder description.
+
+### Step 3g-e: Sending `[Agent]` events without the SDK (HTTP API)
+
+For platform integrations where installing the SDK isn't practical (e.g., Sierra webhooks, Intercom bots, custom chat platforms), you can send `[Agent]` events directly to the [Amplitude HTTP V2 API](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/).
+
+**Required structure** — each event in the `events` array:
+
+```json
+{
+  "event_type": "[Agent] AI Response",
+  "user_id": "user-123",
+  "device_id": "anon-device-456",
+  "time": 1719446400000,
+  "event_properties": {
+    "[Agent] Session ID": "session-abc-123",
+    "[Agent] Trace ID": "session-abc-123-trace-1",
+    "[Agent] Turn ID": 2,
+    "[Agent] Agent ID": "my-agent",
+    "[Agent] SDK Version": "http-api/1.0",
+    "[Agent] Runtime": "custom",
+    "$llm_message": {"text": "Here's what I found..."}
+  }
+}
+```
+
+**Identity:** Set `user_id` and/or `device_id` at the top level. At least one is required for user-level analytics.
+
+**Content:** User and AI message text goes in `$llm_message.text` inside `event_properties`, not at the top level.
+
+**Trace grouping:** Set `[Agent] Trace ID` on every event (see Step 3g-c). Events without it are grouped into a single turn.
+
+**Session lifecycle:** You must send an explicit `[Agent] Session End` event when the conversation ends — there is no session context manager to auto-close for you.
+
+**Batching:** The HTTP V2 API accepts up to 2000 events per request and 20MB payload. For large sessions, batch events in groups (e.g., 10-50 per request). Event ordering is reconstructed from `[Agent] Turn ID` + `time` regardless of batch arrival order.
+
+**Event types to send** (minimum viable session):
+1. `[Agent] User Message` — one per user input
+2. `[Agent] AI Response` — one per AI output (never empty `$llm_message`)
+3. `[Agent] Session End` — one at session close
+4. `[Agent] Span` (optional) — for tool calls, UI components, or sub-operations
+5. `[Agent] Score` (optional) — for user feedback (thumbs up/down)
 
 ### Step 3h: Add scoring
 
@@ -514,6 +707,126 @@ Next steps:
 ```
 
 > **If any data quality field fails:** `cost = $0` usually means the model name is not in genai-prices — use the canonical provider model ID (e.g. `claude-sonnet-4-20250514`, not `claude-sonnet-4-6`) or set `totalCostUsd` explicitly. `tokens = 0` means `usage` was not extracted from the LLM response. `identity missing` means neither `userId` nor `deviceId` was set on the tracking call.
+
+### Step 4f: Remediation loop
+
+If any fill rate is below 100% or any data quality gate fails,
+diagnose and fix before proceeding to Phase 5.
+
+Common issues and fixes:
+
+| Fill rate gap | What breaks in Agent Analytics | Fix |
+|---|---|---|
+| userId: 0% | Can't create cohorts or link to User Activity | Find where user identity is available in the request (auth token, header, session cookie) and pass it to `agent.session({ userId })` |
+| Session ID: 0% | Sessions page empty, signals don't run | Wrap the route handler in `agent.session({ sessionId })`. Use the app's existing conversation/thread/ticket ID. |
+| Agent ID: 0% | Agent filter on Monitor doesn't work | Create a named agent with `ai.agent('name')` and use it for sessions |
+| Session End missing | Signals never execute, no Session Record | Ensure `session.run()` completes (or call `trackSessionEnd()` explicitly) |
+| Cost USD: 0% | Monitor cost charts show $0 | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
+| Tokens: 0% | Token consumption charts empty | For manual `trackAiMessage`: pass `inputTokens`/`outputTokens` from the `response.usage` object. For provider wrappers: verify the response has a `.usage` field. |
+| Latency: 0% | Latency trend charts empty | Wrap the LLM call in `performance.now()` and pass `latencyMs` |
+| Content empty (metadata_only) | Thread tab empty, signals/evaluators can't judge | Switch to `contentMode: 'full'` with `redactPii: true`, or accept that LLM-based evaluators won't work |
+
+After each fix:
+  1. Update the verify test if needed
+  2. Re-run: `npx vitest run __amplitude_verify__.test.ts`
+  3. Check `mock.summary()` — all fill rates should be 100%
+  4. Repeat until "Ready to deploy"
+
+Do NOT proceed to Phase 5 with any data quality gate failing.
+
+---
+
+## Phase 5: Ship
+
+### Step 5a: Create branch and PR
+
+Create a branch for the instrumentation changes:
+
+  Branch name: `feat/amplitude-ai-instrumentation`
+
+PR title: `Add Amplitude AI agent analytics instrumentation`
+
+PR body should include:
+  - Summary: which agents, providers, and tools were instrumented
+  - The fill rate report from `mock.summary()` (paste the output)
+  - Content mode and privacy configuration chosen
+  - Checklist:
+    - [ ] `@amplitude/ai` added to dependencies
+    - [ ] `AMPLITUDE_AI_API_KEY` added to secrets/env management
+       (not committed to source)
+    - [ ] `__amplitude_verify__.test.ts` passes locally
+    - [ ] Existing tests still pass
+    - [ ] No `.env` files or API keys committed
+    - [ ] `.gitignore` includes `.env`
+
+### Step 5b: Reviewer guide
+
+Include in the PR description — what the reviewer should check:
+
+  1. Are `userId` and `sessionId` sourced from real request data
+     (not hardcoded test values)?
+  2. Is `contentMode` appropriate for the data sensitivity?
+     (`'full'` + `redactPii: true` for most; `'metadata_only'` for regulated data)
+  3. Are agent names descriptive? (They appear in dashboards and
+     the Application Registry.)
+  4. Does the verify test cover the main user-facing code paths?
+  5. Are existing tests unbroken?
+  6. Is `AMPLITUDE_AI_API_KEY` managed through the team's secrets
+     system (not `.env` committed to git)?
+
+### Step 5c: Post-deploy verification
+
+After the PR is merged and deployed:
+
+  1. Make 2-3 real requests to the instrumented endpoints
+  2. Open Amplitude > Agent Analytics > Sessions
+  3. Verify you see sessions with the correct:
+     - `userId` (matches your test user)
+     - `agentId` (matches what you configured)
+     - Event sequence: User Message > AI Response > Session End
+  4. Check AI Response events show non-zero `[Agent] Cost USD`
+     (if cost is $0, the model name may not be recognized —
+     see Step 4f remediation table)
+  5. If the app has multi-agent delegation, verify child agent
+     events share the parent's `sessionId`
+
+### Step 5d: Things to try in Agent Analytics
+
+  1. **Monitor** — landing page. Check agent health: session volume,
+     cost and latency trends, always-on signal results.
+     Filter by agent to compare agents side by side.
+
+  2. **Sessions** — browse every agent session. Filter by date, agent,
+     evaluator result, error type, or topic. Search interaction
+     content to find specific conversations.
+
+  3. **Inspect a session** — open any session to see:
+     - Thread: the full conversation (user messages + AI responses)
+     - Turns: turn-by-turn breakdown with nested tool calls and spans
+     - Evaluators: pass/fail results from always-on signals
+     - Info: metadata (model, cost, tokens, latency)
+
+  4. **Check always-on signals** — Amplitude runs these automatically on
+     every closed session (no configuration needed):
+     - Task completion
+     - Response quality
+     - User friction
+     - Negative feedback
+     - User intent
+     - Session safety
+     - Data quality check (code-based, not LLM)
+
+  5. **Create a cohort** — filter sessions (e.g., "failed task completion")
+     → create a cohort → use it in any Amplitude chart (funnel,
+     retention, segmentation). This is the core differentiator:
+     connect agent quality to product outcomes.
+
+  6. (Optional) **Create a custom evaluator** — define a judge prompt and
+     pass criteria for product-specific quality checks.
+
+  7. (Optional) **Set up Session Replay linking** — add `browserSessionId`
+     + `deviceId` from your frontend for one-click navigation from
+     AI session to browser replay.
 
 ---
 
@@ -739,7 +1052,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 
 - **Never modify unrelated files.** Only touch files with LLM call sites and the bootstrap file.
 - **Never duplicate instrumentation.** Check for existing `patch()` or wrapper calls before adding new ones.
-- **Never call the base SDK's `amplitude.track()` directly.** All event tracking must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.). The base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata — events sent this way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom event not covered by the other `track*` methods.
+- **Route events by kind, not by convenience.** Agent telemetry must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.) — the base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata, so agent telemetry sent that way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom *agent* event not covered by the other `track*` methods. The base SDK's `track()` is correct in exactly one case: genuine **business/product events** (e.g. `Product Added`) emitted for cross-journey attribution, which must stay non-`[Agent]` so they join the standard web/mobile taxonomy (see Step 3e). Never send those through `track*`.
 - **Pause before Phase 3.** Always show the discovery report and get developer confirmation.
 - **Prefer additive changes.** Add imports and wrappers rather than rewriting entire files.
 - **Keep content mode explicit.** Default is `full` + `redactPii: true`. Never silently downgrade.

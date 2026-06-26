@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.14.0
+
+### Added (AA-151359)
+- **`pushContext()` public API for cross-SDK parity:** New `pushContext()` method on
+  the AI client allows callers to append context entries that are automatically
+  included on subsequent events within the session. Aligns the Node SDK surface with
+  the Python SDK's equivalent API.
+
+### Docs (AA-151367)
+- **Trace ID grouping, UI component spans, and HTTP API usage:** New instrumentation
+  guide sections documenting how `[Agent] Trace ID` controls turn grouping in the
+  session viewer, how to emit `[Agent] Span` events for rich UI components
+  (accordions, suggestion panels, forms), how to handle empty AI responses, and a
+  complete JSON reference for sending `[Agent]` events via the HTTP V2 API without
+  the SDK.
+
+## 0.13.0
+
+### Added (AA-151308)
+- **OTEL span-first instrumentation:** `observe()` decorator and provider wrappers now
+  emit OpenTelemetry spans alongside Amplitude events. Stack trace capture,
+  `doctor --fill-rates`, provider OTEL spans, and MCP OTEL detection included.
+  Session tags, git metadata, and SDK v2 compatibility layer added.
+
+### Fixed (AA-151308)
+- **Duplicate event deduplication, privacy, provider spans, and streaming fixes:**
+  Resolved duplicate event emission, privacy mode handling, provider span accuracy,
+  and streaming cost tracking edge cases.
+- **TS2352 type error in decorators.ts:** Fixed TypeScript type assertion error.
+
+## 0.12.0
+
+### Docs (AA-151340)
+- **Fan-out LLM canonical pattern (Step 3g-b):** New instrumentation guide section
+  and MCP pattern (`fan-out-llm`) documenting the correct way to instrument parallel
+  child-agent workflows. `scan_project` now detects ≥2 LLM call sites in the same
+  function and recommends the fan-out pattern. Cross-references Python SDK parity where
+  `run_as` / `arun_as` now suppress auto user-message tracking (requires `amplitude-ai
+  >= 1.9.0`).
+
+### Added (AA-151269)
+- **Per-session idle timeout stamped on the first event:** `trackUserMessage` now
+  accepts `idleTimeoutMinutes`, and `Session` stamps its value on the first event
+  (typically the user message) in addition to `[Agent] Session End`. This closes the
+  window where the enrichment pipeline did not yet know a session's idle override and
+  could apply the org default before the explicit-end event arrived.
+
+### Changed (AA-151269)
+- **`idleTimeoutMinutes: -1` is now a 90-day backstop, not "never auto-close":** `-1`
+  means "rely on an explicit Session End," but the session still auto-closes after a
+  90-day inactivity backstop, so a session that is never explicitly ended can no longer
+  leak open forever. Positive values are honored up to 90 days (values above are
+  clamped). `agent.session()` still throws a `RangeError` for negative values other
+  than `-1`.
+
+## 0.11.1
+
+### Docs (AA-150651)
+- **Dual-event guidance for agentic business actions:** Step 3e of `amplitude-ai.md`
+  (and the README `tool()` section) now documents emitting both an `[Agent] Tool Call`
+  (operational) and the standard product event via the base SDK with a `journey_type`
+  discriminator (business attribution), so agent-driven and click-driven journeys are
+  comparable in the same funnel without joining. Reframes the Safety Rule from an absolute
+  ban on the base SDK's `track()` to scoped routing: agent telemetry via `track*`, business
+  product events via the base SDK. Docs-only; no code changes.
+
 ## 0.11.0
 
 ### Added (AA-151040)

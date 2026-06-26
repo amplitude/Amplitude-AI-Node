@@ -44,6 +44,7 @@ export interface ScanResult {
   uninstrumented_call_sites: number;
   is_multi_agent: boolean;
   multi_agent_signals: string[];
+  has_fan_out: boolean;
   has_streaming: boolean;
   has_vercel_ai_sdk: boolean;
   has_edge_runtime: boolean;
@@ -51,6 +52,8 @@ export interface ScanResult {
   has_langgraph: boolean;
   message_queue_deps: string[];
   has_frontend_deps: boolean;
+  has_otel_deps: boolean;
+  otel_packages: string[];
   recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
@@ -112,6 +115,18 @@ const FRONTEND_DEPS = [
   '@angular/core',
 ];
 
+const OTEL_DEPS = [
+  '@opentelemetry/api',
+  '@opentelemetry/sdk-trace-base',
+  '@opentelemetry/sdk-trace-node',
+  '@opentelemetry/exporter-trace-otlp-grpc',
+  '@opentelemetry/exporter-trace-otlp-http',
+  '@opentelemetry/exporter-trace-otlp-proto',
+  '@opentelemetry/instrumentation',
+  '@opentelemetry/auto-instrumentations-node',
+  '@traceloop/node-server-sdk',
+];
+
 // Tightened to LLM-specific contexts: stream:true near model/messages, or Vercel AI SDK fns
 const STREAMING_RE = /streamText\s*\(|useChat\s*\(|stream\s*:\s*true/;
 
@@ -146,7 +161,7 @@ function collectSourceFiles(
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry)) continue;
     const fullPath = join(dir, entry);
-    let stat;
+    let stat: ReturnType<typeof statSync> | undefined;
     try {
       stat = statSync(fullPath);
     } catch {
@@ -430,6 +445,10 @@ export function scanProject(rootPath: string): ScanResult {
   // Frontend deps (browser-server linking signal)
   const hasFrontendDeps = FRONTEND_DEPS.some((dep) => allDeps.has(dep));
 
+  // OTEL deps
+  const otelPackages = OTEL_DEPS.filter((dep) => allDeps.has(dep));
+  const hasOtelDeps = otelPackages.length > 0;
+
   // Vercel AI SDK detection (dep-level)
   const hasVercelAiSdk = VERCEL_AI_SDK_DEPS.some((dep) => allDeps.has(dep)) || hasVercelAiSdkUsage;
 
@@ -490,11 +509,47 @@ export function scanProject(rootPath: string): ScanResult {
     );
   }
 
+  if (hasOtelDeps) {
+      recommendations.push(
+        `OpenTelemetry dependencies detected (${otelPackages.join(', ')}). Consider calling \`ai.enableOtel()\` after initializing AmplitudeAI to route all instrumentation through OTEL spans. The AmplitudeEventSpanProcessor maps GenAI semantic convention spans into [Agent] events automatically. Use \`observe({ type: "agent" })\` on orchestration functions to capture delegation latency and errors as real OTEL spans.`,
+      );
+  }
+
   if (globalHasAmplitudeImport && globalHasWrappers && globalHasSessionContext) {
     recommendations.push(
       'Project already has @amplitude/ai instrumentation with wrappers and session context. ' +
       'No re-instrumentation needed. Consider upgrading contentMode tiers, adding scoring, ' +
       'or expanding multi-agent coverage if applicable.',
+    );
+  }
+
+  // Fan-out LLM detection: ≥2 LLM call sites within the same function
+  // suggests a parallel/fan-out pattern that needs runAs delegation.
+  let hasFanOut = false;
+  for (const agent of agents) {
+    const fnCounts = new Map<string, number>();
+    for (const cs of agent.call_site_details) {
+      const fn = cs.containing_function;
+      if (fn) {
+        fnCounts.set(fn, (fnCounts.get(fn) ?? 0) + 1);
+      }
+    }
+    const fanOutFns = [...fnCounts.entries()]
+      .filter(([, count]) => count >= 2)
+      .map(([fn]) => fn);
+    if (fanOutFns.length > 0) {
+      hasFanOut = true;
+      multiAgentSignals.push(
+        `File ${agent.file}: fan-out pattern detected — multiple LLM call sites in function(s): ${fanOutFns.join(', ')}. Use runAs() to delegate each parallel call to a child agent.`,
+      );
+    }
+  }
+
+  if (hasFanOut) {
+    recommendations.push(
+      'Fan-out LLM pattern detected: one function dispatches multiple LLM calls in parallel. ' +
+      'Use session.runAs(child, fn) for each sub-call so they share the parent traceId without ' +
+      'emitting duplicate user messages. See Step 3g-b in the instrumentation guide (amplitude-ai.md).',
     );
   }
 
@@ -518,6 +573,7 @@ export function scanProject(rootPath: string): ScanResult {
     uninstrumented_call_sites: uninstrumentedCallSites,
     is_multi_agent: isMultiAgent,
     multi_agent_signals: multiAgentSignals,
+    has_fan_out: hasFanOut,
     has_streaming: hasStreaming,
     has_vercel_ai_sdk: hasVercelAiSdk,
     has_edge_runtime: hasEdgeRuntime,
@@ -525,6 +581,8 @@ export function scanProject(rootPath: string): ScanResult {
     has_langgraph: hasLanggraph,
     message_queue_deps: messageQueueDeps,
     has_frontend_deps: hasFrontendDeps,
+    has_otel_deps: hasOtelDeps,
+    otel_packages: otelPackages,
     recommendations,
     recommended_tier: recommendedTier,
   };
