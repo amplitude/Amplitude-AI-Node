@@ -17,7 +17,7 @@
     "type": "git",
     "url": "https://github.com/amplitude/Amplitude-AI-Node.git"
   },
-  "homepage": "https://amplitude.com/docs/sdks/agent-analytics/sdk",
+  "homepage": "https://github.com/amplitude/Amplitude-AI-Node#readme",
   "bugs": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/issues"
   },
