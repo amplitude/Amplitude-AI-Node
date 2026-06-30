@@ -447,7 +447,12 @@ export class SimpleStreamingTracker {
       ...contextFields(ctx),
       modelName: this._modelName,
       provider: this._providerName,
-      responseContent: state.content,
+      responseContent:
+        (state.content?.trim()
+          ? state.content
+          : (state.inputTokens ?? 0) > 0 || (state.outputTokens ?? 0) > 0
+            ? '[Agent run: tool_use response]'
+            : (state.content ?? '')),
       latencyMs: this.accumulator.elapsedMs,
       inputTokens: state.inputTokens,
       outputTokens: state.outputTokens,

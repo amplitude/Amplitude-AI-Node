@@ -38,6 +38,8 @@ export interface AIConfigOptions {
    * opted in — stack traces may contain file paths and internal details.
    */
   captureStackTrace?: boolean;
+  /** Raise when tokens > 0 but cost calculates to 0 (dev/CI). */
+  strictCost?: boolean;
 }
 
 /**
@@ -68,6 +70,7 @@ export class AIConfig {
   readonly validate: boolean;
   readonly propagateContext: boolean;
   readonly captureStackTrace: boolean;
+  readonly strictCost: boolean;
 
   constructor(options: AIConfigOptions = {}) {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
@@ -80,6 +83,7 @@ export class AIConfig {
     this.validate = options.validate ?? false;
     this.propagateContext = options.propagateContext ?? false;
     this.captureStackTrace = options.captureStackTrace ?? false;
+    this.strictCost = options.strictCost ?? false;
   }
 
   toPrivacyConfig(): PrivacyConfig {
