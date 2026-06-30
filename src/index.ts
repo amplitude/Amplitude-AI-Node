@@ -190,6 +190,7 @@ export { PrivacyConfig, normalizeToolDefinitions } from './core/privacy.js';
 export {
   AmplitudeAIError,
   ConfigurationError,
+  CostCalculationError,
   TrackingError,
   ProviderError,
   ValidationError,

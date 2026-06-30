@@ -294,6 +294,23 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 > 3. Or calling `calculateCost({ modelName, inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
 > 4. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
 
+**Cost guarantee contract (Monitor / Nova):**
+
+| Path | Requirement |
+|------|-------------|
+| **Provider wrap** | Every LLM completion → `[Agent] AI Response` + `[Agent] Cost USD` automatically |
+| **Custom / batch / artifact-only** | Call **`trackRunCost()`** at run end when wrap did not emit per-call AI Responses |
+| **Session End** | Lifecycle only — **do not** attach cost fields |
+
+`trackRunCost()` emits **delta** cost only. Default **empty content** — omit `$llm_message` for cost-only balancing events. Pass `content` when you want a session-viewer bubble.
+
+```typescript
+s.trackRunCost(runCostUsd, inputTokens, outputTokens, modelName, 'openai', {
+  latencyMs,
+  content: '[Artifact: batch run]', // optional
+});
+```
+
 ### Step 3f: Managed and hosted agent architectures
 
 **Use this pattern when LLM calls happen server-side** — Anthropic Managed Agents, OpenAI Assistants API, agent-as-a-service platforms, or LLM gateways where you poll for results rather than calling `messages.create` directly. Provider wrappers have nothing to intercept in this architecture; use manual tracking instead.

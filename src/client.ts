@@ -12,7 +12,14 @@ import {
   trackToolCall,
   trackUserMessage,
 } from './core/tracking.js';
-import { ConfigurationError } from './exceptions.js';
+import { getActiveContext } from './context.js';
+import {
+  EVENT_AI_RESPONSE,
+  PROP_COST_USD,
+  PROP_SESSION_ID,
+  PROP_TRACE_ID,
+} from './core/constants.js';
+import { ConfigurationError, CostCalculationError } from './exceptions.js';
 import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
 import type { SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
@@ -145,6 +152,7 @@ export class AmplitudeAI {
   protected _config: AIConfig;
   protected _privacyConfig: PrivacyConfig;
   protected _sessionTurnCounters: Map<string, number> = new Map();
+  protected _traceEmittedCostUsd: Map<string, number> = new Map();
   /** @internal Tracks events since last flush() — used by the exit warning. */
   _trackCountSinceFlush = 0;
 
@@ -275,6 +283,7 @@ export class AmplitudeAI {
       // Short-ID warning — Amplitude server rejects user_id/device_id
       // shorter than 5 characters with HTTP 400.
       _warnShortId(event, logger);
+      this._recordEmittedCostFromEvent(event);
 
       if (debug) {
         console.warn(formatDebugLine(event));
@@ -322,6 +331,66 @@ export class AmplitudeAI {
     this._sessionTurnCounters.delete(sessionId);
     this._sessionTurnCounters.set(sessionId, next);
     return next;
+  }
+
+  private _traceCostKey(sessionId: string, traceId: string | null | undefined): string {
+    return `${sessionId}\0${traceId ?? ''}`;
+  }
+
+  _recordEmittedCostFromEvent(event: AmplitudeEvent): void {
+    if (event.event_type !== EVENT_AI_RESPONSE) return;
+    const props = event.event_properties ?? {};
+    const cost = props[PROP_COST_USD];
+    if (cost == null || Number(cost) <= 0) return;
+    const key = this._traceCostKey(String(props[PROP_SESSION_ID] ?? ''), props[PROP_TRACE_ID] as string | null);
+    if (!this._traceEmittedCostUsd.has(key) && this._traceEmittedCostUsd.size >= _MAX_SESSION_TURN_COUNTERS) {
+      const lruKey = this._traceEmittedCostUsd.keys().next().value;
+      if (lruKey != null) this._traceEmittedCostUsd.delete(lruKey);
+    }
+    const prev = this._traceEmittedCostUsd.get(key) ?? 0;
+    this._traceEmittedCostUsd.delete(key);
+    this._traceEmittedCostUsd.set(key, Math.round((prev + Number(cost)) * 1e6) / 1e6);
+  }
+
+  _getTraceEmittedCostUsd(sessionId: string, traceId: string | null | undefined): number {
+    return this._traceEmittedCostUsd.get(this._traceCostKey(sessionId, traceId)) ?? 0;
+  }
+
+  _autoCalculateCost(opts: {
+    model: string;
+    provider: string;
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number | null;
+    cacheReadTokens?: number | null;
+    cacheCreationTokens?: number | null;
+  }): number | null {
+    try {
+      const cost = calculateCost({
+        modelName: opts.model,
+        inputTokens: opts.inputTokens,
+        outputTokens: opts.outputTokens,
+        reasoningTokens: opts.reasoningTokens ?? 0,
+        cacheReadInputTokens: opts.cacheReadTokens ?? 0,
+        cacheCreationInputTokens: opts.cacheCreationTokens ?? 0,
+        defaultProvider: opts.provider || undefined,
+      });
+      const totalTokens = opts.inputTokens + opts.outputTokens;
+      if (this._config.strictCost && totalTokens > 0 && cost <= 0) {
+        throw new CostCalculationError(
+          `Cost calculation returned 0 for model=${opts.model} (provider=${opts.provider}, tokens=${totalTokens}). Pass totalCostUsd explicitly or check model alias.`,
+        );
+      }
+      if (!this._config.strictCost && totalTokens > 0 && cost <= 0) {
+        getLogger().warn(
+          `Cost calculation returned 0 for model=${opts.model} (provider=${opts.provider}). Use canonical model ID or pass totalCostUsd.`,
+        );
+      }
+      return cost;
+    } catch (e) {
+      if (e instanceof CostCalculationError) throw e;
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------
@@ -442,19 +511,15 @@ export class AmplitudeAI {
       opts.inputTokens != null &&
       opts.outputTokens != null
     ) {
-      try {
-        effectiveCost = calculateCost({
-          modelName: opts.model,
-          inputTokens: opts.inputTokens,
-          outputTokens: opts.outputTokens,
-          reasoningTokens: opts.reasoningTokens ?? 0,
-          cacheReadInputTokens: opts.cacheReadTokens ?? 0,
-          cacheCreationInputTokens: opts.cacheCreationTokens ?? 0,
-          defaultProvider: opts.provider || undefined,
-        });
-      } catch {
-        // cost calculation is best-effort
-      }
+      effectiveCost = this._autoCalculateCost({
+        model: opts.model,
+        provider: opts.provider,
+        inputTokens: opts.inputTokens,
+        outputTokens: opts.outputTokens,
+        reasoningTokens: opts.reasoningTokens,
+        cacheReadTokens: opts.cacheReadTokens,
+        cacheCreationTokens: opts.cacheCreationTokens,
+      });
     }
 
     return trackAiMessage({
@@ -505,6 +570,68 @@ export class AmplitudeAI {
       eventProperties: opts.eventProperties,
       groups: opts.groups,
       privacyConfig: opts.privacyConfig ?? this._privacyConfig,
+      browserSessionId: opts.browserSessionId,
+    });
+  }
+
+  trackRunCost(opts: {
+    totalCostUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+    model: string;
+    provider: string;
+    latencyMs?: number | null;
+    content?: string;
+    finishReason?: string | null;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    userId?: string;
+    deviceId?: string | null;
+    sessionId?: string;
+    traceId?: string | null;
+    turnId?: number | null;
+    agentId?: string | null;
+    parentAgentId?: string | null;
+    customerOrgId?: string | null;
+    agentVersion?: string | null;
+    description?: string | null;
+    context?: Record<string, unknown> | null;
+    env?: string | null;
+    eventProperties?: Record<string, unknown> | null;
+    groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
+  }): string {
+    const ctx = getActiveContext();
+    const sessionId = opts.sessionId ?? ctx?.sessionId ?? '';
+    const traceId = opts.traceId !== undefined ? opts.traceId : (ctx?.traceId ?? null);
+    const emitted = this._getTraceEmittedCostUsd(sessionId, traceId);
+    const delta = Math.round((opts.totalCostUsd - emitted) * 1e6) / 1e6;
+    if (delta <= 1e-6) return '';
+    return this.trackAiMessage({
+      userId: opts.userId,
+      deviceId: opts.deviceId,
+      content: opts.content ?? '',
+      sessionId,
+      model: opts.model,
+      provider: opts.provider,
+      latencyMs: opts.latencyMs ?? 0,
+      inputTokens: opts.inputTokens,
+      outputTokens: opts.outputTokens,
+      cacheReadTokens: opts.cacheReadTokens,
+      cacheCreationTokens: opts.cacheCreationTokens,
+      totalCostUsd: delta,
+      finishReason: opts.finishReason ?? 'tool_use',
+      traceId,
+      turnId: opts.turnId,
+      agentId: opts.agentId,
+      parentAgentId: opts.parentAgentId,
+      customerOrgId: opts.customerOrgId,
+      agentVersion: opts.agentVersion,
+      description: opts.description,
+      context: opts.context,
+      env: opts.env,
+      eventProperties: opts.eventProperties,
+      groups: opts.groups,
       browserSessionId: opts.browserSessionId,
     });
   }

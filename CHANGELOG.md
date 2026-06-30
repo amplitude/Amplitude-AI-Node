@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.0
+
+### Added (AA-151394)
+- **`trackRunCost()`:** Run-end API emitting delta `[Agent] Cost USD` on
+  `[Agent] AI Response` with trace-scoped balancing. Default empty content for
+  cost-only events.
+- **`AIConfig.strictCost`:** Raises `CostCalculationError` when tokens are present
+  but cost calculates to zero (dev/CI).
+- **Streaming tool-use fix:** `finalize()` uses placeholder content when tokens > 0
+  but message body is empty.
+- **`MockAmplitudeAI.summary()`:** Provider, Cost USD, and run-cost gates; fails
+  when tool calls exist without AI Response cost.
+
 ## 0.14.0
 
 ### Added (AA-151359)

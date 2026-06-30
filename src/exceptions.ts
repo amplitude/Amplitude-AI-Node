@@ -32,3 +32,10 @@ export class ValidationError extends AmplitudeAIError {
     this.name = 'ValidationError';
   }
 }
+
+export class CostCalculationError extends AmplitudeAIError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CostCalculationError';
+  }
+}

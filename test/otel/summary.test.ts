@@ -33,7 +33,7 @@ describe('MockAmplitudeAI.summary()', () => {
       s.trackToolCall('search', 50, true);
     });
     const result = mock.summary();
-    expect(result).toContain('8/8 passed');
+    expect(result).toContain('11/11 passed');
   });
 
   it('detects missing session ID', () => {
