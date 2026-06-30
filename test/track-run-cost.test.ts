@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AIConfig } from '../src/config.js';
-import { EVENT_AI_RESPONSE, PROP_COST_USD } from '../src/core/constants.js';
+import { EVENT_AI_RESPONSE, PROP_COST_USD, PROP_INPUT_TOKENS, PROP_OUTPUT_TOKENS } from '../src/core/constants.js';
 import { CostCalculationError } from '../src/exceptions.js';
 import { MockAmplitudeAI } from '../src/testing.js';
 
@@ -32,6 +32,22 @@ describe('trackRunCost', () => {
     const costs = aiResponses.map((e) => Number(e.event_properties?.[PROP_COST_USD]));
     expect(costs.reduce((a, b) => a + b, 0)).toBeCloseTo(0.0123, 6);
     expect(costs[1]).toBeCloseTo(0.0073, 6);
+  });
+
+  it('emits token deltas after partial emissions', () => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('agent', { userId: 'u1', traceId: 't1' });
+    agent.trackAiMessage('partial', 'gpt-4o', 'openai', 100, {
+      sessionId: 's1',
+      inputTokens: 500,
+      outputTokens: 100,
+      totalCostUsd: 0.005,
+    });
+    agent.trackRunCost(0.0123, 1000, 200, 'gpt-4o', 'openai', { sessionId: 's1' });
+    const aiResponses = mock.events.filter((e) => e.event_type === EVENT_AI_RESPONSE);
+    const balancing = aiResponses[1].event_properties ?? {};
+    expect(balancing[PROP_INPUT_TOKENS]).toBe(500);
+    expect(balancing[PROP_OUTPUT_TOKENS]).toBe(100);
   });
 
   it('no-ops when cost already satisfied', () => {

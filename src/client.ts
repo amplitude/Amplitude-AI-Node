@@ -15,7 +15,11 @@ import {
 import { getActiveContext } from './context.js';
 import {
   EVENT_AI_RESPONSE,
+  PROP_CACHE_CREATION_TOKENS,
+  PROP_CACHE_READ_TOKENS,
   PROP_COST_USD,
+  PROP_INPUT_TOKENS,
+  PROP_OUTPUT_TOKENS,
   PROP_SESSION_ID,
   PROP_TRACE_ID,
 } from './core/constants.js';
@@ -153,6 +157,7 @@ export class AmplitudeAI {
   protected _privacyConfig: PrivacyConfig;
   protected _sessionTurnCounters: Map<string, number> = new Map();
   protected _traceEmittedCostUsd: Map<string, number> = new Map();
+  protected _traceEmittedTokens: Map<string, [number, number, number, number]> = new Map();
   /** @internal Tracks events since last flush() — used by the exit warning. */
   _trackCountSinceFlush = 0;
 
@@ -340,9 +345,26 @@ export class AmplitudeAI {
   _recordEmittedCostFromEvent(event: AmplitudeEvent): void {
     if (event.event_type !== EVENT_AI_RESPONSE) return;
     const props = event.event_properties ?? {};
+    const key = this._traceCostKey(String(props[PROP_SESSION_ID] ?? ''), props[PROP_TRACE_ID] as string | null);
+    const inputTokens = Number(props[PROP_INPUT_TOKENS] ?? 0);
+    const outputTokens = Number(props[PROP_OUTPUT_TOKENS] ?? 0);
+    const cacheReadTokens = Number(props[PROP_CACHE_READ_TOKENS] ?? 0);
+    const cacheCreationTokens = Number(props[PROP_CACHE_CREATION_TOKENS] ?? 0);
+    if (!this._traceEmittedTokens.has(key) && this._traceEmittedTokens.size >= _MAX_SESSION_TURN_COUNTERS) {
+      const lruKey = this._traceEmittedTokens.keys().next().value;
+      if (lruKey != null) this._traceEmittedTokens.delete(lruKey);
+    }
+    const [prevIn, prevOut, prevCacheRead, prevCacheCreation] = this._traceEmittedTokens.get(key) ?? [0, 0, 0, 0];
+    this._traceEmittedTokens.delete(key);
+    this._traceEmittedTokens.set(key, [
+      prevIn + inputTokens,
+      prevOut + outputTokens,
+      prevCacheRead + cacheReadTokens,
+      prevCacheCreation + cacheCreationTokens,
+    ]);
+
     const cost = props[PROP_COST_USD];
     if (cost == null || Number(cost) <= 0) return;
-    const key = this._traceCostKey(String(props[PROP_SESSION_ID] ?? ''), props[PROP_TRACE_ID] as string | null);
     if (!this._traceEmittedCostUsd.has(key) && this._traceEmittedCostUsd.size >= _MAX_SESSION_TURN_COUNTERS) {
       const lruKey = this._traceEmittedCostUsd.keys().next().value;
       if (lruKey != null) this._traceEmittedCostUsd.delete(lruKey);
@@ -354,6 +376,10 @@ export class AmplitudeAI {
 
   _getTraceEmittedCostUsd(sessionId: string, traceId: string | null | undefined): number {
     return this._traceEmittedCostUsd.get(this._traceCostKey(sessionId, traceId)) ?? 0;
+  }
+
+  _getTraceEmittedTokens(sessionId: string, traceId: string | null | undefined): [number, number, number, number] {
+    return this._traceEmittedTokens.get(this._traceCostKey(sessionId, traceId)) ?? [0, 0, 0, 0];
   }
 
   _autoCalculateCost(opts: {
@@ -607,6 +633,14 @@ export class AmplitudeAI {
     const emitted = this._getTraceEmittedCostUsd(sessionId, traceId);
     const delta = Math.round((opts.totalCostUsd - emitted) * 1e6) / 1e6;
     if (delta <= 1e-6) return '';
+    const [emittedIn, emittedOut, emittedCacheRead, emittedCacheCreation] = this._getTraceEmittedTokens(
+      sessionId,
+      traceId,
+    );
+    const deltaInput = Math.max(0, opts.inputTokens - emittedIn);
+    const deltaOutput = Math.max(0, opts.outputTokens - emittedOut);
+    const deltaCacheRead = Math.max(0, (opts.cacheReadTokens ?? 0) - emittedCacheRead);
+    const deltaCacheCreation = Math.max(0, (opts.cacheCreationTokens ?? 0) - emittedCacheCreation);
     return this.trackAiMessage({
       userId: opts.userId,
       deviceId: opts.deviceId,
@@ -615,10 +649,10 @@ export class AmplitudeAI {
       model: opts.model,
       provider: opts.provider,
       latencyMs: opts.latencyMs ?? 0,
-      inputTokens: opts.inputTokens,
-      outputTokens: opts.outputTokens,
-      cacheReadTokens: opts.cacheReadTokens,
-      cacheCreationTokens: opts.cacheCreationTokens,
+      inputTokens: deltaInput,
+      outputTokens: deltaOutput,
+      cacheReadTokens: deltaCacheRead,
+      cacheCreationTokens: deltaCacheCreation,
       totalCostUsd: delta,
       finishReason: opts.finishReason ?? 'tool_use',
       traceId,
