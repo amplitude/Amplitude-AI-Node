@@ -5,10 +5,12 @@ import {
   EVENT_SESSION_END,
   EVENT_TOOL_CALL,
   PROP_AGENT_ID,
+  PROP_COST_USD,
   PROP_INPUT_TOKENS,
   PROP_LATENCY_MS,
   PROP_MODEL_NAME,
   PROP_OUTPUT_TOKENS,
+  PROP_PROVIDER,
   PROP_SESSION_ID,
   PROP_TOOL_NAME,
   PROP_TRACE_ID,
@@ -294,7 +296,13 @@ export class MockAmplitudeAI extends AmplitudeAI {
 
     // 5. Model name (for AI responses)
     const aiResponses = this.events.filter((e) => e.event_type === EVENT_AI_RESPONSE);
-    const hasModel = aiResponses.some((e) => e.event_properties?.[PROP_MODEL_NAME]);
+    const toolCalls = this.events.filter((e) => e.event_type === EVENT_TOOL_CALL);
+    const hasModel =
+      aiResponses.length > 0 &&
+      aiResponses.every((e) => {
+        const v = e.event_properties?.[PROP_MODEL_NAME];
+        return v != null && v !== '';
+      });
     gates.push({
       name: 'Model Name',
       pass: aiResponses.length === 0 || hasModel,
@@ -302,10 +310,28 @@ export class MockAmplitudeAI extends AmplitudeAI {
       fix: 'Pass model to trackAiMessage()',
     });
 
-    // 6. Token usage
-    const hasTokens = aiResponses.some(
-      (e) => e.event_properties?.[PROP_INPUT_TOKENS] != null || e.event_properties?.[PROP_OUTPUT_TOKENS] != null,
-    );
+    // 6. Provider (AI responses)
+    const hasProvider =
+      aiResponses.length > 0 &&
+      aiResponses.every((e) => {
+        const v = e.event_properties?.[PROP_PROVIDER];
+        return v != null && v !== '';
+      });
+    gates.push({
+      name: 'Provider',
+      pass: aiResponses.length === 0 || hasProvider,
+      impact: 'Provider breakdown not available',
+      fix: 'Pass provider to trackAiMessage() or use a provider wrapper',
+    });
+
+    // 7. Token usage
+    const hasTokens =
+      aiResponses.length > 0 &&
+      aiResponses.every(
+        (e) =>
+          (e.event_properties?.[PROP_INPUT_TOKENS] as number) > 0 ||
+          (e.event_properties?.[PROP_OUTPUT_TOKENS] as number) > 0,
+      );
     gates.push({
       name: 'Token Usage',
       pass: aiResponses.length === 0 || hasTokens,
@@ -313,8 +339,26 @@ export class MockAmplitudeAI extends AmplitudeAI {
       fix: 'Pass inputTokens/outputTokens to trackAiMessage()',
     });
 
-    // 7. Tool names
-    const toolCalls = this.events.filter((e) => e.event_type === EVENT_TOOL_CALL);
+    // 8. Cost USD (AI responses)
+    const hasCost =
+      aiResponses.length > 0 &&
+      aiResponses.every((e) => (e.event_properties?.[PROP_COST_USD] as number) > 0);
+    gates.push({
+      name: 'Cost USD',
+      pass: aiResponses.length === 0 || hasCost,
+      impact: 'Monitor cost charts will show $0',
+      fix: 'Use canonical model name, set totalCostUsd, or call trackRunCost() at run end',
+    });
+
+    // 9. Tool calls without AI Response cost
+    gates.push({
+      name: 'Run cost (tool-only)',
+      pass: !(toolCalls.length > 0 && aiResponses.length === 0),
+      impact: 'Batch/artifact runs show $0 spend on Monitor',
+      fix: 'Call trackRunCost() at run end with totalCostUsd',
+    });
+
+    // 10. Tool names
     const hasToolName = toolCalls.some((e) => e.event_properties?.[PROP_TOOL_NAME]);
     gates.push({
       name: 'Tool Names',
@@ -323,7 +367,7 @@ export class MockAmplitudeAI extends AmplitudeAI {
       fix: 'Pass toolName to trackToolCall()',
     });
 
-    // 8. Latency
+    // 11. Latency
     const hasLatency = this.events.some(
       (e) =>
         (e.event_type === EVENT_AI_RESPONSE || e.event_type === EVENT_TOOL_CALL) &&

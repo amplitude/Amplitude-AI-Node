@@ -356,6 +356,24 @@ export class Session {
     );
   }
 
+  trackRunCost(
+    totalCostUsd: number,
+    inputTokens: number,
+    outputTokens: number,
+    model: string,
+    provider: string,
+    opts: Parameters<BoundAgent['trackRunCost']>[5] = {},
+  ): string {
+    return this._agent.trackRunCost(
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+      model,
+      provider,
+      this._inject(opts),
+    );
+  }
+
   trackToolCall(
     toolName: string,
     latencyMs: number,

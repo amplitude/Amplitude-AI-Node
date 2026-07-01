@@ -207,6 +207,27 @@ export class BoundAgent {
     } as Parameters<AmplitudeAI['trackAiMessage']>[0]);
   }
 
+  trackRunCost(
+    totalCostUsd: number,
+    inputTokens: number,
+    outputTokens: number,
+    model: string,
+    provider: string,
+    opts: Omit<
+      Parameters<AmplitudeAI['trackRunCost']>[0],
+      'totalCostUsd' | 'inputTokens' | 'outputTokens' | 'model' | 'provider'
+    > = {},
+  ): string {
+    return this._ai.trackRunCost({
+      ...this._merge(opts),
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+      model,
+      provider,
+    });
+  }
+
   trackToolCall(
     toolName: string,
     latencyMs: number,
