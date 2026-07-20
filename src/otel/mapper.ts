@@ -212,7 +212,7 @@ export class SpanEventMapper {
 
     const latencyMs = this._computeLatencyMs(span);
 
-    let costUsd = safeFloat(attrs[GENAI_USAGE_COST]);
+    let costUsd = safeCostFloat(attrs[GENAI_USAGE_COST]);
     if (costUsd == null && inputTokens != null && outputTokens != null) {
       try {
         costUsd = calculateCost({
@@ -404,7 +404,8 @@ export class SpanEventMapper {
       trackEmbedding({
         ...shared, model: fields.model, provider: fields.provider,
         latencyMs: fields.latencyMs, inputTokens: fields.inputTokens,
-        dimensions, eventProperties: ep,
+        dimensions, totalCostUsd: resolveEmbeddingCostUsd(fields),
+        eventProperties: ep,
       } as never);
     } else if (eventType === EVENT_TYPE_SESSION_END) {
       trackSessionEnd({ ...shared, turnId: fields.turnId, eventProperties: ep } as never);
@@ -456,7 +457,8 @@ export class SpanEventMapper {
       trackEmbedding({
         ...shared, model: fields.model, provider: fields.provider,
         latencyMs: fields.latencyMs, inputTokens: fields.inputTokens,
-        dimensions, eventProperties: ep,
+        dimensions, totalCostUsd: resolveEmbeddingCostUsd(fields),
+        eventProperties: ep,
       } as never);
     } else if (operation === OP_EXECUTE_TOOL) {
       let toolName = String(attrs[GENAI_TOOL_NAME] ?? '');
@@ -848,6 +850,29 @@ function safeFloat(value: unknown): number | null {
   if (value == null) return null;
   const n = Number(value);
   return Number.isNaN(n) ? null : n;
+}
+
+function safeCostFloat(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && value.trim().length === 0) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function resolveEmbeddingCostUsd(fields: RoutingFields): number | null {
+  if (fields.costUsd != null) return fields.costUsd;
+  if (fields.inputTokens == null) return null;
+  try {
+    return calculateCost({
+      modelName: fields.model,
+      inputTokens: fields.inputTokens,
+      outputTokens: 0,
+      defaultProvider:
+        fields.provider !== 'unknown' ? fields.provider : undefined,
+    });
+  } catch {
+    return null;
+  }
 }
 
 function parseJsonAttr(value: unknown): unknown[] | null {

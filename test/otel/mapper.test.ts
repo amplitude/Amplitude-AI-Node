@@ -107,12 +107,15 @@ describe('SpanEventMapper', () => {
       [AMP_EVENT_TYPE]: EVENT_TYPE_EMBEDDING,
       [GENAI_RESPONSE_MODEL]: 'text-embedding-3-small',
       [GENAI_PROVIDER_NAME]: 'openai',
+      [GENAI_INPUT_TOKENS]: 1_000,
       [GENAI_EMBEDDING_DIMENSIONS]: 1536,
+      [GENAI_USAGE_COST]: 0.42,
     });
     mapper.mapAndTrack(span);
     expect(amplitude.track).toHaveBeenCalled();
     const event = amplitude.track.mock.calls[0]?.[0];
     expect(event?.event_type).toBe('[Agent] Embedding');
+    expect(event?.event_properties?.['[Agent] Cost USD']).toBe(0.42);
   });
 
   it('routes explicit type: session_end', () => {
@@ -180,6 +183,32 @@ describe('SpanEventMapper', () => {
     });
   });
 
+  it.each([
+    ['blank string', ''],
+    ['whitespace string', '   '],
+    ['boolean', false],
+    ['negative number', -0.1],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+  ])('falls back from invalid authoritative cost: %s', (_label, invalidCost) => {
+    const span = makeSpan({
+      [GENAI_OPERATION_NAME]: OP_CHAT,
+      [GENAI_PROVIDER_NAME]: 'openai',
+      [GENAI_RESPONSE_MODEL]: 'gpt-4o',
+      [GENAI_INPUT_TOKENS]: 1_000,
+      [GENAI_OUTPUT_TOKENS]: 200,
+      [GENAI_USAGE_COST]: invalidCost,
+    });
+
+    mapper.mapAndTrack(span);
+
+    const event = amplitude.track.mock.calls[0]?.[0];
+    const cost = event?.event_properties?.['[Agent] Cost USD'];
+    expect(cost).toEqual(expect.any(Number));
+    expect(Number.isFinite(cost)).toBe(true);
+    expect(cost).toBeGreaterThan(0);
+  });
+
   it('leaves partial token usage unpriced', () => {
     const span = makeSpan({
       [GENAI_OPERATION_NAME]: OP_CHAT,
@@ -201,11 +230,29 @@ describe('SpanEventMapper', () => {
       [GENAI_RESPONSE_MODEL]: 'text-embedding-3-small',
       [GENAI_INPUT_TOKENS]: 50,
       [GENAI_EMBEDDING_DIMENSIONS]: 1536,
+      [GENAI_USAGE_COST]: 0.25,
     });
     mapper.mapAndTrack(span);
     expect(amplitude.track).toHaveBeenCalledTimes(1);
     const event = amplitude.track.mock.calls[0]?.[0];
     expect(event?.event_type).toBe('[Agent] Embedding');
+    expect(event?.event_properties?.['[Agent] Cost USD']).toBe(0.25);
+  });
+
+  it('calculates embedding cost from input-only usage', () => {
+    const span = makeSpan({
+      [GENAI_OPERATION_NAME]: OP_EMBEDDINGS,
+      [GENAI_PROVIDER_NAME]: 'openai',
+      [GENAI_RESPONSE_MODEL]: 'text-embedding-3-small',
+      [GENAI_INPUT_TOKENS]: 1_000,
+    });
+
+    mapper.mapAndTrack(span);
+
+    const event = amplitude.track.mock.calls[0]?.[0];
+    const cost = event?.event_properties?.['[Agent] Cost USD'];
+    expect(cost).toEqual(expect.any(Number));
+    expect(cost).toBeGreaterThan(0);
   });
 
   it('routes genai operation: execute_tool → Tool Call', () => {
