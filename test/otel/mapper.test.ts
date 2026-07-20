@@ -180,6 +180,20 @@ describe('SpanEventMapper', () => {
     });
   });
 
+  it('leaves partial token usage unpriced', () => {
+    const span = makeSpan({
+      [GENAI_OPERATION_NAME]: OP_CHAT,
+      [GENAI_PROVIDER_NAME]: 'openai',
+      [GENAI_RESPONSE_MODEL]: 'gpt-4o',
+      [GENAI_INPUT_TOKENS]: 1_000,
+    });
+
+    mapper.mapAndTrack(span);
+
+    const event = amplitude.track.mock.calls[0]?.[0];
+    expect(event?.event_properties).not.toHaveProperty('[Agent] Cost USD');
+  });
+
   it('routes genai operation: embeddings → Embedding', () => {
     const span = makeSpan({
       [GENAI_OPERATION_NAME]: OP_EMBEDDINGS,

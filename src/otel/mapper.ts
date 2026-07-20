@@ -213,7 +213,7 @@ export class SpanEventMapper {
     const latencyMs = this._computeLatencyMs(span);
 
     let costUsd = safeFloat(attrs[GENAI_USAGE_COST]);
-    if (costUsd == null && (inputTokens != null || outputTokens != null)) {
+    if (costUsd == null && inputTokens != null && outputTokens != null) {
       try {
         costUsd = calculateCost({
           modelName: model,
