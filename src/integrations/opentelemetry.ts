@@ -7,6 +7,10 @@
  */
 
 import type { AmplitudeAI } from '../client.js';
+import {
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_USAGE_COST,
+} from '../otel/conventions.js';
 import { calculateCost } from '../utils/costs.js';
 
 export interface ExporterOptions {
@@ -164,8 +168,11 @@ export class AmplitudeAgentExporter {
     const cacheCreationTokens = _toOtelNumber(
       attrs['gen_ai.usage.cache_creation.input_tokens'],
     );
+    const reasoningTokens = _toOtelNumber(
+      attrs[GENAI_REASONING_OUTPUT_TOKENS],
+    );
 
-    let costUsd = _toOtelNumber(attrs['gen_ai.usage.cost']);
+    let costUsd = _toOtelNumber(attrs[GENAI_USAGE_COST]);
     if (
       costUsd == null &&
       modelName !== 'unknown' &&
@@ -177,6 +184,7 @@ export class AmplitudeAgentExporter {
           modelName,
           inputTokens,
           outputTokens,
+          reasoningTokens: reasoningTokens ?? 0,
           cacheReadInputTokens: cacheReadTokens ?? 0,
           cacheCreationInputTokens: cacheCreationTokens ?? 0,
           defaultProvider:
@@ -201,6 +209,7 @@ export class AmplitudeAgentExporter {
       inputTokens,
       outputTokens,
       totalTokens,
+      reasoningTokens,
       cacheReadTokens,
       cacheCreationTokens,
       totalCostUsd: costUsd,

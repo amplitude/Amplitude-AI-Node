@@ -799,6 +799,23 @@ describe('AmplitudeGenAIExporter expanded', () => {
     expect(call.cacheCreationTokens).toBe(15);
   });
 
+  it('maps reasoning token attributes to trackAiMessage', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({ amplitudeAI: ai as never });
+    const cb = vi.fn();
+
+    const span = makeGenAISpan({
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.usage.reasoning.output_tokens': 12,
+      },
+    });
+    exporter.export([span as never], cb);
+
+    const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.reasoningTokens).toBe(12);
+  });
+
   it('prefers gen_ai.provider.name over gen_ai.system', (): void => {
     const ai = createMockAmplitudeAI();
     const exporter = new AmplitudeAgentExporter({ amplitudeAI: ai as never });

@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { trace } from '@opentelemetry/api';
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
 import { _sessionStorage, SessionContext } from '../../src/context.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
@@ -9,6 +15,14 @@ import {
   applySessionContext,
   BaseAIProvider,
 } from '../../src/providers/base.js';
+import {
+  GENAI_CACHE_CREATION_INPUT_TOKENS,
+  GENAI_CACHE_READ_INPUT_TOKENS,
+  GENAI_INPUT_TOKENS,
+  GENAI_OUTPUT_TOKENS,
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_USAGE_COST,
+} from '../../src/otel/conventions.js';
 
 vi.mock('../../src/core/tracking.js', () => ({
   trackAiMessage: vi.fn(() => 'msg-123'),
@@ -26,8 +40,11 @@ function createMockAmplitude(): {
 }
 
 class TestProvider extends BaseAIProvider {
-  constructor(amplitude: { track: (event: Record<string, unknown>) => void }) {
-    super({ amplitude, providerName: 'test' });
+  constructor(
+    amplitude: { track: (event: Record<string, unknown>) => void },
+    providerName = 'test',
+  ) {
+    super({ amplitude, providerName });
   }
 }
 
@@ -149,6 +166,24 @@ describe('SimpleStreamingTracker', () => {
     expect(typeof call[0].latencyMs).toBe('number');
     expect(call[0].latencyMs).toBeGreaterThanOrEqual(0);
   });
+
+  it('calculates cost from complete streaming usage', (): void => {
+    const provider = new TestProvider(createMockAmplitude(), 'openai');
+    const tracker = provider.createStreamingTracker();
+    tracker.setModel('gpt-4o');
+    tracker.setUsage({
+      inputTokens: 1_000,
+      outputTokens: 200,
+      cacheReadTokens: 400,
+    });
+
+    tracker.finalize({ userId: 'u1' });
+
+    const calls = (trackAiMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.at(-1);
+    if (!call) throw new Error('Expected mock to be called');
+    expect(call[0].totalCostUsd).toBeGreaterThan(0);
+  });
 });
 
 describe('BaseAIProvider._track', () => {
@@ -168,5 +203,76 @@ describe('BaseAIProvider._track', () => {
     expect(call[0].userId).toBe('u1');
     expect(call[0].modelName).toBe('gpt-4');
     expect(call[0].provider).toBe('test');
+  });
+});
+
+describe('BaseAIProvider OTEL usage parity', () => {
+  afterEach(() => {
+    trace.disable();
+  });
+
+  function installSpanExporter(): InMemorySpanExporter {
+    trace.disable();
+    const exporter = new InMemorySpanExporter();
+    const tracerProvider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    trace.setGlobalTracerProvider(tracerProvider);
+    return exporter;
+  }
+
+  it('emits complete usage and authoritative cost for non-streaming calls', () => {
+    const exporter = installSpanExporter();
+    const provider = new TestProvider(createMockAmplitude(), 'openai');
+
+    provider.trackFn()({
+      modelName: 'gpt-4o',
+      provider: 'openai',
+      responseContent: 'done',
+      latencyMs: 10,
+      inputTokens: 1_000,
+      outputTokens: 200,
+      reasoningTokens: 75,
+      cacheReadInputTokens: 400,
+      cacheCreationInputTokens: 50,
+      totalCostUsd: 0.123456,
+    });
+
+    const attributes = exporter.getFinishedSpans()[0]?.attributes;
+    expect(attributes).toMatchObject({
+      [GENAI_INPUT_TOKENS]: 1_000,
+      [GENAI_OUTPUT_TOKENS]: 200,
+      [GENAI_REASONING_OUTPUT_TOKENS]: 75,
+      [GENAI_CACHE_READ_INPUT_TOKENS]: 400,
+      [GENAI_CACHE_CREATION_INPUT_TOKENS]: 50,
+      [GENAI_USAGE_COST]: 0.123456,
+    });
+  });
+
+  it('emits complete usage for generic streaming calls', () => {
+    const exporter = installSpanExporter();
+    const provider = new TestProvider(createMockAmplitude(), 'openai');
+    const tracker = provider.createStreamingTracker();
+    tracker.setModel('gpt-4o');
+    tracker.setUsage({
+      inputTokens: 1_000,
+      outputTokens: 200,
+      reasoningTokens: 75,
+      cacheReadTokens: 400,
+      cacheCreationTokens: 50,
+    });
+
+    tracker.finalize({ userId: 'user-1' });
+
+    const attributes = exporter.getFinishedSpans()[0]?.attributes;
+    expect(attributes).toMatchObject({
+      [GENAI_INPUT_TOKENS]: 1_000,
+      [GENAI_OUTPUT_TOKENS]: 200,
+      [GENAI_REASONING_OUTPUT_TOKENS]: 75,
+      [GENAI_CACHE_READ_INPUT_TOKENS]: 400,
+      [GENAI_CACHE_CREATION_INPUT_TOKENS]: 50,
+      [GENAI_USAGE_COST]: expect.any(Number),
+    });
+    expect(attributes?.[GENAI_USAGE_COST]).toBeGreaterThan(0);
   });
 });

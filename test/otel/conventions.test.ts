@@ -26,6 +26,16 @@ describe('OTEL conventions', () => {
     expect(conventions.GENAI_OUTPUT_TOKENS).toBe('gen_ai.usage.output_tokens');
   });
 
+  it('exports cost parity attributes with canonical values', () => {
+    expect(conventions.GENAI_REASONING_OUTPUT_TOKENS).toBe(
+      'gen_ai.usage.reasoning.output_tokens',
+    );
+    expect(conventions.GENAI_USAGE_COST).toBe('gen_ai.usage.cost');
+    expect(conventions.GENAI_CACHE_CREATION_INPUT_TOKENS).toBe(
+      'gen_ai.usage.cache_creation.input_tokens',
+    );
+  });
+
   it('exports GENAI_CACHE_READ_INPUT_TOKENS with correct value', () => {
     expect(conventions.GENAI_CACHE_READ_INPUT_TOKENS).toBe('gen_ai.usage.cache_read.input_tokens');
   });

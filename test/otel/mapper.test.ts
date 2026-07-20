@@ -14,6 +14,10 @@ import {
   GENAI_RESPONSE_MODEL,
   GENAI_INPUT_TOKENS,
   GENAI_OUTPUT_TOKENS,
+  GENAI_CACHE_READ_INPUT_TOKENS,
+  GENAI_CACHE_CREATION_INPUT_TOKENS,
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_USAGE_COST,
   GENAI_TOOL_NAME,
   GENAI_INPUT_MESSAGES,
   GENAI_OUTPUT_MESSAGES,
@@ -148,6 +152,32 @@ describe('SpanEventMapper', () => {
     const types = amplitude.track.mock.calls.map((c: unknown[]) => (c[0] as Record<string, unknown>)?.event_type);
     expect(types).toContain('[Agent] User Message');
     expect(types).toContain('[Agent] AI Response');
+  });
+
+  it('preserves complete usage and prefers authoritative cost', () => {
+    const span = makeSpan({
+      [GENAI_OPERATION_NAME]: OP_CHAT,
+      [GENAI_PROVIDER_NAME]: 'openai',
+      [GENAI_RESPONSE_MODEL]: 'gpt-4o',
+      [GENAI_INPUT_TOKENS]: 1_000,
+      [GENAI_OUTPUT_TOKENS]: 200,
+      [GENAI_CACHE_READ_INPUT_TOKENS]: 400,
+      [GENAI_CACHE_CREATION_INPUT_TOKENS]: 50,
+      [GENAI_REASONING_OUTPUT_TOKENS]: 75,
+      [GENAI_USAGE_COST]: 0.123456,
+    });
+
+    mapper.mapAndTrack(span);
+
+    const event = amplitude.track.mock.calls[0]?.[0];
+    expect(event?.event_properties).toMatchObject({
+      '[Agent] Input Tokens': 1_000,
+      '[Agent] Output Tokens': 200,
+      '[Agent] Cache Read Tokens': 400,
+      '[Agent] Cache Creation Tokens': 50,
+      '[Agent] Reasoning Tokens': 75,
+      '[Agent] Cost USD': 0.123456,
+    });
   });
 
   it('routes genai operation: embeddings → Embedding', () => {
