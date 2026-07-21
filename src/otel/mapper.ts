@@ -83,11 +83,13 @@ import {
   GENAI_OUTPUT_MESSAGES,
   GENAI_OUTPUT_TOKENS,
   GENAI_PROVIDER_NAME,
+  GENAI_REASONING_OUTPUT_TOKENS,
   GENAI_REQUEST_MAX_TOKENS,
   GENAI_REQUEST_MODEL,
   GENAI_REQUEST_TEMPERATURE,
   GENAI_REQUEST_TOP_P,
   GENAI_RESPONSE_MODEL,
+  GENAI_USAGE_COST,
   GENAI_SYSTEM_INSTRUCTIONS,
   GENAI_TOOL_NAME,
   OP_CHAT,
@@ -202,6 +204,7 @@ export class SpanEventMapper {
       : null;
     const cacheReadInputTokens = safeInt(attrs[GENAI_CACHE_READ_INPUT_TOKENS]);
     const cacheCreationInputTokens = safeInt(attrs[GENAI_CACHE_CREATION_INPUT_TOKENS]);
+    const reasoningTokens = safeInt(attrs[GENAI_REASONING_OUTPUT_TOKENS]);
     const finishReasons = attrs[GENAI_FINISH_REASONS];
     const finishReason = Array.isArray(finishReasons) && finishReasons.length > 0
       ? String(finishReasons[0])
@@ -209,13 +212,14 @@ export class SpanEventMapper {
 
     const latencyMs = this._computeLatencyMs(span);
 
-    let costUsd: number | null = null;
-    if (inputTokens != null || outputTokens != null) {
+    let costUsd = safeCostFloat(attrs[GENAI_USAGE_COST]);
+    if (costUsd == null && inputTokens != null && outputTokens != null) {
       try {
         costUsd = calculateCost({
           modelName: model,
           inputTokens: inputTokens ?? 0,
           outputTokens: outputTokens ?? 0,
+          reasoningTokens: reasoningTokens ?? 0,
           cacheReadInputTokens: cacheReadInputTokens ?? 0,
           cacheCreationInputTokens: cacheCreationInputTokens ?? 0,
           defaultProvider: provider !== 'unknown' ? provider : undefined,
@@ -282,7 +286,7 @@ export class SpanEventMapper {
     if (explicitType) {
       this._routeExplicitType(explicitType, attrs, span, shared, extraProps, {
         model, provider, latencyMs, inputTokens, outputTokens, totalTokens,
-        cacheReadInputTokens, cacheCreationInputTokens, costUsd, isError,
+        cacheReadInputTokens, cacheCreationInputTokens, reasoningTokens, costUsd, isError,
         errorMessage, errorType, finishReason, temperature, maxTokens, topP,
         userContent, aiContent, systemPrompt, turnId, skipAutoUser,
       });
@@ -294,7 +298,7 @@ export class SpanEventMapper {
     if (operation) {
       this._routeGenaiOperation(operation, attrs, span, shared, extraProps, {
         model, provider, latencyMs, inputTokens, outputTokens, totalTokens,
-        cacheReadInputTokens, cacheCreationInputTokens, costUsd, isError,
+        cacheReadInputTokens, cacheCreationInputTokens, reasoningTokens, costUsd, isError,
         errorMessage, finishReason, temperature, maxTokens, topP,
         userContent, aiContent, systemPrompt, turnId, skipAutoUser,
       });
@@ -306,7 +310,7 @@ export class SpanEventMapper {
     if (spanKind) {
       this._routeSpanKind(spanKind, attrs, span, shared, extraProps, {
         model, provider, latencyMs, inputTokens, outputTokens, totalTokens,
-        cacheReadInputTokens, cacheCreationInputTokens, costUsd, isError,
+        cacheReadInputTokens, cacheCreationInputTokens, reasoningTokens, costUsd, isError,
         errorMessage, errorType, finishReason, temperature, maxTokens, topP,
         userContent, aiContent, systemPrompt, turnId,
       });
@@ -328,6 +332,7 @@ export class SpanEventMapper {
         totalTokens,
         cacheReadInputTokens,
         cacheCreationInputTokens,
+        reasoningTokens,
         totalCostUsd: costUsd,
         isError,
         errorMessage,
@@ -375,6 +380,7 @@ export class SpanEventMapper {
         outputTokens: fields.outputTokens, totalTokens: fields.totalTokens,
         cacheReadInputTokens: fields.cacheReadInputTokens,
         cacheCreationInputTokens: fields.cacheCreationInputTokens,
+        reasoningTokens: fields.reasoningTokens,
         totalCostUsd: fields.costUsd, isError: fields.isError,
         errorMessage: fields.errorMessage, finishReason: fields.finishReason,
         systemPrompt: fields.systemPrompt, temperature: fields.temperature,
@@ -398,7 +404,8 @@ export class SpanEventMapper {
       trackEmbedding({
         ...shared, model: fields.model, provider: fields.provider,
         latencyMs: fields.latencyMs, inputTokens: fields.inputTokens,
-        dimensions, eventProperties: ep,
+        dimensions, totalCostUsd: resolveEmbeddingCostUsd(fields),
+        eventProperties: ep,
       } as never);
     } else if (eventType === EVENT_TYPE_SESSION_END) {
       trackSessionEnd({ ...shared, turnId: fields.turnId, eventProperties: ep } as never);
@@ -438,6 +445,7 @@ export class SpanEventMapper {
         outputTokens: fields.outputTokens, totalTokens: fields.totalTokens,
         cacheReadInputTokens: fields.cacheReadInputTokens,
         cacheCreationInputTokens: fields.cacheCreationInputTokens,
+        reasoningTokens: fields.reasoningTokens,
         totalCostUsd: fields.costUsd, isError: fields.isError,
         errorMessage: fields.errorMessage, finishReason: fields.finishReason,
         systemPrompt: fields.systemPrompt, temperature: fields.temperature,
@@ -449,7 +457,8 @@ export class SpanEventMapper {
       trackEmbedding({
         ...shared, model: fields.model, provider: fields.provider,
         latencyMs: fields.latencyMs, inputTokens: fields.inputTokens,
-        dimensions, eventProperties: ep,
+        dimensions, totalCostUsd: resolveEmbeddingCostUsd(fields),
+        eventProperties: ep,
       } as never);
     } else if (operation === OP_EXECUTE_TOOL) {
       let toolName = String(attrs[GENAI_TOOL_NAME] ?? '');
@@ -472,6 +481,7 @@ export class SpanEventMapper {
         outputTokens: fields.outputTokens, totalTokens: fields.totalTokens,
         cacheReadInputTokens: fields.cacheReadInputTokens,
         cacheCreationInputTokens: fields.cacheCreationInputTokens,
+        reasoningTokens: fields.reasoningTokens,
         totalCostUsd: fields.costUsd, isError: fields.isError,
         errorMessage: fields.errorMessage, finishReason: fields.finishReason,
         systemPrompt: fields.systemPrompt, temperature: fields.temperature,
@@ -486,6 +496,7 @@ export class SpanEventMapper {
         outputTokens: fields.outputTokens, totalTokens: fields.totalTokens,
         cacheReadInputTokens: fields.cacheReadInputTokens,
         cacheCreationInputTokens: fields.cacheCreationInputTokens,
+        reasoningTokens: fields.reasoningTokens,
         totalCostUsd: fields.costUsd, isError: fields.isError,
         errorMessage: fields.errorMessage, finishReason: fields.finishReason,
         eventProperties: ep,
@@ -540,6 +551,7 @@ export class SpanEventMapper {
         outputTokens: fields.outputTokens, totalTokens: fields.totalTokens,
         cacheReadInputTokens: fields.cacheReadInputTokens,
         cacheCreationInputTokens: fields.cacheCreationInputTokens,
+        reasoningTokens: fields.reasoningTokens,
         totalCostUsd: fields.costUsd, isError: fields.isError,
         errorMessage: fields.errorMessage, finishReason: fields.finishReason,
         systemPrompt: fields.systemPrompt, temperature: fields.temperature,
@@ -808,6 +820,7 @@ interface RoutingFields {
   totalTokens: number | null;
   cacheReadInputTokens: number | null;
   cacheCreationInputTokens: number | null;
+  reasoningTokens: number | null;
   costUsd: number | null;
   isError: boolean;
   errorMessage: string | null;
@@ -837,6 +850,29 @@ function safeFloat(value: unknown): number | null {
   if (value == null) return null;
   const n = Number(value);
   return Number.isNaN(n) ? null : n;
+}
+
+function safeCostFloat(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && value.trim().length === 0) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function resolveEmbeddingCostUsd(fields: RoutingFields): number | null {
+  if (fields.costUsd != null) return fields.costUsd;
+  if (fields.inputTokens == null) return null;
+  try {
+    return calculateCost({
+      modelName: fields.model,
+      inputTokens: fields.inputTokens,
+      outputTokens: 0,
+      defaultProvider:
+        fields.provider !== 'unknown' ? fields.provider : undefined,
+    });
+  } catch {
+    return null;
+  }
 }
 
 function parseJsonAttr(value: unknown): unknown[] | null {

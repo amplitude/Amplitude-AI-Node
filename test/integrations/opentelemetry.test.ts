@@ -142,6 +142,7 @@ describe('AmplitudeAgentExporter', () => {
           'gen_ai.operation.name': 'embedding',
           'gen_ai.request.model': 'text-embedding-3-small',
           'gen_ai.usage.input_tokens': 123,
+          'gen_ai.usage.cost': 0.42,
           'gen_ai.embedding.vector_size': 1536,
           'amplitude.user_id': 'u1',
           'amplitude.session_id': 's1',
@@ -151,6 +152,10 @@ describe('AmplitudeAgentExporter', () => {
       exporter.export([embSpan as never], cb);
       expect(ai.trackEmbedding).toHaveBeenCalledOnce();
       expect(ai.trackAiMessage).not.toHaveBeenCalled();
+      expect(ai.trackEmbedding.mock.calls[0]?.[0]).toMatchObject({
+        inputTokens: 123,
+        totalCostUsd: 0.42,
+      });
     });
 
     it('uses defaultUserId when amplitude.user_id is absent', (): void => {
@@ -371,6 +376,41 @@ describe('AmplitudeAgentExporter expanded', () => {
     const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
     expect(call.totalCostUsd).toBe(0.05);
   });
+
+  it.each([
+    ['blank string', ''],
+    ['whitespace string', '   '],
+    ['boolean', false],
+    ['negative number', -0.1],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+  ])(
+    'falls back from invalid authoritative cost: %s',
+    (_label, invalidCost): void => {
+      const ai = createMockAmplitudeAI();
+      const exporter = new AmplitudeAgentExporter({
+        amplitudeAI: ai as never,
+      });
+      const cb = vi.fn();
+
+      const span = makeGenAISpan({
+        attributes: {
+          ...makeGenAISpan().attributes,
+          'gen_ai.response.model': 'gpt-4o',
+          'gen_ai.usage.cost': invalidCost,
+        },
+      });
+      exporter.export([span as never], cb);
+
+      const call = ai.trackAiMessage.mock.calls[0]![0] as Record<
+        string,
+        unknown
+      >;
+      expect(call.totalCostUsd).toEqual(expect.any(Number));
+      expect(Number.isFinite(call.totalCostUsd)).toBe(true);
+      expect(call.totalCostUsd).toBeGreaterThan(0);
+    },
+  );
 
   it('normalizes finish reason arrays using first value', (): void => {
     const ai = createMockAmplitudeAI();
@@ -797,6 +837,23 @@ describe('AmplitudeGenAIExporter expanded', () => {
     const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
     expect(call.cacheReadTokens).toBe(80);
     expect(call.cacheCreationTokens).toBe(15);
+  });
+
+  it('maps reasoning token attributes to trackAiMessage', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({ amplitudeAI: ai as never });
+    const cb = vi.fn();
+
+    const span = makeGenAISpan({
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.usage.reasoning.output_tokens': 12,
+      },
+    });
+    exporter.export([span as never], cb);
+
+    const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.reasoningTokens).toBe(12);
   });
 
   it('prefers gen_ai.provider.name over gen_ai.system', (): void => {

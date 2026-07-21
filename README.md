@@ -1707,6 +1707,8 @@ Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are process
 | `gen_ai.usage.total_tokens` | `[Agent] Total Tokens` | Derived if not present |
 | `gen_ai.usage.cache_read.input_tokens` | `[Agent] Cache Read Tokens` | |
 | `gen_ai.usage.cache_creation.input_tokens` | `[Agent] Cache Creation Tokens` | |
+| `gen_ai.usage.reasoning.output_tokens` | `[Agent] Reasoning Tokens` | |
+| `gen_ai.usage.cost` | `[Agent] Cost USD` | Preferred over automatic pricing when present |
 | `gen_ai.request.temperature` | `[Agent] Temperature` | |
 | `gen_ai.request.top_p` | `[Agent] Top P` | |
 | `gen_ai.request.max_output_tokens` | `[Agent] Max Output Tokens` | |
@@ -1715,7 +1717,7 @@ Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are process
 | Span duration | `[Agent] Latency Ms` | |
 | Span status ERROR | `[Agent] Is Error`, `[Agent] Error Message` | |
 
-**Not available via OTEL (use native wrappers):** reasoning content/tokens, TTFB, streaming detection, implicit feedback, file attachments, event graph linking (parent_message_id).
+**Not available via OTEL (use native wrappers):** reasoning content, TTFB, streaming detection, implicit feedback, file attachments, event graph linking (parent_message_id).
 
 **When to use OTEL vs. native wrappers:** If you already have `@opentelemetry/instrumentation-openai` or similar producing GenAI spans, the OTEL bridge gives you Amplitude analytics with zero code changes. For richer tracking (implicit feedback, streaming metrics, attachments), use the native `wrapOpenAI()`/`wrapAnthropic()` wrappers alongside OTEL.
 

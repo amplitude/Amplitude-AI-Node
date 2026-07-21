@@ -7,6 +7,10 @@
  */
 
 import type { AmplitudeAI } from '../client.js';
+import {
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_USAGE_COST,
+} from '../otel/conventions.js';
 import { calculateCost } from '../utils/costs.js';
 
 export interface ExporterOptions {
@@ -84,6 +88,7 @@ export class AmplitudeAgentExporter {
         attrs['gen_ai.request.model'] ??
         'unknown',
     );
+    const authoritativeCostUsd = _toOtelCost(attrs[GENAI_USAGE_COST]);
 
     if (
       operation === 'tool' ||
@@ -122,6 +127,7 @@ export class AmplitudeAgentExporter {
             | number
             | undefined) ??
           (attrs['gen_ai.embeddings.dimension.count'] as number | undefined),
+        totalCostUsd: authoritativeCostUsd,
       });
       return;
     }
@@ -164,8 +170,11 @@ export class AmplitudeAgentExporter {
     const cacheCreationTokens = _toOtelNumber(
       attrs['gen_ai.usage.cache_creation.input_tokens'],
     );
+    const reasoningTokens = _toOtelNumber(
+      attrs[GENAI_REASONING_OUTPUT_TOKENS],
+    );
 
-    let costUsd = _toOtelNumber(attrs['gen_ai.usage.cost']);
+    let costUsd = authoritativeCostUsd;
     if (
       costUsd == null &&
       modelName !== 'unknown' &&
@@ -177,6 +186,7 @@ export class AmplitudeAgentExporter {
           modelName,
           inputTokens,
           outputTokens,
+          reasoningTokens: reasoningTokens ?? 0,
           cacheReadInputTokens: cacheReadTokens ?? 0,
           cacheCreationInputTokens: cacheCreationTokens ?? 0,
           defaultProvider:
@@ -201,6 +211,7 @@ export class AmplitudeAgentExporter {
       inputTokens,
       outputTokens,
       totalTokens,
+      reasoningTokens,
       cacheReadTokens,
       cacheCreationTokens,
       totalCostUsd: costUsd,
@@ -235,6 +246,13 @@ function _toOtelNumber(value: unknown): number | undefined {
     return Number.isNaN(parsed) ? undefined : parsed;
   }
   return undefined;
+}
+
+function _toOtelCost(value: unknown): number | undefined {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function _tryParseJsonArray(value: string): unknown[] {

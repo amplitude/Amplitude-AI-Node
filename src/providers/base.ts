@@ -17,6 +17,8 @@ import {
   type TrackAiMessageOptions,
 } from '../core/tracking.js';
 import {
+  GENAI_CACHE_CREATION_INPUT_TOKENS,
+  GENAI_CACHE_READ_INPUT_TOKENS,
   GENAI_ERROR_TYPE,
   GENAI_FINISH_REASONS,
   GENAI_INPUT_MESSAGES,
@@ -25,11 +27,13 @@ import {
   GENAI_OUTPUT_MESSAGES,
   GENAI_OUTPUT_TOKENS,
   GENAI_PROVIDER_NAME,
+  GENAI_REASONING_OUTPUT_TOKENS,
   GENAI_REQUEST_MAX_TOKENS,
   GENAI_REQUEST_MODEL,
   GENAI_REQUEST_TEMPERATURE,
   GENAI_REQUEST_TOP_P,
   GENAI_RESPONSE_MODEL,
+  GENAI_USAGE_COST,
   OP_CHAT,
 } from '../otel/conventions.js';
 import { recordToolUsesFromResponse } from '../utils/tool-latency.js';
@@ -40,6 +44,7 @@ import {
   type TrackCallOptions,
   type TrackFn,
 } from '../types.js';
+import { calculateCost } from '../utils/costs.js';
 import { getLogger } from '../utils/logger.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 
@@ -261,6 +266,18 @@ export abstract class BaseAIProvider {
         };
         if (opts.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = opts.inputTokens;
         if (opts.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = opts.outputTokens;
+        if (opts.reasoningTokens != null) {
+          spanAttrs[GENAI_REASONING_OUTPUT_TOKENS] = opts.reasoningTokens;
+        }
+        if (opts.cacheReadInputTokens != null) {
+          spanAttrs[GENAI_CACHE_READ_INPUT_TOKENS] = opts.cacheReadInputTokens;
+        }
+        if (opts.cacheCreationInputTokens != null) {
+          spanAttrs[GENAI_CACHE_CREATION_INPUT_TOKENS] = opts.cacheCreationInputTokens;
+        }
+        if (opts.totalCostUsd != null) {
+          spanAttrs[GENAI_USAGE_COST] = opts.totalCostUsd;
+        }
         if (opts.temperature != null) spanAttrs[GENAI_REQUEST_TEMPERATURE] = opts.temperature;
         if (opts.maxOutputTokens != null) spanAttrs[GENAI_REQUEST_MAX_TOKENS] = opts.maxOutputTokens;
         if (opts.topP != null) spanAttrs[GENAI_REQUEST_TOP_P] = opts.topP;
@@ -405,6 +422,22 @@ export class SimpleStreamingTracker {
 
     const state = this.accumulator.getState();
     const ctx = applySessionContext(overrides);
+    let costUsd: number | null = null;
+    if (state.inputTokens != null && state.outputTokens != null) {
+      try {
+        costUsd = calculateCost({
+          modelName: this._modelName,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          reasoningTokens: state.reasoningTokens ?? 0,
+          cacheReadInputTokens: state.cacheReadTokens ?? 0,
+          cacheCreationInputTokens: state.cacheCreationTokens ?? 0,
+          defaultProvider: this._providerName,
+        });
+      } catch {
+        // cost calculation is best-effort
+      }
+    }
 
     // When OTEL is active, emit a span instead of calling _trackFn directly.
     const tracer = _getOtelTracer();
@@ -418,6 +451,16 @@ export class SimpleStreamingTracker {
         };
         if (state.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = state.inputTokens;
         if (state.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = state.outputTokens;
+        if (state.reasoningTokens != null) {
+          spanAttrs[GENAI_REASONING_OUTPUT_TOKENS] = state.reasoningTokens;
+        }
+        if (state.cacheReadTokens != null) {
+          spanAttrs[GENAI_CACHE_READ_INPUT_TOKENS] = state.cacheReadTokens;
+        }
+        if (state.cacheCreationTokens != null) {
+          spanAttrs[GENAI_CACHE_CREATION_INPUT_TOKENS] = state.cacheCreationTokens;
+        }
+        if (costUsd != null) spanAttrs[GENAI_USAGE_COST] = costUsd;
         if (state.finishReason != null) spanAttrs[GENAI_FINISH_REASONS] = [state.finishReason];
         if (this._inputMessages.length > 0) {
           spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(this._inputMessages);
@@ -460,6 +503,7 @@ export class SimpleStreamingTracker {
       reasoningTokens: state.reasoningTokens,
       cacheReadInputTokens: state.cacheReadTokens,
       cacheCreationInputTokens: state.cacheCreationTokens,
+      totalCostUsd: costUsd,
       finishReason: state.finishReason,
       toolCalls: state.toolCalls.length > 0 ? state.toolCalls : null,
       providerTtfbMs: state.ttfbMs,
