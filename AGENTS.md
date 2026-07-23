@@ -143,3 +143,12 @@ Prompt:
 - `[Agent] Tool Call`
 - `[Agent] Topic Classification`
 - `[Agent] User Message`
+
+## Cursor Cloud specific instructions
+
+This package is fully self-contained — it needs no databases or external services to build, test, or run in the Cursor Cloud VM. Standard commands are in the `## Testing` section above and in `package.json` `scripts`.
+
+- Install with `pnpm install` (corepack auto-selects the pinned pnpm from `packageManager`).
+- Verify locally with `pnpm run lint`, `pnpm run test:typescript`, `pnpm test run` (Vitest, ~1500 tests), and `pnpm run build` (tsdown → `dist/`).
+- `AMPLITUDE_AI_API_KEY` is only needed to deliver telemetry to Amplitude's servers; it is optional for local dev. `amplitude-ai doctor` reports it as the only failing check when unset, which is expected. For deterministic local runs and examples, use `MockAmplitudeAI` (from `@amplitude/ai/testing`) and inspect captured events with `getEvents()` instead of a live key.
+- The `examples/` scripts import from `src/` (`.ts`); the built `dist/` exposes the same API (e.g. `MockAmplitudeAI` from `dist/testing.js`) for quick `node` smoke runs.
