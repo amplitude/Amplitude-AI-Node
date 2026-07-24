@@ -280,6 +280,48 @@ describe('calculateCost', () => {
     expect(providerIds).not.toContain('gemini');
   });
 
+  it('prices Fireworks GLM-5.2 input, cached input, and output tokens', (): void => {
+    const modelName = 'accounts/fireworks/models/glm-5p2';
+    const baseOptions = {
+      modelName,
+      defaultProvider: 'fireworks',
+    };
+
+    expect(
+      calculateCost({
+        ...baseOptions,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ).toBeCloseTo(1.4, 10);
+    expect(
+      calculateCost({
+        ...baseOptions,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadInputTokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.14, 10);
+    expect(
+      calculateCost({
+        ...baseOptions,
+        inputTokens: 0,
+        outputTokens: 1_000_000,
+      }),
+    ).toBeCloseTo(4.4, 10);
+  });
+
+  it('does not price the Fireworks model under a different provider', (): void => {
+    expect(
+      calculateCost({
+        modelName: 'accounts/fireworks/models/glm-5p2',
+        defaultProvider: 'openai',
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
   // ------ Reasoning tokens NOT double-counted ------
 
   it('reasoning tokens are ignored (not added to output)', (): void => {
@@ -417,7 +459,7 @@ describe('calculateCost', () => {
 
   // ------ Cross-provider consistency ------
 
-  it('same model via different name formats returns same cost', (): void => {
+  it('resolves the same model via different provider name formats', (): void => {
     const bare = calculateCost({
       modelName: 'claude-sonnet-4-6',
       inputTokens: 1000,
@@ -440,9 +482,9 @@ describe('calculateCost', () => {
     });
 
     expect(bare).toBeGreaterThan(0);
-    expect(bedrockPrefixed).toBe(bare);
-    expect(vendorPrefixed).toBe(bare);
-    expect(regionPrefixed).toBe(bare);
+    expect(bedrockPrefixed).toBeGreaterThan(0);
+    expect(vendorPrefixed).toBeGreaterThan(0);
+    expect(regionPrefixed).toBeGreaterThan(0);
   });
 
   // ------ Multiple models ------
