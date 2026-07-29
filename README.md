@@ -849,7 +849,7 @@ The SDK tracks four token categories:
 - `[Agent] Cache Read Tokens` — tokens read from provider cache (cheap)
 - `[Agent] Cache Creation Tokens` — tokens written to provider cache (slightly expensive)
 
-Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If the package fails to load (e.g. in certain bundler environments), `calculateCost()` returns `0` and logs a warning. You can also pass `totalCostUsd` directly if you compute cost yourself:
+Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If a model cannot be priced, `calculateCost()` returns `null`, logs a bounded warning, and the SDK omits `[Agent] Cost USD`. You can also pass `totalCostUsd` directly if you compute cost yourself:
 
 ```typescript
 s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
@@ -857,7 +857,7 @@ s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may return `$0` until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
+> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may have no cost until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
 >
 > ```typescript
 > import { enableLivePriceUpdates } from '@amplitude/ai';
@@ -2811,7 +2811,7 @@ All 10 `[Agent]` event types and their properties (see [Event Property Reference
 
 ### Token and cost utilities
 
-- **`calculateCost()`** — Returns cost in USD when `@pydantic/genai-prices` is installed; otherwise returns `0` (never `null`).
+- **`calculateCost()`** — Returns cost in USD when pricing is available, `0` for zero-token usage, or `null` when the model cannot be priced.
 - **`countTokens(text, model?)`** — Uses tiktoken when available. For unknown models, tries `o200k_base` encoding before falling back to `cl100k_base` (matching the Python SDK).
 - **`estimateTokens(text)`** — Heuristic fallback: `ceil(chars/3.5 + words*0.1)` (matching the Python SDK).
 - **`stripProviderPrefix(modelName)`** — Splits on `:` (e.g., `openai:gpt-4o` → `gpt-4o`). Use for normalizing model IDs before cost lookup. Import from `@amplitude/ai/internals`.

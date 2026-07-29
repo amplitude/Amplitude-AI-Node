@@ -402,14 +402,9 @@ export class AmplitudeAI {
         defaultProvider: opts.provider || undefined,
       });
       const totalTokens = opts.inputTokens + opts.outputTokens;
-      if (this._config.strictCost && totalTokens > 0 && cost <= 0) {
+      if (this._config.strictCost && totalTokens > 0 && cost == null) {
         throw new CostCalculationError(
-          `Cost calculation returned 0 for model=${opts.model} (provider=${opts.provider}, tokens=${totalTokens}). Pass totalCostUsd explicitly or check model alias.`,
-        );
-      }
-      if (!this._config.strictCost && totalTokens > 0 && cost <= 0) {
-        getLogger().warn(
-          `Cost calculation returned 0 for model=${opts.model} (provider=${opts.provider}). Use canonical model ID or pass totalCostUsd.`,
+          `Cost could not be calculated for model=${opts.model} (provider=${opts.provider}, tokens=${totalTokens}). Pass totalCostUsd explicitly or check model alias.`,
         );
       }
       return cost;

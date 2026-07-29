@@ -274,9 +274,9 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 
 **Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
 
-> **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. Two things can cause `cost_usd: 0`:
+> **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. If the model cannot be priced, the SDK omits `[Agent] Cost USD` rather than recording an authoritative `$0`.
 >
-> **1. Unrecognized model name.** Common causes:
+> **1. Unrecognized model name.** Common causes of omitted cost:
 > - Vertex AI model aliases (e.g. `claude-sonnet-4-6` instead of canonical `claude-sonnet-4-20250514`)
 > - Internal gateway product labels (e.g. `my-company/gpt4` instead of `gpt-4o`)
 > - Brand-new models not yet in genai-prices
@@ -292,7 +292,7 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 > 1. Normalizing the model name to the canonical provider ID
 > 2. Normalizing `inputTokens` per the provider convention above
 > 3. Or calling `calculateCost({ modelName, inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
-> 4. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
+> 4. Use the Phase 4 data quality gate (below) to catch missing cost during development
 
 **Cost guarantee contract (Monitor / Nova):**
 

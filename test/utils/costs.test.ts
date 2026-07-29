@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   calculateCost,
   getGenaiPriceLookupCandidates,
@@ -158,13 +158,28 @@ describe('calculateCost', () => {
     expect(result).toBeGreaterThan(0);
   });
 
-  it('returns 0 for unknown model', (): void => {
+  it('returns null for unknown model', (): void => {
     const result = calculateCost({
       modelName: 'totally-unknown-model-xyz-999',
       inputTokens: 100,
       outputTokens: 50,
     });
-    expect(result).toBe(0);
+    expect(result).toBeNull();
+  });
+
+  it('warns once per unsupported price identity', (): void => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const options = {
+      modelName: 'another-unknown-model-xyz-999',
+      inputTokens: 100,
+      outputTokens: 50,
+    };
+
+    calculateCost(options);
+    calculateCost(options);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
   it('returns 0 for zero tokens', (): void => {
@@ -319,7 +334,7 @@ describe('calculateCost', () => {
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
       }),
-    ).toBe(0);
+    ).toBeNull();
   });
 
   // ------ Reasoning tokens NOT double-counted ------
@@ -524,13 +539,14 @@ describe('calculateCost', () => {
 
   // ------ Bedrock vendor normalization ------
 
-  it('normalizes meta.llama model names', (): void => {
+  it('normalizes meta.llama model names for Bedrock', (): void => {
     const result = calculateCost({
       modelName: 'meta.llama3-70b-instruct-v1:0',
       inputTokens: 1000,
       outputTokens: 500,
+      defaultProvider: 'bedrock',
     });
-    expect(typeof result).toBe('number');
+    expect(result).toBeGreaterThan(0);
   });
 
   it('normalizes amazon.nova model names', (): void => {

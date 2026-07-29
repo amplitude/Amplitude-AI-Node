@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed (AA-151534)
+- Unsupported or failed automatic price lookups now omit `[Agent] Cost USD`
+  instead of recording an authoritative `$0`. Explicitly supplied zero costs
+  and zero-token calls remain unchanged.
+
 ## 0.15.0
 
 ### Added (AA-151394)
