@@ -134,7 +134,7 @@ export class AmplitudeCallbackHandler {
           cacheCreationInputTokens: cacheCreationTokens,
           defaultProvider: inferProvider(modelName),
         });
-        if (cost != null && cost > 0) costUsd = cost;
+        if (cost != null) costUsd = cost;
       } catch {
         // cost calculation is best-effort
       }
