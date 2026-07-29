@@ -86,6 +86,33 @@ describe('trackRunCost', () => {
       });
     }).toThrow(CostCalculationError);
   });
+
+  it('omits automatic cost for an unknown model', () => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('agent', { userId: 'u1' });
+    agent.trackAiMessage('hi', 'unknown-model-xyz-998', 'openai', 1, {
+      sessionId: 's1',
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+
+    const event = mock.events.find((e) => e.event_type === EVENT_AI_RESPONSE);
+    expect(event?.event_properties?.[PROP_COST_USD]).toBeUndefined();
+  });
+
+  it('preserves an explicitly supplied zero cost', () => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('agent', { userId: 'u1' });
+    agent.trackAiMessage('hi', 'custom-free-model', 'custom', 1, {
+      sessionId: 's1',
+      inputTokens: 100,
+      outputTokens: 50,
+      totalCostUsd: 0,
+    });
+
+    const event = mock.events.find((e) => e.event_type === EVENT_AI_RESPONSE);
+    expect(event?.event_properties?.[PROP_COST_USD]).toBe(0);
+  });
 });
 
 describe('summary cost gates', () => {

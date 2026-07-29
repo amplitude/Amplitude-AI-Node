@@ -73,6 +73,35 @@ describe('AmplitudeCallbackHandler', () => {
       expect(call.latencyMs as number).toBeGreaterThanOrEqual(0);
     });
 
+    it('preserves a calculated zero cost for zero-token responses', (): void => {
+      const ai = createMockAmplitudeAI();
+      const handler = new AmplitudeCallbackHandler({
+        amplitudeAI: ai as never,
+      });
+
+      handler.handleLLMStart({}, ['prompt'], 'run-zero');
+      handler.handleLLMEnd(
+        {
+          generations: [[{ text: '' }]],
+          llmOutput: {
+            modelName: 'gpt-4o',
+            tokenUsage: {
+              promptTokens: 0,
+              completionTokens: 0,
+              totalTokens: 0,
+            },
+          },
+        },
+        'run-zero',
+      );
+
+      const call = ai.trackAiMessage.mock.calls[0]![0] as Record<
+        string,
+        unknown
+      >;
+      expect(call.totalCostUsd).toBe(0);
+    });
+
     it('tracks user prompts on LLM start when available', (): void => {
       const ai = createMockAmplitudeAI();
       const handler = new AmplitudeCallbackHandler({

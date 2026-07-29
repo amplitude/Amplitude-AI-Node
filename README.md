@@ -849,7 +849,7 @@ The SDK tracks four token categories:
 - `[Agent] Cache Read Tokens` — tokens read from provider cache (cheap)
 - `[Agent] Cache Creation Tokens` — tokens written to provider cache (slightly expensive)
 
-Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If the package fails to load (e.g. in certain bundler environments), `calculateCost()` returns `0` and logs a warning. You can also pass `totalCostUsd` directly if you compute cost yourself:
+Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If a model cannot be priced, `calculateCost()` returns `null`, logs a bounded warning, and the SDK omits `[Agent] Cost USD`. You can also pass `totalCostUsd` directly if you compute cost yourself:
 
 ```typescript
 s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
@@ -857,7 +857,7 @@ s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may return `$0` until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
+> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may have no cost until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
 >
 > ```typescript
 > import { enableLivePriceUpdates } from '@amplitude/ai';
@@ -2171,7 +2171,7 @@ mock.reset();
 | Symptom                                            | Cause                                                             | Fix                                                                                                                                                                                          |
 | -------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No events in Amplitude                             | API key not set or incorrect                                      | Run `amplitude-ai doctor` — it checks `AMPLITUDE_AI_API_KEY` and reports a fix command                                                                                                       |
-| Events tracked but `[Agent] Cost USD` is $0        | Model not in the pricing database, or `total_cost_usd` not passed | Pass `totalCostUsd` explicitly. If you see a `@pydantic/genai-prices not available` warning at startup, the pricing package failed to load (common in bundler environments) — check your build config |
+| Events tracked but `[Agent] Cost USD` is missing   | Pricing is unavailable for the model and `totalCostUsd` was not passed | Check the bounded pricing warning, use the canonical provider model ID, or pass `totalCostUsd` explicitly |
 | `patch()` doesn't instrument calls                 | `patch()` called after the provider client was created            | Call `patch()` before importing or instantiating provider clients                                                                                                                            |
 | Session context missing on events                  | LLM calls made outside `session.run()`                            | Wrap your LLM calls inside `session.run(async () => { ... })`                                                                                                                                |
 | `flush()` hangs or times out in serverless         | Process exits before flush completes                              | Use `await ai.flush()` before returning from your Lambda/Cloud Function handler                                                                                                              |
@@ -2811,7 +2811,7 @@ All 10 `[Agent]` event types and their properties (see [Event Property Reference
 
 ### Token and cost utilities
 
-- **`calculateCost()`** — Returns cost in USD when `@pydantic/genai-prices` is installed; otherwise returns `0` (never `null`).
+- **`calculateCost()`** — Returns cost in USD when pricing is available, `0` for zero-token usage, or `null` when the model cannot be priced.
 - **`countTokens(text, model?)`** — Uses tiktoken when available. For unknown models, tries `o200k_base` encoding before falling back to `cl100k_base` (matching the Python SDK).
 - **`estimateTokens(text)`** — Heuristic fallback: `ceil(chars/3.5 + words*0.1)` (matching the Python SDK).
 - **`stripProviderPrefix(modelName)`** — Splits on `:` (e.g., `openai:gpt-4o` → `gpt-4o`). Use for normalizing model IDs before cost lookup. Import from `@amplitude/ai/internals`.

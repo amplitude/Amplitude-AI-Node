@@ -194,7 +194,7 @@ export class AmplitudeAgentExporter {
               ? providerName
               : undefined,
         });
-        if (computed > 0) costUsd = computed;
+        if (computed != null) costUsd = computed;
       } catch {
         // cost calculation is best-effort
       }

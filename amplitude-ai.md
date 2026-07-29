@@ -274,9 +274,9 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 
 **Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
 
-> **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. Two things can cause `cost_usd: 0`:
+> **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. If the model cannot be priced, the SDK omits `[Agent] Cost USD` rather than recording an authoritative `$0`.
 >
-> **1. Unrecognized model name.** Common causes:
+> **1. Unrecognized model name.** Common causes of omitted cost:
 > - Vertex AI model aliases (e.g. `claude-sonnet-4-6` instead of canonical `claude-sonnet-4-20250514`)
 > - Internal gateway product labels (e.g. `my-company/gpt4` instead of `gpt-4o`)
 > - Brand-new models not yet in genai-prices
@@ -292,13 +292,13 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 > 1. Normalizing the model name to the canonical provider ID
 > 2. Normalizing `inputTokens` per the provider convention above
 > 3. Or calling `calculateCost({ modelName, inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens })` yourself and passing **`totalCostUsd`** explicitly — this overrides auto-calculation
-> 4. Use the Phase 4 data quality gate (below) to catch `cost_usd: 0` during development
+> 4. Use the Phase 4 data quality gate (below) to catch missing cost during development
 
 **Cost guarantee contract (Monitor / Nova):**
 
 | Path | Requirement |
 |------|-------------|
-| **Provider wrap** | Every LLM completion → `[Agent] AI Response` + `[Agent] Cost USD` automatically |
+| **Provider wrap** | Every LLM completion → `[Agent] AI Response`; `[Agent] Cost USD` is included automatically when pricing is available |
 | **Custom / batch / artifact-only** | Call **`trackRunCost()`** at run end when wrap did not emit per-call AI Responses |
 | **Session End** | Lifecycle only — **do not** attach cost fields |
 
@@ -673,9 +673,9 @@ for (const e of aiEvents) {
   // Tokens — needed for token analytics and cost estimation
   expect(p['[Agent] Input Tokens']).toBeGreaterThan(0);
   expect(p['[Agent] Output Tokens']).toBeGreaterThan(0);
-  // Cost — if 0 the model name is likely not in genai-prices.
+  // Cost — if missing, the model name is likely not in genai-prices.
   // Fix: use the canonical model ID or set totalCostUsd explicitly.
-  expect(p['[Agent] Cost USD']).toBeGreaterThan(0);
+  expect(p['[Agent] Cost USD']).toBeDefined();
 }
 ```
 
@@ -738,7 +738,7 @@ Common issues and fixes:
 | Session ID: 0% | Sessions page empty, signals don't run | Wrap the route handler in `agent.session({ sessionId })`. Use the app's existing conversation/thread/ticket ID. |
 | Agent ID: 0% | Agent filter on Monitor doesn't work | Create a named agent with `ai.agent('name')` and use it for sessions |
 | Session End missing | Signals never execute, no Session Record | Ensure `session.run()` completes (or call `trackSessionEnd()` explicitly) |
-| Cost USD: 0% | Monitor cost charts show $0 | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
+| Cost USD: 0% | Monitor cost coverage is incomplete | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
 | Tokens: 0% | Token consumption charts empty | For manual `trackAiMessage`: pass `inputTokens`/`outputTokens` from the `response.usage` object. For provider wrappers: verify the response has a `.usage` field. |
 | Latency: 0% | Latency trend charts empty | Wrap the LLM call in `performance.now()` and pass `latencyMs` |
 | Content empty (metadata_only) | Thread tab empty, signals/evaluators can't judge | Switch to `contentMode: 'full'` with `redactPii: true`, or accept that LLM-based evaluators won't work |
@@ -801,8 +801,8 @@ After the PR is merged and deployed:
      - `userId` (matches your test user)
      - `agentId` (matches what you configured)
      - Event sequence: User Message > AI Response > Session End
-  4. Check AI Response events show non-zero `[Agent] Cost USD`
-     (if cost is $0, the model name may not be recognized —
+  4. Check AI Response events include `[Agent] Cost USD` when pricing is available
+     (if cost is missing, the model name may not be recognized —
      see Step 4f remediation table)
   5. If the app has multi-agent delegation, verify child agent
      events share the parent's `sessionId`

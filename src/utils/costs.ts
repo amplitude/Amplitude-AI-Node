@@ -10,9 +10,30 @@ import {
   inferProviderFromModel,
   tryInferProviderFromModel,
 } from './providers.js';
+import { getLogger } from './logger.js';
 import { calcPrice, updatePrices } from '@pydantic/genai-prices';
 
 let _livePricesEnabled = false;
+const warnedCostLookupFailures = new Set<string>();
+const MAX_COST_LOOKUP_WARNINGS = 100;
+
+function warnCostLookupFailure(
+  modelName: string,
+  provider: string | undefined,
+  reason: string,
+): void {
+  const key = `${modelName}\x1f${provider ?? ''}\x1f${reason}`;
+  if (
+    warnedCostLookupFailures.has(key) ||
+    warnedCostLookupFailures.size >= MAX_COST_LOOKUP_WARNINGS
+  ) {
+    return;
+  }
+  warnedCostLookupFailures.add(key);
+  getLogger().warn(
+    `Unable to calculate cost for model=${modelName} provider=${provider ?? 'unknown'} (${reason}); [Agent] Cost USD will be omitted.`,
+  );
+}
 
 /**
  * Opt in to background price updates from the genai-prices GitHub repo.
@@ -187,7 +208,7 @@ export function calculateCost(options: {
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
   defaultProvider?: string;
-}): number {
+}): number | null {
   const {
     modelName,
     inputTokens,
@@ -197,14 +218,22 @@ export function calculateCost(options: {
     defaultProvider,
   } = options;
 
-  try {
-    const usage = {
-      input_tokens: safeInt(inputTokens),
-      output_tokens: safeInt(outputTokens),
-      cache_read_tokens: safeInt(cacheReadInputTokens),
-      cache_write_tokens: safeInt(cacheCreationInputTokens),
-    };
+  const usage = {
+    input_tokens: safeInt(inputTokens),
+    output_tokens: safeInt(outputTokens),
+    cache_read_tokens: safeInt(cacheReadInputTokens),
+    cache_write_tokens: safeInt(cacheCreationInputTokens),
+  };
+  if (
+    usage.input_tokens <= 0 &&
+    usage.output_tokens <= 0 &&
+    usage.cache_read_tokens <= 0 &&
+    usage.cache_write_tokens <= 0
+  ) {
+    return 0;
+  }
 
+  try {
     const candidates = getGenaiPriceLookupCandidates(
       modelName,
       defaultProvider,
@@ -217,13 +246,18 @@ export function calculateCost(options: {
         model,
         Object.keys(opts).length > 0 ? opts : undefined,
       );
-      if (result?.total_price != null && result.total_price > 0) {
+      if (result?.total_price != null) {
         return result.total_price;
       }
     }
+    warnCostLookupFailure(
+      modelName,
+      defaultProvider,
+      'unsupported model or provider',
+    );
   } catch {
-    // Fall through to 0
+    warnCostLookupFailure(modelName, defaultProvider, 'price lookup failed');
   }
 
-  return 0;
+  return null;
 }
