@@ -80,14 +80,32 @@ Agent 2: "recipe-agent"  (child of chat-handler, called as a tool)
 Multi-agent architecture: delegation-as-tools (A2A)
   → will instrument with ai.agent().child() + session.runAs()
 
+Instrumentation approach: patch + call-site discovery
+  (OTel spans already emitted: [yes/no] · existing Amplitude instance detected: [yes/no])
+  → see "Choosing the instrumentation approach" in Phase 3
+
 Proceed with instrumentation? [Review changes first / Apply / Skip]
 ```
 
-**PAUSE HERE.** Let the developer review the agent names, descriptions, and structure before proceeding. They can edit names and descriptions.
+**PAUSE HERE.** Let the developer review the agent names, descriptions, structure, **and the proposed instrumentation approach** before proceeding. They can edit names and descriptions, and pick a different approach tier.
 
 ---
 
 ## Phase 3: Instrument
+
+### Choosing the instrumentation approach
+
+Pick the mechanism **before writing any code**, and put the choice in the Phase 2 discovery report so the developer confirms it at the pause. These mechanisms differ in blast radius *and* in how much they capture — start with the least-invasive one that fits what Phase 1 detected, then layer richer instrumentation only where a real data gap justifies the larger diff. In priority order:
+
+1. **Already emitting OpenTelemetry spans? → bridge OTel first.** If the app (or a tool it already runs — Langfuse, OpenLIT, Traceloop/OpenLLMetry, or hand-rolled OTel) produces GenAI-semantic-convention spans, call `ai.enableOtel(...)`. The `AmplitudeAgentExporter` maps those spans to `[Agent]` events with **no new call sites**. This is the highest-leverage path when it applies — you reuse instrumentation the team already maintains. Requires the `@opentelemetry/api` + `@opentelemetry/sdk-trace-base` peer deps.
+
+2. **Otherwise, patch the providers as the starting point.** `patch({ amplitudeAI: ai })` instruments every detected provider globally from the bootstrap file with **zero call-site edits** — the fastest path to first data and the smallest diff, so start here whenever it's viable. **Treat it as a floor, not the finish:** a bare patch emits only `[Agent] AI Response`, carries **no user identity**, and **silently drops any provider call that fires outside an active session** — so on its own it produces no turns, user messages, tool calls, or multi-agent delegation. Because of that, **always still run the Phase 2 call-site discovery even when patching**, and report exactly which call sites and event types the patch covers versus misses so the developer can decide where to layer sessions and wrappers.
+
+3. **Piggyback on an existing Amplitude instance / identity.** If the app already stands up `@amplitude/analytics-node` (or already posts events to the HTTP endpoint), pass that client straight into `new AmplitudeAI({ amplitude: existingClient })` instead of creating a second one, and thread the app's existing user/device id into each session. Identity is set at session creation and propagates from there — there is no post-hoc setter, so capture it at the entry point. When such instrumentation already exists it is usually the best-developed path, because identity and transport are already wired and you inherit the team's existing conventions.
+
+4. **Explicit provider wrappers + call-site instrumentation (fallback).** When none of the above fits, wrap each provider client (Step 3b) and instrument call sites directly (Steps 3c–3e). This gives the highest fidelity and coverage at the cost of the largest diff — it is the fallback, not the default.
+
+Whichever tier you land on, **surface the orchestration and multi-agent decisions to the developer** rather than guessing — see the Phase 2 pause.
 
 ### Step 3a: Install dependencies
 
@@ -128,7 +146,7 @@ export const openai = new OpenAI({
 
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
 
-> **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible. `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock, and Mistral clients.
+> **Note:** `wrap(existingClient, ai)` instruments an already-constructed client without touching its instantiation site; `patch({ amplitudeAI: ai })` covers every detected provider with no code changes at all (this is the tier-2 patch path from "Choosing the instrumentation approach" above). Both capture fewer event types than provider wrappers — patch in particular emits only `[Agent] AI Response` and drops calls that fire outside a session — so use them as the low-invasiveness entry point and layer provider wrappers where you need the full event model. `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock, and Mistral clients.
 
 ### Step 3c: Swap provider imports
 
