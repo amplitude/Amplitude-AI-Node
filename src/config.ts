@@ -38,7 +38,7 @@ export interface AIConfigOptions {
    * opted in — stack traces may contain file paths and internal details.
    */
   captureStackTrace?: boolean;
-  /** Raise when tokens > 0 but cost calculates to 0 (dev/CI). */
+  /** Raise when tokens > 0 but cost cannot be calculated (dev/CI). */
   strictCost?: boolean;
 }
 

@@ -36,6 +36,22 @@ describe('MockAmplitudeAI.summary()', () => {
     expect(result).toContain('11/11 passed');
   });
 
+  it('counts an explicitly supplied zero cost as filled', () => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('test-agent', { userId: 'u1' });
+    const session = agent.session({ userId: 'u1' });
+    session.run((s) => {
+      s.trackUserMessage('hello');
+      s.trackAiMessage('hi', 'custom-free-model', 'custom', 200, {
+        inputTokens: 10,
+        outputTokens: 20,
+        totalCostUsd: 0,
+      });
+    });
+
+    expect(mock.summary()).toContain('11/11 passed');
+  });
+
   it('detects missing session ID', () => {
     const mock = new MockAmplitudeAI();
     // Track directly without session context — but trackUserMessage requires sessionId

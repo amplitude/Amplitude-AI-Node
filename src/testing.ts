@@ -342,11 +342,11 @@ export class MockAmplitudeAI extends AmplitudeAI {
     // 8. Cost USD (AI responses)
     const hasCost =
       aiResponses.length > 0 &&
-      aiResponses.every((e) => (e.event_properties?.[PROP_COST_USD] as number) > 0);
+      aiResponses.every((e) => e.event_properties?.[PROP_COST_USD] != null);
     gates.push({
       name: 'Cost USD',
       pass: aiResponses.length === 0 || hasCost,
-      impact: 'Monitor cost charts will show $0',
+      impact: 'Monitor cost coverage will be incomplete',
       fix: 'Use canonical model name, set totalCostUsd, or call trackRunCost() at run end',
     });
 
