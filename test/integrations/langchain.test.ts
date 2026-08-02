@@ -58,6 +58,28 @@ describe('AmplitudeCallbackHandler', () => {
       expect(call.sessionId).toBe('s1');
     });
 
+    it('accepts LangChain LC id path arrays without throwing', (): void => {
+      const ai = createMockAmplitudeAI();
+      const handler = new AmplitudeCallbackHandler({
+        amplitudeAI: ai as never,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(() =>
+        handler.handleChatModelStart(
+          {
+            id: ['langchain', 'chat_models', 'openai', 'ChatOpenAI'],
+            kwargs: { model: 'gpt-4o-mini' },
+          },
+          [[{ _getType: () => 'human', content: 'hello' }]],
+          'chat-lc-id',
+        ),
+      ).not.toThrow();
+
+      expect(ai.trackUserMessage).toHaveBeenCalledOnce();
+    });
+
     it('stores model name for subsequent handleLLMEnd cost calculation', (): void => {
       const ai = createMockAmplitudeAI();
       const handler = new AmplitudeCallbackHandler({

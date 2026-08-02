@@ -70,6 +70,26 @@ describe('OpenRouter canonical model', () => {
   it('documents OpenRouter-shaped baseURL for SDK-through recipes', (): void => {
     expect(OPENROUTER_BASE_URL).toContain('openrouter.ai/api/v1');
   });
+
+  it('inherits session userId via applySessionContext (parity with Python fix)', async (): Promise<void> => {
+    // Node OpenAI wrappers call applySessionContext before tracking gates, so
+    // agent.session({ userId }) is enough — no per-call amplitudeUserId needed.
+    const { applySessionContext } = await import('../src/providers/base.js');
+    const { SessionContext, runWithContext } = await import('../src/context.js');
+
+    const sessionCtx = new SessionContext({
+      userId: 'session-user',
+      sessionId: 'session-1',
+      agentId: 'gateway-agent',
+      nextTurnIdFn: () => 1,
+    });
+
+    runWithContext(sessionCtx, () => {
+      const ctx = applySessionContext({});
+      expect(ctx.userId).toBe('session-user');
+      expect(ctx.sessionId).toBe('session-1');
+    });
+  });
 });
 
 describe('LiteLLM canonical model', () => {
