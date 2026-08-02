@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added (AA-151730)
+- **Gateway partnership parity:** OpenRouter / LiteLLM / Requesty SDK-through recipes,
+  `ingestion_path` / `gateway` context convention, and gateway smoke tests proving
+  canonical model cost fill vs product-label cost omission.
+- **LangChain DoD:** `handleChatModelStart` tracks `[Agent] User Message` for chat
+  models; tool callbacks pass `privacyConfig`. Handler stays duck-typed (no hard
+  `@langchain/core` dependency).
+- **OTEL exporter parity:** `privacyConfig`, `allowedScopes`, and `blockedScopes` on
+  `AmplitudeAgentExporter` / `AmplitudeGenAIExporter`; README constructor fixed to
+  `{ amplitudeAI: ai }`.
+
 ### Fixed (AA-151534)
 - Unsupported or failed automatic price lookups now omit `[Agent] Cost USD`
   instead of recording an authoritative `$0`. Explicitly supplied zero costs

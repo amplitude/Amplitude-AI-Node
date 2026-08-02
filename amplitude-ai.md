@@ -907,7 +907,92 @@ All imported from `@amplitude/ai`:
 
 ---
 
+## Works with
+
+OpenAI-compatible gateways and OTEL partners that `@amplitude/ai` already supports without a special SDK build.
+
+### Decision: gateway-only vs SDK-through
+
+| Path | When to use | What you get |
+| --- | --- | --- |
+| **SDK-through** | Your app constructs an OpenAI-compatible client (or uses an `@amplitude/ai` provider wrapper) | Full `[Agent]` taxonomy, sessions, tools, scores, cache-aware cost when the **canonical** model id is known |
+| **Gateway-only (OTLP)** | The gateway emits GenAI spans and you cannot instrument the app | Model / tokens / cost / latency when the exporter maps spans; thinner coverage than SDK-through |
+
+Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans (LiteLLM, Strands) or as a future OpenRouter webhook path.
+
+### Install recipes (SDK-through)
+
+```typescript
+import { AmplitudeAI, OpenAI } from '@amplitude/ai';
+
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+
+// OpenRouter
+const client = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.OPENROUTER_API_KEY!,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+const agent = ai.agent('openrouter-agent', {
+  userId,
+  context: { ingestion_path: 'gateway', gateway: 'openrouter' },
+});
+```
+
+```typescript
+// LiteLLM proxy
+const client = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.LITELLM_API_KEY!,
+  baseURL: 'http://localhost:4000/v1',
+});
+const agent = ai.agent('litellm-agent', {
+  userId,
+  context: { ingestion_path: 'gateway', gateway: 'litellm' },
+});
+```
+
+```typescript
+// Requesty (SDK-through only — no OTLP push today)
+const client = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.REQUESTY_API_KEY!,
+  baseURL: 'https://router.requesty.ai/v1',
+});
+const agent = ai.agent('requesty-agent', {
+  userId,
+  context: { ingestion_path: 'gateway', gateway: 'requesty' },
+});
+```
+
+**Model id rule:** pass the **real provider model** the gateway routed to (`gpt-4o-mini`, `claude-sonnet-4-20250514`). Gateway product labels (`openrouter/auto`, router aliases) cannot be priced — the SDK **omits** `[Agent] Cost USD` rather than recording `$0`.
+
+### Partner notes
+
+- **LiteLLM + OTLP:** set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on GenAI spans. Without it, spans carry metadata/tokens only.
+- **OpenRouter Privacy Mode:** binary content on/off at the gateway. Align Amplitude `contentMode` (`full` vs `metadata_only`) so you do not expect thread text the gateway already stripped.
+- **Requesty:** no OTLP exporter today — use SDK-through with Requesty's OpenAI-compatible base URL.
+- **Strands → Nova:** export GenAI spans into Amplitude via `AmplitudeAgentExporter` / `enableOtel()`. Required OTLP attributes for cost fill: `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`.
+
+### `ingestion_path` convention
+
+Use existing `[Agent] Context` (no new schema fields):
+
+```typescript
+context: { ingestion_path: 'gateway', gateway: 'openrouter' } // or litellm | requesty
+```
+
+Segment dashboards on `ingestion_path` / `gateway` to separate direct-provider traffic from gateway traffic.
+
+---
+
 ## Ecosystem-Specific Guidance
+
+### LangChain / LangGraph
+- Use `AmplitudeCallbackHandler` — duck-typed compatible with LangChain callbacks (no hard `@langchain/core` dependency). Pass it in `callbacks`.
+- Chat models invoke `handleChatModelStart` (tracks `[Agent] User Message`); legacy LLMs use `handleLLMStart`. Both paths feed `handleLLMEnd` / tool callbacks.
+- Pass `privacyConfig` on the handler so AI responses and tool calls sanitize consistently.
+- LangGraph graph orchestration events (node transitions, checkpoints) are not yet instrumented
 
 ### Vercel AI SDK
 - Provider wrappers instrument the underlying SDK (`openai`), not the Vercel abstraction

@@ -110,7 +110,14 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Need tool telemetry: use \`tool()\`.
 - Need span/observability: use \`observe()\`.
 - Cannot modify call sites at all: use \`patch()\` for aggregate-only monitoring (no per-user analytics).
+- Already emit OTEL GenAI spans: use \`AmplitudeAgentExporter({ amplitudeAI: ai })\` (or \`enableOtel()\`) to map them to [Agent] events.
+- Routing through OpenRouter / LiteLLM / Requesty: SDK-through with OpenAI \`baseURL\` + canonical model id; tag \`context: { ingestion_path: 'gateway', gateway: '...' }\` (see Works with in \`amplitude-ai.md\` / README).
+- Gateway product labels only (e.g. \`openrouter/auto\`): cost is omitted — normalize to the routed provider model id.
+- LiteLLM / Strands OTLP partners: ensure \`gen_ai.request.model\` + input/output token attrs; LiteLLM needs \`CAPTURE_MESSAGE_CONTENT\` for bodies; Requesty has no OTLP (SDK-through only).
+- LangChain / LangGraph: use \`AmplitudeCallbackHandler\` (duck-typed; implements \`handleChatModelStart\` for User Message).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
+- Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
+- Works-with partners (OpenRouter, LiteLLM, Requesty, Strands): see **Works with** in \`amplitude-ai.md\` and README.
 
 ## MCP Surface
 
@@ -142,7 +149,8 @@ Prompt:
 - \`session.run()\` relies on \`AsyncLocalStorage\`; not available in Edge Runtime. **Cloudflare Workers:** do NOT import \`AmplitudeAI\`, \`AIConfig\`, or any runtime export from \`@amplitude/ai\` in Worker bundles — they pull in \`node:async_hooks\` / \`node:module\` which break Workers Builds. Use the SDK-free \`FetchAmplitudeClient\` pattern with direct \`[Agent]\` event construction (see "Edge Runtime / Cloudflare Workers" in amplitude-ai.md). Only \`import type { ... } from '@amplitude/ai/types'\` is safe.
 - **User message text:** \`trackUserMessage(content, opts?)\` — put human-readable intent in \`content\`; large JSON / RAG / pipeline state in \`opts.context\` (preferred — maps to the registered \`[Agent] Context\` property, always queryable in charts), not as the only \`content\`, or session labels and segmentation show raw JSON. Avoid \`opts.eventProperties\` for custom dimensions on \`[Agent]\` events — unregistered properties may be silently dropped by schema enforcement.
 - **Turns vs spans:** \`[Agent] User Message\` + \`[Agent] AI Response\` drive turn-level analytics; \`observe()\` / \`trackSpan()\` complement them — do not use spans alone for conversation metrics.
-- **Gateways / custom \`baseURL\`:** use \`trackAiMessage\` with \`usage\` fields, the **real** routed model id, and \`totalCostUsd\` when genai-prices cannot resolve the model string (install \`@pydantic/genai-prices\` for automatic cost when supported).
+- **Gateways / custom \`baseURL\`:** use \`trackAiMessage\` with \`usage\` fields, the **real** routed model id, and \`totalCostUsd\` when genai-prices cannot resolve the model string (install \`@pydantic/genai-prices\` for automatic cost when supported). Tag gateway traffic with \`context: { ingestion_path: 'gateway', gateway: 'openrouter'|'litellm'|'requesty' }\`.
+- **LangChain callbacks:** \`AmplitudeCallbackHandler\` is duck-typed (no hard \`@langchain/core\` dep). Prefer \`handleChatModelStart\` coverage for chat models.
 
 ## CLI
 
