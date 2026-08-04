@@ -443,6 +443,7 @@ export class AmplitudeAI {
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
+    privacyConfig?: PrivacyConfig | null;
   }): string {
     const effectiveTurnId = opts.turnId ?? this._nextTurnId(opts.sessionId);
     return trackUserMessage({
@@ -470,7 +471,7 @@ export class AmplitudeAI {
       idleTimeoutMinutes: opts.idleTimeoutMinutes,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
-      privacyConfig: this._privacyConfig,
+      privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,
     });
   }
@@ -696,6 +697,7 @@ export class AmplitudeAI {
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
+    privacyConfig?: PrivacyConfig | null;
   }): string {
     return trackToolCall({
       amplitude: this._amplitude,
@@ -724,7 +726,7 @@ export class AmplitudeAI {
       errorType: opts.errorType,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
-      privacyConfig: this._privacyConfig,
+      privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,
     });
   }
@@ -751,6 +753,7 @@ export class AmplitudeAI {
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
+    privacyConfig?: PrivacyConfig | null;
   }): string {
     // Auto-calculate cost from input tokens when not supplied, mirroring
     // trackAiMessage. Embeddings have no output tokens, so outputTokens is 0.
@@ -790,7 +793,7 @@ export class AmplitudeAI {
       env: opts.env,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
-      privacyConfig: this._privacyConfig,
+      privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,
     });
   }

@@ -2,7 +2,8 @@
  * LangChain integration — AmplitudeCallbackHandler.
  *
  * Tracks LLM calls, tool calls, and chain events via LangChain's
- * callback system.
+ * callback system. Duck-typed compatible with LangChain's BaseCallbackHandler
+ * (no hard dependency on @langchain/core) — pass the handler in `callbacks`.
  */
 
 import type { AmplitudeAI } from '../client.js';
@@ -51,12 +52,10 @@ export class AmplitudeCallbackHandler {
     };
   }
 
-  handleLLMStart(
+  private _rememberModelName(
     serialized: Record<string, unknown>,
-    prompts: string[],
     runId: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
     const kwargs = serialized.kwargs as Record<string, unknown> | undefined;
     const idModel = Array.isArray(serialized.id)
       ? serialized.id.find(
@@ -72,26 +71,56 @@ export class AmplitudeCallbackHandler {
       kwargs?.model ?? kwargs?.modelName ?? kwargs?.model_name ?? idModel ?? '',
     );
     if (modelName) this._runModelNames.set(runId, modelName);
+  }
 
-    const trackUserMessage = (
-      this._ai as unknown as {
-        trackUserMessage?: (opts: Record<string, unknown>) => void;
-      }
-    ).trackUserMessage;
-    if (typeof trackUserMessage === 'function') {
-      const ctx = this._getContext();
-      for (const prompt of prompts) {
-        if (!prompt) continue;
-        trackUserMessage({
-          userId: ctx.userId,
-          content: prompt,
-          sessionId: ctx.sessionId ?? 'langchain-session',
-          traceId: ctx.traceId,
-          agentId: ctx.agentId,
-          env: ctx.env,
-        });
+  private _trackUserContents(contents: string[]): void {
+    const ctx = this._getContext();
+    for (const content of contents) {
+      if (!content) continue;
+      this._ai.trackUserMessage({
+        userId: ctx.userId,
+        content,
+        sessionId: ctx.sessionId ?? 'langchain-session',
+        traceId: ctx.traceId,
+        agentId: ctx.agentId,
+        env: ctx.env,
+        privacyConfig: this._privacyConfig,
+      });
+    }
+  }
+
+  handleLLMStart(
+    serialized: Record<string, unknown>,
+    prompts: string[],
+    runId: string,
+  ): void {
+    this._runStartTimes.set(runId, performance.now());
+    this._rememberModelName(serialized, runId);
+    this._trackUserContents(prompts);
+  }
+
+  /**
+   * Chat-model path (ChatOpenAI, ChatAnthropic, …). Without this, modern
+   * LangChain stacks never emit `[Agent] User Message` because they call
+   * `handleChatModelStart` instead of `handleLLMStart`.
+   */
+  handleChatModelStart(
+    serialized: Record<string, unknown>,
+    messages: unknown[][],
+    runId: string,
+  ): void {
+    this._runStartTimes.set(runId, performance.now());
+    this._rememberModelName(serialized, runId);
+
+    const userContents: string[] = [];
+    for (const batch of messages) {
+      if (!Array.isArray(batch)) continue;
+      for (const msg of batch) {
+        const text = _extractChatMessageUserText(msg);
+        if (text) userContents.push(text);
       }
     }
+    this._trackUserContents(userContents);
   }
 
   handleLLMEnd(output: Record<string, unknown>, runId: string): void {
@@ -194,6 +223,7 @@ export class AmplitudeCallbackHandler {
       env: ctx.env,
       input: toolInput,
       output,
+      privacyConfig: this._privacyConfig,
     });
   }
 
@@ -218,6 +248,7 @@ export class AmplitudeCallbackHandler {
       env: ctx.env,
       input: toolInput,
       errorMessage: error instanceof Error ? error.message : String(error),
+      privacyConfig: this._privacyConfig,
     });
   }
 
@@ -239,6 +270,7 @@ export class AmplitudeCallbackHandler {
       env: ctx.env,
       isError: true,
       errorMessage: error instanceof Error ? error.message : String(error),
+      privacyConfig: this._privacyConfig,
     });
   }
 }
@@ -298,4 +330,38 @@ function _extractLangchainText(generation: unknown): string {
       return typeof item.text === 'string' ? item.text : '';
     })
     .join('');
+}
+
+function _extractChatMessageUserText(message: unknown): string | null {
+  if (message == null || typeof message !== 'object') return null;
+  const msg = message as Record<string, unknown> & {
+    _getType?: () => string;
+    getType?: () => string;
+  };
+
+  const role =
+    (typeof msg._getType === 'function' ? msg._getType() : undefined) ??
+    (typeof msg.getType === 'function' ? msg.getType() : undefined) ??
+    msg.type ??
+    msg.role;
+  const roleStr = typeof role === 'string' ? role.toLowerCase() : '';
+  if (roleStr !== 'human' && roleStr !== 'user') return null;
+
+  if (typeof msg.content === 'string' && msg.content.length > 0) {
+    return msg.content;
+  }
+  if (Array.isArray(msg.content)) {
+    const text = msg.content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part != null && typeof part === 'object') {
+          const item = part as Record<string, unknown>;
+          return typeof item.text === 'string' ? item.text : '';
+        }
+        return '';
+      })
+      .join('');
+    return text.length > 0 ? text : null;
+  }
+  return null;
 }

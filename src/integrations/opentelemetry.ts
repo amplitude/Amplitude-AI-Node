@@ -7,6 +7,7 @@
  */
 
 import type { AmplitudeAI } from '../client.js';
+import type { PrivacyConfig } from '../core/privacy.js';
 import {
   GENAI_REASONING_OUTPUT_TOKENS,
   GENAI_USAGE_COST,
@@ -16,6 +17,14 @@ import { calculateCost } from '../utils/costs.js';
 export interface ExporterOptions {
   amplitudeAI: AmplitudeAI;
   defaultUserId?: string;
+  privacyConfig?: PrivacyConfig | null;
+  /**
+   * If set, only process spans whose instrumentation scope name is in this set.
+   * By default any span with `gen_ai.*` attributes is processed.
+   */
+  allowedScopes?: ReadonlySet<string> | string[] | null;
+  /** Instrumentation scope names to ignore (e.g. `['fastapi', 'sqlalchemy']`). */
+  blockedScopes?: ReadonlySet<string> | string[] | null;
 }
 
 interface OTELSpan {
@@ -27,15 +36,36 @@ interface OTELSpan {
   status?: { code?: number; message?: string };
   parentSpanId?: string;
   spanContext?: () => { traceId: string; spanId: string };
+  instrumentationScope?: { name?: string };
+  instrumentationLibrary?: { name?: string };
 }
 
 export class AmplitudeAgentExporter {
   private _ai: AmplitudeAI;
   private _defaultUserId: string;
+  private _privacyConfig: PrivacyConfig | null;
+  private _allowedScopes: Set<string> | null;
+  private _blockedScopes: Set<string>;
 
   constructor(options: ExporterOptions) {
     this._ai = options.amplitudeAI;
     this._defaultUserId = options.defaultUserId ?? 'otel-user';
+    this._privacyConfig = options.privacyConfig ?? null;
+    this._allowedScopes =
+      options.allowedScopes == null
+        ? null
+        : new Set(
+            options.allowedScopes instanceof Set
+              ? options.allowedScopes
+              : options.allowedScopes,
+          );
+    this._blockedScopes = new Set(
+      options.blockedScopes == null
+        ? []
+        : options.blockedScopes instanceof Set
+          ? options.blockedScopes
+          : options.blockedScopes,
+    );
   }
 
   export(
@@ -44,6 +74,7 @@ export class AmplitudeAgentExporter {
   ): void {
     for (const span of spans) {
       try {
+        if (!this._shouldProcess(span)) continue;
         this._processSpan(span);
       } catch {
         // Skip individual span failures
@@ -59,6 +90,25 @@ export class AmplitudeAgentExporter {
   forceFlush(): Promise<void> {
     this._ai.flush();
     return Promise.resolve();
+  }
+
+  private _shouldProcess(span: OTELSpan): boolean {
+    const scopeName =
+      span.instrumentationScope?.name ??
+      span.instrumentationLibrary?.name ??
+      '';
+
+    if (scopeName && this._blockedScopes.has(scopeName)) {
+      return false;
+    }
+    if (this._allowedScopes != null) {
+      if (!scopeName || !this._allowedScopes.has(scopeName)) {
+        return false;
+      }
+    }
+
+    const attrs = span.attributes ?? {};
+    return Object.keys(attrs).some((k) => k.startsWith('gen_ai.'));
   }
 
   private _processSpan(span: OTELSpan): void {
@@ -108,6 +158,7 @@ export class AmplitudeAgentExporter {
           undefined,
         output: attrs['gen_ai.response.text'] ?? undefined,
         errorMessage: isError ? span.status?.message : undefined,
+        privacyConfig: this._privacyConfig,
       });
       return;
     }
@@ -128,6 +179,7 @@ export class AmplitudeAgentExporter {
             | undefined) ??
           (attrs['gen_ai.embeddings.dimension.count'] as number | undefined),
         totalCostUsd: authoritativeCostUsd,
+        privacyConfig: this._privacyConfig,
       });
       return;
     }
@@ -153,6 +205,7 @@ export class AmplitudeAgentExporter {
             content: m.content,
             sessionId,
             traceId: spanCtx?.traceId,
+            privacyConfig: this._privacyConfig,
           });
         }
       }
@@ -223,6 +276,7 @@ export class AmplitudeAgentExporter {
       temperature: _toOtelNumber(attrs['gen_ai.request.temperature']),
       maxOutputTokens: _toOtelNumber(attrs['gen_ai.request.max_tokens']),
       topP: _toOtelNumber(attrs['gen_ai.request.top_p']),
+      privacyConfig: this._privacyConfig,
     });
   }
 }

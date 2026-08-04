@@ -873,4 +873,127 @@ describe('AmplitudeGenAIExporter expanded', () => {
     const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
     expect(call.provider).toBe('azure-openai');
   });
+
+  it('passes privacyConfig through to track* calls', (): void => {
+    const ai = createMockAmplitudeAI();
+    const privacyConfig = {
+      privacyMode: true,
+      contentMode: 'metadata_only',
+    };
+    const exporter = new AmplitudeAgentExporter({
+      amplitudeAI: ai as never,
+      privacyConfig: privacyConfig as never,
+    });
+    const cb = vi.fn();
+
+    const inputMessages = JSON.stringify([
+      { role: 'user', content: 'hello privacy' },
+    ]);
+    exporter.export(
+      [
+        makeGenAISpan({
+          attributes: {
+            ...makeGenAISpan().attributes,
+            'gen_ai.input.messages': inputMessages,
+          },
+        }) as never,
+      ],
+      cb,
+    );
+
+    expect(
+      (ai.trackUserMessage.mock.calls[0]?.[0] as Record<string, unknown>)
+        ?.privacyConfig,
+    ).toEqual(privacyConfig);
+    expect(
+      (ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>)
+        ?.privacyConfig,
+    ).toEqual(privacyConfig);
+
+    exporter.export(
+      [
+        makeGenAISpan({
+          attributes: {
+            'gen_ai.system': 'openai',
+            'gen_ai.operation.name': 'tool',
+            'gen_ai.tool.name': 'search',
+            'amplitude.user_id': 'u1',
+          },
+        }) as never,
+      ],
+      cb,
+    );
+    expect(
+      (ai.trackToolCall.mock.calls[0]?.[0] as Record<string, unknown>)
+        ?.privacyConfig,
+    ).toEqual(privacyConfig);
+  });
+
+  it('filters by allowedScopes / blockedScopes instrumentation names', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({
+      amplitudeAI: ai as never,
+      allowedScopes: ['openllmetry'],
+      blockedScopes: ['sqlalchemy'],
+    });
+    const cb = vi.fn();
+
+    const allowed = makeGenAISpan({
+      instrumentationScope: { name: 'openllmetry' },
+    });
+    const blocked = makeGenAISpan({
+      instrumentationScope: { name: 'sqlalchemy' },
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.response.text': 'blocked',
+      },
+    });
+    const otherScope = makeGenAISpan({
+      instrumentationScope: { name: 'fastapi' },
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.response.text': 'other',
+      },
+    });
+
+    exporter.export(
+      [allowed as never, blocked as never, otherScope as never],
+      cb,
+    );
+
+    expect(ai.trackAiMessage).toHaveBeenCalledOnce();
+    expect(
+      (ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>)?.content,
+    ).toBe('Hello world');
+  });
+
+  it('blockedScopes alone drops matching scopes', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({
+      amplitudeAI: ai as never,
+      blockedScopes: new Set(['noisy-lib']),
+    });
+    const cb = vi.fn();
+
+    exporter.export(
+      [
+        makeGenAISpan({
+          instrumentationLibrary: { name: 'noisy-lib' },
+        }) as never,
+        makeGenAISpan({
+          instrumentationScope: { name: 'ok-lib' },
+          attributes: {
+            ...makeGenAISpan().attributes,
+            'gen_ai.response.text': 'kept',
+          },
+        }) as never,
+      ],
+      cb,
+    );
+
+    expect(ai.trackAiMessage).toHaveBeenCalledOnce();
+    expect(
+      (ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>)?.content,
+    ).toBe('kept');
+  });
 });

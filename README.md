@@ -90,6 +90,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
   - [Session](#session)
 - [Configuration](#configuration)
 - [Context Dict Conventions](#context-dict-conventions)
+- [Works with](#works-with)
 - [Privacy & Content Control](#privacy-content-control)
 - [Cache-Aware Cost Tracking](#cache-aware-cost-tracking)
 - [Semantic Cache Tracking](#semantic-cache-tracking)
@@ -166,7 +167,6 @@ const ai = new AmplitudeAI({
 | Runtime | Node.js only (no browser). Python SDK available separately ([amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)). |
 | Zero-code patching | OpenAI, Anthropic, Azure OpenAI, Gemini, Mistral, Bedrock (Converse, ConverseStream, and InvokeModel). |
 | CrewAI | Python-only; the Node.js export throws `ProviderError` by design. Use LangChain or OpenTelemetry integrations instead. |
-| OTEL scope filtering | Not yet supported (Python SDK has `allowed_scopes`/`blocked_scopes`). |
 | Streaming cost tracking | Automatic for OpenAI and Anthropic. Manual token counts required for other providers' streamed responses. |
 
 ### Is this for me?
@@ -649,6 +649,8 @@ The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unk
 | `prompt_revision` | `"v7"`, `"abc123"`, `"2026-02-15"` | Track which prompt version was used. Detect prompt regression when combined with `agentVersion`. |
 | `deployment_region` | `"us-east-1"`, `"eu-west-1"` | Segment by deployment region for latency analysis or compliance tracking. |
 | `canary_group` | `"canary"`, `"stable"` | Identify canary vs. stable deployments for progressive rollout monitoring. |
+| `ingestion_path` | `"gateway"` | Tag traffic that routed through an OpenAI-compatible gateway (pair with `gateway`). |
+| `gateway` | `"openrouter"`, `"litellm"`, `"requesty"` | Which partner gateway handled the call. Existing `[Agent] Context` keys — no new schema fields. |
 
 **Example:**
 
@@ -688,6 +690,51 @@ const child = parent.child('researcher', {
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
 > **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `experiment_variant`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
+
+## Works with
+
+OpenAI-compatible gateways and OTEL partners — no special SDK build required:
+
+| Partner | Path | Notes |
+| --- | --- | --- |
+| **OpenRouter** | SDK-through (`baseURL`) | Pass the **canonical** routed model id (e.g. `gpt-4o-mini`), not `openrouter/auto`. Align Amplitude `contentMode` with OpenRouter Privacy Mode. |
+| **LiteLLM** | SDK-through or OTLP | Set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on OTEL spans. |
+| **Requesty** | SDK-through only | No OTLP push today — point the OpenAI client at Requesty's base URL. |
+| **Strands → Nova** | OTLP | Export GenAI spans into Amplitude via `AmplitudeAgentExporter` / `enableOtel()`. |
+
+Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
+
+```typescript
+import { AmplitudeAI, OpenAI } from '@amplitude/ai';
+
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+
+// OpenRouter
+const openrouter = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+const orAgent = ai.agent('openrouter-agent', {
+  userId,
+  context: { ingestion_path: 'gateway', gateway: 'openrouter' },
+});
+
+// LiteLLM proxy
+const litellm = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.LITELLM_API_KEY,
+  baseURL: 'http://localhost:4000/v1',
+});
+const llAgent = ai.agent('litellm-agent', {
+  userId,
+  context: { ingestion_path: 'gateway', gateway: 'litellm' },
+});
+```
+
+**Model id rule:** pass the **real provider model** the gateway routed to (`gpt-4o-mini`, `claude-sonnet-4-20250514`). Gateway product labels (`openrouter/auto`, router aliases) cannot be priced — the SDK **omits** `[Agent] Cost USD` rather than recording `$0`.
+
+For OTLP partners, emit at least `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Full recipes: [`amplitude-ai.md` Works with](amplitude-ai.md#works-with).
 
 ## Privacy & Content Control
 
@@ -1651,9 +1698,12 @@ const handler = new AmplitudeCallbackHandler({
   amplitudeAI: ai,
   userId: 'user-123',
   sessionId: 'sess-1',
+  privacyConfig: { contentMode: 'full' }, // applied to AI + tool events
 });
 
-// Pass handler to LangChain callbacks
+// Pass handler to LangChain callbacks (duck-typed — no hard @langchain/core dep).
+// Chat models call handleChatModelStart (tracks [Agent] User Message); LLMs use handleLLMStart.
+chain.invoke(input, { callbacks: [handler] });
 ```
 
 ### OpenTelemetry
@@ -1662,6 +1712,7 @@ Two exporters add Amplitude as a destination alongside your existing trace backe
 
 ```typescript
 import {
+  AmplitudeAI,
   AmplitudeAgentExporter,
   AmplitudeGenAIExporter,
 } from '@amplitude/ai';
@@ -1671,13 +1722,15 @@ import {
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const provider = new NodeTracerProvider();
 
 // GenAI exporter — converts gen_ai.* spans into Amplitude AI events
 provider.addSpanProcessor(
   new BatchSpanProcessor(
     new AmplitudeGenAIExporter({
-      apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+      amplitudeAI: ai,
+      // optional: privacyConfig, allowedScopes, blockedScopes
     }),
   ),
 );
@@ -1686,7 +1739,7 @@ provider.addSpanProcessor(
 provider.addSpanProcessor(
   new SimpleSpanProcessor(
     new AmplitudeAgentExporter({
-      apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+      amplitudeAI: ai,
     }),
   ),
 );
@@ -1694,7 +1747,7 @@ provider.addSpanProcessor(
 provider.register();
 ```
 
-Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are processed; all other spans are silently ignored. This means it's safe to add the exporter to a pipeline that produces mixed (GenAI + HTTP + DB) spans.
+Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are processed; all other spans are silently ignored. This means it's safe to add the exporter to a pipeline that produces mixed (GenAI + HTTP + DB) spans. Use `allowedScopes` / `blockedScopes` to further filter by OpenTelemetry instrumentation scope name.
 
 **Attribute mapping reference:**
 

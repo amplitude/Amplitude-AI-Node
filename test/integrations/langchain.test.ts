@@ -27,6 +27,94 @@ describe('AmplitudeCallbackHandler', () => {
     expect(handler).toBeInstanceOf(AmplitudeCallbackHandler);
   });
 
+  describe('handleChatModelStart', () => {
+    it('tracks User Message from human/user chat messages', (): void => {
+      const ai = createMockAmplitudeAI();
+      const handler = new AmplitudeCallbackHandler({
+        amplitudeAI: ai as never,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      handler.handleChatModelStart(
+        { kwargs: { model: 'gpt-4o-mini' } },
+        [
+          [
+            { _getType: () => 'system', content: 'You are helpful.' },
+            { _getType: () => 'human', content: 'What is Amplitude?' },
+            { role: 'assistant', content: 'prior reply' },
+          ],
+        ],
+        'chat-run-1',
+      );
+
+      expect(ai.trackUserMessage).toHaveBeenCalledOnce();
+      const call = ai.trackUserMessage.mock.calls[0]![0] as Record<
+        string,
+        unknown
+      >;
+      expect(call.content).toBe('What is Amplitude?');
+      expect(call.userId).toBe('u1');
+      expect(call.sessionId).toBe('s1');
+    });
+
+    it('accepts LangChain LC id path arrays without throwing', (): void => {
+      const ai = createMockAmplitudeAI();
+      const handler = new AmplitudeCallbackHandler({
+        amplitudeAI: ai as never,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      expect(() =>
+        handler.handleChatModelStart(
+          {
+            id: ['langchain', 'chat_models', 'openai', 'ChatOpenAI'],
+            kwargs: { model: 'gpt-4o-mini' },
+          },
+          [[{ _getType: () => 'human', content: 'hello' }]],
+          'chat-lc-id',
+        ),
+      ).not.toThrow();
+
+      expect(ai.trackUserMessage).toHaveBeenCalledOnce();
+    });
+
+    it('stores model name for subsequent handleLLMEnd cost calculation', (): void => {
+      const ai = createMockAmplitudeAI();
+      const handler = new AmplitudeCallbackHandler({
+        amplitudeAI: ai as never,
+      });
+
+      handler.handleChatModelStart(
+        { kwargs: { model: 'gpt-4o-mini' } },
+        [[{ _getType: () => 'human', content: 'hi' }]],
+        'chat-run-cost',
+      );
+      handler.handleLLMEnd(
+        {
+          generations: [[{ text: 'hello' }]],
+          llmOutput: {
+            tokenUsage: {
+              promptTokens: 10,
+              completionTokens: 5,
+              totalTokens: 15,
+            },
+          },
+        },
+        'chat-run-cost',
+      );
+
+      const call = ai.trackAiMessage.mock.calls[0]![0] as Record<
+        string,
+        unknown
+      >;
+      expect(call.model).toBe('gpt-4o-mini');
+      expect(call.totalCostUsd).toEqual(expect.any(Number));
+      expect(Number(call.totalCostUsd)).toBeGreaterThan(0);
+    });
+  });
+
   describe('handleLLMStart / handleLLMEnd', () => {
     it('tracks an AI message with latency and token usage on LLM end', (): void => {
       const ai = createMockAmplitudeAI();
@@ -383,6 +471,31 @@ describe('AmplitudeCallbackHandler', () => {
         | undefined;
       expect(call?.toolName).toBe('fallback_tool');
     });
+    it('passes privacyConfig through to trackToolCall on success and error', (): void => {
+      const ai = createMockAmplitudeAI();
+      const privacyConfig = {
+        privacyMode: true,
+        contentMode: 'metadata_only',
+      };
+      const handler = new AmplitudeCallbackHandler({
+        amplitudeAI: ai as never,
+        privacyConfig: privacyConfig as never,
+      });
+
+      handler.handleToolStart({ name: 'search' }, 'q', 'tool-priv');
+      handler.handleToolEnd('ok', 'tool-priv');
+      expect(
+        (ai.trackToolCall.mock.calls[0]?.[0] as Record<string, unknown>)
+          ?.privacyConfig,
+      ).toEqual(privacyConfig);
+
+      handler.handleToolStart({ name: 'search' }, 'q', 'tool-priv-err');
+      handler.handleToolError(new Error('boom'), 'tool-priv-err');
+      expect(
+        (ai.trackToolCall.mock.calls[1]?.[0] as Record<string, unknown>)
+          ?.privacyConfig,
+      ).toEqual(privacyConfig);
+    });
   });
 
   describe('handleToolError', () => {
@@ -448,5 +561,61 @@ describe('createAmplitudeCallback', () => {
       amplitudeAI: amplitudeAI as never,
     });
     expect(handler).toBeInstanceOf(AmplitudeCallbackHandler);
+  });
+});
+
+describe('LangChain DoD (MockAmplitudeAI)', () => {
+  it('handleChatModelStart + handleLLMEnd emit User Message and AI Response', async (): Promise<void> => {
+    const { MockAmplitudeAI } = await import('../../src/testing.js');
+    const { EVENT_AI_RESPONSE, EVENT_USER_MESSAGE } = await import(
+      '../../src/core/constants.js'
+    );
+
+    const mock = new MockAmplitudeAI();
+    const handler = new AmplitudeCallbackHandler({
+      amplitudeAI: mock,
+      userId: 'u-lc',
+      sessionId: 's-lc',
+      agentId: 'langchain-agent',
+    });
+
+    handler.handleChatModelStart(
+      {
+        id: ['langchain', 'chat_models', 'openai', 'ChatOpenAI'],
+        kwargs: { model: 'gpt-4o-mini' },
+      },
+      [[{ _getType: () => 'human', content: 'What is Amplitude?' }]],
+      'dod-run',
+    );
+    handler.handleLLMEnd(
+      {
+        generations: [[{ text: 'Amplitude is a product analytics platform.' }]],
+        llmOutput: {
+          modelName: 'gpt-4o-mini',
+          tokenUsage: {
+            promptTokens: 10,
+            completionTokens: 20,
+            totalTokens: 30,
+          },
+        },
+      },
+      'dod-run',
+    );
+
+    expect(mock.getEvents(EVENT_USER_MESSAGE).length).toBeGreaterThanOrEqual(1);
+    expect(mock.getEvents(EVENT_AI_RESPONSE).length).toBeGreaterThanOrEqual(1);
+    expect(mock.summary()).toMatch(/\d+\/\d+ passed/);
+  });
+
+  it('documents duck-typed BaseCallbackHandler compatibility (no hard @langchain/core dep)', (): void => {
+    // AmplitudeCallbackHandler intentionally does not extend BaseCallbackHandler
+    // so @langchain/core stays an optional install. LangChain accepts any object
+    // with matching handle* methods in `callbacks`.
+    expect(typeof AmplitudeCallbackHandler.prototype.handleChatModelStart).toBe(
+      'function',
+    );
+    expect(typeof AmplitudeCallbackHandler.prototype.handleLLMStart).toBe(
+      'function',
+    );
   });
 });
