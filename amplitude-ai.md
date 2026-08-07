@@ -628,6 +628,8 @@ app.use(createAmplitudeAIMiddleware({
 
 ## Phase 4: Verify
 
+> **Do not report instrumentation as complete until you have executed Steps 4b, 4c, and 4d and all checks pass.** Wiring the code is not done — verification is part of the task.
+
 ### Step 4a: Create verification test
 
 Create `__amplitude_verify__.test.ts` that verifies:
