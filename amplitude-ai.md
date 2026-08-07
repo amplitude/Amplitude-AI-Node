@@ -8,9 +8,9 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 
 1. Read `package.json` for dependencies
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
-3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL`, in-house gateway, or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`.
+3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
-5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source
+5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place.
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
 7. Check for streaming: `stream: true` in provider calls
 8. Check for frontend deps: `react`, `vue`, `svelte` in deps
@@ -189,7 +189,7 @@ s.trackUserMessage('Summarize the attached design doc and list open questions', 
 s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
 
-**Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
+**Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. **Do not call `s.trackUserMessage()` for the same user input you are also passing to a provider wrapper** — you will get two `[Agent] User Message` events for a single user turn. Choose one: either call `s.trackUserMessage()` manually and suppress auto-tracking, or rely on the provider wrapper and omit the manual call. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
 <!-- llms-excerpt:content-shaping:end -->
 
 **Enrichment vs Agent Analytics UI:** A short **`content`** line plus structured data in **`context`** keeps session titles and segmentation readable. Amplitude’s **server-side LLM enrichment** builds eval input primarily from **turn text** stored on each session (`input_text` / `output_text` derived from `$llm_message`). If automated evaluators must reason over the **full** structured payload, keep essential facts in **`content`**, add **scalar event properties** for key fields, or coordinate a pipeline change to merge allowlisted **`context`** into enrichment input—do not assume enrichments automatically parse large JSON blobs only present in `[Agent] Context`.
@@ -627,6 +627,8 @@ app.use(createAmplitudeAIMiddleware({
 ---
 
 ## Phase 4: Verify
+
+> **Do not report instrumentation as complete until you have executed Steps 4b, 4c, and 4d and all checks pass.** Wiring the code is not done — verification is part of the task.
 
 ### Step 4a: Create verification test
 
