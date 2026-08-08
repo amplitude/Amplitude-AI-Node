@@ -74,6 +74,53 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
 | Optional peers  | openai, @anthropic-ai/sdk, @google/generative-ai, @google/genai, @mistralai/mistralai, @aws-sdk/client-bedrock-runtime, tiktoken or js-tiktoken (token counting)                               |
 
+## Quality gates in GitHub Actions
+
+This repository also exposes a composite Action for the Agent Analytics
+Detect → Cover → Test → Prove loop. It pulls the live evaluator definitions
+that PMs have approved in Amplitude, runs an offline fixture suite, and fails
+the workflow only when configured quality thresholds are missed.
+
+> The Action installs the public `amplitude-ai-eval` Python package from PyPI.
+> Use it after that package's first release is published; the package version
+> is an explicit Action input to keep CI runs reproducible.
+
+```yaml
+name: Agent quality gate
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: amplitude/Amplitude-AI-Node@v0
+        with:
+          project-id: ${{ vars.AMPLITUDE_PROJECT_ID }}
+          amplitude-token: ${{ secrets.AMPLITUDE_MCP_TOKEN }}
+          config: amplitude-eval.yaml
+          cli-version: 0.1.0
+```
+
+The Action preserves the evaluator CLI's exit codes: `0` is a pass, `1` is a
+threshold miss, and `2` is a configuration, authentication, or evaluator
+error. Keep `amplitude-token` in GitHub Secrets; a PAT or a supported
+OIDC-exchanged token may be used.
+
+### Attach CI provenance to a Quality Issue
+
+To attach the run to a reviewed Quality Issue, also pass `issue-id`, `app-id`,
+`agent-analytics-graphql-endpoint`, and
+`agent-analytics-authorization`. The Action records the GitHub run URL,
+commit SHA, and pull-request URL through the scoped
+`attachCiGateToIssue` mutation. The authorization input is intentionally a
+complete header value because GraphQL gateway deployments can use different
+token schemes; store it in GitHub Secrets.
+
 ## Table of Contents
 
 - [How to Get Started](#how-to-get-started)
