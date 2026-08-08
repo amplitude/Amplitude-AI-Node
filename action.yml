@@ -54,7 +54,9 @@ runs:
 
     - name: Install evaluator CLI
       shell: bash
-      run: python -m pip install --disable-pip-version-check "amplitude-ai-eval==${{ inputs.cli-version }}"
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+      run: python -m pip install --disable-pip-version-check "amplitude-ai-eval==$CLI_VERSION"
 
     - id: gate
       name: Pull evaluators and run gate
@@ -107,13 +109,14 @@ runs:
         GRAPHQL_ENDPOINT: ${{ inputs.agent-analytics-graphql-endpoint }}
         AUTHORIZATION: ${{ inputs.agent-analytics-authorization }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        RUN_ID: ${{ github.run_id }}
         COMMIT_SHA: ${{ github.sha }}
         PR_URL: ${{ github.event.pull_request.html_url }}
       run: |
         set -euo pipefail
         payload=$(jq -n \
           --arg id "$ISSUE_ID" \
-          --arg runId "${{ github.run_id }}" \
+          --arg runId "$RUN_ID" \
           --arg runUrl "$RUN_URL" \
           --arg commitSha "$COMMIT_SHA" \
           --arg prUrl "$PR_URL" \
