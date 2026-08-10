@@ -1,5 +1,7 @@
 # Instrument with @amplitude/ai
 
+> **Reference:** [Agent Analytics SDK docs](https://amplitude.com/docs/sdks/agent-analytics/sdk#install-the-sdk)
+
 Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Discover → Instrument → Verify**. The result is a fully instrumented app with provider wrappers, session lifecycle, multi-agent delegation (when detected), and a verification test proving correctness — all before deploying anything.
 
 ---
@@ -10,7 +12,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
 3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
-5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place.
+5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place. **If plain Amplitude packages are present, inspect their initialization (e.g. `amplitude.init(...)`, `new Amplitude(...)`) to find the API key env var already in use** (e.g. `process.env.AMPLITUDE_API_KEY`). Ask the developer: "I found an existing Amplitude setup using `AMPLITUDE_API_KEY` — should I reuse that key for Agent Analytics, or use a separate key under a different env var?" Use whichever they confirm; do not assume `AMPLITUDE_AI_API_KEY` if they already have a key configured.
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
 7. Check for streaming: `stream: true` in provider calls
 8. Check for frontend deps: `react`, `vue`, `svelte` in deps
@@ -91,8 +93,12 @@ Proceed with instrumentation? [Review changes first / Apply / Skip]
 
 ### Step 3a: Install dependencies
 
+Check whether `@amplitude/ai` is already in `package.json` dependencies. If it is, skip this step. If not, detect the package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, otherwise npm) and install:
+
 ```bash
-pnpm add @amplitude/ai    # or npm install / yarn add
+pnpm add @amplitude/ai          # pnpm
+yarn add @amplitude/ai          # yarn
+npm install @amplitude/ai       # npm
 ```
 
 ### Step 3b: Create bootstrap file
@@ -692,6 +698,14 @@ npx vitest run __amplitude_verify__.test.ts
 ```bash
 npx amplitude-ai doctor
 ```
+
+If the project uses a different env var for the Amplitude API key (detected in Phase 1 Step 5), pass it with `--key-env` so doctor validates the correct variable:
+
+```bash
+npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+```
+
+All doctor failures are mandatory to resolve before proceeding.
 
 ### Step 4d: Run project checks
 

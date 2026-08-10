@@ -6,6 +6,8 @@ const args = process.argv.slice(2);
 const includeMockCheck = !args.includes('--no-mock-check');
 const jsonMode = args.includes('--json');
 const fillRatesMode = args.includes('--fill-rates');
+const keyEnvIdx = args.indexOf('--key-env');
+const apiKeyEnv = keyEnvIdx !== -1 ? args[keyEnvIdx + 1] : undefined;
 
 if (fillRatesMode) {
   const result = runFillRates(process.cwd());
@@ -29,7 +31,7 @@ if (fillRatesMode) {
   }
   process.exit(result.all_healthy ? 0 : 1);
 } else {
-  const result = runDoctor(process.cwd(), { includeMockCheck });
+  const result = runDoctor(process.cwd(), { includeMockCheck, apiKeyEnv });
 
   if (jsonMode) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
