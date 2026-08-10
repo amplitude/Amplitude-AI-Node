@@ -7,6 +7,10 @@ const includeMockCheck = !args.includes('--no-mock-check');
 const jsonMode = args.includes('--json');
 const fillRatesMode = args.includes('--fill-rates');
 const keyEnvIdx = args.indexOf('--key-env');
+if (keyEnvIdx !== -1 && keyEnvIdx + 1 >= args.length) {
+  process.stderr.write('Error: --key-env requires an argument.\nUsage: amplitude-ai doctor --key-env MY_AMPLITUDE_KEY\n');
+  process.exit(1);
+}
 const apiKeyEnv = keyEnvIdx !== -1 ? args[keyEnvIdx + 1] : undefined;
 
 if (fillRatesMode) {
