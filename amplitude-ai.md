@@ -706,6 +706,12 @@ If the project uses a different env var for the Amplitude API key (detected in P
 npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
 ```
 
+If the key lives in a `.env` file rather than the shell environment, load it first:
+
+```bash
+set -a && source .env && set +a && npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+```
+
 All doctor failures are mandatory to resolve before proceeding.
 
 ### Step 4d: Run project checks
