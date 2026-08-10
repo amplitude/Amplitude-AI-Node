@@ -715,6 +715,24 @@ npx tsc --noEmit    # TypeScript compiles
 npm test            # Existing tests still pass
 ```
 
+### Step 4d-live: Send a real test event
+
+Start the app locally and hit at least one instrumented endpoint to confirm events reach the Amplitude transport (HTTP 200, no flush errors). This proves the live pipeline works, not just the mock:
+
+```bash
+# Start the app (adapt to the project's run command)
+node server.js &
+
+# Hit the instrumented endpoint
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "hello", "userId": "smoke-test-user", "sessionId": "smoke-test-session"}'
+
+# Expected: 200. Check for flush errors in the app logs.
+```
+
+If the app uses a different framework or endpoint shape, adapt the curl accordingly. The goal is one real request that exercises the session context and provider wrapper.
+
 ### Step 4e: Show confidence report
 
 ```
@@ -767,6 +785,14 @@ After each fix:
   4. Repeat until "Ready to deploy"
 
 Do NOT proceed to Phase 5 with any data quality gate failing.
+
+> **Checklist before telling the user instrumentation is complete:**
+> - [ ] Step 4b: verification test ran and passed
+> - [ ] Step 4c: `npx amplitude-ai doctor` ran and all checks passed (or failing checks are explicitly explained)
+> - [ ] Step 4d: TypeScript and existing tests still pass
+> - [ ] Step 4d-live: real request sent to the app, HTTP 200, no flush errors in logs
+>
+> Do not report "instrumentation is complete" until all four are checked off.
 
 ---
 
