@@ -164,7 +164,8 @@ const agent = ai.agent('chat-handler', {
 export async function POST(req: Request) {
   const { messages, userId, sessionId } = await req.json();
   return agent.session({ userId, sessionId }).run(async (s) => {
-    s.trackUserMessage(messages[messages.length - 1].content);
+    // Do NOT call s.trackUserMessage() here — the provider wrapper auto-emits
+    // [Agent] User Message from the messages array. Calling both produces duplicates.
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
     return Response.json(response);
   });
