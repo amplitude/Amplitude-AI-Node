@@ -16,10 +16,9 @@ inputs:
   amplitude-token:
     description: Amplitude MCP PAT or GitHub-OIDC-exchanged token. Pass as a GitHub secret.
     required: true
-  cli-version:
-    description: Released PyPI version of amplitude-ai-eval.
-    required: false
-    default: "0.1.0"
+  sdk-version:
+    description: Released PyPI version of amplitude-ai that includes the evaluator CLI.
+    required: true
   python-version:
     description: Python version used to install and run the evaluator CLI.
     required: false
@@ -55,8 +54,8 @@ runs:
     - name: Install evaluator CLI
       shell: bash
       env:
-        CLI_VERSION: ${{ inputs.cli-version }}
-      run: python -m pip install --disable-pip-version-check "amplitude-ai-eval==$CLI_VERSION"
+        SDK_VERSION: ${{ inputs.sdk-version }}
+      run: python -m pip install --disable-pip-version-check "amplitude-ai==$SDK_VERSION"
 
     - id: gate
       name: Pull evaluators and run gate

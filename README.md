@@ -81,9 +81,9 @@ Detect → Cover → Test → Prove loop. It pulls the live evaluator definition
 that PMs have approved in Amplitude, runs an offline fixture suite, and fails
 the workflow only when configured quality thresholds are missed.
 
-> The Action installs the public `amplitude-ai-eval` Python package from PyPI.
-> Use it after that package's first release is published; the package version
-> is an explicit Action input to keep CI runs reproducible.
+> The Action installs the public `amplitude-ai` Python SDK from PyPI. The
+> evaluator CLI ships with the SDK; its version is an explicit Action input to
+> keep CI runs reproducible.
 
 ```yaml
 name: Agent quality gate
@@ -103,7 +103,7 @@ jobs:
           project-id: ${{ vars.AMPLITUDE_PROJECT_ID }}
           amplitude-token: ${{ secrets.AMPLITUDE_MCP_TOKEN }}
           config: amplitude-eval.yaml
-          cli-version: 0.1.0
+          sdk-version: 1.13.0
 ```
 
 The Action preserves the evaluator CLI's exit codes: `0` is a pass, `1` is a
