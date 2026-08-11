@@ -10,9 +10,15 @@ import {
 const { mockTrackAiMessage } = vi.hoisted(() => ({
   mockTrackAiMessage: vi.fn(() => 'msg-bedrock-123'),
 }));
+const { mockCalculateCost } = vi.hoisted(() => ({
+  mockCalculateCost: vi.fn(() => 0.01),
+}));
 
 vi.mock('../../src/core/tracking.js', () => ({
   trackAiMessage: mockTrackAiMessage,
+}));
+vi.mock('../../src/utils/costs.js', () => ({
+  calculateCost: mockCalculateCost,
 }));
 
 function createMockAmplitude(): {
@@ -46,6 +52,28 @@ describe('Bedrock provider', () => {
       const provider = new Bedrock({ amplitude: amp, client: fakeClient });
       expect(provider.client).toBe(fakeClient);
     });
+
+    it('accepts pricingModelName option', (): void => {
+      const amp = createMockAmplitude();
+      const fakeClient = { send: vi.fn() };
+      const provider = new Bedrock({
+        amplitude: amp,
+        client: fakeClient,
+        pricingModelName: 'anthropic.claude-sonnet-4-20250514',
+      });
+      expect((provider as Record<string, unknown>)._pricingModelName).toBe(
+        'anthropic.claude-sonnet-4-20250514',
+      );
+    });
+
+    it('defaults pricingModelName to undefined when omitted', (): void => {
+      const amp = createMockAmplitude();
+      const fakeClient = { send: vi.fn() };
+      const provider = new Bedrock({ amplitude: amp, client: fakeClient });
+      expect(
+        (provider as Record<string, unknown>)._pricingModelName,
+      ).toBeUndefined();
+    });
   });
 
   describe('converse', () => {
@@ -54,6 +82,7 @@ describe('Bedrock provider', () => {
       const fakeClient = {
         send: vi.fn().mockResolvedValue({
           output: { message: { content: [{ text: 'ok' }] } },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
         }),
       };
       const provider = new Bedrock({ amplitude: amp, client: fakeClient });
@@ -62,11 +91,94 @@ describe('Bedrock provider', () => {
           provider.converse({ modelId: 'anthropic.claude-3' }),
         ).resolves.toEqual({
           output: { message: { content: [{ text: 'ok' }] } },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
         });
       } else {
         await expect(
           provider.converse({ modelId: 'anthropic.claude-3' }),
         ).rejects.toThrow(/@aws-sdk\/client-bedrock-runtime is required/);
+      }
+    });
+
+    it('passes pricingModelName to calculateCost instead of ARN', async (): Promise<void> => {
+      const amp = createMockAmplitude();
+      const fakeClient = {
+        send: vi.fn().mockResolvedValue({
+          output: { message: { content: [{ text: 'ok' }] } },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        }),
+      };
+      const provider = new Bedrock({
+        amplitude: amp,
+        client: fakeClient,
+        pricingModelName: 'anthropic.claude-sonnet-4-20250514',
+      });
+      if (BEDROCK_AVAILABLE) {
+        mockCalculateCost.mockClear();
+        await provider.converse({
+          modelId:
+            'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+          messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+        });
+        const costCall = mockCalculateCost.mock.calls[0];
+        expect(costCall).toBeDefined();
+        expect(costCall[0].modelName).toBe(
+          'anthropic.claude-sonnet-4-20250514',
+        );
+      }
+    });
+
+    it('emits ARN as modelName on event when pricingModelName is set', async (): Promise<void> => {
+      const amp = createMockAmplitude();
+      const fakeClient = {
+        send: vi.fn().mockResolvedValue({
+          output: { message: { content: [{ text: 'ok' }] } },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        }),
+      };
+      const provider = new Bedrock({
+        amplitude: amp,
+        client: fakeClient,
+        pricingModelName: 'anthropic.claude-sonnet-4-20250514',
+      });
+      if (BEDROCK_AVAILABLE) {
+        mockTrackAiMessage.mockClear();
+        await provider.converse({
+          modelId:
+            'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+          messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+        });
+        // The modelName passed to trackAiMessage should be the ARN, not the pricing model name
+        const trackCall = mockTrackAiMessage.mock.calls[0];
+        expect(trackCall).toBeDefined();
+        expect(trackCall[0].modelName).toBe(
+          'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+        );
+      }
+    });
+
+    it('falls back to modelId when pricingModelName is not set', async (): Promise<void> => {
+      const amp = createMockAmplitude();
+      const fakeClient = {
+        send: vi.fn().mockResolvedValue({
+          output: { message: { content: [{ text: 'ok' }] } },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        }),
+      };
+      const provider = new Bedrock({ amplitude: amp, client: fakeClient });
+      if (BEDROCK_AVAILABLE) {
+        mockCalculateCost.mockClear();
+        await provider.converse({
+          modelId:
+            'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+          messages: [{ role: 'user', content: [{ text: 'hi' }] }],
+        });
+        const costCall = mockCalculateCost.mock.calls[0];
+        expect(costCall).toBeDefined();
+        // Without pricingModelName, calculateCost receives the ARN (which returns 0 via guard)
+        expect(costCall[0].modelName).toBe(
+          'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+        );
       }
     });
   });

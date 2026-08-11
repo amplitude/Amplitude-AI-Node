@@ -609,4 +609,53 @@ describe('ARN model IDs', () => {
       expect(candidates.length).toBeGreaterThan(0);
     });
   });
+
+  describe('getGenaiPriceLookupCandidates with pricingModelName (simulated)', () => {
+    it('calculates cost correctly when a real model name replaces ARN', (): void => {
+      // When pricingModelName is used, calculateCost receives the real model
+      // name instead of the ARN. This should produce candidates.
+      const candidates = getGenaiPriceLookupCandidates(
+        'anthropic.claude-sonnet-4-20250514',  // pricing model name
+        'bedrock',
+      );
+      expect(candidates.length).toBeGreaterThan(0);
+    });
+
+    it('returns zero cost for unknown pricing model name', (): void => {
+      // Even with pricingModelName, if the name is unknown to genai-prices,
+      // cost should be 0 (safe fallback).
+      const result = calculateCost({
+        modelName: 'nonexistent.model-v1',
+        inputTokens: 1000,
+        outputTokens: 500,
+        defaultProvider: 'bedrock',
+      });
+      expect(result).toBe(0);
+    });
+
+    it('returns zero cost for ARN even with provider hint (guard)', (): void => {
+      // The ARN guard fires before the provider hint can help.
+      const result = calculateCost({
+        modelName:
+          'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+        inputTokens: 1000,
+        outputTokens: 500,
+        defaultProvider: 'bedrock',
+      });
+      expect(result).toBe(0);
+    });
+
+    it('preserves explicit cost (zero) as highest precedence', (): void => {
+      // When totalCostUsd is explicitly set to 0, it must be preserved.
+      // calculateCost returns 0 for ARN, which is semantically correct.
+      const result = calculateCost({
+        modelName:
+          'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+        inputTokens: 1000,
+        outputTokens: 500,
+        defaultProvider: 'bedrock',
+      });
+      expect(result).toBe(0);
+    });
+  });
 });

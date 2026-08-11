@@ -26,11 +26,23 @@ export interface BedrockOptions {
   privacyConfig?: PrivacyConfig | null;
   /** Pass the `@aws-sdk/client-bedrock-runtime` module directly to bypass `tryRequire` (required in bundler environments). */
   bedrockModule?: unknown;
+  /**
+   * Optional. When the modelId is an AWS Bedrock inference profile ARN that
+   * carries no model identity (e.g.
+   * ``arn:aws:bedrock:us-east-1:ACCOUNT:application-inference-profile/ID``),
+   * set this to the underlying foundation model name (e.g.
+   * ``"anthropic.claude-sonnet-4-20250514"``) for correct cost calculation.
+   *
+   * The ARN continues to be emitted as `[Agent] Model Name` on events for
+   * grouping and traceability purposes — only cost calculation uses this value.
+   */
+  pricingModelName?: string;
 }
 
 export class Bedrock extends BaseAIProvider {
   private _client: unknown;
   private _bedrockMod: Record<string, unknown> | null;
+  private _pricingModelName: string | undefined;
 
   constructor(options: BedrockOptions) {
     super({
@@ -42,6 +54,7 @@ export class Bedrock extends BaseAIProvider {
     this._bedrockMod =
       (options.bedrockModule as Record<string, unknown> | null) ??
       _BedrockModule;
+    this._pricingModelName = options.pricingModelName;
   }
 
   async converse(params: Record<string, unknown>): Promise<unknown> {
@@ -68,11 +81,12 @@ export class Bedrock extends BaseAIProvider {
       const latencyMs = performance.now() - startTime;
 
       const extracted = extractBedrockResponse(response);
+      const costModelName = this._pricingModelName ?? modelId;
       let costUsd: number | null = null;
       if (extracted.inputTokens != null && extracted.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: modelId,
+            modelName: costModelName,
             inputTokens: extracted.inputTokens,
             outputTokens: extracted.outputTokens,
             cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
@@ -155,7 +169,7 @@ export class Bedrock extends BaseAIProvider {
 
       return {
         ...response,
-        stream: this._wrapConverseStream(modelId, params, stream, ctx),
+        stream: this._wrapConverseStream(modelId, this._pricingModelName, params, stream, ctx),
       };
     } catch (error) {
       this._track({
@@ -206,11 +220,12 @@ export class Bedrock extends BaseAIProvider {
         responseBody,
       );
 
+      const costModelName = this._pricingModelName ?? modelId;
       let costUsd: number | null = null;
       if (extracted.inputTokens != null && extracted.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: modelId,
+            modelName: costModelName,
             inputTokens: extracted.inputTokens,
             outputTokens: extracted.outputTokens,
             defaultProvider: 'bedrock',
@@ -293,7 +308,7 @@ export class Bedrock extends BaseAIProvider {
 
       return {
         ...response,
-        body: this._wrapInvokeModelStream(modelId, params, stream, ctx),
+        body: this._wrapInvokeModelStream(modelId, this._pricingModelName, params, stream, ctx),
       };
     } catch (error) {
       this._track({
@@ -316,6 +331,7 @@ export class Bedrock extends BaseAIProvider {
 
   private async *_wrapInvokeModelStream(
     modelId: string,
+    pricingModelName: string | undefined,
     params: Record<string, unknown>,
     stream: AsyncIterable<unknown>,
     ctx: ReturnType<typeof applySessionContext>,
@@ -354,11 +370,12 @@ export class Bedrock extends BaseAIProvider {
     } finally {
       const state = accumulator.getState();
       const modelName = String(accumulator.model ?? modelId);
+      const costModelName = pricingModelName ?? modelName;
       let costUsd: number | null = null;
       if (state.inputTokens != null && state.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName,
+            modelName: costModelName,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             defaultProvider: 'bedrock',
@@ -390,6 +407,7 @@ export class Bedrock extends BaseAIProvider {
 
   private async *_wrapConverseStream(
     modelId: string,
+    pricingModelName: string | undefined,
     params: Record<string, unknown>,
     stream: AsyncIterable<unknown>,
     ctx: ReturnType<typeof applySessionContext>,
@@ -463,11 +481,12 @@ export class Bedrock extends BaseAIProvider {
     } finally {
       const state = accumulator.getState();
       const modelName = String(accumulator.model ?? modelId);
+      const costModelName = pricingModelName ?? modelName;
       let costUsd: number | null = null;
       if (state.inputTokens != null && state.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName,
+            modelName: costModelName,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             cacheReadInputTokens: state.cacheReadTokens ?? 0,
