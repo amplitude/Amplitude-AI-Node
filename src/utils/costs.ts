@@ -56,6 +56,21 @@ export function enableLivePriceUpdates(intervalMs = 3_600_000): void {
   setInterval(doUpdate, intervalMs).unref?.();
 }
 
+/**
+ * ARN prefix for AWS Bedrock inference profile model IDs.
+ *
+ * Application inference profiles (``arn:aws:bedrock:*:application-inference-profile/...``)
+ * are opaque — they carry no model identity in the ARN path, so cost cannot be
+ * calculated for them.  AWS cross-region inference profiles follow the same ARN
+ * format and are equally unresolvable through the current pricing pipeline.
+ *
+ * ``stripProviderPrefix`` deliberately does NOT strip ``arn:`` (see comment below)
+ * and ``getGenaiPriceLookupCandidates`` returns empty candidates for ARN models
+ * so pricing silently falls through to ``0`` / ``None`` rather than attempting
+ * genai-prices lookups that would produce misleading ``LookupError`` warnings.
+ */
+const _BEDROCK_ARN_RE = /^arn:aws:bedrock:.*:(?:application-)?inference-profile\//;
+
 export function stripProviderPrefix(modelName: string): string {
   const colonIdx = modelName.indexOf(':');
   if (colonIdx < 0) return modelName;
@@ -64,6 +79,10 @@ export function stripProviderPrefix(modelName: string): string {
   // If the prefix contains a dot, it's part of a Bedrock model ID where the
   // colon separates a version suffix (e.g. "anthropic.claude-v1:0").
   if (prefix.includes('.')) return modelName;
+  // AWS ARNs ("arn:aws:bedrock:...") are NOT provider prefixes — "arn" is the
+  // standard ARN format indicator.  Leave the full ARN intact so downstream
+  // code (e.g. ``getGenaiPriceLookupCandidates``) can recognise it.
+  if (prefix === 'arn') return modelName;
   return modelName.slice(colonIdx + 1);
 }
 
@@ -96,6 +115,11 @@ export function getGenaiPriceLookupCandidates(
   modelName: string,
   defaultProvider?: string,
 ): Array<{ model: string; providerId?: string }> {
+  // AWS Bedrock ARNs (inference profiles, application inference profiles) carry
+  // no model identity that could be priced.  Return empty to silently fall back
+  // to 0 rather than attempting lookups that pollute logs with LookupErrors.
+  if (_BEDROCK_ARN_RE.test(modelName)) return [];
+
   const stripped = stripProviderPrefix(modelName);
   const inferred = defaultProvider ?? tryInferProviderFromModel(stripped);
 

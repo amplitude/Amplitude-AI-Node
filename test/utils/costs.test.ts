@@ -499,4 +499,114 @@ describe('calculateCost', () => {
     });
     expect(typeof result).toBe('number');
   });
+
+  // ------ AWS Bedrock ARN inference profiles ------
+
+  it('returns 0 cost for application-inference-profile ARN', (): void => {
+    const result = calculateCost({
+      modelName:
+        'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+      inputTokens: 1000,
+      outputTokens: 500,
+      defaultProvider: 'bedrock',
+    });
+    expect(result).toBe(0);
+  });
+
+  it('returns 0 cost for cross-region inference-profile ARN', (): void => {
+    const result = calculateCost({
+      modelName:
+        'arn:aws:bedrock:us-east-1::inference-profile/us.anthropic.claude-sonnet-4-20250514',
+      inputTokens: 1000,
+      outputTokens: 500,
+      defaultProvider: 'bedrock',
+    });
+    expect(result).toBe(0);
+  });
+
+  it('does not interfere with normal Bedrock model IDs', (): void => {
+    const result = calculateCost({
+      modelName: 'us.anthropic.claude-sonnet-4-6',
+      inputTokens: 1000,
+      outputTokens: 500,
+      defaultProvider: 'bedrock',
+    });
+    expect(result).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ARN model IDs — stripProviderPrefix
+// ---------------------------------------------------------------------------
+
+describe('ARN model IDs', () => {
+  describe('stripProviderPrefix', () => {
+    it('does not strip arn: prefix', (): void => {
+      expect(
+        stripProviderPrefix(
+          'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+        ),
+      ).toBe(
+        'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+      );
+    });
+
+    it('does not strip arn: for cross-region inference profile', (): void => {
+      expect(
+        stripProviderPrefix(
+          'arn:aws:bedrock:us-east-1::inference-profile/us.anthropic.claude-sonnet-4-20250514',
+        ),
+      ).toBe(
+        'arn:aws:bedrock:us-east-1::inference-profile/us.anthropic.claude-sonnet-4-20250514',
+      );
+    });
+
+    it('still strips normal provider prefixes like openai:', (): void => {
+      expect(stripProviderPrefix('openai:gpt-4o')).toBe('gpt-4o');
+    });
+
+    it('still strips bedrock: provider prefix', (): void => {
+      expect(
+        stripProviderPrefix('bedrock:anthropic.claude-sonnet-4-6'),
+      ).toBe('anthropic.claude-sonnet-4-6');
+    });
+
+    it('preserves Bedrock model IDs with version-suffix colons', (): void => {
+      expect(
+        stripProviderPrefix('anthropic.claude-sonnet-4-6:v1'),
+      ).toBe('anthropic.claude-sonnet-4-6:v1');
+    });
+  });
+
+  describe('getGenaiPriceLookupCandidates', () => {
+    it('returns empty candidates for application-inference-profile ARN', (): void => {
+      const candidates = getGenaiPriceLookupCandidates(
+        'arn:aws:bedrock:us-east-1:024848455093:application-inference-profile/u8j91z6xnr8b',
+        'bedrock',
+      );
+      expect(candidates).toHaveLength(0);
+    });
+
+    it('returns empty candidates for cross-region inference-profile ARN', (): void => {
+      const candidates = getGenaiPriceLookupCandidates(
+        'arn:aws:bedrock:us-east-1::inference-profile/us.anthropic.claude-sonnet-4-20250514',
+        'bedrock',
+      );
+      expect(candidates).toHaveLength(0);
+    });
+
+    it('still returns candidates for normal Bedrock model IDs', (): void => {
+      const candidates = getGenaiPriceLookupCandidates(
+        'us.anthropic.claude-sonnet-4-6',
+        'bedrock',
+      );
+      expect(candidates.length).toBeGreaterThan(0);
+    });
+
+    it('still returns candidates for provider-prefixed models', (): void => {
+      const candidates =
+        getGenaiPriceLookupCandidates('openai:gpt-4o');
+      expect(candidates.length).toBeGreaterThan(0);
+    });
+  });
 });
