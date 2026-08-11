@@ -1,5 +1,7 @@
 # Instrument with @amplitude/ai
 
+> **Reference:** [Agent Analytics SDK docs](https://amplitude.com/docs/sdks/agent-analytics/sdk#install-the-sdk)
+
 Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Discover → Instrument → Verify**. The result is a fully instrumented app with provider wrappers, session lifecycle, multi-agent delegation (when detected), and a verification test proving correctness — all before deploying anything.
 
 ---
@@ -10,7 +12,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
 3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
-5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place.
+5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place. **If plain Amplitude packages are present, inspect their initialization (e.g. `amplitude.init(...)`, `new Amplitude(...)`) to find the API key env var already in use** (e.g. `process.env.AMPLITUDE_API_KEY`). Ask the developer: "I found an existing Amplitude setup using `AMPLITUDE_API_KEY` — should I reuse that key for Agent Analytics, or use a separate key under a different env var?" Use whichever they confirm; do not assume `AMPLITUDE_AI_API_KEY` if they already have a key configured.
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
 7. Check for streaming: `stream: true` in provider calls
 8. Check for frontend deps: `react`, `vue`, `svelte` in deps
@@ -91,8 +93,12 @@ Proceed with instrumentation? [Review changes first / Apply / Skip]
 
 ### Step 3a: Install dependencies
 
+Check whether `@amplitude/ai` is already in `package.json` dependencies. If it is, skip this step. If not, detect the package manager (`pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, otherwise npm) and install:
+
 ```bash
-pnpm add @amplitude/ai    # or npm install / yarn add
+pnpm add @amplitude/ai          # pnpm
+yarn add @amplitude/ai          # yarn
+npm install @amplitude/ai       # npm
 ```
 
 ### Step 3b: Create bootstrap file
@@ -158,7 +164,8 @@ const agent = ai.agent('chat-handler', {
 export async function POST(req: Request) {
   const { messages, userId, sessionId } = await req.json();
   return agent.session({ userId, sessionId }).run(async (s) => {
-    s.trackUserMessage(messages[messages.length - 1].content);
+    // Do NOT call s.trackUserMessage() here — the provider wrapper auto-emits
+    // [Agent] User Message from the messages array. Calling both produces duplicates.
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
     return Response.json(response);
   });
@@ -693,12 +700,44 @@ npx vitest run __amplitude_verify__.test.ts
 npx amplitude-ai doctor
 ```
 
+If the project uses a different env var for the Amplitude API key (detected in Phase 1 Step 5), pass it with `--key-env` so doctor validates the correct variable:
+
+```bash
+npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+```
+
+If the key lives in a `.env` file rather than the shell environment, load it first:
+
+```bash
+set -a && source .env && set +a && npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+```
+
+All doctor failures are mandatory to resolve before proceeding.
+
 ### Step 4d: Run project checks
 
 ```bash
 npx tsc --noEmit    # TypeScript compiles
 npm test            # Existing tests still pass
 ```
+
+### Step 4d-live: Send a real test event
+
+Start the app locally and hit at least one instrumented endpoint to confirm events reach the Amplitude transport (HTTP 200, no flush errors). This proves the live pipeline works, not just the mock:
+
+```bash
+# Start the app (adapt to the project's run command)
+node server.js &
+
+# Hit the instrumented endpoint
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "hello", "userId": "smoke-test-user", "sessionId": "smoke-test-session"}'
+
+# Expected: 200. Check for flush errors in the app logs.
+```
+
+If the app uses a different framework or endpoint shape, adapt the curl accordingly. The goal is one real request that exercises the session context and provider wrapper.
 
 ### Step 4e: Show confidence report
 
@@ -752,6 +791,14 @@ After each fix:
   4. Repeat until "Ready to deploy"
 
 Do NOT proceed to Phase 5 with any data quality gate failing.
+
+> **Checklist before telling the user instrumentation is complete:**
+> - [ ] Step 4b: verification test ran and passed
+> - [ ] Step 4c: `npx amplitude-ai doctor` ran and all checks passed (or failing checks are explicitly explained)
+> - [ ] Step 4d: TypeScript and existing tests still pass
+> - [ ] Step 4d-live: real request sent to the app, HTTP 200, no flush errors in logs
+>
+> Do not report "instrumentation is complete" until all four are checked off.
 
 ---
 

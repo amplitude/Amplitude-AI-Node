@@ -11,6 +11,7 @@ type DoctorResult = {
 
 type DoctorOptions = {
   includeMockCheck?: boolean;
+  apiKeyEnv?: string;
 };
 
 const readPackageJson = (cwd: string): Record<string, unknown> | null => {
@@ -111,13 +112,14 @@ const runFillRates = (_cwd: string): FillRateResult => {
 const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
   const checks: DoctorResult['checks'] = [];
 
-  const hasApiKey = Boolean(process.env.AMPLITUDE_AI_API_KEY);
+  const keyEnv = options.apiKeyEnv ?? 'AMPLITUDE_AI_API_KEY';
+  const hasApiKey = Boolean(process.env[keyEnv]);
   checks.push({
-    name: 'env.AMPLITUDE_AI_API_KEY',
+    name: `env.${keyEnv}`,
     ok: hasApiKey,
     detail: hasApiKey ? 'present' : 'missing',
     ...(!hasApiKey && {
-      fix: 'export AMPLITUDE_AI_API_KEY=your_project_api_key',
+      fix: `export ${keyEnv}=your_project_api_key`,
     }),
   });
 
