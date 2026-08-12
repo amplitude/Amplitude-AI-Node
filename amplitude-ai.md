@@ -34,7 +34,20 @@ Detected environment:
   Recommended: full instrumentation
 ```
 
-**Next step:** Confirm the detection with the developer, then proceed to full instrumentation. Always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
+After listing the environment, derive the instrumentation requirements and append them:
+
+```
+Your instrumentation requirements:
+  REQUIRED  [if framework is "none" or no serverless signals] Non-serverless runtime → call `await ai.flush()` after each `session.run()`
+  REQUIRED  [if framework is "none" and multi-turn] Multi-turn HTTP server → stable sessionId across requests (use conversation/thread ID, not a per-request UUID); agent defined at module level
+  REQUIRED  [if Bedrock and "type":"module" in package.json] Bedrock + ESM → pass `bedrockModule` explicitly to `Bedrock` constructor (no CJS require() available)
+  REQUIRED  [if streaming] Streaming → keep `session.run()` open until stream is fully consumed; do not return the stream before `run()` exits
+  WARNING   [if cross-region Bedrock model ID e.g. us.*, eu.*] Cross-region model ID → cost tracking will be missing; use canonical Bedrock model ID for cost (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
+```
+
+Only emit requirement lines that apply to the detected environment. Carry this list through Phases 3 and 4: Phase 3 implements every REQUIRED item; Phase 4 verifies each one behaviorally.
+
+**Next step:** Confirm the detection and requirements list with the developer, then proceed to full instrumentation. Always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
 
 ---
 
@@ -134,6 +147,8 @@ export const openai = new OpenAI({
 
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
 
+> **Agent as module-level singleton:** Define agents at the top level of the bootstrap file or route module — never inside a request handler. Re-creating `ai.agent(...)` on every request produces a different `[Agent] Agent ID` per turn, which breaks session grouping in Agent Analytics.
+
 > **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible. `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock, and Mistral clients.
 
 ### Step 3c: Swap provider imports
@@ -177,6 +192,10 @@ export async function POST(req: Request) {
 - Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
 - Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
 - Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
+
+> **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
+>
+> **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Without it, events are queued in memory and sent on the next flush interval — or never, if the process restarts. This produces no error and no log output; silence here means data loss.
 
 <!-- llms-excerpt:content-shaping:start -->
 **User message text vs structured pipeline data (critical for Agent Analytics UI):**
@@ -665,26 +684,32 @@ mock.eventsForAgent('child-agent-id');  // filter by agent
 
 // Data quality gate — catch silent instrumentation gaps that produce
 // broken dashboards without throwing any errors at runtime.
-const aiEvents = mock.eventsOfType('[Agent] AI Response');
+// Import SDK constants so typos are caught at compile time, not silently at runtime.
+import {
+  PROP_SESSION_ID, PROP_MODEL_NAME, PROP_PROVIDER, PROP_LATENCY_MS,
+  PROP_INPUT_TOKENS, PROP_OUTPUT_TOKENS, PROP_COST_USD,
+} from '@amplitude/ai';
+
+const aiEvents = mock.getEvents('[Agent] AI Response');
 for (const e of aiEvents) {
   const p = e.event_properties ?? {};
   // Identity: at least one of userId or deviceId must be set
   expect(e.user_id || e.device_id).toBeTruthy();
   // Session grouping
-  expect(p['[Agent] Session ID']).toBeTruthy();
+  expect(p[PROP_SESSION_ID]).toBeTruthy();
   // Model must be a canonical provider ID (e.g. "claude-sonnet-4-20250514",
   // not a gateway alias like "claude-sonnet-4-6") for cost calculation
-  expect(p['[Agent] Model']).toBeTruthy();
+  expect(p[PROP_MODEL_NAME]).toBeTruthy();
   // Provider
-  expect(p['[Agent] Provider']).toBeTruthy();
+  expect(p[PROP_PROVIDER]).toBeTruthy();
   // Latency
-  expect(p['[Agent] Latency Ms']).toBeGreaterThan(0);
+  expect(p[PROP_LATENCY_MS]).toBeGreaterThan(0);
   // Tokens — needed for token analytics and cost estimation
-  expect(p['[Agent] Input Tokens']).toBeGreaterThan(0);
-  expect(p['[Agent] Output Tokens']).toBeGreaterThan(0);
+  expect(p[PROP_INPUT_TOKENS]).toBeGreaterThan(0);
+  expect(p[PROP_OUTPUT_TOKENS]).toBeGreaterThan(0);
   // Cost — if missing, the model name is likely not in genai-prices.
   // Fix: use the canonical model ID or set totalCostUsd explicitly.
-  expect(p['[Agent] Cost USD']).toBeDefined();
+  expect(p[PROP_COST_USD]).toBeDefined();
 }
 ```
 
@@ -734,8 +759,10 @@ curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "hello", "userId": "smoke-test-user", "sessionId": "smoke-test-session"}'
 
-# Expected: 200. Check for flush errors in the app logs.
+# Expected: 200.
 ```
+
+After the request completes, open **Amplitude > Agent Analytics > Sessions** and verify the session appears with the correct `userId`, `agentId`, and event sequence (User Message → AI Response → Session End). This is the behavioral confirmation — HTTP 200 only proves the transport accepted the request, not that events were recorded. If the session does not appear within 60 seconds, the most common cause is a missing `await ai.flush()` (non-serverless runtimes do not auto-flush).
 
 If the app uses a different framework or endpoint shape, adapt the curl accordingly. The goal is one real request that exercises the session context and provider wrapper.
 
@@ -796,9 +823,11 @@ Do NOT proceed to Phase 5 with any data quality gate failing.
 > - [ ] Step 4b: verification test ran and passed
 > - [ ] Step 4c: `npx amplitude-ai doctor` ran and all checks passed (or failing checks are explicitly explained)
 > - [ ] Step 4d: TypeScript and existing tests still pass
-> - [ ] Step 4d-live: real request sent to the app, HTTP 200, no flush errors in logs
+> - [ ] Step 4d-live: real request sent to the app, session visible in Agent Analytics within ~60 seconds
+> - [ ] `await ai.flush()` is called after each `session.run()` in long-lived servers (Express, Fastify, plain Node `http`) — not needed for serverless/short-lived processes
+> - [ ] `ai` and `agent` are module-level singletons, not re-created per request
 >
-> Do not report "instrumentation is complete" until all four are checked off.
+> Do not report "instrumentation is complete" until all items are checked off.
 
 ---
 
@@ -824,6 +853,8 @@ PR body should include:
     - [ ] Existing tests still pass
     - [ ] No `.env` files or API keys committed
     - [ ] `.gitignore` includes `.env`
+    - [ ] Non-serverless runtime: `await ai.flush()` called after each `session.run()`
+    - [ ] Agent defined at module level (not inside request handler)
 
 ### Step 5b: Reviewer guide
 
