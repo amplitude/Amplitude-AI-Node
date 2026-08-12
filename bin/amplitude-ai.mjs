@@ -17,13 +17,17 @@ const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.jso
 
 if (command === '--help' || command === '-h' || command === undefined) {
   const version = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
+  const apiKeySet = !!process.env.AMPLITUDE_AI_API_KEY;
+  const keyLine = apiKeySet
+    ? '  The AMPLITUDE_AI_API_KEY environment variable supplies the API key to use\n  for instrumentation, running, and verification. Keep it available\n  to the app runtime.\n'
+    : '';
   process.stdout.write(
     `@amplitude/ai v${version}
 
 Paste this into your AI coding agent (Cursor, Claude Code, Copilot, etc.):
 
   Instrument this app with @amplitude/ai. Follow node_modules/@amplitude/ai/amplitude-ai.md
-
+${keyLine}
 CLI commands:
   mcp            Start the MCP server (optional, for advanced tooling)
   doctor         Validate environment, deps, and event pipeline
