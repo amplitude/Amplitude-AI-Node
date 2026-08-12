@@ -248,6 +248,8 @@ const result = await searchProducts(query);
 // [Agent] Tool Call event automatically emitted with duration, success, input/output
 ```
 
+> `tool()` applies to **any function the agent calls as a tool step** — not just external API calls. Deterministic helpers, local classifiers, pre-processing functions — if the agent invokes it as part of its reasoning flow, wrap it. Without wrapping, the tool step is invisible to Agent Analytics even though the rest of the session is tracked.
+
 **Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
 
 1. **`[Agent] Tool Call`** (via `tool()` or `trackToolCall()`) — operational telemetry: latency, success/failure, error rate on the action itself.
@@ -299,6 +301,13 @@ s.trackAiMessage(completedMessage.content, 'gpt-4o', 'openai', latencyMs, {
 ```
 
 **Proxies and OpenAI-compatible gateways:** When calls go through a gateway (custom `baseURL`, unified API, etc.), `@amplitude/ai` may not wrap that client. After each completion, read **`usage`** from the response (or final stream chunk) and pass **`inputTokens` / `outputTokens` / `totalTokens`** into `trackAiMessage`. For the **model** argument, use the **real provider model id** the gateway routed to (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`) — not an internal gateway product label.
+
+**Local and on-device models** (node-llama-cpp, Ollama, llama.cpp, etc.): call `trackAiMessage` with `"local"` as the provider and your model name as the model. Omit `inputTokens`/`outputTokens` — local inference libraries typically don't return a usage object. Token charts and cost will be empty, which is expected: there are no API fees and no pricing data exists for local models.
+
+```typescript
+s.trackAiMessage(responseText, 'qwen2.5-0.5b', 'local', latencyMs);
+// Token and cost fields intentionally absent — local model, no usage object returned.
+```
 
 > **Cost tracking for proxies/gateways:** `client.trackAiMessage()` auto-calculates cost via genai-prices when `model` and token counts are provided and `totalCostUsd` is not set. If the model cannot be priced, the SDK omits `[Agent] Cost USD` rather than recording an authoritative `$0`.
 >
