@@ -38,8 +38,7 @@ After listing the environment, derive the instrumentation requirements and appen
 
 ```
 Your instrumentation requirements:
-  REQUIRED  [if framework is "none" or no serverless signals] Non-serverless runtime → call `await ai.flush()` after each `session.run()`
-  REQUIRED  [if framework is "none" and multi-turn] Multi-turn HTTP server → stable sessionId across requests (use conversation/thread ID, not a per-request UUID); agent defined at module level
+  REQUIRED  [if non-serverless — no Lambda/Vercel/Cloud Functions signals detected] Long-lived server → call `await ai.flush()` after each `session.run()`; use a stable sessionId tied to the conversation (not a per-request UUID); define agent at module level
   REQUIRED  [if Bedrock and "type":"module" in package.json] Bedrock + ESM → pass `bedrockModule` explicitly to `Bedrock` constructor (no CJS require() available)
   REQUIRED  [if streaming] Streaming → keep `session.run()` open until stream is fully consumed; do not return the stream before `run()` exits
   WARNING   [if cross-region Bedrock model ID e.g. us.*, eu.*] Cross-region model ID → cost tracking will be missing; use canonical Bedrock model ID for cost (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
