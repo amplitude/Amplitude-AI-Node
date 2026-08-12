@@ -47,7 +47,7 @@ Your instrumentation requirements:
 
 Only emit requirement lines that apply to the detected environment. Carry this list through Phases 3 and 4: Phase 3 implements every REQUIRED item; Phase 4 verifies each one behaviorally.
 
-**Next step:** Confirm the detection and requirements list with the developer, then proceed to full instrumentation. Always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
+**PAUSE.** Show the detection output and requirements list to the developer. Ask if anything looks wrong or missing before continuing. Do not start Phase 2 until they confirm. Once confirmed, proceed to Phase 2 — always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
 
 ---
 
@@ -98,7 +98,7 @@ Multi-agent architecture: delegation-as-tools (A2A)
 Proceed with instrumentation? [Review changes first / Apply / Skip]
 ```
 
-**PAUSE HERE.** Let the developer review the agent names, descriptions, and structure before proceeding. They can edit names and descriptions.
+**PAUSE.** Present the agent map and instrumentation plan to the developer — no code has been written yet. Explain what files will be created or modified and why. Ask them to confirm agent names and descriptions (these appear in dashboards) and give the go-ahead before starting Phase 3.
 
 ---
 
@@ -652,6 +652,10 @@ app.use(createAmplitudeAIMiddleware({
 
 ---
 
+**Before moving to Phase 4**, briefly tell the developer what was instrumented: which files were changed, which agents and providers are now tracked, and which REQUIRED items from the Phase 1 requirements list were implemented. Keep it concise — a few bullets is enough.
+
+---
+
 ## Phase 4: Verify
 
 > **Do not report instrumentation as complete until you have executed Steps 4b, 4c, and 4d and all checks pass.** Wiring the code is not done — verification is part of the task.
@@ -818,6 +822,8 @@ After each fix:
   4. Repeat until "Ready to deploy"
 
 Do NOT proceed to Phase 5 with any data quality gate failing.
+
+**PAUSE.** Show the developer the full verification results (doctor checks, test results, data quality gate, live session confirmation). Ask for their go-ahead before creating any branch or PR. Only proceed to Phase 5 once they confirm.
 
 > **Checklist before telling the user instrumentation is complete:**
 > - [ ] Step 4b: verification test ran and passed
@@ -1235,7 +1241,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 - **Never modify unrelated files.** Only touch files with LLM call sites and the bootstrap file.
 - **Never duplicate instrumentation.** Check for existing `patch()` or wrapper calls before adding new ones.
 - **Route events by kind, not by convenience.** Agent telemetry must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.) — the base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata, so agent telemetry sent that way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom *agent* event not covered by the other `track*` methods. The base SDK's `track()` is correct in exactly one case: genuine **business/product events** (e.g. `Product Added`) emitted for cross-journey attribution, which must stay non-`[Agent]` so they join the standard web/mobile taxonomy (see Step 3e). Never send those through `track*`.
-- **Pause before Phase 3.** Always show the discovery report and get developer confirmation.
+- **Three mandatory pauses:** after Phase 1 (detection confirmed), after Phase 2 (plan confirmed before writing any code), and after Phase 4 (verification results shown before creating any PR). Do not advance past any of these without explicit developer confirmation.
 - **Prefer additive changes.** Add imports and wrappers rather than rewriting entire files.
 - **Keep content mode explicit.** Default is `full` + `redactPii: true`. Never silently downgrade.
 - **Preserve existing tests.** Instrumentation must not break the test suite.
