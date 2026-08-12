@@ -646,6 +646,8 @@ const deviceId = req.headers.get('x-amplitude-device-id');
 const session = agent.session({ userId, browserSessionId, deviceId });
 ```
 
+**Browser `userId` and `sessionId`:** `userId` is a stable, persisted user identity (how it's stored depends on the app). `sessionId` is conversation-scoped — generate a fresh UUID when starting a new chat, reuse the stored one when resuming an existing chat.
+
 ### Step 3k: Framework-specific notes
 
 **Next.js App Router**: Session wrapping goes inside each route handler. Add `@amplitude/ai` to `serverExternalPackages` in `next.config.ts`.
