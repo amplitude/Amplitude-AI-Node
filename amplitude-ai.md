@@ -198,6 +198,22 @@ export async function POST(req: Request) {
 
 > **[Frontend: yes] Client-managed sessionId — required check.** If the browser client generates its own `sessionId` (common when the app doesn't use the Amplitude browser SDK), verify it is conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts, and do not persist it indefinitely across page loads. A sessionId stored in `localStorage` and never reset will silently route all new events under an old session — the server accepts and enriches them correctly, but they never appear as new sessions in Agent Analytics because the ID predates instrumentation. This is invisible at the server level: HTTP 200, events ingested, nothing in the logs. The fix must happen in the client. During verification (Step 4d-live), use an incognito window, which starts with empty storage and guarantees a fresh sessionId.
 
+> **Latency on error paths:** The happy-path examples above capture latency only on success. For production code, start the timer before the LLM call and record latency in a `finally` block so it's captured whether the call succeeds or throws:
+> ```typescript
+> const start = performance.now();
+> try {
+>   const response = await client.chat.completions.create({ model, messages });
+>   // provider wrapper auto-emits [Agent] AI Response with latency on success
+> } catch (e) {
+>   s.trackAiMessage('', model, 'openai', performance.now() - start, {
+>     isError: true,
+>     errorMessage: (e as Error).message,
+>   });
+>   throw e;
+> }
+> ```
+> Without this, a failed LLM call produces no `[Agent] AI Response` event — the turn is invisible in Agent Analytics and latency/error-rate charts miss the failure entirely.
+
 > **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
 >
 > **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Use `try/finally` so events are flushed even when `session.run()` throws — without it, an unhandled error silently drops all queued events:
@@ -994,7 +1010,7 @@ After the PR is merged and deployed:
 |--------|--------------|
 | `s.trackUserMessage(content, opts?)` | `[Agent] User Message` |
 | `s.trackAiMessage(content, model, provider, latencyMs, opts?)` — `opts`: `{ inputTokens?, outputTokens?, totalCostUsd?, isError?, errorMessage? }` | `[Agent] AI Response` |
-| `s.trackToolCall(toolName, latencyMs, success, opts?)` — `opts`: `{ input?, output?, isError?, errorMessage? }`. Use directly for synchronous tools; `tool()` HOF is async-only. | `[Agent] Tool Call` |
+| `s.trackToolCall(toolName, latencyMs, success, opts?)` — `opts`: `{ toolInput?, toolOutput?, errorMessage?, errorType? }`. Use directly for synchronous tools; `tool()` HOF is async-only. | `[Agent] Tool Call` |
 | `s.score(name, value, targetId)` | `[Agent] Score` |
 
 ### Higher-Order Functions
