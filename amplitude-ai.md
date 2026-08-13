@@ -2,7 +2,7 @@
 
 > **Reference:** [Agent Analytics SDK docs](https://amplitude.com/docs/sdks/agent-analytics/sdk#install-the-sdk)
 
-Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Discover → Instrument → Verify**. The result is a fully instrumented app with provider wrappers, session lifecycle, multi-agent delegation (when detected), and a verification test proving correctness — all before deploying anything.
+Auto-instrument a JS/TS AI app with `@amplitude/ai` in 5 phases: **Detect → Discover → Instrument → Verify → Ship**. The result is a fully instrumented app with provider wrappers, session lifecycle, multi-agent delegation (when detected), and a verification test proving correctness — all before deploying anything.
 
 ---
 
@@ -10,12 +10,12 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 
 1. Read `package.json` for dependencies
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
-3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
+3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **local/on-device LLMs**: `node-llama-cpp`, `@ollama/sdk`, `ollama`, `lmstudio` in deps, or a `baseURL` pointing to `localhost` / `127.0.0.1` that is not a known proxy (LiteLLM, OpenRouter, etc.) — flag these as `Local LLM: yes`. No `@amplitude/ai` wrapper exists for local models; plan manual tracking. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
 5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place. **If plain Amplitude packages are present, inspect their initialization (e.g. `amplitude.init(...)`, `new Amplitude(...)`) to find the API key env var already in use** (e.g. `process.env.AMPLITUDE_API_KEY`). Ask the developer: "I found an existing Amplitude setup using `AMPLITUDE_API_KEY` — should I reuse that key for Agent Analytics, or use a separate key under a different env var?" Use whichever they confirm; do not assume `AMPLITUDE_AI_API_KEY` if they already have a key configured.
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
 7. Check for streaming: `stream: true` in provider calls
-8. Check for frontend deps: `react`, `vue`, `svelte` in deps
+8. Determine whether the server delivers a browser UI. Ask: does any route or static handler send HTML to a browser? Evidence: an `index.html` anywhere in the project, a static file directory (`public/`, `static/`, `dist/`), HTML template files, or any response with `Content-Type: text/html`. Framework-specific deps (`react`, `vue`, `svelte`) are one signal but not the only one. If yes, flag `Frontend: yes` — a browser client is generating or persisting `sessionId`
 9. Check for Vercel AI SDK: `@ai-sdk/*` in deps
 10. Check for edge runtime: `runtime = 'edge'` in route files
 
@@ -34,7 +34,21 @@ Detected environment:
   Recommended: full instrumentation
 ```
 
-**Next step:** Confirm the detection with the developer, then proceed to full instrumentation. Always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
+After listing the environment, derive the instrumentation requirements and append them:
+
+```
+Your instrumentation requirements:
+  REQUIRED  [if non-serverless — no Lambda/Vercel/Cloud Functions signals detected] Long-lived server → call `await ai.flush()` after each `session.run()`; use a stable sessionId tied to the conversation (not a per-request UUID); define agent at module level
+  REQUIRED  [if Bedrock and "type":"module" in package.json] Bedrock + ESM → pass `bedrockModule` explicitly to `Bedrock` constructor (no CJS require() available)
+  REQUIRED  [if streaming] Streaming → keep `session.run()` open until stream is fully consumed; do not return the stream before `run()` exits
+  REQUIRED  [if Local LLM: yes] No provider wrapper available → use manual tracking: `trackUserMessage` + `trackAiMessage` + `trackToolCall`. Doctor will report `provider_dependency` — this is a false positive, not a bug; the instrumentation is correct. Pass `totalCostUsd: 0` on every `trackAiMessage` call — omitting it will silently fail the Phase 4 data quality cost check.
+  REQUIRED  [if Frontend: yes] Client sessionId scope → verify the browser client resets `sessionId` when a new conversation starts; a sessionId persisted in localStorage across page loads will silently attach new events to an old session that predates instrumentation and will never appear in Agent Analytics
+  WARNING   [if cross-region Bedrock model ID e.g. us.*, eu.*] Cross-region model ID → cost tracking will be missing; use canonical Bedrock model ID for cost (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
+```
+
+Only emit requirement lines that apply to the detected environment. Carry this list through Phases 3 and 4: Phase 3 implements every REQUIRED item; Phase 4 verifies each one behaviorally.
+
+**PAUSE.** Show the detection output and requirements list to the developer. Ask if anything looks wrong or missing before continuing. Do not start Phase 2 until they confirm. Once confirmed, proceed to Phase 2 — always instrument with agents, sessions, provider wrappers, tool tracking, and scoring. If multi-agent signals are detected, also add child agents and `runAs` delegation.
 
 ---
 
@@ -50,6 +64,7 @@ Detected environment:
    - Delegation patterns (parent calls child → `runAs`)
    - Feedback handlers (thumbs up/down UI components)
    - Tool functions (functions called by the LLM via function calling)
+   - **If Frontend: yes was flagged in Phase 1**: also find the client-side file where `sessionId` is generated and stored. Identify whether it uses `localStorage`, a React state, or another mechanism — this is the file that Step 3j will fix.
 4. For each event emission you plan to add, trace **all code paths** that should emit the same event type. Look for error handlers, retry-exhaustion paths, timeout handlers, and fallback branches that represent the same logical operation failing — these should also emit the event (typically with `success: false` or an `errorMessage`).
 
 ### Multi-Agent Detection
@@ -82,14 +97,36 @@ Agent 2: "recipe-agent"  (child of chat-handler, called as a tool)
 Multi-agent architecture: delegation-as-tools (A2A)
   → will instrument with ai.agent().child() + session.runAs()
 
+Requirements to implement (from Phase 1):
+  □ [copy each REQUIRED item that applied — do not omit any]
+
+Files to create or modify:
+  CREATE src/lib/amplitude.ts          — bootstrap (AmplitudeAI, AIConfig, provider wrappers)
+  MODIFY src/app/api/chat/route.ts     — wrap handler with agent.session().run()
+  [list all files that will change]
+
 Proceed with instrumentation? [Review changes first / Apply / Skip]
 ```
 
-**PAUSE HERE.** Let the developer review the agent names, descriptions, and structure before proceeding. They can edit names and descriptions.
+**PAUSE.** Present the agent map, the REQUIRED items list, and the file plan to the developer — no code has been written yet. Confirm agent names and descriptions (these appear in dashboards) and get the go-ahead before starting Phase 3. The developer must see and approve the REQUIRED items here; do not begin Phase 3 until confirmed.
 
 ---
 
 ## Phase 3: Instrument
+
+**Before writing any code**, verify your implementation plan covers every REQUIRED item from Phase 1. Each maps to a specific step:
+
+| REQUIRED item | Implemented in |
+|---------------|---------------|
+| Non-serverless flush (`await ai.flush()` + `try/finally`) | Step 3d |
+| Stable `sessionId` tied to conversation, not per-request UUID | Step 3d |
+| Agent defined at module level (singleton) | Step 3b |
+| Bedrock + ESM → pass `bedrockModule` explicitly | Step 3b |
+| Streaming → keep `session.run()` open until stream consumed | Step 3i |
+| Local LLM → manual tracking + `totalCostUsd: 0` on every call | Step 3e |
+| Frontend `sessionId` scope → reset on new conversation | Step 3j |
+
+If a REQUIRED item from your Phase 1 list does not appear in this table, implement it in the most relevant step and do not skip it. Every REQUIRED item must have code written for it before Phase 4.
 
 ### Step 3a: Install dependencies
 
@@ -103,7 +140,9 @@ npm install @amplitude/ai       # npm
 
 ### Step 3b: Create bootstrap file
 
-Create `src/lib/amplitude.ts` (or the project's conventional lib path):
+**Use the agent names confirmed with the developer in Phase 2** — not the example names below. Agent IDs appear in dashboards and the Application Registry; a wrong name here means wrong names everywhere.
+
+Create `src/lib/amplitude.ts` (or the project's conventional lib path, as listed in the Phase 2 file plan):
 
 **Choose `contentMode` based on privacy needs:**
 
@@ -133,6 +172,10 @@ export const openai = new OpenAI({
 ```
 
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
+
+> **`.env` is not loaded automatically by Node.** `process.env.AMPLITUDE_AI_API_KEY` is read at module load time — if the env var isn't in the shell when `node` starts, the SDK initializes with `undefined` and every session becomes a silent no-op (no error, no log output). Start the server with `node --env-file=.env server.js` (Node 20+) or add `import 'dotenv/config'` at the top of your entry point before any SDK imports. Verify the var is present before starting: `echo $AMPLITUDE_AI_API_KEY`.
+
+> **Agent as module-level singleton:** Define agents at the top level of the bootstrap file or route module — never inside a request handler. Re-creating `ai.agent(...)` on every request produces a different `[Agent] Agent ID` per turn, which breaks session grouping in Agent Analytics.
 
 > **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible. `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock, and Mistral clients.
 
@@ -169,7 +212,7 @@ export async function POST(req: Request) {
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
     return Response.json(response);
   });
-  // session.run() auto-flushes in serverless (Vercel, Lambda, Netlify, etc.)
+  // session.run() auto-flushes in serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Workers)
   // For non-serverless, or tracking outside session.run(), call: await ai.flush()
 }
 ```
@@ -177,6 +220,36 @@ export async function POST(req: Request) {
 - Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
 - Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
 - Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
+
+> **[Frontend: yes] Client-managed sessionId — required check.** If the browser client generates its own `sessionId` (common when the app doesn't use the Amplitude browser SDK), verify it is conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts, and do not persist it indefinitely across page loads. A sessionId stored in `localStorage` and never reset will silently route all new events under an old session — the server accepts and enriches them correctly, but they never appear as new sessions in Agent Analytics because the ID predates instrumentation. This is invisible at the server level: HTTP 200, events ingested, nothing in the logs. The fix must happen in the client. During verification (Step 4d-live), use an incognito window, which starts with empty storage and guarantees a fresh sessionId.
+
+> **Latency on error paths:** The happy-path examples above capture latency only on success. For production code, start the timer before the LLM call and record latency in a `finally` block so it's captured whether the call succeeds or throws:
+> ```typescript
+> const start = performance.now();
+> try {
+>   const response = await client.chat.completions.create({ model, messages });
+>   // provider wrapper auto-emits [Agent] AI Response with latency on success
+> } catch (e) {
+>   s.trackAiMessage('', model, 'openai', performance.now() - start, {
+>     isError: true,
+>     errorMessage: (e as Error).message,
+>   });
+>   throw e;
+> }
+> ```
+> Without this, a failed LLM call produces no `[Agent] AI Response` event — the turn is invisible in Agent Analytics and latency/error-rate charts miss the failure entirely.
+
+> **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
+>
+> **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Use `try/finally` so events are flushed even when `session.run()` throws — without it, an unhandled error silently drops all queued events:
+> ```typescript
+> try {
+>   await agent.session({ userId, sessionId }).run(async (s) => { ... });
+> } finally {
+>   await ai.flush();
+> }
+> ```
+> Without the flush, events are queued in memory and sent on the next interval — or never, if the process restarts. No error, no log output; silence here means data loss.
 
 <!-- llms-excerpt:content-shaping:start -->
 **User message text vs structured pipeline data (critical for Agent Analytics UI):**
@@ -228,6 +301,8 @@ const searchProducts = tool(searchDB, { name: 'search_products' });
 const result = await searchProducts(query);
 // [Agent] Tool Call event automatically emitted with duration, success, input/output
 ```
+
+> `tool()` applies to **any function the agent calls as a tool step** — not just external API calls. Deterministic helpers, local classifiers, pre-processing functions — if the agent invokes it as part of its reasoning flow, wrap it. Without wrapping, the tool step is invisible to Agent Analytics even though the rest of the session is tracked.
 
 **Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
 
@@ -344,8 +419,8 @@ s.trackAiMessage(responseText, event.model, 'anthropic', responseLatencyMs, {
 
 ```typescript
 s.trackToolCall(toolEvent.name, toolEvent.durationMs, !toolEvent.isError, {
-  input: toolEvent.input,
-  output: toolEvent.output,
+  toolInput: toolEvent.input,
+  toolOutput: toolEvent.output,
 });
 ```
 
@@ -382,8 +457,8 @@ await session.run(async (s) => {
       });
     } else if (event.type === 'tool_use') {
       s.trackToolCall(event.name, event.durationMs, true, {
-        input: event.input,
-        output: event.output,
+        toolInput: event.input,
+        toolOutput: event.output,
       });
     }
   }
@@ -449,9 +524,8 @@ await orchestrator.session({ sessionId }).run(async (s) => {
     s.runAs(matcher, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
   ]);
 
-  s.trackAiMessage(assemble(a, b), {
-    model: 'gpt-4o', provider: 'openai',
-    latencyMs: latency, inputTokens: inTok, outputTokens: outTok,
+  s.trackAiMessage(assemble(a, b), 'gpt-4o', 'openai', latency, {
+    inputTokens: inTok, outputTokens: outTok,
   });
 });
 ```
@@ -518,9 +592,7 @@ s.trackSpan({
 If your agent's response is purely a UI component with no text, you still need an `[Agent] AI Response` event for turn counting. Put a brief description in the content so the session viewer shows a readable bubble:
 
 ```typescript
-s.trackAiMessage('[Displayed: loan options comparison table]', {
-  model: 'gpt-4o', provider: 'openai', latencyMs: 200,
-});
+s.trackAiMessage('[Displayed: loan options comparison table]', 'gpt-4o', 'openai', 200);
 // Then emit the span with the full component data:
 s.trackSpan({
   name: 'loan-comparison-table',
@@ -610,13 +682,49 @@ return agent.session({ userId }).run(async (s) => {
 
 ### Step 3j: Browser-server session linking
 
-If frontend deps were detected, extract browser IDs from request headers:
+If `Frontend: yes` was detected, determine how the client generates and passes `sessionId`:
+
+**Case A — App uses the Amplitude browser SDK** (`@amplitude/analytics-browser` in client deps or a `<script>` tag loading it): the SDK sets `x-amplitude-session-id` and `x-amplitude-device-id` headers automatically. Extract them on the server:
 
 ```typescript
 const browserSessionId = req.headers.get('x-amplitude-session-id');
 const deviceId = req.headers.get('x-amplitude-device-id');
 const session = agent.session({ userId, browserSessionId, deviceId });
 ```
+
+**Case B — App manages its own `sessionId` client-side** (the common case for apps without the Amplitude browser SDK): `sessionId` is typically generated in the browser and sent as a request body field or header. Verify the client code resets it correctly:
+
+- `sessionId` must be conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts
+- Do not generate once at page load and persist indefinitely in `localStorage` — that reuses the same ID across all conversations and across page reloads
+- Resuming an existing conversation: reuse the stored ID. Starting a new conversation: generate a new one
+
+The most common vanilla-JS pattern is a module-level `stableId` that gets generated once and never reset. The fix requires three changes: make it mutable, add a reset helper, and call the helper on conversation start (Clear button, new-chat action, or first-message check):
+
+```javascript
+// BEFORE — generated once at page load, never reset
+const SESSION_ID = crypto.randomUUID();
+
+// AFTER — reset on new conversation
+let SESSION_ID = crypto.randomUUID();
+
+function newSessionId() {
+  SESSION_ID = crypto.randomUUID();
+  return SESSION_ID;
+}
+
+// Wire to Clear / New Conversation button:
+clearBtn.addEventListener('click', () => {
+  newSessionId();
+  // ... clear message list, reset UI state
+});
+
+// Or: reset on first message if SESSION_ID predates instrumentation
+if (isFirstMessage) newSessionId();
+```
+
+If you cannot inspect the client code, ask the developer: "How does the browser generate and store `sessionId`? Is it reset when a new conversation starts, or does it persist across page loads?"
+
+**`userId`** is a stable, persisted user identity (how it's stored depends on the app) — it is correct to persist this across sessions.
 
 ### Step 3k: Framework-specific notes
 
@@ -633,24 +741,33 @@ app.use(createAmplitudeAIMiddleware({
 
 ---
 
+**Before moving to Phase 4**, confirm every REQUIRED item from the Phase 1 list was implemented. List which files were changed, which agents and providers are now tracked, and map each REQUIRED item to where it was implemented. If any REQUIRED item was not implemented, implement it now — do not enter Phase 4 with an open REQUIRED item.
+
+---
+
 ## Phase 4: Verify
 
 > **Do not report instrumentation as complete until you have executed Steps 4b, 4c, and 4d and all checks pass.** Wiring the code is not done — verification is part of the task.
 
 ### Step 4a: Create verification test
 
-Create `__amplitude_verify__.test.ts` that verifies:
+**File naming:** Use `__amplitude_verify__.test.ts` for TypeScript projects. For pure JS ESM projects (`"type": "module"` in `package.json` with no TypeScript), use `__amplitude_verify__.test.mjs` instead.
+
+Create the verify file that verifies:
 - Each agent emits `[Agent] User Message` with correct `[Agent] Agent ID`
 - Sessions are properly closed (`assertSessionClosed`)
 - Multi-agent delegation preserves session ID across `runAs`
 - **Data quality gate** — every `[Agent] AI Response` has the seven fields Agent Analytics needs
 
+**Replace the placeholder names below** (`'test-agent'`, `'u1'`, `'s1'`) with the actual agent IDs, a representative user ID, and a test session ID from your Phase 2 discovery. The test must verify the specific agents you instrumented — a test using wrong agent names passes even if the real agents have no events.
+
 ```typescript
 import { AIConfig, tool } from '@amplitude/ai';
 import { MockAmplitudeAI } from '@amplitude/ai/testing';
 
+// Use actual agent ID from Phase 2, not 'test-agent'
 const mock = new MockAmplitudeAI(new AIConfig({ contentMode: 'full' }));
-const agent = mock.agent('test-agent', { userId: 'u1' });
+const agent = mock.agent('chat-handler', { userId: 'u1' });  // replace 'chat-handler' with your agent ID
 
 await agent.session({ sessionId: 's1' }).run(async (s) => {
   s.trackUserMessage('hello');
@@ -665,34 +782,52 @@ mock.eventsForAgent('child-agent-id');  // filter by agent
 
 // Data quality gate — catch silent instrumentation gaps that produce
 // broken dashboards without throwing any errors at runtime.
-const aiEvents = mock.eventsOfType('[Agent] AI Response');
+// Import SDK constants so typos are caught at compile time, not silently at runtime.
+import {
+  PROP_SESSION_ID, PROP_MODEL_NAME, PROP_PROVIDER, PROP_LATENCY_MS,
+  PROP_INPUT_TOKENS, PROP_OUTPUT_TOKENS, PROP_COST_USD,
+} from '@amplitude/ai';
+
+const aiEvents = mock.getEvents('[Agent] AI Response');
 for (const e of aiEvents) {
   const p = e.event_properties ?? {};
   // Identity: at least one of userId or deviceId must be set
   expect(e.user_id || e.device_id).toBeTruthy();
   // Session grouping
-  expect(p['[Agent] Session ID']).toBeTruthy();
+  expect(p[PROP_SESSION_ID]).toBeTruthy();
   // Model must be a canonical provider ID (e.g. "claude-sonnet-4-20250514",
   // not a gateway alias like "claude-sonnet-4-6") for cost calculation
-  expect(p['[Agent] Model']).toBeTruthy();
+  expect(p[PROP_MODEL_NAME]).toBeTruthy();
   // Provider
-  expect(p['[Agent] Provider']).toBeTruthy();
+  expect(p[PROP_PROVIDER]).toBeTruthy();
   // Latency
-  expect(p['[Agent] Latency Ms']).toBeGreaterThan(0);
+  expect(p[PROP_LATENCY_MS]).toBeGreaterThan(0);
   // Tokens — needed for token analytics and cost estimation
-  expect(p['[Agent] Input Tokens']).toBeGreaterThan(0);
-  expect(p['[Agent] Output Tokens']).toBeGreaterThan(0);
+  expect(p[PROP_INPUT_TOKENS]).toBeGreaterThan(0);
+  expect(p[PROP_OUTPUT_TOKENS]).toBeGreaterThan(0);
   // Cost — if missing, the model name is likely not in genai-prices.
   // Fix: use the canonical model ID or set totalCostUsd explicitly.
-  expect(p['[Agent] Cost USD']).toBeDefined();
+  expect(p[PROP_COST_USD]).toBeDefined();
 }
 ```
 
 ### Step 4b: Run verification
 
 ```bash
-npx vitest run __amplitude_verify__.test.ts
+npx vitest run __amplitude_verify__.test.ts   # TypeScript projects
+npx vitest run __amplitude_verify__.test.mjs  # pure JS ESM projects
 ```
+
+If `vitest` is not in the project's dependencies, use Node's built-in test runner as a fallback:
+
+```bash
+node --test __amplitude_verify__.test.mjs
+```
+
+> **If the verify test imports from the app** (e.g. a helper or tool function from `server.mjs`), that import pulls in the bootstrap file, which initializes `AmplitudeAI` at module load time and throws `ConfigurationError` immediately if `AMPLITUDE_AI_API_KEY` is not in the shell. Add `--env-file` to load it:
+> ```bash
+> node --env-file=.env --test __amplitude_verify__.test.mjs
+> ```
 
 ### Step 4c: Run doctor
 
@@ -712,7 +847,7 @@ If the key lives in a `.env` file rather than the shell environment, load it fir
 set -a && source .env && set +a && npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
 ```
 
-All doctor failures are mandatory to resolve before proceeding.
+All doctor failures are mandatory to resolve before proceeding. **Exception:** if your Phase 1 list included `REQUIRED: Local LLM`, doctor will report `provider_dependency` — this is expected and not a failure. Ignore that check only; all other doctor checks still apply.
 
 ### Step 4d: Run project checks
 
@@ -721,21 +856,29 @@ npx tsc --noEmit    # TypeScript compiles
 npm test            # Existing tests still pass
 ```
 
+> **Transport noise in test output:** Running the existing test suite with a live `AMPLITUDE_AI_API_KEY` in the environment causes `Amplitude Logger [Error]: invalid: ...` spam in stderr — test user IDs like `"test-user"` or `"smoke-test-user"` are rejected by the Amplitude transport because they don't match real user records. Tests still pass. This is expected and not a failure; it is not a sign of broken instrumentation. To suppress it, unset the key before running the suite: `AMPLITUDE_AI_API_KEY= npm test`.
+
 ### Step 4d-live: Send a real test event
 
 Start the app locally and hit at least one instrumented endpoint to confirm events reach the Amplitude transport (HTTP 200, no flush errors). This proves the live pipeline works, not just the mock:
 
 ```bash
-# Start the app (adapt to the project's run command)
-node server.js &
+# Start the app — load .env if keys live there (plain Node does not load .env automatically)
+node --env-file=.env server.js &   # Node 20+; or: node -r dotenv/config server.js &
 
 # Hit the instrumented endpoint
 curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "hello", "userId": "smoke-test-user", "sessionId": "smoke-test-session"}'
 
-# Expected: 200. Check for flush errors in the app logs.
+# Expected: 200.
 ```
+
+After the request completes, open **Amplitude > Agent Analytics > Sessions** and verify the session appears with the correct `userId`, `agentId`, and event sequence (User Message → AI Response → Session End). This is the behavioral confirmation — HTTP 200 only proves the transport accepted the request, not that events were recorded.
+
+If the session does not appear within 60 seconds:
+- **Server-side apps:** most common cause is a missing `await ai.flush()` — non-serverless runtimes queue events in memory and never send them without an explicit flush.
+- **Browser-fronted apps:** use an incognito window for this test (see Step 3d client sessionId note). Incognito starts with empty storage — if the session appears there but not your normal browser, the cause is a stale `sessionId` in `localStorage`.
 
 If the app uses a different framework or endpoint shape, adapt the curl accordingly. The goal is one real request that exercises the session context and provider wrapper.
 
@@ -792,13 +935,17 @@ After each fix:
 
 Do NOT proceed to Phase 5 with any data quality gate failing.
 
+**PAUSE.** Show the developer the full verification results (doctor checks, test results, data quality gate, live session confirmation). Ask for their go-ahead before creating any branch or PR. Only proceed to Phase 5 once they confirm.
+
 > **Checklist before telling the user instrumentation is complete:**
 > - [ ] Step 4b: verification test ran and passed
 > - [ ] Step 4c: `npx amplitude-ai doctor` ran and all checks passed (or failing checks are explicitly explained)
 > - [ ] Step 4d: TypeScript and existing tests still pass
-> - [ ] Step 4d-live: real request sent to the app, HTTP 200, no flush errors in logs
+> - [ ] Step 4d-live: real request sent to the app, session visible in Agent Analytics within ~60 seconds
+> - [ ] `await ai.flush()` is called after each `session.run()` in long-lived servers (Express, Fastify, plain Node `http`) — not needed for serverless/short-lived processes
+> - [ ] `ai` and `agent` are module-level singletons, not re-created per request
 >
-> Do not report "instrumentation is complete" until all four are checked off.
+> Do not report "instrumentation is complete" until all items are checked off.
 
 ---
 
@@ -824,6 +971,10 @@ PR body should include:
     - [ ] Existing tests still pass
     - [ ] No `.env` files or API keys committed
     - [ ] `.gitignore` includes `.env`
+    - [ ] Non-serverless runtime: `await ai.flush()` called in `try/finally` after each `session.run()`
+    - [ ] Agent defined at module level (not inside request handler)
+    - [ ] (Local LLM only) `totalCostUsd: 0` passed on every `trackAiMessage` call
+    - [ ] (Frontend: yes only) `sessionId` reset on new conversation — not persisted indefinitely in `localStorage`
 
 ### Step 5b: Reviewer guide
 
@@ -903,21 +1054,23 @@ After the PR is merged and deployed:
 | API | What it does |
 |-----|-------------|
 | `new AmplitudeAI({ apiKey, config? })` | Initialize SDK |
-| `new AIConfig({ contentMode?, redactPii?, customRedactionPatterns?, customRedactionFn?, debug? })` | Privacy/debug config |
-| `ai.agent(agentId, opts?)` | Create bound agent |
-| `agent.child(agentId, opts?)` | Create child agent |
-| `agent.session(opts?)` | Create session (`autoFlush` auto-detects serverless) |
+| `new AIConfig({ contentMode?, redactPii?, customRedactionPatterns?, customRedactionFn?, dryRun?, validate?, onEventCallback?, propagateContext?, debug? })` — `contentMode`: `'full'` (text + PII redaction) \| `'metadata_only'` (tokens/latency/cost, no text) \| `'customer_enriched'` (no text by default, customer sends enriched summaries via `trackSessionEnrichment`). `dryRun`: emit no events (safe for testing the instrumentation path). `validate`: surface schema violations before sending. `onEventCallback(event, statusCode, message)`: fired per tracked event, useful for debugging or secondary sinks. `propagateContext`: auto-propagate session context across async boundaries. | Privacy/debug config |
+| `ai.agent(agentId, opts?)` — `opts`: `{ description?, context?, userId?, env?, agentVersion? }`. `env` tags events with deployment environment (e.g. `'staging'`, `'production'`). `agentVersion` versions the agent for A/B comparison in dashboards. | Create bound agent |
+| `agent.child(agentId, opts?)` — `opts`: `{ description?, context? }` | Create child agent |
+| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush? }`. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Workers). | Create session |
 | `session.run(fn)` | Execute with session context (auto-flushes in serverless) |
 | `s.runAs(childAgent, fn)` | Delegate to child agent |
-| `ai.flush()` | Flush events (serverless) |
+| `ai.flush()` | Flush queued events — required after each session in long-lived servers. Always use `try/finally`: `try { await session.run(...) } finally { await ai.flush() }` — without `finally`, a thrown error inside `session.run()` skips the flush and silently drops all events from that session. |
 
 ### Tracking Methods (on session `s`)
 
 | Method | Event Emitted |
 |--------|--------------|
-| `s.trackUserMessage(content)` | `[Agent] User Message` |
-| `s.trackAiMessage(content, model, provider, latencyMs)` | `[Agent] AI Response` |
-| `s.trackToolCall(toolName, latencyMs, success)` | `[Agent] Tool Call` |
+| `s.trackUserMessage(content, opts?)` — `opts`: `{ context?, attachments?, isRegeneration?, isEdit?, editedMessageId?, labels? }` | `[Agent] User Message` |
+| `s.trackAiMessage(content, model, provider, latencyMs, opts?)` — `opts`: `{ inputTokens?, outputTokens?, totalTokens?, totalCostUsd?, cacheReadTokens?, cacheCreationInputTokens?, modelTier?, wasCopied?, wasCached?, isError?, errorMessage?, attachments?, context? }`. `modelTier`: `'fast'` \| `'standard'` \| `'reasoning'`. | `[Agent] AI Response` |
+| `s.trackToolCall(toolName, latencyMs, success, opts?)` — `opts`: `{ toolInput?, toolOutput?, errorMessage?, errorType?, context? }`. Field names are `toolInput`/`toolOutput` (not `input`/`output`). Use directly for synchronous tools; `tool()` HOF is async-only. | `[Agent] Tool Call` |
+| `s.trackConversation({ amplitude, userId, sessionId, agentId, messages })` — `messages`: `{ role: 'user'\|'assistant'\|'system', content, model?, provider?, latency_ms? }[]`. Convenience method for batch/replay: processes the array and emits the correct event sequence in one call. Useful for apps that reconstruct conversation history from logs. | `[Agent] User Message` + `[Agent] AI Response` sequence |
+| `s.trackSessionEnd(opts?)` — `opts`: `{ abandonmentTurn? }`. `abandonmentTurn`: the turn index at which the user abandoned the session — used for drop-off analysis. | `[Agent] Session End` |
 | `s.score(name, value, targetId)` | `[Agent] Score` |
 
 ### Higher-Order Functions
@@ -953,6 +1106,42 @@ All imported from `@amplitude/ai`:
 | `ClaudeAgentSDKTracker` (from `@amplitude/ai/integrations/claude-agent-sdk`) | PreToolUse/PostToolUse hooks + message processing for Claude Agent SDK |
 
 **Automatic tool call extraction via `patch()`:** When using `patch()`, the SDK automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed. It detects tool calls for OpenAI Chat Completions (`role: "assistant"` with `tool_calls` + `role: "tool"` results), OpenAI Responses API (`type: "function_call"` / `type: "function_call_output"`), and Anthropic Messages (`type: "tool_use"` / `type: "tool_result"` blocks). Extracted tool calls are emitted with `latencyMs: 0` since execution timing isn't available through message inspection. For real tool latency, use `tool()` HOF, `trackToolCall()`, or the `ClaudeAgentSDKTracker` hooks.
+
+---
+
+## Local / On-Device LLMs
+
+For local models (`node-llama-cpp`, `ollama`, LM Studio, or any `localhost` inference server), no `@amplitude/ai` provider wrapper exists. Use manual tracking throughout:
+
+```typescript
+await agent.session({ userId, sessionId }).run(async (s) => {
+  s.trackUserMessage(userInput);
+
+  // Optional: track preprocessing steps (e.g. context retrieval, prompt construction)
+  const toolStart = Date.now();
+  const context = await inspectMessage(userInput);   // any sync/async preprocessing step
+  s.trackToolCall('inspect_message', Date.now() - toolStart, true, {
+    toolInput: { message: userInput },
+    toolOutput: { context },
+  });
+
+  const start = Date.now();
+  const response = await localModel.complete(prompt);   // your local inference call
+  const latencyMs = Date.now() - start;
+
+  s.trackAiMessage(response.text, 'llama-3.2-3b', 'local', latencyMs, {
+    inputTokens: response.usage?.inputTokens,   // if the runtime exposes it
+    outputTokens: response.usage?.outputTokens,
+    totalCostUsd: 0,  // required — local models have no cost; 0 suppresses the data quality gate failure
+  });
+});
+```
+
+**Doctor false positive:** Running `npx amplitude-ai doctor` against a local-LLM project will report `provider_dependency` because no recognized provider wrapper is detected. This is expected — the instrumentation is correct. Ignore that check; all other doctor checks still apply.
+
+**Cost tracking:** Cost is structurally impossible for local models — there is no pricing API. Always pass `totalCostUsd: 0` explicitly; omitting it will fail the Phase 4 data quality cost check silently. Do not treat a `$0` cost as a bug — it is the correct suppression value for local inference.
+
+**Token counts:** Expose if available from the runtime. If not, omit — `inputTokens`/`outputTokens` are optional and their absence degrades token analytics but does not break sessions.
 
 ---
 
@@ -1204,7 +1393,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 - **Never modify unrelated files.** Only touch files with LLM call sites and the bootstrap file.
 - **Never duplicate instrumentation.** Check for existing `patch()` or wrapper calls before adding new ones.
 - **Route events by kind, not by convenience.** Agent telemetry must go through the AI SDK's `track*` methods (`trackUserMessage`, `trackAiMessage`, `trackToolCall`, `trackSpan`, etc.) — the base `@amplitude/analytics-node` SDK's `track()` does not attach `[Agent]` event types or session metadata, so agent telemetry sent that way will not appear in Agent Analytics dashboards. Use `trackSpan()` for any custom *agent* event not covered by the other `track*` methods. The base SDK's `track()` is correct in exactly one case: genuine **business/product events** (e.g. `Product Added`) emitted for cross-journey attribution, which must stay non-`[Agent]` so they join the standard web/mobile taxonomy (see Step 3e). Never send those through `track*`.
-- **Pause before Phase 3.** Always show the discovery report and get developer confirmation.
+- **Three mandatory pauses:** after Phase 1 (detection confirmed), after Phase 2 (plan confirmed before writing any code), and after Phase 4 (verification results shown before creating any PR). Do not advance past any of these without explicit developer confirmation.
 - **Prefer additive changes.** Add imports and wrappers rather than rewriting entire files.
 - **Keep content mode explicit.** Default is `full` + `redactPii: true`. Never silently downgrade.
 - **Preserve existing tests.** Instrumentation must not break the test suite.
