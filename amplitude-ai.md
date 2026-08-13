@@ -10,7 +10,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 
 1. Read `package.json` for dependencies
 2. Detect framework: `next` → Next.js, `express` → Express, `fastify` → Fastify, `hono` → Hono
-3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
+3. Detect LLM providers: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@mistralai/mistralai`. Also detect **local/on-device LLMs**: `node-llama-cpp`, `@ollama/sdk`, `ollama`, `lmstudio` in deps, or a `baseURL` pointing to `localhost` / `127.0.0.1` that is not a known proxy (LiteLLM, OpenRouter, etc.) — flag these as `Local LLM: yes`. No `@amplitude/ai` wrapper exists for local models; plan manual tracking. Also detect **OpenAI-compatible proxies** (custom `baseURL` that does **not** match OpenAI's official endpoints `api.openai.com` or `us.api.openai.com` — e.g., an in-house gateway or a client library that forwards to multiple models): there is often **no** `@amplitude/ai` provider wrapper for that hop — plan **`trackAiMessage`** with **`usage`** from the **completion response** (or final stream chunk), same as stock `openai`. **Do not flag a `baseURL` set to an official OpenAI endpoint as a proxy** — the standard provider wrapper works fine.
 4. Detect agent frameworks: `langchain`, `@langchain/core`, `llamaindex`, `@openai/agents`, `crewai`
 5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place. **If plain Amplitude packages are present, inspect their initialization (e.g. `amplitude.init(...)`, `new Amplitude(...)`) to find the API key env var already in use** (e.g. `process.env.AMPLITUDE_API_KEY`). Ask the developer: "I found an existing Amplitude setup using `AMPLITUDE_API_KEY` — should I reuse that key for Agent Analytics, or use a separate key under a different env var?" Use whichever they confirm; do not assume `AMPLITUDE_AI_API_KEY` if they already have a key configured.
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
@@ -41,6 +41,7 @@ Your instrumentation requirements:
   REQUIRED  [if non-serverless — no Lambda/Vercel/Cloud Functions signals detected] Long-lived server → call `await ai.flush()` after each `session.run()`; use a stable sessionId tied to the conversation (not a per-request UUID); define agent at module level
   REQUIRED  [if Bedrock and "type":"module" in package.json] Bedrock + ESM → pass `bedrockModule` explicitly to `Bedrock` constructor (no CJS require() available)
   REQUIRED  [if streaming] Streaming → keep `session.run()` open until stream is fully consumed; do not return the stream before `run()` exits
+  REQUIRED  [if Local LLM: yes] No provider wrapper available → use manual tracking: `trackUserMessage` + `trackAiMessage` + `trackToolCall`. Doctor will report `provider_dependency` — this is a false positive, not a bug; the instrumentation is correct. Cost tracking is structurally impossible for local models: pass `totalCostUsd: 0` to suppress the data quality gap, or accept it.
   REQUIRED  [if Frontend: yes] Client sessionId scope → verify the browser client resets `sessionId` when a new conversation starts; a sessionId persisted in localStorage across page loads will silently attach new events to an old session that predates instrumentation and will never appear in Agent Analytics
   WARNING   [if cross-region Bedrock model ID e.g. us.*, eu.*] Cross-region model ID → cost tracking will be missing; use canonical Bedrock model ID for cost (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
 ```
@@ -199,7 +200,15 @@ export async function POST(req: Request) {
 
 > **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
 >
-> **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Without it, events are queued in memory and sent on the next flush interval — or never, if the process restarts. This produces no error and no log output; silence here means data loss.
+> **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Use `try/finally` so events are flushed even when `session.run()` throws — without it, an unhandled error silently drops all queued events:
+> ```typescript
+> try {
+>   await agent.session({ userId, sessionId }).run(async (s) => { ... });
+> } finally {
+>   await ai.flush();
+> }
+> ```
+> Without the flush, events are queued in memory and sent on the next interval — or never, if the process restarts. No error, no log output; silence here means data loss.
 
 <!-- llms-excerpt:content-shaping:start -->
 **User message text vs structured pipeline data (critical for Agent Analytics UI):**
@@ -680,7 +689,9 @@ app.use(createAmplitudeAIMiddleware({
 
 ### Step 4a: Create verification test
 
-Create `__amplitude_verify__.test.ts` that verifies:
+**File naming:** Use `__amplitude_verify__.test.ts` for TypeScript projects. For pure JS ESM projects (`"type": "module"` in `package.json` with no TypeScript), use `__amplitude_verify__.test.mjs` instead.
+
+Create the verify file that verifies:
 - Each agent emits `[Agent] User Message` with correct `[Agent] Agent ID`
 - Sessions are properly closed (`assertSessionClosed`)
 - Multi-agent delegation preserves session ID across `runAs`
@@ -738,7 +749,14 @@ for (const e of aiEvents) {
 ### Step 4b: Run verification
 
 ```bash
-npx vitest run __amplitude_verify__.test.ts
+npx vitest run __amplitude_verify__.test.ts   # TypeScript projects
+npx vitest run __amplitude_verify__.test.mjs  # pure JS ESM projects
+```
+
+If `vitest` is not in the project's dependencies, use Node's built-in test runner as a fallback:
+
+```bash
+node --test __amplitude_verify__.test.mjs
 ```
 
 ### Step 4c: Run doctor
@@ -974,9 +992,9 @@ After the PR is merged and deployed:
 
 | Method | Event Emitted |
 |--------|--------------|
-| `s.trackUserMessage(content)` | `[Agent] User Message` |
-| `s.trackAiMessage(content, model, provider, latencyMs)` | `[Agent] AI Response` |
-| `s.trackToolCall(toolName, latencyMs, success)` | `[Agent] Tool Call` |
+| `s.trackUserMessage(content, opts?)` | `[Agent] User Message` |
+| `s.trackAiMessage(content, model, provider, latencyMs, opts?)` — `opts`: `{ inputTokens?, outputTokens?, totalCostUsd?, isError?, errorMessage? }` | `[Agent] AI Response` |
+| `s.trackToolCall(toolName, latencyMs, success, opts?)` — `opts`: `{ input?, output?, isError?, errorMessage? }`. Use directly for synchronous tools; `tool()` HOF is async-only. | `[Agent] Tool Call` |
 | `s.score(name, value, targetId)` | `[Agent] Score` |
 
 ### Higher-Order Functions
@@ -1012,6 +1030,33 @@ All imported from `@amplitude/ai`:
 | `ClaudeAgentSDKTracker` (from `@amplitude/ai/integrations/claude-agent-sdk`) | PreToolUse/PostToolUse hooks + message processing for Claude Agent SDK |
 
 **Automatic tool call extraction via `patch()`:** When using `patch()`, the SDK automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed. It detects tool calls for OpenAI Chat Completions (`role: "assistant"` with `tool_calls` + `role: "tool"` results), OpenAI Responses API (`type: "function_call"` / `type: "function_call_output"`), and Anthropic Messages (`type: "tool_use"` / `type: "tool_result"` blocks). Extracted tool calls are emitted with `latencyMs: 0` since execution timing isn't available through message inspection. For real tool latency, use `tool()` HOF, `trackToolCall()`, or the `ClaudeAgentSDKTracker` hooks.
+
+---
+
+## Local / On-Device LLMs
+
+For local models (`node-llama-cpp`, `ollama`, LM Studio, or any `localhost` inference server), no `@amplitude/ai` provider wrapper exists. Use manual tracking throughout:
+
+```typescript
+const start = Date.now();
+const response = await localModel.complete(prompt);   // your local inference call
+const latencyMs = Date.now() - start;
+
+await agent.session({ userId, sessionId }).run(async (s) => {
+  s.trackUserMessage(userInput);
+  s.trackAiMessage(response.text, 'llama-3.2-3b', 'local', latencyMs, {
+    inputTokens: response.usage?.inputTokens,   // if the runtime exposes it
+    outputTokens: response.usage?.outputTokens,
+    totalCostUsd: 0,  // local models have no cost — pass 0 to suppress the data quality gap
+  });
+});
+```
+
+**Doctor false positive:** Running `npx amplitude-ai doctor` against a local-LLM project will report `provider_dependency` because no recognized provider wrapper is detected. This is expected — the instrumentation is correct. Ignore that check; all other doctor checks still apply.
+
+**Cost tracking:** Cost is structurally impossible for local models — there is no pricing API. Either pass `totalCostUsd: 0` explicitly (suppresses the data quality gate failure) or accept the gap. Do not treat a missing `[Agent] Cost USD` as a bug.
+
+**Token counts:** Expose if available from the runtime. If not, omit — `inputTokens`/`outputTokens` are optional and their absence degrades token analytics but does not break sessions.
 
 ---
 
