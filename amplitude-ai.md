@@ -15,7 +15,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Di
 5. Detect existing instrumentation: `@amplitude/ai` in deps, `patch({` or `AmplitudeAI` in source. Also detect **plain `@amplitude/analytics-node` or `@amplitude/analytics-browser` instrumentation** — files calling `amplitude.track('EventName', ...)` with custom event names. This produces no `[Agent]` events and will not appear in Agent Analytics. Flag it explicitly: **"Found plain Amplitude tracking with custom event names — these events will not show in Agent Analytics sessions. They must be replaced with `@amplitude/ai` `track*` calls."** Do not silently leave both in place. **If plain Amplitude packages are present, inspect their initialization (e.g. `amplitude.init(...)`, `new Amplitude(...)`) to find the API key env var already in use** (e.g. `process.env.AMPLITUDE_API_KEY`). Ask the developer: "I found an existing Amplitude setup using `AMPLITUDE_API_KEY` — should I reuse that key for Agent Analytics, or use a separate key under a different env var?" Use whichever they confirm; do not assume `AMPLITUDE_AI_API_KEY` if they already have a key configured.
 6. Check for multi-agent signals: multiple files with LLM calls, tool definitions that call other LLM-calling functions, delegation patterns
 7. Check for streaming: `stream: true` in provider calls
-8. Check for frontend deps: `react`, `vue`, `svelte` in deps
+8. Determine whether the server delivers a browser UI. Ask: does any route or static handler send HTML to a browser? Evidence: an `index.html` anywhere in the project, a static file directory (`public/`, `static/`, `dist/`), HTML template files, or any response with `Content-Type: text/html`. Framework-specific deps (`react`, `vue`, `svelte`) are one signal but not the only one. If yes, flag `Frontend: yes` — a browser client is generating or persisting `sessionId`
 9. Check for Vercel AI SDK: `@ai-sdk/*` in deps
 10. Check for edge runtime: `runtime = 'edge'` in route files
 
@@ -41,6 +41,7 @@ Your instrumentation requirements:
   REQUIRED  [if non-serverless — no Lambda/Vercel/Cloud Functions signals detected] Long-lived server → call `await ai.flush()` after each `session.run()`; use a stable sessionId tied to the conversation (not a per-request UUID); define agent at module level
   REQUIRED  [if Bedrock and "type":"module" in package.json] Bedrock + ESM → pass `bedrockModule` explicitly to `Bedrock` constructor (no CJS require() available)
   REQUIRED  [if streaming] Streaming → keep `session.run()` open until stream is fully consumed; do not return the stream before `run()` exits
+  REQUIRED  [if Frontend: yes] Client sessionId scope → verify the browser client resets `sessionId` when a new conversation starts; a sessionId persisted in localStorage across page loads will silently attach new events to an old session that predates instrumentation and will never appear in Agent Analytics
   WARNING   [if cross-region Bedrock model ID e.g. us.*, eu.*] Cross-region model ID → cost tracking will be missing; use canonical Bedrock model ID for cost (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
 ```
 
@@ -193,6 +194,8 @@ export async function POST(req: Request) {
 - Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
 - Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
 - Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
+
+> **[Frontend: yes] Client-managed sessionId — required check.** If the browser client generates its own `sessionId` (common when the app doesn't use the Amplitude browser SDK), verify it is conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts, and do not persist it indefinitely across page loads. A sessionId stored in `localStorage` and never reset will silently route all new events under an old session — the server accepts and enriches them correctly, but they never appear as new sessions in Agent Analytics because the ID predates instrumentation. This is invisible at the server level: HTTP 200, events ingested, nothing in the logs. The fix must happen in the client. During verification (Step 4d-live), use an incognito window, which starts with empty storage and guarantees a fresh sessionId.
 
 > **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
 >
@@ -632,7 +635,9 @@ return agent.session({ userId }).run(async (s) => {
 
 ### Step 3j: Browser-server session linking
 
-If frontend deps were detected, extract browser IDs from request headers:
+If `Frontend: yes` was detected, determine how the client generates and passes `sessionId`:
+
+**Case A — App uses the Amplitude browser SDK** (`@amplitude/analytics-browser` in client deps or a `<script>` tag loading it): the SDK sets `x-amplitude-session-id` and `x-amplitude-device-id` headers automatically. Extract them on the server:
 
 ```typescript
 const browserSessionId = req.headers.get('x-amplitude-session-id');
@@ -640,9 +645,15 @@ const deviceId = req.headers.get('x-amplitude-device-id');
 const session = agent.session({ userId, browserSessionId, deviceId });
 ```
 
-**Browser `userId` and `sessionId`:** `userId` is a stable, persisted user identity (how it's stored depends on the app). `sessionId` is conversation-scoped — generate a fresh UUID when starting a new chat, reuse the stored one when resuming an existing chat.
+**Case B — App manages its own `sessionId` client-side** (the common case for apps without the Amplitude browser SDK): `sessionId` is typically generated in the browser and sent as a request body field or header. Verify the client code resets it correctly:
 
-> **Stale session IDs during verification:** If your app persists `sessionId` in `localStorage`, any ID generated before instrumentation was working will never appear in Agent Analytics — events sent under it are silently accepted by the transport but attached to a session that was never ingested or enriched. **When running the Step 4d-live smoke test, use an incognito window.** Incognito starts with empty storage, so the first request generates a fresh `sessionId` with no pre-instrumentation history. If the session appears in Agent Analytics in incognito but not in your normal browser, the cause is a stale stored ID — clear `localStorage` (or call `crypto.randomUUID()` on next page load) to confirm instrumentation is working.
+- `sessionId` must be conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts
+- Do not generate once at page load and persist indefinitely in `localStorage` — that reuses the same ID across all conversations and across page reloads
+- Resuming an existing conversation: reuse the stored ID. Starting a new conversation: generate a new one
+
+If you cannot inspect the client code, ask the developer: "How does the browser generate and store `sessionId`? Is it reset when a new conversation starts, or does it persist across page loads?"
+
+**`userId`** is a stable, persisted user identity (how it's stored depends on the app) — it is correct to persist this across sessions.
 
 ### Step 3k: Framework-specific notes
 
@@ -777,7 +788,7 @@ After the request completes, open **Amplitude > Agent Analytics > Sessions** and
 
 If the session does not appear within 60 seconds:
 - **Server-side apps:** most common cause is a missing `await ai.flush()` — non-serverless runtimes queue events in memory and never send them without an explicit flush.
-- **Browser-fronted apps:** most common cause is a stale `sessionId` in `localStorage` from before instrumentation was working. Use an incognito window — incognito has no stored state, so the first request generates a fresh session ID that has no pre-instrumentation history. If it appears in incognito but not your normal browser, clear `localStorage` and reload.
+- **Browser-fronted apps:** use an incognito window for this test (see Step 3d client sessionId note). Incognito starts with empty storage — if the session appears there but not your normal browser, the cause is a stale `sessionId` in `localStorage`.
 
 If the app uses a different framework or endpoint shape, adapt the curl accordingly. The goal is one real request that exercises the session context and provider wrapper.
 
