@@ -698,6 +698,30 @@ const session = agent.session({ userId, browserSessionId, deviceId });
 - Do not generate once at page load and persist indefinitely in `localStorage` — that reuses the same ID across all conversations and across page reloads
 - Resuming an existing conversation: reuse the stored ID. Starting a new conversation: generate a new one
 
+The most common vanilla-JS pattern is a module-level `stableId` that gets generated once and never reset. The fix requires three changes: make it mutable, add a reset helper, and call the helper on conversation start (Clear button, new-chat action, or first-message check):
+
+```javascript
+// BEFORE — generated once at page load, never reset
+const SESSION_ID = crypto.randomUUID();
+
+// AFTER — reset on new conversation
+let SESSION_ID = crypto.randomUUID();
+
+function newSessionId() {
+  SESSION_ID = crypto.randomUUID();
+  return SESSION_ID;
+}
+
+// Wire to Clear / New Conversation button:
+clearBtn.addEventListener('click', () => {
+  newSessionId();
+  // ... clear message list, reset UI state
+});
+
+// Or: reset on first message if SESSION_ID predates instrumentation
+if (isFirstMessage) newSessionId();
+```
+
 If you cannot inspect the client code, ask the developer: "How does the browser generate and store `sessionId`? Is it reset when a new conversation starts, or does it persist across page loads?"
 
 **`userId`** is a stable, persisted user identity (how it's stored depends on the app) — it is correct to persist this across sessions.
@@ -800,6 +824,11 @@ If `vitest` is not in the project's dependencies, use Node's built-in test runne
 node --test __amplitude_verify__.test.mjs
 ```
 
+> **If the verify test imports from the app** (e.g. a helper or tool function from `server.mjs`), that import pulls in the bootstrap file, which initializes `AmplitudeAI` at module load time and throws `ConfigurationError` immediately if `AMPLITUDE_AI_API_KEY` is not in the shell. Add `--env-file` to load it:
+> ```bash
+> node --env-file=.env --test __amplitude_verify__.test.mjs
+> ```
+
 ### Step 4c: Run doctor
 
 ```bash
@@ -826,6 +855,8 @@ All doctor failures are mandatory to resolve before proceeding. **Exception:** i
 npx tsc --noEmit    # TypeScript compiles
 npm test            # Existing tests still pass
 ```
+
+> **Transport noise in test output:** Running the existing test suite with a live `AMPLITUDE_AI_API_KEY` in the environment causes `Amplitude Logger [Error]: invalid: ...` spam in stderr — test user IDs like `"test-user"` or `"smoke-test-user"` are rejected by the Amplitude transport because they don't match real user records. Tests still pass. This is expected and not a failure; it is not a sign of broken instrumentation. To suppress it, unset the key before running the suite: `AMPLITUDE_AI_API_KEY= npm test`.
 
 ### Step 4d-live: Send a real test event
 
