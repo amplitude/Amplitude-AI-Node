@@ -146,6 +146,8 @@ export const openai = new OpenAI({
 
 Add `AMPLITUDE_AI_API_KEY` to `.env.example`. Check `.gitignore` includes `.env`.
 
+> **`.env` is not loaded automatically by Node.** `process.env.AMPLITUDE_AI_API_KEY` is read at module load time — if the env var isn't in the shell when `node` starts, the SDK initializes with `undefined` and every session becomes a silent no-op (no error, no log output). Start the server with `node --env-file=.env server.js` (Node 20+) or add `import 'dotenv/config'` at the top of your entry point before any SDK imports. Verify the var is present before starting: `echo $AMPLITUDE_AI_API_KEY`.
+
 > **Agent as module-level singleton:** Define agents at the top level of the bootstrap file or route module — never inside a request handler. Re-creating `ai.agent(...)` on every request produces a different `[Agent] Agent ID` per turn, which breaks session grouping in Agent Analytics.
 
 > **Note:** If you cannot modify provider instantiation sites, use `wrap(existingClient, ai)` to instrument an existing client, or `patch({ amplitudeAI: ai })` for zero-code verification. These capture fewer event types — always prefer provider wrappers when possible. `wrap()` supports OpenAI, Azure OpenAI, Anthropic, Gemini (`@google/generative-ai`), Google Gen AI (`@google/genai`), Bedrock, and Mistral clients.
@@ -640,6 +642,8 @@ const session = agent.session({ userId, browserSessionId, deviceId });
 
 **Browser `userId` and `sessionId`:** `userId` is a stable, persisted user identity (how it's stored depends on the app). `sessionId` is conversation-scoped — generate a fresh UUID when starting a new chat, reuse the stored one when resuming an existing chat.
 
+> **Stale session IDs during verification:** If your app persists `sessionId` in `localStorage`, any ID generated before instrumentation was working will never appear in Agent Analytics — events sent under it are silently accepted by the transport but attached to a session that was never ingested or enriched. **When running the Step 4d-live smoke test, use an incognito window.** Incognito starts with empty storage, so the first request generates a fresh `sessionId` with no pre-instrumentation history. If the session appears in Agent Analytics in incognito but not in your normal browser, the cause is a stale stored ID — clear `localStorage` (or call `crypto.randomUUID()` on next page load) to confirm instrumentation is working.
+
 ### Step 3k: Framework-specific notes
 
 **Next.js App Router**: Session wrapping goes inside each route handler. Add `@amplitude/ai` to `serverExternalPackages` in `next.config.ts`.
@@ -758,8 +762,8 @@ npm test            # Existing tests still pass
 Start the app locally and hit at least one instrumented endpoint to confirm events reach the Amplitude transport (HTTP 200, no flush errors). This proves the live pipeline works, not just the mock:
 
 ```bash
-# Start the app (adapt to the project's run command)
-node server.js &
+# Start the app — load .env if keys live there (plain Node does not load .env automatically)
+node --env-file=.env server.js &   # Node 20+; or: node -r dotenv/config server.js &
 
 # Hit the instrumented endpoint
 curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/chat \
@@ -769,7 +773,11 @@ curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/chat \
 # Expected: 200.
 ```
 
-After the request completes, open **Amplitude > Agent Analytics > Sessions** and verify the session appears with the correct `userId`, `agentId`, and event sequence (User Message → AI Response → Session End). This is the behavioral confirmation — HTTP 200 only proves the transport accepted the request, not that events were recorded. If the session does not appear within 60 seconds, the most common cause is a missing `await ai.flush()` (non-serverless runtimes do not auto-flush).
+After the request completes, open **Amplitude > Agent Analytics > Sessions** and verify the session appears with the correct `userId`, `agentId`, and event sequence (User Message → AI Response → Session End). This is the behavioral confirmation — HTTP 200 only proves the transport accepted the request, not that events were recorded.
+
+If the session does not appear within 60 seconds:
+- **Server-side apps:** most common cause is a missing `await ai.flush()` — non-serverless runtimes queue events in memory and never send them without an explicit flush.
+- **Browser-fronted apps:** most common cause is a stale `sessionId` in `localStorage` from before instrumentation was working. Use an incognito window — incognito has no stored state, so the first request generates a fresh session ID that has no pre-instrumentation history. If it appears in incognito but not your normal browser, clear `localStorage` and reload.
 
 If the app uses a different framework or endpoint shape, adapt the curl accordingly. The goal is one real request that exercises the session context and provider wrapper.
 
