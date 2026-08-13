@@ -2,7 +2,7 @@
 
 > **Reference:** [Agent Analytics SDK docs](https://amplitude.com/docs/sdks/agent-analytics/sdk#install-the-sdk)
 
-Auto-instrument a JS/TS AI app with `@amplitude/ai` in 4 phases: **Detect → Discover → Instrument → Verify**. The result is a fully instrumented app with provider wrappers, session lifecycle, multi-agent delegation (when detected), and a verification test proving correctness — all before deploying anything.
+Auto-instrument a JS/TS AI app with `@amplitude/ai` in 5 phases: **Detect → Discover → Instrument → Verify → Ship**. The result is a fully instrumented app with provider wrappers, session lifecycle, multi-agent delegation (when detected), and a verification test proving correctness — all before deploying anything.
 
 ---
 
@@ -64,6 +64,7 @@ Only emit requirement lines that apply to the detected environment. Carry this l
    - Delegation patterns (parent calls child → `runAs`)
    - Feedback handlers (thumbs up/down UI components)
    - Tool functions (functions called by the LLM via function calling)
+   - **If Frontend: yes was flagged in Phase 1**: also find the client-side file where `sessionId` is generated and stored. Identify whether it uses `localStorage`, a React state, or another mechanism — this is the file that Step 3j will fix.
 4. For each event emission you plan to add, trace **all code paths** that should emit the same event type. Look for error handlers, retry-exhaustion paths, timeout handlers, and fallback branches that represent the same logical operation failing — these should also emit the event (typically with `success: false` or an `errorMessage`).
 
 ### Multi-Agent Detection
@@ -139,7 +140,9 @@ npm install @amplitude/ai       # npm
 
 ### Step 3b: Create bootstrap file
 
-Create `src/lib/amplitude.ts` (or the project's conventional lib path):
+**Use the agent names confirmed with the developer in Phase 2** — not the example names below. Agent IDs appear in dashboards and the Application Registry; a wrong name here means wrong names everywhere.
+
+Create `src/lib/amplitude.ts` (or the project's conventional lib path, as listed in the Phase 2 file plan):
 
 **Choose `contentMode` based on privacy needs:**
 
@@ -714,7 +717,7 @@ app.use(createAmplitudeAIMiddleware({
 
 ---
 
-**Before moving to Phase 4**, briefly tell the developer what was instrumented: which files were changed, which agents and providers are now tracked, and which REQUIRED items from the Phase 1 requirements list were implemented. Keep it concise — a few bullets is enough.
+**Before moving to Phase 4**, confirm every REQUIRED item from the Phase 1 list was implemented. List which files were changed, which agents and providers are now tracked, and map each REQUIRED item to where it was implemented. If any REQUIRED item was not implemented, implement it now — do not enter Phase 4 with an open REQUIRED item.
 
 ---
 
@@ -732,12 +735,15 @@ Create the verify file that verifies:
 - Multi-agent delegation preserves session ID across `runAs`
 - **Data quality gate** — every `[Agent] AI Response` has the seven fields Agent Analytics needs
 
+**Replace the placeholder names below** (`'test-agent'`, `'u1'`, `'s1'`) with the actual agent IDs, a representative user ID, and a test session ID from your Phase 2 discovery. The test must verify the specific agents you instrumented — a test using wrong agent names passes even if the real agents have no events.
+
 ```typescript
 import { AIConfig, tool } from '@amplitude/ai';
 import { MockAmplitudeAI } from '@amplitude/ai/testing';
 
+// Use actual agent ID from Phase 2, not 'test-agent'
 const mock = new MockAmplitudeAI(new AIConfig({ contentMode: 'full' }));
-const agent = mock.agent('test-agent', { userId: 'u1' });
+const agent = mock.agent('chat-handler', { userId: 'u1' });  // replace 'chat-handler' with your agent ID
 
 await agent.session({ sessionId: 's1' }).run(async (s) => {
   s.trackUserMessage('hello');
@@ -812,7 +818,7 @@ If the key lives in a `.env` file rather than the shell environment, load it fir
 set -a && source .env && set +a && npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
 ```
 
-All doctor failures are mandatory to resolve before proceeding.
+All doctor failures are mandatory to resolve before proceeding. **Exception:** if your Phase 1 list included `REQUIRED: Local LLM`, doctor will report `provider_dependency` — this is expected and not a failure. Ignore that check only; all other doctor checks still apply.
 
 ### Step 4d: Run project checks
 
@@ -934,8 +940,10 @@ PR body should include:
     - [ ] Existing tests still pass
     - [ ] No `.env` files or API keys committed
     - [ ] `.gitignore` includes `.env`
-    - [ ] Non-serverless runtime: `await ai.flush()` called after each `session.run()`
+    - [ ] Non-serverless runtime: `await ai.flush()` called in `try/finally` after each `session.run()`
     - [ ] Agent defined at module level (not inside request handler)
+    - [ ] (Local LLM only) `totalCostUsd: 0` passed on every `trackAiMessage` call
+    - [ ] (Frontend: yes only) `sessionId` reset on new conversation — not persisted indefinitely in `localStorage`
 
 ### Step 5b: Reviewer guide
 
