@@ -96,14 +96,36 @@ Agent 2: "recipe-agent"  (child of chat-handler, called as a tool)
 Multi-agent architecture: delegation-as-tools (A2A)
   → will instrument with ai.agent().child() + session.runAs()
 
+Requirements to implement (from Phase 1):
+  □ [copy each REQUIRED item that applied — do not omit any]
+
+Files to create or modify:
+  CREATE src/lib/amplitude.ts          — bootstrap (AmplitudeAI, AIConfig, provider wrappers)
+  MODIFY src/app/api/chat/route.ts     — wrap handler with agent.session().run()
+  [list all files that will change]
+
 Proceed with instrumentation? [Review changes first / Apply / Skip]
 ```
 
-**PAUSE.** Present the agent map and instrumentation plan to the developer — no code has been written yet. Explain what files will be created or modified and why. Ask them to confirm agent names and descriptions (these appear in dashboards) and give the go-ahead before starting Phase 3.
+**PAUSE.** Present the agent map, the REQUIRED items list, and the file plan to the developer — no code has been written yet. Confirm agent names and descriptions (these appear in dashboards) and get the go-ahead before starting Phase 3. The developer must see and approve the REQUIRED items here; do not begin Phase 3 until confirmed.
 
 ---
 
 ## Phase 3: Instrument
+
+**Before writing any code**, verify your implementation plan covers every REQUIRED item from Phase 1. Each maps to a specific step:
+
+| REQUIRED item | Implemented in |
+|---------------|---------------|
+| Non-serverless flush (`await ai.flush()` + `try/finally`) | Step 3d |
+| Stable `sessionId` tied to conversation, not per-request UUID | Step 3d |
+| Agent defined at module level (singleton) | Step 3b |
+| Bedrock + ESM → pass `bedrockModule` explicitly | Step 3b |
+| Streaming → keep `session.run()` open until stream consumed | Step 3i |
+| Local LLM → manual tracking + `totalCostUsd: 0` on every call | Step 3e |
+| Frontend `sessionId` scope → reset on new conversation | Step 3j |
+
+If a REQUIRED item from your Phase 1 list does not appear in this table, implement it in the most relevant step and do not skip it. Every REQUIRED item must have code written for it before Phase 4.
 
 ### Step 3a: Install dependencies
 
