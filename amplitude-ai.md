@@ -41,7 +41,7 @@ Your instrumentation requirements:
   REQUIRED  [if non-serverless — no Lambda/Vercel/Cloud Functions signals detected] Long-lived server → call `await ai.flush()` after each `session.run()`; use a stable sessionId tied to the conversation (not a per-request UUID); define agent at module level
   REQUIRED  [if Bedrock and "type":"module" in package.json] Bedrock + ESM → pass `bedrockModule` explicitly to `Bedrock` constructor (no CJS require() available)
   REQUIRED  [if streaming] Streaming → keep `session.run()` open until stream is fully consumed; do not return the stream before `run()` exits
-  REQUIRED  [if Local LLM: yes] No provider wrapper available → use manual tracking: `trackUserMessage` + `trackAiMessage` + `trackToolCall`. Doctor will report `provider_dependency` — this is a false positive, not a bug; the instrumentation is correct. Cost tracking is structurally impossible for local models: pass `totalCostUsd: 0` to suppress the data quality gap, or accept it.
+  REQUIRED  [if Local LLM: yes] No provider wrapper available → use manual tracking: `trackUserMessage` + `trackAiMessage` + `trackToolCall`. Doctor will report `provider_dependency` — this is a false positive, not a bug; the instrumentation is correct. Pass `totalCostUsd: 0` on every `trackAiMessage` call — omitting it will silently fail the Phase 4 data quality cost check.
   REQUIRED  [if Frontend: yes] Client sessionId scope → verify the browser client resets `sessionId` when a new conversation starts; a sessionId persisted in localStorage across page loads will silently attach new events to an old session that predates instrumentation and will never appear in Agent Analytics
   WARNING   [if cross-region Bedrock model ID e.g. us.*, eu.*] Cross-region model ID → cost tracking will be missing; use canonical Bedrock model ID for cost (e.g. anthropic.claude-3-5-sonnet-20241022-v2:0)
 ```
@@ -394,8 +394,8 @@ s.trackAiMessage(responseText, event.model, 'anthropic', responseLatencyMs, {
 
 ```typescript
 s.trackToolCall(toolEvent.name, toolEvent.durationMs, !toolEvent.isError, {
-  input: toolEvent.input,
-  output: toolEvent.output,
+  toolInput: toolEvent.input,
+  toolOutput: toolEvent.output,
 });
 ```
 
@@ -432,8 +432,8 @@ await session.run(async (s) => {
       });
     } else if (event.type === 'tool_use') {
       s.trackToolCall(event.name, event.durationMs, true, {
-        input: event.input,
-        output: event.output,
+        toolInput: event.input,
+        toolOutput: event.output,
       });
     }
   }
@@ -499,9 +499,8 @@ await orchestrator.session({ sessionId }).run(async (s) => {
     s.runAs(matcher, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
   ]);
 
-  s.trackAiMessage(assemble(a, b), {
-    model: 'gpt-4o', provider: 'openai',
-    latencyMs: latency, inputTokens: inTok, outputTokens: outTok,
+  s.trackAiMessage(assemble(a, b), 'gpt-4o', 'openai', latency, {
+    inputTokens: inTok, outputTokens: outTok,
   });
 });
 ```
@@ -568,9 +567,7 @@ s.trackSpan({
 If your agent's response is purely a UI component with no text, you still need an `[Agent] AI Response` event for turn counting. Put a brief description in the content so the session viewer shows a readable bubble:
 
 ```typescript
-s.trackAiMessage('[Displayed: loan options comparison table]', {
-  model: 'gpt-4o', provider: 'openai', latencyMs: 200,
-});
+s.trackAiMessage('[Displayed: loan options comparison table]', 'gpt-4o', 'openai', 200);
 // Then emit the span with the full component data:
 s.trackSpan({
   name: 'loan-comparison-table',
@@ -1002,7 +999,7 @@ After the PR is merged and deployed:
 | `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush? }`. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Workers). | Create session |
 | `session.run(fn)` | Execute with session context (auto-flushes in serverless) |
 | `s.runAs(childAgent, fn)` | Delegate to child agent |
-| `ai.flush()` | Flush queued events — required after each session in long-lived servers; use `try/finally` |
+| `ai.flush()` | Flush queued events — required after each session in long-lived servers. Always use `try/finally`: `try { await session.run(...) } finally { await ai.flush() }` — without `finally`, a thrown error inside `session.run()` skips the flush and silently drops all events from that session. |
 
 ### Tracking Methods (on session `s`)
 
@@ -1056,23 +1053,32 @@ All imported from `@amplitude/ai`:
 For local models (`node-llama-cpp`, `ollama`, LM Studio, or any `localhost` inference server), no `@amplitude/ai` provider wrapper exists. Use manual tracking throughout:
 
 ```typescript
-const start = Date.now();
-const response = await localModel.complete(prompt);   // your local inference call
-const latencyMs = Date.now() - start;
-
 await agent.session({ userId, sessionId }).run(async (s) => {
   s.trackUserMessage(userInput);
+
+  // Optional: track preprocessing steps (e.g. context retrieval, prompt construction)
+  const toolStart = Date.now();
+  const context = await inspectMessage(userInput);   // any sync/async preprocessing step
+  s.trackToolCall('inspect_message', Date.now() - toolStart, true, {
+    toolInput: { message: userInput },
+    toolOutput: { context },
+  });
+
+  const start = Date.now();
+  const response = await localModel.complete(prompt);   // your local inference call
+  const latencyMs = Date.now() - start;
+
   s.trackAiMessage(response.text, 'llama-3.2-3b', 'local', latencyMs, {
     inputTokens: response.usage?.inputTokens,   // if the runtime exposes it
     outputTokens: response.usage?.outputTokens,
-    totalCostUsd: 0,  // local models have no cost — pass 0 to suppress the data quality gap
+    totalCostUsd: 0,  // required — local models have no cost; 0 suppresses the data quality gate failure
   });
 });
 ```
 
 **Doctor false positive:** Running `npx amplitude-ai doctor` against a local-LLM project will report `provider_dependency` because no recognized provider wrapper is detected. This is expected — the instrumentation is correct. Ignore that check; all other doctor checks still apply.
 
-**Cost tracking:** Cost is structurally impossible for local models — there is no pricing API. Either pass `totalCostUsd: 0` explicitly (suppresses the data quality gate failure) or accept the gap. Do not treat a missing `[Agent] Cost USD` as a bug.
+**Cost tracking:** Cost is structurally impossible for local models — there is no pricing API. Always pass `totalCostUsd: 0` explicitly; omitting it will fail the Phase 4 data quality cost check silently. Do not treat a `$0` cost as a bug — it is the correct suppression value for local inference.
 
 **Token counts:** Expose if available from the runtime. If not, omit — `inputTokens`/`outputTokens` are optional and their absence degrades token analytics but does not break sessions.
 
