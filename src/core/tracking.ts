@@ -99,6 +99,7 @@ import type { MessageLabel, SessionEnrichments } from './enrichments.js';
 import {
   getTextFromLlmMessage,
   PrivacyConfig,
+  redactPiiPatterns,
   sanitizeStructuredContent,
 } from './privacy.js';
 
@@ -455,13 +456,31 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
     properties[PROP_TTFB_MS] = opts.providerTtfbMs;
   if (opts.finishReason != null)
     properties[PROP_FINISH_REASON] = opts.finishReason;
-  if (opts.errorMessage != null)
-    properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
+
+  // Content channels: errorMessage, stackTrace, and toolCalls carry
+  // model-/tool-generated text that must obey contentMode. In non-`full`
+  // modes we suppress them entirely so the metadata_only / customer_enriched
+  // contracts hold across every channel, not just `$llm_message`.
+  let aiMsgEffectiveMode = pc.contentMode;
+  if (aiMsgEffectiveMode == null)
+    aiMsgEffectiveMode = pc.privacyMode ? 'metadata_only' : 'full';
+  if (aiMsgEffectiveMode === 'full') {
+    if (opts.errorMessage != null)
+      properties[PROP_ERROR_MESSAGE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
+      );
+    if (opts.stackTrace != null)
+      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(opts.stackTrace);
+    if (opts.toolCalls != null) {
+      const sanitizedCalls = sanitizeStructuredContent(
+        opts.toolCalls,
+        pc.redactPii,
+        pc,
+      );
+      properties[PROP_TOOL_CALLS] = serializeToJsonString(sanitizedCalls);
+    }
+  }
   if (opts.errorType != null) properties[PROP_ERROR_TYPE] = opts.errorType;
-  if (opts.stackTrace != null)
-    properties[PROP_STACK_TRACE] = opts.stackTrace;
-  if (opts.toolCalls != null)
-    properties[PROP_TOOL_CALLS] = serializeToJsonString(opts.toolCalls);
 
   // Reasoning content
   const reasoningProps = pc.sanitizeReasoningContent(
@@ -609,9 +628,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.context)
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
-  if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
   if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
-  if (opts.stackTrace) properties[PROP_STACK_TRACE] = opts.stackTrace;
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.locale) properties[PROP_LOCALE] = opts.locale;
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
@@ -622,13 +639,25 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   if (effectiveMode == null)
     effectiveMode = pc.privacyMode ? 'metadata_only' : 'full';
 
+  // errorMessage / stackTrace are content channels — the auto-tracker sets
+  // errorMessage = String(toolOutput) on failed tool_result blocks, which
+  // would otherwise bypass the toolOutput contentMode gate. Gate them here.
+  if (effectiveMode === 'full') {
+    if (opts.errorMessage)
+      properties[PROP_ERROR_MESSAGE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
+      );
+    if (opts.stackTrace)
+      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(opts.stackTrace);
+  }
+
   if (opts.toolInput != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.toolInput, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.toolInput, pc.redactPii, pc);
     properties[PROP_TOOL_INPUT] = serializeToJsonString(sanitized);
   }
 
   if (opts.toolOutput != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.toolOutput, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.toolOutput, pc.redactPii, pc);
     properties[PROP_TOOL_OUTPUT] = serializeToJsonString(sanitized);
   }
 
@@ -956,12 +985,12 @@ export function trackSpan(opts: TrackSpanOptions): string {
     effectiveMode = pc.privacyMode ? 'metadata_only' : 'full';
 
   if (opts.inputState != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.inputState, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.inputState, pc.redactPii, pc);
     properties[PROP_INPUT_STATE] = serializeToJsonString(sanitized);
   }
 
   if (opts.outputState != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.outputState, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.outputState, pc.redactPii, pc);
     properties[PROP_OUTPUT_STATE] = serializeToJsonString(sanitized);
   }
 
