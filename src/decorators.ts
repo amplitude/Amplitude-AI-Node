@@ -626,8 +626,16 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
             }
             return result;
           } catch (exc) {
-            const msg = exc instanceof Error ? exc.message : String(exc);
-            span.setStatus({ code: 2, message: msg });
+            // AA-151931 V3-G: the mapper reads `span.status.message` into
+            // PROP_ERROR_MESSAGE, which is a content channel. Non-full
+            // modes still emit an ERROR status so the failure signal
+            // survives; only the raw message body is stripped.
+            if (gateOpen) {
+              const msg = exc instanceof Error ? exc.message : String(exc);
+              span.setStatus({ code: 2, message: msg });
+            } else {
+              span.setStatus({ code: 2 });
+            }
             throw exc;
           } finally {
             span.end();

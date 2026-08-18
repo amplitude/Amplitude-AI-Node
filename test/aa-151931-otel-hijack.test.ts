@@ -141,3 +141,75 @@ describe('AA-151931 V3-C (Node): @observe decorator opt-in gate', () => {
     expect((_getOtelOwner() as { otelEnabled: boolean }).otelEnabled).toBe(true);
   });
 });
+
+describe('AA-151931 V3-G (Node): span.status.message obeys contentMode', () => {
+  afterEach(() => {
+    trace.disable();
+  });
+
+  it('provider path: strips raw errorMessage from status when contentMode is customer_enriched', async () => {
+    const exporter = installSpanExporter();
+    const transport = fakeTransport();
+    const { PrivacyConfig } = await import('../src/core/privacy.js');
+    const ai = new AmplitudeAI({ amplitude: transport, config: new AIConfig() });
+    ai.enableOtel();
+
+    // Pass the privacyConfig directly to the provider — real subclass
+    // wrappers (openai/anthropic/etc.) inherit it via _inheritPrivacyConfig,
+    // but TestProvider takes what its constructor is given.
+    const provider = new (class extends TestProvider {
+      constructor() {
+        super({
+          amplitude: ai,
+          providerName: 'openai',
+          privacyConfig: new PrivacyConfig({ contentMode: 'customer_enriched' }),
+        });
+      }
+    })();
+
+    provider.emitTestSpan({
+      modelName: 'gpt-4',
+      provider: 'openai',
+      isError: true,
+      errorType: 'RateLimitError',
+      errorMessage: 'upstream 429: token=SECRET-STATUS-LEAK',
+    });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans.length).toBeGreaterThan(0);
+    // ERROR status still surfaces (code=2) so consumers see the failure.
+    expect(spans[0].status.code).toBe(2);
+    // But the raw message body must not ship — this was the leak channel.
+    expect(spans[0].status.message ?? '').not.toContain('SECRET-STATUS-LEAK');
+  });
+
+  it('provider path: keeps errorMessage on status when contentMode is full', async () => {
+    const exporter = installSpanExporter();
+    const transport = fakeTransport();
+    const { PrivacyConfig } = await import('../src/core/privacy.js');
+    const ai = new AmplitudeAI({ amplitude: transport, config: new AIConfig() });
+    ai.enableOtel();
+
+    const provider = new (class extends TestProvider {
+      constructor() {
+        super({
+          amplitude: ai,
+          providerName: 'openai',
+          privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+        });
+      }
+    })();
+
+    provider.emitTestSpan({
+      modelName: 'gpt-4',
+      provider: 'openai',
+      isError: true,
+      errorType: 'RateLimitError',
+      errorMessage: 'upstream 429: some detail',
+    });
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans[0].status.code).toBe(2);
+    expect(spans[0].status.message).toContain('some detail');
+  });
+});

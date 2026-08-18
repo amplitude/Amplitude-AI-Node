@@ -382,7 +382,17 @@ export abstract class BaseAIProvider {
 
         const span = tracer.startSpan(`${opts.provider}.${OP_CHAT}`, { attributes: spanAttrs });
         if (opts.isError) {
-          span.setStatus({ code: 2, message: opts.errorMessage ?? 'error' });
+          // AA-151931 V3-G: the mapper reads `span.status.message` into
+          // PROP_ERROR_MESSAGE, so the raw error string is content and
+          // must obey the same gate as gen_ai.*.messages. Non-full modes
+          // still emit an ERROR status so consumers see the failure;
+          // only the message body is stripped.
+          const errMode = _providerEffectiveMode(this._privacyConfig);
+          if (errMode === 'full') {
+            span.setStatus({ code: 2, message: opts.errorMessage ?? 'error' });
+          } else {
+            span.setStatus({ code: 2 });
+          }
         }
         span.end();
       } catch (e) {
