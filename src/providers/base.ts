@@ -11,10 +11,7 @@ import {
   PROP_SESSION_REPLAY_ID,
 } from '../core/constants.js';
 import type { PrivacyConfig } from '../core/privacy.js';
-import {
-  redactPiiPatterns,
-  sanitizeStructuredContent,
-} from '../core/privacy.js';
+import { sanitizeStructuredContent } from '../core/privacy.js';
 import {
   trackAiMessage,
   trackUserMessage,
