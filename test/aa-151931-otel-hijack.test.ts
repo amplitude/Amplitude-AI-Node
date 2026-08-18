@@ -119,3 +119,25 @@ describe('AA-151931 V3-A: opt-in gate on _getOtelTracer', () => {
     expect(ai.otelEnabled).toBe(true);
   });
 });
+
+describe('AA-151931 V3-C (Node): @observe decorator opt-in gate', () => {
+  afterEach(() => {
+    trace.disable();
+  });
+
+  it('exposes a module-level owner registry that enableOtel populates', async () => {
+    const { _getOtelOwner, _setOtelOwner } = await import('../src/client.js');
+
+    // Baseline: no owner registered.
+    _setOtelOwner(null);
+    expect(_getOtelOwner()).toBeNull();
+
+    // enableOtel registers the calling AmplitudeAI as the owner.
+    const transport = fakeTransport();
+    const ai = new AmplitudeAI({ amplitude: transport, config: new AIConfig() });
+    ai.enableOtel();
+
+    expect(_getOtelOwner()).toBe(ai);
+    expect((_getOtelOwner() as { otelEnabled: boolean }).otelEnabled).toBe(true);
+  });
+});

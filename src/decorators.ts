@@ -13,6 +13,7 @@ import {
   getActiveContext,
   SessionContext,
 } from './context.js';
+import { _getOtelOwner } from './client.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
@@ -529,6 +530,20 @@ interface OtelSpanHandle {
 }
 
 function _getOtelTracer(): OtelTracerLike | null {
+  // AA-151931 V3-C: gate on the module-level OTEL owner registry set by
+  // `AmplitudeAI.enableOtel()`. Previously this returned a tracer
+  // whenever any real TracerProvider was globally registered — which
+  // meant any app running OTEL for APM (Datadog, Honeycomb, …) silently
+  // rerouted content from `@observe`-decorated functions into that APM
+  // sink instead of Amplitude. Now we require an explicit opt-in on
+  // some AmplitudeAI in this process.
+  //
+  // `@observe` decorators don't naturally have an `AmplitudeAI`
+  // reference in scope (their `amplitude:` param is a raw `AmplitudeLike`
+  // transport). The module registry gives us a place to record consent
+  // without threading a new argument through every decorator surface.
+  const owner = _getOtelOwner();
+  if (owner?.otelEnabled !== true) return null;
   try {
     const api = _require('@opentelemetry/api') as {
       trace: {
