@@ -46,6 +46,15 @@ class TestProvider extends BaseAIProvider {
   ) {
     super({ amplitude, providerName });
   }
+
+  /**
+   * AA-151931 V3-A: OTEL emission is gated on `_otelEnabled`. The test
+   * fake used here isn't an `AmplitudeAI` instance, so we flip the flag
+   * directly for the OTEL-parity tests.
+   */
+  _forceOtelEnabledForTest(): void {
+    (this as unknown as { _otelEnabled: boolean })._otelEnabled = true;
+  }
 }
 
 describe('applySessionContext', () => {
@@ -224,6 +233,7 @@ describe('BaseAIProvider OTEL usage parity', () => {
   it('emits complete usage and authoritative cost for non-streaming calls', () => {
     const exporter = installSpanExporter();
     const provider = new TestProvider(createMockAmplitude(), 'openai');
+    provider._forceOtelEnabledForTest();
 
     provider.trackFn()({
       modelName: 'gpt-4o',
@@ -252,6 +262,7 @@ describe('BaseAIProvider OTEL usage parity', () => {
   it('emits complete usage for generic streaming calls', () => {
     const exporter = installSpanExporter();
     const provider = new TestProvider(createMockAmplitude(), 'openai');
+    provider._forceOtelEnabledForTest();
     const tracker = provider.createStreamingTracker();
     tracker.setModel('gpt-4o');
     tracker.setUsage({

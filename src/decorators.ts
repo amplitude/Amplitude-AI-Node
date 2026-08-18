@@ -573,9 +573,21 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
     const sessionId = ctx?.sessionId ?? randomUUID();
 
     const runFn = async (): Promise<unknown> => {
+      // AA-151931 V3-E: gate span state attributes on effective content
+      // mode. `_serializeState` already drops the payload when the mode
+      // is `metadata_only`, but `AMP_INPUT_STATE` was previously stamped
+      // unconditionally when `_serializeState` returned non-null — which
+      // meant the `full` fallback path always shipped it, and
+      // `customer_enriched` mode leaked it too.
+      const pc = params.privacyConfig;
+      const gateOpen =
+        pc == null
+          ? true
+          : pc.contentMode === 'full' ||
+            (pc.contentMode == null && !pc.privacyMode);
       const inputState = _serializeState(
         args.length === 1 ? args[0] : args.length > 0 ? { args } : null,
-        params.privacyConfig,
+        pc,
       );
 
       // Try to use OTEL tracer if available — the span processor will
@@ -584,18 +596,15 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
       if (tracer != null) {
         return tracer.startActiveSpan(spanName, async (span: OtelSpanHandle) => {
           span.setAttribute(AMP_SPAN_KIND, spanKind);
-          if (inputState != null) {
+          if (inputState != null && gateOpen) {
             span.setAttribute(AMP_INPUT_STATE, JSON.stringify(inputState));
           }
 
           let result: unknown = undefined;
           try {
             result = await fn.apply(this, args);
-            const pc = params.privacyConfig;
-            const isMetadataOnly = pc != null &&
-              (pc.contentMode === 'metadata_only' || (pc.contentMode == null && pc.privacyMode));
-            if (!isMetadataOnly) {
-              const outputState = _serializeState(result, params.privacyConfig);
+            if (gateOpen) {
+              const outputState = _serializeState(result, pc);
               if (outputState != null) {
                 span.setAttribute(AMP_OUTPUT_STATE, JSON.stringify(outputState));
               }

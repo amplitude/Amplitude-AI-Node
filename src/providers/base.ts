@@ -12,6 +12,10 @@ import {
 } from '../core/constants.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import {
+  redactPiiPatterns,
+  sanitizeStructuredContent,
+} from '../core/privacy.js';
+import {
   trackAiMessage,
   trackUserMessage,
   type TrackAiMessageOptions,
@@ -187,7 +191,19 @@ interface OtelSpanHandle {
   end(): void;
 }
 
-function _getOtelTracer(): OtelTracerLike | null {
+/**
+ * Return an OTEL tracer only when the specific `AmplitudeAI` instance
+ * that owns this provider wrapper has called `.enableOtel()`.
+ *
+ * Previously (AA-151931 V3-A) this checked the *global* `TracerProvider`
+ * shape and returned a tracer whenever any real one was registered —
+ * which meant every app running OTEL for APM (Datadog, Honeycomb, etc.)
+ * silently rerouted our LLM content into that APM sink, bypassing
+ * `contentMode` entirely. Python's provider path (`providers/base.py:74-95`)
+ * always gated on `owner._otel_enabled`; this brings Node to parity.
+ */
+function _getOtelTracer(otelEnabled: boolean): OtelTracerLike | null {
+  if (!otelEnabled) return null;
   try {
     const api = _require('@opentelemetry/api') as {
       trace: {
@@ -216,9 +232,56 @@ function _getOtelTracer(): OtelTracerLike | null {
   }
 }
 
+function _inheritOtelEnabled(input: AmplitudeOrAI): boolean {
+  const flag = (input as { otelEnabled?: boolean }).otelEnabled;
+  return flag === true;
+}
+
+/**
+ * Resolve effective content mode (mirrors `core/tracking.ts _effectiveMode`).
+ * Kept local so the OTEL emission path can gate its message attributes the
+ * same way Amplitude-event emission does (AA-151931 V3-B).
+ */
+function _providerEffectiveMode(
+  pc: PrivacyConfig | null,
+): 'full' | 'metadata_only' | 'customer_enriched' {
+  if (pc == null) return 'full';
+  const explicit = pc.contentMode;
+  if (
+    explicit === 'full' ||
+    explicit === 'metadata_only' ||
+    explicit === 'customer_enriched'
+  ) {
+    return explicit;
+  }
+  return pc.privacyMode ? 'metadata_only' : 'full';
+}
+
+/**
+ * Serialize an input-messages array for the `gen_ai.input.messages` span
+ * attribute, applying PrivacyConfig if provided. Returns `null` when the
+ * effective mode is not `full` — caller must omit the attribute in that
+ * case rather than stamping an empty string (AA-151931 V3-B).
+ *
+ * Custom redaction (customRedactionPatterns/customRedactionFn) will land
+ * as part of AA-151915 which widens `sanitizeStructuredContent` to accept
+ * a PrivacyConfig. Until then, only built-in PII redaction is applied.
+ */
+function _sanitizeGenAiMessagesForSpan(
+  messages: unknown,
+  pc: PrivacyConfig | null,
+): string | null {
+  const mode = _providerEffectiveMode(pc);
+  if (mode !== 'full') return null;
+  if (pc == null) return JSON.stringify(messages);
+  const sanitized = sanitizeStructuredContent(messages, pc.redactPii);
+  return JSON.stringify(sanitized);
+}
+
 export abstract class BaseAIProvider {
   protected _amplitude: AmplitudeLike;
   protected _privacyConfig: PrivacyConfig | null;
+  protected _otelEnabled: boolean;
   readonly _providerName: string;
 
   constructor(options: {
@@ -228,6 +291,11 @@ export abstract class BaseAIProvider {
   }) {
     this._amplitude = resolveAmplitude(options.amplitude);
     this._privacyConfig = options.privacyConfig ?? null;
+    // OTEL routing is opt-in per AmplitudeAI instance. Inherit the flag
+    // from the AmplitudeAI passed in (AA-151931 V3-A). Raw Amplitude
+    // clients or plain transports have no otelEnabled property, so this
+    // stays false.
+    this._otelEnabled = _inheritOtelEnabled(options.amplitude);
     this._providerName = options.providerName;
   }
 
@@ -252,10 +320,12 @@ export abstract class BaseAIProvider {
       browserSessionId: opts.browserSessionId,
     });
 
-    // When OTEL is active, emit a completed span with gen_ai.* attributes
-    // so the SpanEventMapper handles event creation. This enables provider
-    // wrapper events to show up in OTEL traces alongside observe() spans.
-    const tracer = _getOtelTracer();
+    // When OTEL is active on this AmplitudeAI instance, emit a completed
+    // span with gen_ai.* attributes so the SpanEventMapper handles event
+    // creation. This enables provider wrapper events to show up in OTEL
+    // traces alongside observe() spans. AA-151931 V3-A: gate on explicit
+    // opt-in so we don't route content into an unrelated global provider.
+    const tracer = _getOtelTracer(this._otelEnabled);
     if (tracer != null) {
       try {
         const spanAttrs: Record<string, unknown> = {
@@ -281,14 +351,21 @@ export abstract class BaseAIProvider {
         if (opts.temperature != null) spanAttrs[GENAI_REQUEST_TEMPERATURE] = opts.temperature;
         if (opts.maxOutputTokens != null) spanAttrs[GENAI_REQUEST_MAX_TOKENS] = opts.maxOutputTokens;
         if (opts.topP != null) spanAttrs[GENAI_REQUEST_TOP_P] = opts.topP;
+        // AA-151931 V3-B: gen_ai.input.messages / gen_ai.output.messages
+        // are content channels — respect contentMode and apply custom
+        // redaction so metadata_only really means no content, even on
+        // OTEL spans.
         const inputMsgs = (opts as Record<string, unknown>).inputMessages;
         if (inputMsgs != null) {
-          spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(inputMsgs);
+          const serialized = _sanitizeGenAiMessagesForSpan(inputMsgs, this._privacyConfig);
+          if (serialized != null) spanAttrs[GENAI_INPUT_MESSAGES] = serialized;
         }
         if (opts.responseContent != null) {
-          spanAttrs[GENAI_OUTPUT_MESSAGES] = JSON.stringify([
-            { role: 'assistant', content: opts.responseContent },
-          ]);
+          const serialized = _sanitizeGenAiMessagesForSpan(
+            [{ role: 'assistant', content: opts.responseContent }],
+            this._privacyConfig,
+          );
+          if (serialized != null) spanAttrs[GENAI_OUTPUT_MESSAGES] = serialized;
         }
         if (opts.finishReason != null) {
           spanAttrs[GENAI_FINISH_REASONS] = [opts.finishReason];
@@ -296,10 +373,14 @@ export abstract class BaseAIProvider {
         if (opts.latencyMs != null) {
           spanAttrs['amplitude.latency_ms'] = opts.latencyMs;
         }
+        // AA-151931 V3-D: `error.type` is a short classifier per the
+        // GenAI semantic conventions. Previously we fell back to
+        // `errorMessage` here, which shipped the raw error string under
+        // the classifier attribute (violating the convention and bypassing
+        // any content gate). The message flows through the span status
+        // instead; consumers that need it can read it from there.
         if (opts.isError && opts.errorType != null) {
           spanAttrs[GENAI_ERROR_TYPE] = opts.errorType;
-        } else if (opts.isError && opts.errorMessage != null) {
-          spanAttrs[GENAI_ERROR_TYPE] = opts.errorMessage;
         }
 
         const span = tracer.startSpan(`${opts.provider}.${OP_CHAT}`, { attributes: spanAttrs });
@@ -355,12 +436,18 @@ export abstract class BaseAIProvider {
   _privacyConfigRef(): PrivacyConfig | null {
     return this._privacyConfig;
   }
+
+  /** @internal Accessor for SimpleStreamingTracker (AA-151931 V3-A). */
+  _otelEnabledRef(): boolean {
+    return this._otelEnabled;
+  }
 }
 
 export class SimpleStreamingTracker {
   private _trackFn: TrackFn;
   private _amplitude: AmplitudeLike;
   private _privacyConfig: PrivacyConfig | null;
+  private _otelEnabled: boolean;
   readonly accumulator: StreamingAccumulator;
   private _modelName = 'unknown';
   private _providerName: string;
@@ -372,6 +459,7 @@ export class SimpleStreamingTracker {
     this._trackFn = provider.trackFn();
     this._amplitude = provider._amplitudeClient();
     this._privacyConfig = provider._privacyConfigRef();
+    this._otelEnabled = provider._otelEnabledRef();
     this._providerName = provider._providerName;
     this.accumulator = new StreamingAccumulator();
   }
@@ -439,8 +527,9 @@ export class SimpleStreamingTracker {
       }
     }
 
-    // When OTEL is active, emit a span instead of calling _trackFn directly.
-    const tracer = _getOtelTracer();
+    // When OTEL is active on this AmplitudeAI instance, emit a span
+    // instead of calling _trackFn directly (AA-151931 V3-A).
+    const tracer = _getOtelTracer(this._otelEnabled);
     if (tracer != null) {
       try {
         const spanAttrs: Record<string, unknown> = {
@@ -462,13 +551,18 @@ export class SimpleStreamingTracker {
         }
         if (costUsd != null) spanAttrs[GENAI_USAGE_COST] = costUsd;
         if (state.finishReason != null) spanAttrs[GENAI_FINISH_REASONS] = [state.finishReason];
+        // AA-151931 V3-B: gate gen_ai.*.messages on contentMode, same as
+        // the non-streaming path.
         if (this._inputMessages.length > 0) {
-          spanAttrs[GENAI_INPUT_MESSAGES] = JSON.stringify(this._inputMessages);
+          const serialized = _sanitizeGenAiMessagesForSpan(this._inputMessages, this._privacyConfig);
+          if (serialized != null) spanAttrs[GENAI_INPUT_MESSAGES] = serialized;
         }
         if (state.content) {
-          spanAttrs[GENAI_OUTPUT_MESSAGES] = JSON.stringify([
-            { role: 'assistant', content: state.content },
-          ]);
+          const serialized = _sanitizeGenAiMessagesForSpan(
+            [{ role: 'assistant', content: state.content }],
+            this._privacyConfig,
+          );
+          if (serialized != null) spanAttrs[GENAI_OUTPUT_MESSAGES] = serialized;
         }
         if (this.accumulator.elapsedMs > 0) {
           spanAttrs['amplitude.latency_ms'] = this.accumulator.elapsedMs;
