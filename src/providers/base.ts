@@ -260,9 +260,11 @@ function _providerEffectiveMode(
  * effective mode is not `full` — caller must omit the attribute in that
  * case rather than stamping an empty string (AA-151931 V3-B).
  *
- * Custom redaction (customRedactionPatterns/customRedactionFn) will land
- * as part of AA-151915 which widens `sanitizeStructuredContent` to accept
- * a PrivacyConfig. Until then, only built-in PII redaction is applied.
+ * Applies built-in PII redaction AND custom redaction (via the
+ * three-arg `sanitizeStructuredContent`) so `gen_ai.input.messages` /
+ * `gen_ai.output.messages` obey `customRedactionPatterns` and
+ * `customRedactionFn` before attributes enter the OTEL pipeline —
+ * matching the trackAiMessage / trackToolCall contract.
  */
 function _sanitizeGenAiMessagesForSpan(
   messages: unknown,
@@ -271,7 +273,7 @@ function _sanitizeGenAiMessagesForSpan(
   const mode = _providerEffectiveMode(pc);
   if (mode !== 'full') return null;
   if (pc == null) return JSON.stringify(messages);
-  const sanitized = sanitizeStructuredContent(messages, pc.redactPii);
+  const sanitized = sanitizeStructuredContent(messages, pc.redactPii, pc);
   return JSON.stringify(sanitized);
 }
 

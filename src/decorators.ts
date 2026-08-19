@@ -529,21 +529,35 @@ interface OtelSpanHandle {
   end(): void;
 }
 
-function _getOtelTracer(): OtelTracerLike | null {
-  // AA-151931 V3-C: gate on the module-level OTEL owner registry set by
-  // `AmplitudeAI.enableOtel()`. Previously this returned a tracer
-  // whenever any real TracerProvider was globally registered — which
-  // meant any app running OTEL for APM (Datadog, Honeycomb, …) silently
-  // rerouted content from `@observe`-decorated functions into that APM
-  // sink instead of Amplitude. Now we require an explicit opt-in on
-  // some AmplitudeAI in this process.
+function _getOtelTracer(caller?: unknown): OtelTracerLike | null {
+  // AA-151931 V3-C: gate on the specific caller's OTEL opt-in, falling
+  // back to the module-level registry only when the caller's amplitude
+  // is a raw transport without an `otelEnabled` signal.
   //
-  // `@observe` decorators don't naturally have an `AmplitudeAI`
-  // reference in scope (their `amplitude:` param is a raw `AmplitudeLike`
-  // transport). The module registry gives us a place to record consent
-  // without threading a new argument through every decorator surface.
-  const owner = _getOtelOwner();
-  if (owner?.otelEnabled !== true) return null;
+  // Round-2 review (Avery): the earlier version consulted only the
+  // module registry, so once ANY AmplitudeAI in the process called
+  // `enableOtel()`, every `observe()` — including work associated with
+  // a different client that never opted in — silently rerouted through
+  // OTEL. That crossed the consent boundary between coexisting clients.
+  //
+  // Resolution order:
+  //   1. If the caller passed an AmplitudeAI-shaped object with an
+  //      explicit `otelEnabled` flag, honor THAT client's choice.
+  //      `true` → use OTEL; `false` → do not, even if the module
+  //      registry is populated.
+  //   2. Otherwise (raw transport, null, undefined) fall back to the
+  //      module registry so bare `observe(fn)` calls with no explicit
+  //      amplitude continue to work as documented.
+  const callerOtelEnabled = (caller as { otelEnabled?: boolean } | null)
+    ?.otelEnabled;
+  if (callerOtelEnabled === true) {
+    // fall through to tracer resolution
+  } else if (callerOtelEnabled === false) {
+    return null;
+  } else {
+    const owner = _getOtelOwner();
+    if (owner?.otelEnabled !== true) return null;
+  }
   try {
     const api = _require('@opentelemetry/api') as {
       trace: {
@@ -606,8 +620,10 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
       );
 
       // Try to use OTEL tracer if available — the span processor will
-      // handle event emission via the mapper.
-      const tracer = _getOtelTracer();
+      // handle event emission via the mapper. Pass this call's amplitude
+      // so the opt-in check is scoped to the specific client, not to
+      // the process-wide module registry (AA-151931 V3-C review).
+      const tracer = _getOtelTracer(params.amplitude);
       if (tracer != null) {
         return tracer.startActiveSpan(spanName, async (span: OtelSpanHandle) => {
           span.setAttribute(AMP_SPAN_KIND, spanKind);
