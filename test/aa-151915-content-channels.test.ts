@@ -151,6 +151,96 @@ describe('AA-151915 V2: errorMessage on [Agent] Tool Call respects contentMode',
   });
 });
 
+describe('AA-151915 review: built-in PII redaction applies to stackTrace', () => {
+  // Avery2 review comment: `errorMessage` ran through `redactPiiPatterns`
+  // but `stackTrace` skipped it — so an opted-in customer with
+  // redactPii=true would still see raw emails / phone numbers in the
+  // stack trace. Built-in redaction must run before custom redaction on
+  // both channels, on both trackAiMessage and trackToolCall.
+
+  it('trackAiMessage redacts email + phone in stackTrace when redactPii=true', () => {
+    const amp = mockAmp();
+    trackAiMessage({
+      amplitude: amp,
+      userId: 'u12345',
+      sessionId: 's1',
+      responseContent: '',
+      modelName: 'gpt-4',
+      provider: 'openai',
+      latencyMs: 100,
+      errorMessage: 'failed for jane.doe@acme.com',
+      stackTrace:
+        'Traceback:\n  at process (jane.doe@acme.com)\n  call from 415-555-2671',
+      privacyConfig: new PrivacyConfig({
+        contentMode: 'full',
+        redactPii: true,
+      }),
+    });
+
+    const props = amp.events[0]?.event_properties as Record<string, unknown>;
+    const stack = props['[Agent] Stack Trace'] as string;
+    expect(stack).toBeDefined();
+    expect(stack).not.toContain('jane.doe@acme.com');
+    expect(stack).not.toContain('415-555-2671');
+    // And errorMessage keeps its existing redaction contract.
+    const errMsg = props['[Agent] Error Message'] as string;
+    expect(errMsg).not.toContain('jane.doe@acme.com');
+  });
+
+  it('trackToolCall redacts email in stackTrace when redactPii=true', () => {
+    const amp = mockAmp();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u12345',
+      sessionId: 's1',
+      toolName: 'lookup',
+      success: false,
+      latencyMs: 12,
+      errorMessage: 'lookup failed',
+      stackTrace:
+        'Traceback:\n  at db.query (SELECT * FROM users WHERE email = jane.doe@acme.com)',
+      privacyConfig: new PrivacyConfig({
+        contentMode: 'full',
+        redactPii: true,
+      }),
+    });
+
+    const props = amp.events[0]?.event_properties as Record<string, unknown>;
+    const stack = props['[Agent] Stack Trace'] as string;
+    expect(stack).toBeDefined();
+    expect(stack).not.toContain('jane.doe@acme.com');
+  });
+
+  it('trackAiMessage runs built-in redaction BEFORE customRedaction on stackTrace', () => {
+    // Regression guard for ordering: built-in redaction must run first
+    // so the custom regex sees an already-scrubbed string. Otherwise a
+    // customer pattern could accidentally match a partially-redacted
+    // token and produce a confusing double-scrub.
+    const amp = mockAmp();
+    trackAiMessage({
+      amplitude: amp,
+      userId: 'u12345',
+      sessionId: 's1',
+      responseContent: '',
+      modelName: 'gpt-4',
+      provider: 'openai',
+      latencyMs: 100,
+      stackTrace: 'ctx: jane.doe@acme.com sk-LIVE9f3ab21c',
+      privacyConfig: new PrivacyConfig({
+        contentMode: 'full',
+        redactPii: true,
+        customRedactionPatterns: ['sk-[A-Za-z0-9]+'],
+      }),
+    });
+
+    const props = amp.events[0]?.event_properties as Record<string, unknown>;
+    const stack = props['[Agent] Stack Trace'] as string;
+    expect(stack).not.toContain('jane.doe@acme.com');
+    expect(stack).not.toContain('sk-LIVE9f3ab21c');
+    expect(stack).toContain('[REDACTED]');
+  });
+});
+
 describe('AA-151915 V4: customRedaction reaches tool input/output', () => {
   it('applies customRedactionPatterns to toolInput strings', () => {
     const amp = mockAmp();
