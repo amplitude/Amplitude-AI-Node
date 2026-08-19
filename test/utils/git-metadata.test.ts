@@ -99,6 +99,68 @@ describe('getGitMetadata()', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  // AA-151932 review (Avery): the earlier sanitizer stripped userinfo
+  // on every scheme (broke `ssh://git@host/repo.git`) and left query
+  // strings intact (leaked `?access_token=SECRET`). These lock in
+  // the fix.
+
+  it('preserves the identity user on an ssh:// remote', (): void => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubEnv('AMPLITUDE_GIT_REPO', 'ssh://git@github.com/org/repo.git');
+    const meta = getGitMetadata();
+    // `git@` is the SSH identity, not a credential. Stripping it
+    // produces a broken URL.
+    expect(meta.gitRepo).toBe('ssh://git@github.com/org/repo.git');
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('drops an access_token query string on an HTTPS remote', (): void => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubEnv(
+      'AMPLITUDE_GIT_REPO',
+      'https://github.com/org/repo.git?access_token=SECRET-TOKEN-XYZ',
+    );
+    const meta = getGitMetadata();
+    expect(meta.gitRepo).toBe('https://github.com/org/repo.git');
+    expect(meta.gitRepo ?? '').not.toContain('SECRET-TOKEN-XYZ');
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('drops both userinfo and query string when both carry secrets', (): void => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubEnv(
+      'AMPLITUDE_GIT_REPO',
+      'https://oauth2:token@github.com/org/repo.git?ci_job_token=SECRET',
+    );
+    const meta = getGitMetadata();
+    expect(meta.gitRepo).toBe('https://github.com/org/repo.git');
+    expect(meta.gitRepo ?? '').not.toContain('token');
+    expect(meta.gitRepo ?? '').not.toContain('SECRET');
+  });
+
+  it('drops a URL fragment', (): void => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubEnv(
+      'AMPLITUDE_GIT_REPO',
+      'https://github.com/org/repo.git#SECRET-FRAGMENT',
+    );
+    const meta = getGitMetadata();
+    expect(meta.gitRepo).toBe('https://github.com/org/repo.git');
+    expect(meta.gitRepo ?? '').not.toContain('SECRET-FRAGMENT');
+  });
+
+  it('drops a query string on an ssh:// remote without stripping identity', (): void => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubEnv(
+      'AMPLITUDE_GIT_REPO',
+      'ssh://git@github.com/org/repo.git?token=SECRET',
+    );
+    const meta = getGitMetadata();
+    // Identity preserved, query scrubbed.
+    expect(meta.gitRepo).toBe('ssh://git@github.com/org/repo.git');
+    expect(meta.gitRepo ?? '').not.toContain('SECRET');
+  });
+
   it('warns only once across multiple sanitize calls in the same process', (): void => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubEnv('AMPLITUDE_GIT_REPO', 'https://user:token@github.com/org/repo.git');

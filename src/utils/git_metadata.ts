@@ -30,18 +30,44 @@ function sanitizeRepoUrl(raw: string): string {
   try {
     parsed = new URL(raw);
   } catch {
+    // Not a URL by WHATWG standards (SCP-like `git@github.com:owner/repo.git`,
+    // local paths, etc.). No userinfo/query to scrub — return as-is.
     return raw;
   }
-  if (!parsed.username && !parsed.password) {
+
+  const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  const hasUserInfo = Boolean(parsed.username || parsed.password);
+  const hasQuery = parsed.search.length > 0;
+  const hasFragment = parsed.hash.length > 0;
+
+  // AA-151932 review (Avery): the earlier version stripped userinfo on
+  // every scheme, which broke SSH URLs like `ssh://git@host/repo.git`
+  // where `git@` is the identity, not a credential. And it left query
+  // strings alone, so `https://host/repo.git?access_token=SECRET`
+  // shipped intact.
+  //
+  // Rule: only strip userinfo on HTTP(S) — that's where embedded
+  // basic-auth creds actually live. Always drop query + fragment on
+  // any scheme; git remote URLs shouldn't need them, and OAuth tokens
+  // frequently ride the query string.
+  const shouldStripUserInfo = isHttp && hasUserInfo;
+  if (!shouldStripUserInfo && !hasQuery && !hasFragment) {
     return raw;
   }
-  parsed.username = '';
-  parsed.password = '';
+
+  if (shouldStripUserInfo) {
+    parsed.username = '';
+    parsed.password = '';
+  }
+  if (hasQuery) parsed.search = '';
+  if (hasFragment) parsed.hash = '';
+
   if (!credentialStripWarned) {
     credentialStripWarned = true;
     console.warn(
-      '[amplitude-ai] Stripped embedded credentials from git repo URL before ' +
-        'emitting [Agent] Git Repo. Configure your CI to use a credential-free remote URL.',
+      '[amplitude-ai] Stripped embedded credentials or query parameters from ' +
+        'git repo URL before emitting [Agent] Git Repo. Configure your CI to ' +
+        'use a credential-free remote URL.',
     );
   }
   return parsed.toString();
