@@ -237,6 +237,15 @@ export interface TrackUserMessageOptions {
    * on an explicit Session End). See `BoundAgent.session`.
    */
   idleTimeoutMinutes?: number | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -399,6 +408,15 @@ export interface TrackAiMessageOptions {
   context?: Record<string, unknown> | null;
   spanKind?: string | null;
   stackTrace?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -609,6 +627,15 @@ export interface TrackToolCallOptions {
   env?: string | null;
   locale?: string | null;
   spanKind?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -727,6 +754,15 @@ export interface TrackConversationOptions {
   env?: string | null;
   /** Locale tag (e.g. "en-US") forwarded to every emitted message. */
   locale?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -870,6 +906,15 @@ export interface TrackEmbeddingOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -964,6 +1009,15 @@ export interface TrackSpanOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -1066,6 +1120,15 @@ export interface TrackSessionEndOptions {
   env?: string | null;
   abandonmentTurn?: number | null;
   idleTimeoutMinutes?: number | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -1153,6 +1216,15 @@ export interface TrackSessionEnrichmentOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -1241,6 +1313,15 @@ export interface TrackScoreOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
