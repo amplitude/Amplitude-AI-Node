@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { _setOtelOwner } from '../../src/client.js';
 import { observe, ToolCallTracker } from '../../src/decorators.js';
 import { AMP_INPUT_STATE, AMP_OUTPUT_STATE, AMP_SPAN_KIND } from '../../src/otel/conventions.js';
 import type { AmplitudeLike } from '../../src/types.js';
@@ -43,10 +44,17 @@ describe('observe() with OTEL integration', () => {
     });
     api.trace.setGlobalTracerProvider(provider);
     tracerProvider = provider;
+
+    // AA-151931 V3-C: the decorator's `_getOtelTracer` now requires an
+    // AmplitudeAI to have opted in via `enableOtel()`. Simulate that by
+    // registering an owner directly — these tests don't use a real
+    // AmplitudeAI, they exercise the OTEL span emission path.
+    _setOtelOwner({ otelEnabled: true });
   });
 
   afterEach(async (): Promise<void> => {
     ToolCallTracker.clear();
+    _setOtelOwner(null);
     api.trace.disable();
     if (tracerProvider) {
       await tracerProvider.shutdown();

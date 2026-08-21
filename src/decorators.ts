@@ -13,6 +13,7 @@ import {
   getActiveContext,
   SessionContext,
 } from './context.js';
+import { _getOtelOwner } from './client.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
@@ -528,7 +529,35 @@ interface OtelSpanHandle {
   end(): void;
 }
 
-function _getOtelTracer(): OtelTracerLike | null {
+function _getOtelTracer(caller?: unknown): OtelTracerLike | null {
+  // AA-151931 V3-C: gate on the specific caller's OTEL opt-in, falling
+  // back to the module-level registry only when the caller's amplitude
+  // is a raw transport without an `otelEnabled` signal.
+  //
+  // Round-2 review (Avery): the earlier version consulted only the
+  // module registry, so once ANY AmplitudeAI in the process called
+  // `enableOtel()`, every `observe()` — including work associated with
+  // a different client that never opted in — silently rerouted through
+  // OTEL. That crossed the consent boundary between coexisting clients.
+  //
+  // Resolution order:
+  //   1. If the caller passed an AmplitudeAI-shaped object with an
+  //      explicit `otelEnabled` flag, honor THAT client's choice.
+  //      `true` → use OTEL; `false` → do not, even if the module
+  //      registry is populated.
+  //   2. Otherwise (raw transport, null, undefined) fall back to the
+  //      module registry so bare `observe(fn)` calls with no explicit
+  //      amplitude continue to work as documented.
+  const callerOtelEnabled = (caller as { otelEnabled?: boolean } | null)
+    ?.otelEnabled;
+  if (callerOtelEnabled === true) {
+    // fall through to tracer resolution
+  } else if (callerOtelEnabled === false) {
+    return null;
+  } else {
+    const owner = _getOtelOwner();
+    if (owner?.otelEnabled !== true) return null;
+  }
   try {
     const api = _require('@opentelemetry/api') as {
       trace: {
@@ -573,37 +602,56 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
     const sessionId = ctx?.sessionId ?? randomUUID();
 
     const runFn = async (): Promise<unknown> => {
+      // AA-151931 V3-E: gate span state attributes on effective content
+      // mode. `_serializeState` already drops the payload when the mode
+      // is `metadata_only`, but `AMP_INPUT_STATE` was previously stamped
+      // unconditionally when `_serializeState` returned non-null — which
+      // meant the `full` fallback path always shipped it, and
+      // `customer_enriched` mode leaked it too.
+      const pc = params.privacyConfig;
+      const gateOpen =
+        pc == null
+          ? true
+          : pc.contentMode === 'full' ||
+            (pc.contentMode == null && !pc.privacyMode);
       const inputState = _serializeState(
         args.length === 1 ? args[0] : args.length > 0 ? { args } : null,
-        params.privacyConfig,
+        pc,
       );
 
       // Try to use OTEL tracer if available — the span processor will
-      // handle event emission via the mapper.
-      const tracer = _getOtelTracer();
+      // handle event emission via the mapper. Pass this call's amplitude
+      // so the opt-in check is scoped to the specific client, not to
+      // the process-wide module registry (AA-151931 V3-C review).
+      const tracer = _getOtelTracer(params.amplitude);
       if (tracer != null) {
         return tracer.startActiveSpan(spanName, async (span: OtelSpanHandle) => {
           span.setAttribute(AMP_SPAN_KIND, spanKind);
-          if (inputState != null) {
+          if (inputState != null && gateOpen) {
             span.setAttribute(AMP_INPUT_STATE, JSON.stringify(inputState));
           }
 
           let result: unknown = undefined;
           try {
             result = await fn.apply(this, args);
-            const pc = params.privacyConfig;
-            const isMetadataOnly = pc != null &&
-              (pc.contentMode === 'metadata_only' || (pc.contentMode == null && pc.privacyMode));
-            if (!isMetadataOnly) {
-              const outputState = _serializeState(result, params.privacyConfig);
+            if (gateOpen) {
+              const outputState = _serializeState(result, pc);
               if (outputState != null) {
                 span.setAttribute(AMP_OUTPUT_STATE, JSON.stringify(outputState));
               }
             }
             return result;
           } catch (exc) {
-            const msg = exc instanceof Error ? exc.message : String(exc);
-            span.setStatus({ code: 2, message: msg });
+            // AA-151931 V3-G: the mapper reads `span.status.message` into
+            // PROP_ERROR_MESSAGE, which is a content channel. Non-full
+            // modes still emit an ERROR status so the failure signal
+            // survives; only the raw message body is stripped.
+            if (gateOpen) {
+              const msg = exc instanceof Error ? exc.message : String(exc);
+              span.setStatus({ code: 2, message: msg });
+            } else {
+              span.setStatus({ code: 2 });
+            }
             throw exc;
           } finally {
             span.end();

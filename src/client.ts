@@ -118,6 +118,22 @@ export function _getGlobalUnflushedCount(): number {
   return _globalUnflushedCount;
 }
 
+// AA-151931 V3-C: single-slot registry of the AmplitudeAI that most
+// recently called `enableOtel()`. Used by module-level entry points
+// (bare `@observe` decorators without an explicit `amplitude=`
+// argument) to confirm opt-in before routing content through OTEL.
+let _otelOwner: { otelEnabled?: boolean } | null = null;
+
+/** @internal Registered by `AmplitudeAI.enableOtel()`. */
+export function _setOtelOwner(owner: { otelEnabled?: boolean } | null): void {
+  _otelOwner = owner;
+}
+
+/** @internal Consulted by `decorators.ts` as an opt-in fallback. */
+export function _getOtelOwner(): { otelEnabled?: boolean } | null {
+  return _otelOwner;
+}
+
 function _registerExitHook(): void {
   if (_exitHookRegistered) return;
   _exitHookRegistered = true;
@@ -1040,6 +1056,10 @@ export class AmplitudeAI {
     this._otelMapper = mapper;
     this._otelProcessor = processor;
     this._otelEnabled = true;
+    // AA-151931 V3-C: register this AmplitudeAI as the OTEL owner so
+    // bare `@observe` decorators (no `amplitude=` argument in scope)
+    // can confirm opt-in without hijacking an unrelated global provider.
+    _setOtelOwner(this);
     getLogger().info('OTEL span-first instrumentation enabled');
     return this;
   }
