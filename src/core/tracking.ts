@@ -510,7 +510,14 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
         pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
       );
     if (opts.stackTrace != null)
-      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(opts.stackTrace);
+      // AA-151915 review: stack traces routinely embed the raw
+      // exception message + local-var reprs, so they need the same
+      // built-in PII redaction as errorMessage before custom redaction
+      // runs. Skipping the built-in pass here would leak emails / phone
+      // numbers even for customers who opted into redactPii.
+      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.stackTrace) : opts.stackTrace,
+      );
     if (opts.toolCalls != null) {
       const sanitizedCalls = sanitizeStructuredContent(
         opts.toolCalls,
@@ -699,7 +706,12 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
         pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
       );
     if (opts.stackTrace)
-      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(opts.stackTrace);
+      // Mirrors the trackAiMessage rule — built-in PII redaction runs
+      // before custom redaction so stack-traced emails / phone numbers
+      // don't skip the redactPii pass.
+      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.stackTrace) : opts.stackTrace,
+      );
   }
 
   if (opts.toolInput != null && effectiveMode === 'full') {
