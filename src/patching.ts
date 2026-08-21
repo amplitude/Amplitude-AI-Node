@@ -3133,7 +3133,13 @@ function _extractAnthropicToolCalls(
         parentAgentId: ctx.parentAgentId,
         customerOrgId: ctx.customerOrgId,
         env: ctx.env,
-        errorMessage: isError ? String(toolOutput ?? '') : undefined,
+        // A tool_result carries opaque customer content — not a machine
+        // error string. Setting errorMessage = String(toolOutput) leaks it
+        // via a channel that isn't gated by contentMode in older builds.
+        // The tool output is already tracked via `output` above (with
+        // contentMode + sanitization applied); flag the error via errorType
+        // and let downstream reason about the failure from `success: false`.
+        errorType: isError ? 'tool_result_error' : undefined,
       });
     }
   }

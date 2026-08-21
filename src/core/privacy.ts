@@ -199,10 +199,14 @@ export function sanitizeAnyContent(
 export function sanitizeStructuredContent(
   content: unknown,
   redactPii: boolean,
+  pc?: PrivacyConfig | null,
 ): unknown {
   if (typeof content === 'string') {
     let text = content;
     if (redactPii) text = redactPiiPatterns(text);
+    if (pc != null) {
+      text = pc.applyCustomRedaction(text);
+    }
     return redactBase64Content(text);
   }
 
@@ -214,13 +218,13 @@ export function sanitizeStructuredContent(
     const dict = content as Record<string, unknown>;
     const sanitized: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(dict)) {
-      sanitized[key] = sanitizeStructuredContent(value, redactPii);
+      sanitized[key] = sanitizeStructuredContent(value, redactPii, pc);
     }
     return sanitized;
   }
 
   if (Array.isArray(content)) {
-    return content.map((item) => sanitizeStructuredContent(item, redactPii));
+    return content.map((item) => sanitizeStructuredContent(item, redactPii, pc));
   }
 
   return content;
@@ -367,6 +371,17 @@ export class PrivacyConfig {
 
   get contentMode(): string | null {
     return this._contentMode;
+  }
+
+  /**
+   * Public entry point for applying the caller-configured custom redaction
+   * (patterns + function) to an arbitrary string. Used by tool-payload
+   * sanitization so custom rules reach every content channel, not just
+   * `$llm_message`.
+   */
+  applyCustomRedaction(text: string): string {
+    if (typeof text !== 'string') return text;
+    return this._applyCustomFn(this._applyCustomPatterns(text));
   }
 
   private _applyCustomPatterns(text: string): string {

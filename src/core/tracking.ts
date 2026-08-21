@@ -99,6 +99,7 @@ import type { MessageLabel, SessionEnrichments } from './enrichments.js';
 import {
   getTextFromLlmMessage,
   PrivacyConfig,
+  redactPiiPatterns,
   sanitizeStructuredContent,
 } from './privacy.js';
 
@@ -162,6 +163,22 @@ export function serializeToJsonString(
   return serialized;
 }
 
+/**
+ * Resolve the effective content mode: explicit `contentMode` wins; fall back
+ * to legacy `privacyMode` (true → `metadata_only`, false → `full`).
+ *
+ * Kept in one place so every content channel gate (attachments, context,
+ * labels, errorMessage, stackTrace, tool_calls, tool_input/output) uses the
+ * same lookup — AA-151933.
+ */
+function _effectiveMode(pc: PrivacyConfig): 'full' | 'metadata_only' | 'customer_enriched' {
+  const explicit = pc.contentMode;
+  if (explicit === 'full' || explicit === 'metadata_only' || explicit === 'customer_enriched') {
+    return explicit;
+  }
+  return pc.privacyMode ? 'metadata_only' : 'full';
+}
+
 function withSdkManagedProperties(
   eventProperties: Record<string, unknown> | null | undefined,
   managedProperties: Record<string, unknown>,
@@ -220,6 +237,15 @@ export interface TrackUserMessageOptions {
    * on an explicit Session End). See `BoundAgent.session`.
    */
   idleTimeoutMinutes?: number | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -229,6 +255,7 @@ export interface TrackUserMessageOptions {
 
 export function trackUserMessage(opts: TrackUserMessageOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.sessionId, 'sessionId');
@@ -260,7 +287,8 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
   if (opts.messageSource) properties[PROP_MESSAGE_SOURCE] = opts.messageSource;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
 
   if (opts.isRegeneration) properties[PROP_IS_REGENERATION] = true;
@@ -269,6 +297,7 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
     properties[PROP_EDITED_MESSAGE_ID] = opts.editedMessageId;
 
   if (opts.attachments?.length) {
+    // Metadata always ships (count, type mix, total size).
     properties[PROP_HAS_ATTACHMENTS] = true;
     properties[PROP_ATTACHMENT_COUNT] = opts.attachments.length;
     const types = [
@@ -280,10 +309,14 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
       0,
     );
     if (totalSize > 0) properties[PROP_TOTAL_ATTACHMENT_SIZE] = totalSize;
-    properties[PROP_ATTACHMENTS] = serializeToJsonString(opts.attachments);
+    // The full body (including any `content` field) is a content channel —
+    // gate on full (AA-151933).
+    if (effectiveMode === 'full')
+      properties[PROP_ATTACHMENTS] = serializeToJsonString(opts.attachments);
   }
 
-  if (opts.labels?.length) {
+  // Labels can carry free-text values — treat as a content channel.
+  if (opts.labels?.length && effectiveMode === 'full') {
     properties[PROP_MESSAGE_LABELS] = serializeToJsonString(
       opts.labels.map((lbl) => lbl.toDict()),
     );
@@ -375,6 +408,15 @@ export interface TrackAiMessageOptions {
   context?: Record<string, unknown> | null;
   spanKind?: string | null;
   stackTrace?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -384,6 +426,7 @@ export interface TrackAiMessageOptions {
 
 export function trackAiMessage(opts: TrackAiMessageOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.modelName, 'model');
@@ -419,7 +462,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
 
@@ -455,13 +499,35 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
     properties[PROP_TTFB_MS] = opts.providerTtfbMs;
   if (opts.finishReason != null)
     properties[PROP_FINISH_REASON] = opts.finishReason;
-  if (opts.errorMessage != null)
-    properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
+
+  // Content channels: errorMessage, stackTrace, and toolCalls carry
+  // model-/tool-generated text that must obey contentMode. In non-`full`
+  // modes we suppress them entirely so the metadata_only / customer_enriched
+  // contracts hold across every channel, not just `$llm_message`.
+  if (effectiveMode === 'full') {
+    if (opts.errorMessage != null)
+      properties[PROP_ERROR_MESSAGE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
+      );
+    if (opts.stackTrace != null)
+      // AA-151915 review: stack traces routinely embed the raw
+      // exception message + local-var reprs, so they need the same
+      // built-in PII redaction as errorMessage before custom redaction
+      // runs. Skipping the built-in pass here would leak emails / phone
+      // numbers even for customers who opted into redactPii.
+      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.stackTrace) : opts.stackTrace,
+      );
+    if (opts.toolCalls != null) {
+      const sanitizedCalls = sanitizeStructuredContent(
+        opts.toolCalls,
+        pc.redactPii,
+        pc,
+      );
+      properties[PROP_TOOL_CALLS] = serializeToJsonString(sanitizedCalls);
+    }
+  }
   if (opts.errorType != null) properties[PROP_ERROR_TYPE] = opts.errorType;
-  if (opts.stackTrace != null)
-    properties[PROP_STACK_TRACE] = opts.stackTrace;
-  if (opts.toolCalls != null)
-    properties[PROP_TOOL_CALLS] = serializeToJsonString(opts.toolCalls);
 
   // Reasoning content
   const reasoningProps = pc.sanitizeReasoningContent(
@@ -487,6 +553,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   if (opts.promptId != null) properties[PROP_PROMPT_ID] = opts.promptId;
 
   if (opts.attachments?.length) {
+    // Metadata always ships (count/type/size). The full body (including any
+    // `content` field) is a content channel — gate on full (AA-151933).
     properties[PROP_HAS_ATTACHMENTS] = true;
     properties[PROP_ATTACHMENT_COUNT] = opts.attachments.length;
     const types = [
@@ -498,10 +566,12 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
       0,
     );
     if (totalSize > 0) properties[PROP_TOTAL_ATTACHMENT_SIZE] = totalSize;
-    properties[PROP_ATTACHMENTS] = serializeToJsonString(opts.attachments);
+    if (effectiveMode === 'full')
+      properties[PROP_ATTACHMENTS] = serializeToJsonString(opts.attachments);
   }
 
-  if (opts.labels?.length) {
+  // Labels can carry free-text values — treat as a content channel.
+  if (opts.labels?.length && effectiveMode === 'full') {
     properties[PROP_MESSAGE_LABELS] = serializeToJsonString(
       opts.labels.map((lbl) => lbl.toDict()),
     );
@@ -564,6 +634,15 @@ export interface TrackToolCallOptions {
   env?: string | null;
   locale?: string | null;
   spanKind?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -573,6 +652,7 @@ export interface TrackToolCallOptions {
 
 export function trackToolCall(opts: TrackToolCallOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.toolName, 'toolName');
@@ -607,28 +687,40 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
-  if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
   if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
-  if (opts.stackTrace) properties[PROP_STACK_TRACE] = opts.stackTrace;
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.locale) properties[PROP_LOCALE] = opts.locale;
   if (opts.spanKind) properties[PROP_SPAN_KIND] = opts.spanKind;
   if (opts.toolType) properties[PROP_TOOL_TYPE] = opts.toolType;
   if (opts.toolOwner) properties[PROP_TOOL_OWNER] = opts.toolOwner;
 
-  let effectiveMode = pc.contentMode;
-  if (effectiveMode == null)
-    effectiveMode = pc.privacyMode ? 'metadata_only' : 'full';
+  // errorMessage / stackTrace are content channels — the auto-tracker sets
+  // errorMessage = String(toolOutput) on failed tool_result blocks, which
+  // would otherwise bypass the toolOutput contentMode gate. Gate them here.
+  if (effectiveMode === 'full') {
+    if (opts.errorMessage)
+      properties[PROP_ERROR_MESSAGE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
+      );
+    if (opts.stackTrace)
+      // Mirrors the trackAiMessage rule — built-in PII redaction runs
+      // before custom redaction so stack-traced emails / phone numbers
+      // don't skip the redactPii pass.
+      properties[PROP_STACK_TRACE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(opts.stackTrace) : opts.stackTrace,
+      );
+  }
 
   if (opts.toolInput != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.toolInput, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.toolInput, pc.redactPii, pc);
     properties[PROP_TOOL_INPUT] = serializeToJsonString(sanitized);
   }
 
   if (opts.toolOutput != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.toolOutput, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.toolOutput, pc.redactPii, pc);
     properties[PROP_TOOL_OUTPUT] = serializeToJsonString(sanitized);
   }
 
@@ -674,6 +766,15 @@ export interface TrackConversationOptions {
   env?: string | null;
   /** Locale tag (e.g. "en-US") forwarded to every emitted message. */
   locale?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   userProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
@@ -817,6 +918,15 @@ export interface TrackEmbeddingOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -825,6 +935,7 @@ export interface TrackEmbeddingOptions {
 
 export function trackEmbedding(opts: TrackEmbeddingOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateNonNegative(opts.latencyMs, 'latencyMs');
@@ -858,7 +969,8 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
 
@@ -909,6 +1021,15 @@ export interface TrackSpanOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -917,6 +1038,7 @@ export interface TrackSpanOptions {
 
 export function trackSpan(opts: TrackSpanOptions): string {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateNonNegative(opts.latencyMs, 'latencyMs');
@@ -940,28 +1062,31 @@ export function trackSpan(opts: TrackSpanOptions): string {
   if (opts.sessionId) properties[PROP_SESSION_ID] = opts.sessionId;
   if (opts.turnId != null) properties[PROP_TURN_ID] = opts.turnId;
   if (opts.parentSpanId) properties[PROP_PARENT_SPAN_ID] = opts.parentSpanId;
-  if (opts.errorMessage) properties[PROP_ERROR_MESSAGE] = opts.errorMessage;
+  // errorMessage is a content channel. AA-151915's V2 fix gated it on
+  // `trackAiMessage` and `trackToolCall` but missed this trackSpan call site
+  // (AA-151933). Apply the same gate + PII / custom redaction.
+  if (opts.errorMessage && effectiveMode === 'full')
+    properties[PROP_ERROR_MESSAGE] = pc.applyCustomRedaction(
+      pc.redactPii ? redactPiiPatterns(opts.errorMessage) : opts.errorMessage,
+    );
   if (opts.errorType) properties[PROP_ERROR_TYPE] = opts.errorType;
   if (opts.agentId) properties[PROP_AGENT_ID] = opts.agentId;
   if (opts.parentAgentId) properties[PROP_PARENT_AGENT_ID] = opts.parentAgentId;
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
 
-  let effectiveMode = pc.contentMode;
-  if (effectiveMode == null)
-    effectiveMode = pc.privacyMode ? 'metadata_only' : 'full';
-
   if (opts.inputState != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.inputState, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.inputState, pc.redactPii, pc);
     properties[PROP_INPUT_STATE] = serializeToJsonString(sanitized);
   }
 
   if (opts.outputState != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.outputState, pc.redactPii);
+    const sanitized = sanitizeStructuredContent(opts.outputState, pc.redactPii, pc);
     properties[PROP_OUTPUT_STATE] = serializeToJsonString(sanitized);
   }
 
@@ -1007,6 +1132,15 @@ export interface TrackSessionEndOptions {
   env?: string | null;
   abandonmentTurn?: number | null;
   idleTimeoutMinutes?: number | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -1015,6 +1149,7 @@ export interface TrackSessionEndOptions {
 
 export function trackSessionEnd(opts: TrackSessionEndOptions): void {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.sessionId, 'sessionId');
@@ -1036,7 +1171,8 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
   if (opts.abandonmentTurn != null)
@@ -1092,6 +1228,15 @@ export interface TrackSessionEnrichmentOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -1102,6 +1247,7 @@ export function trackSessionEnrichment(
   opts: TrackSessionEnrichmentOptions,
 ): void {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateRequiredStr(opts.sessionId, 'sessionId');
@@ -1123,7 +1269,8 @@ export function trackSessionEnrichment(
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
 
@@ -1178,6 +1325,15 @@ export interface TrackScoreOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   env?: string | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   privacyConfig?: PrivacyConfig | null;
@@ -1186,6 +1342,7 @@ export interface TrackScoreOptions {
 
 export function trackScore(opts: TrackScoreOptions): void {
   const pc = opts.privacyConfig ?? new PrivacyConfig();
+  const effectiveMode = _effectiveMode(pc);
   if (pc.validate) {
     validateIdentity(opts.userId, opts.deviceId);
     validateNumeric(opts.value, 'value');
@@ -1212,7 +1369,8 @@ export function trackScore(opts: TrackScoreOptions): void {
   if (opts.customerOrgId) properties[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
   if (opts.agentVersion) properties[PROP_AGENT_VERSION] = opts.agentVersion;
   if (opts.description) properties[PROP_AGENT_DESCRIPTION] = opts.description;
-  if (opts.context)
+  // context carries arbitrary caller JSON — gate on full (AA-151933).
+  if (opts.context && effectiveMode === 'full')
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
 

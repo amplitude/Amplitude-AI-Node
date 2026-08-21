@@ -46,6 +46,15 @@ class TestProvider extends BaseAIProvider {
   ) {
     super({ amplitude, providerName });
   }
+
+  /**
+   * AA-151931 V3-A: OTEL emission is gated on `_otelEnabled`. The test
+   * fake used here isn't an `AmplitudeAI` instance, so we flip the flag
+   * directly for the OTEL-parity tests.
+   */
+  _forceOtelEnabledForTest(): void {
+    (this as unknown as { _otelEnabled: boolean })._otelEnabled = true;
+  }
 }
 
 describe('applySessionContext', () => {
@@ -224,6 +233,7 @@ describe('BaseAIProvider OTEL usage parity', () => {
   it('emits complete usage and authoritative cost for non-streaming calls', () => {
     const exporter = installSpanExporter();
     const provider = new TestProvider(createMockAmplitude(), 'openai');
+    provider._forceOtelEnabledForTest();
 
     provider.trackFn()({
       modelName: 'gpt-4o',
@@ -252,6 +262,7 @@ describe('BaseAIProvider OTEL usage parity', () => {
   it('emits complete usage for generic streaming calls', () => {
     const exporter = installSpanExporter();
     const provider = new TestProvider(createMockAmplitude(), 'openai');
+    provider._forceOtelEnabledForTest();
     const tracker = provider.createStreamingTracker();
     tracker.setModel('gpt-4o');
     tracker.setUsage({
@@ -274,5 +285,114 @@ describe('BaseAIProvider OTEL usage parity', () => {
       [GENAI_USAGE_COST]: expect.any(Number),
     });
     expect(attributes?.[GENAI_USAGE_COST]).toBeGreaterThan(0);
+  });
+});
+
+describe('BaseAIProvider inherits privacyConfig from AmplitudeAI (AA-151915)', () => {
+  it('inherits contentMode=metadata_only from AmplitudeAI when passed as `amplitude`', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig, ContentMode } = await import('../../src/config.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ contentMode: ContentMode.METADATA_ONLY }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getContentMode(): string | null {
+        return this._privacyConfig?.contentMode ?? null;
+      }
+    }
+
+    const provider = new ProbeProvider(ai);
+    expect(provider.getContentMode()).toBe('metadata_only');
+  });
+
+  it('inherits customRedactionPatterns from AmplitudeAI', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig } = await import('../../src/config.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ customRedactionPatterns: ['sk-[A-Za-z0-9]+'] }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getCustomPatternCount(): number {
+        return this._privacyConfig?.customPatterns.length ?? 0;
+      }
+    }
+
+    const provider = new ProbeProvider(ai);
+    expect(provider.getCustomPatternCount()).toBe(1);
+  });
+
+  it('does not inherit when a plain Amplitude client (no .config) is passed', () => {
+    const plain = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getPrivacyConfig(): unknown {
+        return this._privacyConfig;
+      }
+    }
+
+    const provider = new ProbeProvider(plain);
+    expect(provider.getPrivacyConfig()).toBeNull();
+  });
+
+  it('explicit privacyConfig option overrides inheritance', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig, ContentMode } = await import('../../src/config.js');
+    const { PrivacyConfig } = await import('../../src/core/privacy.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ contentMode: ContentMode.METADATA_ONLY }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown, pc: PrivacyConfig) {
+        super({
+          amplitude: input as never,
+          privacyConfig: pc,
+          providerName: 'probe',
+        });
+      }
+      getContentMode(): string | null {
+        return this._privacyConfig?.contentMode ?? null;
+      }
+    }
+
+    const explicit = new PrivacyConfig({ contentMode: 'full' });
+    const provider = new ProbeProvider(ai, explicit);
+    expect(provider.getContentMode()).toBe('full');
   });
 });

@@ -433,6 +433,15 @@ export interface TrackCallOptions {
   context?: Record<string, unknown> | null;
   env?: string | null;
   groups?: Record<string, unknown> | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   browserSessionId?: string | number | null;
   inputTokens?: number | null;
