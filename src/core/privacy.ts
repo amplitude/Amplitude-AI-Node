@@ -374,11 +374,10 @@ export class PrivacyConfig {
   }
 
   /**
-   * Public entry point for custom redaction (patterns + function).
-   * Ported from AA-151915 so `sanitizeStructuredContent(content, redactPii, pc)`
-   * on this branch can invoke the same three-step chain used everywhere
-   * else. Kept identical to the AA-151915 shape so the branches merge
-   * cleanly.
+   * Public entry point for applying the caller-configured custom redaction
+   * (patterns + function) to an arbitrary string. Used by tool-payload
+   * sanitization so custom rules reach every content channel, not just
+   * `$llm_message`.
    */
   applyCustomRedaction(text: string): string {
     if (typeof text !== 'string') return text;

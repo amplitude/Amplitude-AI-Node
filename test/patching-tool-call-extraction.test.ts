@@ -333,7 +333,12 @@ describe('auto [Agent] Tool Call extraction', () => {
     const call = ai.trackToolCall.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.toolName).toBe('bad_tool');
     expect(call.success).toBe(false);
-    expect(call.errorMessage).toBe('Error: not found');
+    // AA-151915: tool_result content is customer data, not a machine error
+    // string — the auto-tracker flags failure via errorType and lets the
+    // toolOutput channel (gated by contentMode) carry the actual content.
+    expect(call.errorType).toBe('tool_result_error');
+    expect(call.errorMessage).toBeUndefined();
+    expect(call.output).toBe('Error: not found');
   });
 
   it('Anthropic: user messages with tool_result blocks are NOT tracked as user messages', async (): Promise<void> => {

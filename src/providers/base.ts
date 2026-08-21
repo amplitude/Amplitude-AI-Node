@@ -234,6 +234,15 @@ function _inheritOtelEnabled(input: AmplitudeOrAI): boolean {
   return flag === true;
 }
 
+function _inheritPrivacyConfig(input: AmplitudeOrAI): PrivacyConfig | null {
+  const config = (input as { config?: { toPrivacyConfig?: () => PrivacyConfig } })
+    .config;
+  if (config != null && typeof config.toPrivacyConfig === 'function') {
+    return config.toPrivacyConfig();
+  }
+  return null;
+}
+
 /**
  * Resolve effective content mode (mirrors `core/tracking.ts _effectiveMode`).
  * Kept local so the OTEL emission path can gate its message attributes the
@@ -289,7 +298,13 @@ export abstract class BaseAIProvider {
     providerName: string;
   }) {
     this._amplitude = resolveAmplitude(options.amplitude);
-    this._privacyConfig = options.privacyConfig ?? null;
+    // When passed an AmplitudeAI instance, inherit its privacyConfig so
+    // wrapper-emitted events honor the user's contentMode / redactPii /
+    // customRedaction* settings. Without this, wrappers silently default to
+    // `new PrivacyConfig()` (contentMode=full, no custom redaction), leaking
+    // content that the AmplitudeAI instance was configured to strip.
+    this._privacyConfig =
+      options.privacyConfig ?? _inheritPrivacyConfig(options.amplitude);
     // OTEL routing is opt-in per AmplitudeAI instance. Inherit the flag
     // from the AmplitudeAI passed in (AA-151931 V3-A). Raw Amplitude
     // clients or plain transports have no otelEnabled property, so this
