@@ -216,6 +216,15 @@ function _getOtelTracer(): OtelTracerLike | null {
   }
 }
 
+function _inheritPrivacyConfig(input: AmplitudeOrAI): PrivacyConfig | null {
+  const config = (input as { config?: { toPrivacyConfig?: () => PrivacyConfig } })
+    .config;
+  if (config != null && typeof config.toPrivacyConfig === 'function') {
+    return config.toPrivacyConfig();
+  }
+  return null;
+}
+
 export abstract class BaseAIProvider {
   protected _amplitude: AmplitudeLike;
   protected _privacyConfig: PrivacyConfig | null;
@@ -227,7 +236,14 @@ export abstract class BaseAIProvider {
     providerName: string;
   }) {
     this._amplitude = resolveAmplitude(options.amplitude);
-    this._privacyConfig = options.privacyConfig ?? null;
+    // When passed an AmplitudeAI instance, inherit its privacyConfig so
+    // wrapper-emitted events honor the user's contentMode / redactPii /
+    // customRedaction* settings. Without this, wrappers silently default to
+    // `new PrivacyConfig()` (contentMode=full, no custom redaction), leaking
+    // content that the AmplitudeAI instance was configured to strip.
+    const inherited =
+      options.privacyConfig ?? _inheritPrivacyConfig(options.amplitude);
+    this._privacyConfig = inherited;
     this._providerName = options.providerName;
   }
 

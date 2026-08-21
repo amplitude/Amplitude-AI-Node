@@ -276,3 +276,112 @@ describe('BaseAIProvider OTEL usage parity', () => {
     expect(attributes?.[GENAI_USAGE_COST]).toBeGreaterThan(0);
   });
 });
+
+describe('BaseAIProvider inherits privacyConfig from AmplitudeAI (AA-151915)', () => {
+  it('inherits contentMode=metadata_only from AmplitudeAI when passed as `amplitude`', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig, ContentMode } = await import('../../src/config.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ contentMode: ContentMode.METADATA_ONLY }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getContentMode(): string | null {
+        return this._privacyConfig?.contentMode ?? null;
+      }
+    }
+
+    const provider = new ProbeProvider(ai);
+    expect(provider.getContentMode()).toBe('metadata_only');
+  });
+
+  it('inherits customRedactionPatterns from AmplitudeAI', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig } = await import('../../src/config.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ customRedactionPatterns: ['sk-[A-Za-z0-9]+'] }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getCustomPatternCount(): number {
+        return this._privacyConfig?.customPatterns.length ?? 0;
+      }
+    }
+
+    const provider = new ProbeProvider(ai);
+    expect(provider.getCustomPatternCount()).toBe(1);
+  });
+
+  it('does not inherit when a plain Amplitude client (no .config) is passed', () => {
+    const plain = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getPrivacyConfig(): unknown {
+        return this._privacyConfig;
+      }
+    }
+
+    const provider = new ProbeProvider(plain);
+    expect(provider.getPrivacyConfig()).toBeNull();
+  });
+
+  it('explicit privacyConfig option overrides inheritance', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig, ContentMode } = await import('../../src/config.js');
+    const { PrivacyConfig } = await import('../../src/core/privacy.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ contentMode: ContentMode.METADATA_ONLY }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown, pc: PrivacyConfig) {
+        super({
+          amplitude: input as never,
+          privacyConfig: pc,
+          providerName: 'probe',
+        });
+      }
+      getContentMode(): string | null {
+        return this._privacyConfig?.contentMode ?? null;
+      }
+    }
+
+    const explicit = new PrivacyConfig({ contentMode: 'full' });
+    const provider = new ProbeProvider(ai, explicit);
+    expect(provider.getContentMode()).toBe('full');
+  });
+});
