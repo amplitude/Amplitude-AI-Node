@@ -140,6 +140,19 @@ describe('calculateCost', () => {
     expect(result).toBeGreaterThan(0);
   });
 
+  it.each([
+    ['gpt-5.6-luna', 100_000, 100_000, 0.14],
+    ['gpt-5.6-terra', 300_000, 10_000, 1.38],
+  ])(
+    'uses current catalog pricing for %s',
+    (modelName, inputTokens, outputTokens, expectedCost): void => {
+      expect(calculateCost({ modelName, inputTokens, outputTokens })).toBeCloseTo(
+        expectedCost,
+        10,
+      );
+    },
+  );
+
   it('returns nonzero cost for known Anthropic model', (): void => {
     const result = calculateCost({
       modelName: 'claude-sonnet-4-6',
