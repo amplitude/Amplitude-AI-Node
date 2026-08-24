@@ -496,6 +496,7 @@ export class AmplitudeAI {
     userId?: string;
     deviceId?: string | null;
     content: string;
+    providerRequestId?: string | null;
     sessionId: string;
     model: string;
     provider: string;
@@ -567,6 +568,7 @@ export class AmplitudeAI {
       modelName: opts.model,
       provider: opts.provider,
       responseContent: opts.content,
+      providerRequestId: opts.providerRequestId,
       latencyMs: opts.latencyMs,
       sessionId: opts.sessionId,
       traceId: opts.traceId,

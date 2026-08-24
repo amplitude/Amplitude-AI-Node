@@ -51,8 +51,14 @@ describe('OpenAI streaming', () => {
 
   it('wraps async iterable response and tracks after consumption', async (): Promise<void> => {
     const chunks = [
-      { choices: [{ delta: { content: 'Hello' }, finish_reason: null }] },
-      { choices: [{ delta: { content: ' world' }, finish_reason: null }] },
+      {
+        id: 'fw-stream-123',
+        choices: [{ delta: { content: 'Hello' }, finish_reason: null }],
+      },
+      {
+        id: 'fw-stream-123',
+        choices: [{ delta: { content: ' world' }, finish_reason: null }],
+      },
       {
         choices: [{ delta: {}, finish_reason: 'stop' }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
@@ -84,6 +90,7 @@ describe('OpenAI streaming', () => {
     expect(opts.finishReason).toBe('stop');
     expect(opts.inputTokens).toBe(10);
     expect(opts.outputTokens).toBe(5);
+    expect(opts.providerRequestId).toBe('fw-stream-123');
   });
 
   it('tracks error when stream throws mid-iteration', async (): Promise<void> => {

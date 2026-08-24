@@ -982,6 +982,20 @@ Use instrumented provider wrappers for automatic tracking:
 
 > `Gemini` targets the legacy `@google/generative-ai` SDK (`getGenerativeModel(...).generateContent(...)`). `GoogleGenAI` targets the new unified `@google/genai` SDK (`ai.models.generateContent({ model, contents, config })`). Pick the class that matches the package you installed.
 
+### Fireworks (OpenAI compatibility)
+
+Use the OpenAI-compatible wrapper with a Fireworks endpoint. The SDK validates the URL hostname, labels events with `[Agent] Provider = "fireworks"`, and captures the Fireworks `response.id` as `[Agent] Provider Request ID` on AI response events for Chat Completions and Responses, including streams.
+
+```typescript
+const fireworks = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.FIREWORKS_API_KEY,
+  baseUrl: 'https://api.fireworks.ai/inference/v1',
+});
+```
+
+You can set `provider: 'fireworks'` explicitly for a private proxy. Cost calculation uses public Fireworks/genai-prices data; unknown models omit cost, and no private Amplitude contract rates are included.
+
 **Feature coverage by provider:**
 
 | Feature               | OpenAI | Anthropic | Gemini | AzureOpenAI | Bedrock | Mistral |
@@ -2414,6 +2428,7 @@ Event-specific properties for `[Agent] AI Response` (in addition to common prope
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `[Agent] Message ID` | string | Yes | Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages. |
+| `[Agent] Provider Request ID` | string | No | Provider-owned inference identifier. For Fireworks OpenAI-compatible calls, this is captured from `response.id`. |
 | `[Agent] Component Type` | string | Yes | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
 | `[Agent] Model Name` | string | Yes | LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514'). |
 | `[Agent] Provider` | string | Yes | LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock'). |

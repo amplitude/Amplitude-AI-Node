@@ -39,6 +39,7 @@ describe('OpenAI Responses wrapper', () => {
 
   it('tracks non-streaming responses payload', async (): Promise<void> => {
     const fakeCreate = vi.fn().mockResolvedValueOnce({
+      id: 'resp-fw-123',
       model: 'gpt-4.1',
       status: 'completed',
       output_text: 'Paris is the capital of France.',
@@ -72,6 +73,7 @@ describe('OpenAI Responses wrapper', () => {
     expect(opts.totalTokens).toBe(20);
     expect(opts.systemPrompt).toBe('Be concise');
     expect(opts.finishReason).toBe('completed');
+    expect(opts.providerRequestId).toBe('resp-fw-123');
     expect(typeof opts.totalCostUsd).toBe('number');
   });
 
@@ -203,6 +205,7 @@ describe('OpenAI Responses wrapper', () => {
       yield {
         type: 'response.completed',
         response: {
+          id: 'resp-stream-fw-123',
           model: 'gpt-4.1',
           status: 'completed',
           output_text: 'hello stream',
@@ -232,6 +235,7 @@ describe('OpenAI Responses wrapper', () => {
     expect(opts.isStreaming).toBe(true);
     expect(opts.responseContent).toBe('hello stream');
     expect(opts.totalTokens).toBe(5);
+    expect(opts.providerRequestId).toBe('resp-stream-fw-123');
   });
 
   it('supports responses.stream helper when SDK exposes stream()', async (): Promise<void> => {

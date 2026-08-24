@@ -1207,6 +1207,7 @@ const agent = ai.agent('requesty-agent', {
 
 ### Partner notes
 
+- **Fireworks:** use the built-in `OpenAI` wrapper with `baseUrl: 'https://api.fireworks.ai/inference/v1'`. The SDK labels valid `*.fireworks.ai` endpoints as `fireworks` and captures `response.id` into `[Agent] Provider Request ID` for Chat Completions and Responses, including streams. Set `provider: 'fireworks'` for a private proxy. Costs use only public Fireworks/genai-prices data; unsupported models omit cost.
 - **LiteLLM + OTLP:** set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on GenAI spans. Without it, spans carry metadata/tokens only.
 - **OpenRouter Privacy Mode:** binary content on/off at the gateway. Align Amplitude `contentMode` (`full` vs `metadata_only`) so you do not expect thread text the gateway already stripped.
 - **Requesty:** no OTLP exporter today — use SDK-through with Requesty's OpenAI-compatible base URL.

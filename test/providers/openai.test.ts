@@ -4,6 +4,7 @@ import { setDefaultPropagateContext } from '../../src/propagation.js';
 import { BaseAIProvider } from '../../src/providers/base.js';
 import {
   extractSystemPrompt,
+  resolveOpenAIProvider,
   WrappedCompletions,
 } from '../../src/providers/openai.js';
 
@@ -106,6 +107,25 @@ describe('OpenAI provider', () => {
     });
   });
 
+  describe('Fireworks provider detection', () => {
+    it('accepts valid Fireworks subdomains and explicit override', () => {
+      expect(
+        resolveOpenAIProvider(
+          'https://api.fireworks.ai/inference/v1',
+        ),
+      ).toBe('fireworks');
+      expect(resolveOpenAIProvider('not a url', 'fireworks')).toBe('fireworks');
+    });
+
+    it('rejects lookalike, apex, and invalid hosts', () => {
+      expect(
+        resolveOpenAIProvider('https://fireworks.ai.example.com/v1'),
+      ).toBe('openai');
+      expect(resolveOpenAIProvider('https://fireworks.ai/v1')).toBe('openai');
+      expect(resolveOpenAIProvider('fireworks.ai')).toBe('openai');
+    });
+  });
+
   describe('constructor', () => {
     it('throws or succeeds depending on openai availability', async (): Promise<void> => {
       const mod = await import('../../src/providers/openai.js');
@@ -137,6 +157,20 @@ describe('OpenAI provider', () => {
 
       const opts = lastTrackOpts();
       expect(opts.responseContent).toBe('Hello world');
+    });
+
+    it('captures the provider request ID from response.id', async (): Promise<void> => {
+      const fakeCreate = vi.fn().mockResolvedValueOnce({
+        id: 'fw-request-123',
+        model: 'gpt-4',
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      });
+      const amp = createMockAmplitude();
+      const { completions } = createWrappedCompletions(amp, fakeCreate);
+
+      await completions.create({ model: 'gpt-4', messages: [] });
+
+      expect(lastTrackOpts().providerRequestId).toBe('fw-request-123');
     });
 
     it('successful completion extracts token usage', async (): Promise<void> => {
@@ -310,6 +344,39 @@ describe('OpenAI provider', () => {
 
       const opts = lastTrackOpts();
       expect(opts.provider).toBe('openai');
+    });
+
+    it('prices Fireworks fast Routers from the configured model', async () => {
+      const fakeCreate = vi.fn().mockResolvedValueOnce({
+        id: 'fw-fast-123',
+        model: 'accounts/fireworks/models/kimi-k3',
+        choices: [{ message: { content: 'fast' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 1_000_000,
+          completion_tokens: 0,
+          total_tokens: 1_000_000,
+        },
+      });
+      const amp = createMockAmplitude();
+      const provider = new TestProvider(amp);
+      const completions = new WrappedCompletions(
+        { create: fakeCreate },
+        provider as never,
+        amp,
+        null,
+        false,
+        'fireworks',
+      );
+
+      await completions.create({
+        model: 'accounts/fireworks/routers/kimi-k3-fast',
+        messages: [],
+      });
+
+      const opts = lastTrackOpts();
+      expect(opts.provider).toBe('fireworks');
+      expect(opts.modelName).toBe('accounts/fireworks/models/kimi-k3');
+      expect(opts.totalCostUsd).toBe(4.5);
     });
 
     it('tracks user message inputs before AI response', async (): Promise<void> => {

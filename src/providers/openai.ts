@@ -22,6 +22,7 @@ import type {
   TrackFn,
 } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
+import { resolveOpenAIProvider } from '../utils/openai-provider.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import {
@@ -45,11 +46,20 @@ export interface OpenAIOptions {
   amplitude: AmplitudeOrAI;
   apiKey?: string;
   baseUrl?: string;
+  /** Override provider detection for OpenAI-compatible endpoints. */
+  provider?: 'openai' | 'fireworks';
   privacyConfig?: PrivacyConfig | null;
   propagateContext?: boolean;
   /** Pass the `openai` module directly to bypass `tryRequire` (required in bundler environments). */
   openaiModule?: unknown;
 }
+
+/**
+ * Resolve an OpenAI-compatible endpoint to its analytics provider label.
+ * Fireworks is detected only from a valid `*.fireworks.ai` URL, avoiding
+ * substring matches such as `fireworks.ai.example.com`.
+ */
+export { resolveOpenAIProvider } from '../utils/openai-provider.js';
 
 export class OpenAI<
   TClient extends Record<string, unknown> = Record<string, unknown>,
@@ -60,10 +70,11 @@ export class OpenAI<
   private _propagateContext: boolean;
 
   constructor(options: OpenAIOptions) {
+    const providerName = resolveOpenAIProvider(options.baseUrl, options.provider);
     super({
       amplitude: options.amplitude,
       privacyConfig: options.privacyConfig,
-      providerName: 'openai',
+      providerName,
     });
 
     const mod =
@@ -91,6 +102,7 @@ export class OpenAI<
       this._amplitude,
       this._privacyConfig,
       this._propagateContext,
+      providerName,
     );
     this.responses = new WrappedResponses(
       this._client,
@@ -98,6 +110,7 @@ export class OpenAI<
       this._amplitude,
       this._privacyConfig,
       this._propagateContext,
+      providerName,
     );
   }
 
@@ -115,6 +128,7 @@ export class WrappedChat {
     amplitude: AmplitudeLike,
     privacyConfig: PrivacyConfig | null,
     propagateContext: boolean,
+    providerName = 'openai',
   ) {
     const clientObj = client as Record<string, unknown>;
     const chat = clientObj.chat as Record<string, unknown>;
@@ -124,6 +138,7 @@ export class WrappedChat {
       amplitude,
       privacyConfig,
       propagateContext,
+      providerName,
     );
   }
 }
@@ -212,12 +227,15 @@ export class WrappedCompletions {
       if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
         try {
           costUsd = calculateCost({
-            modelName,
+            modelName:
+              this._providerName === 'fireworks'
+                ? String(requestParams.model ?? modelName)
+                : modelName,
             inputTokens: usage.prompt_tokens,
             outputTokens: usage.completion_tokens,
             reasoningTokens: reasoningTokens ?? 0,
             cacheReadInputTokens: cachedTokens ?? 0,
-            defaultProvider: 'openai',
+            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -228,6 +246,7 @@ export class WrappedCompletions {
         ...contextFields(ctx),
         modelName,
         provider: this._providerName,
+        providerRequestId: _nonEmptyId(resp.id),
         responseContent: String(choice?.message?.content ?? ''),
         latencyMs,
         inputTokens: usage?.prompt_tokens,
@@ -298,10 +317,12 @@ export class WrappedCompletions {
     const accumulator = new StreamingAccumulator();
     accumulator.model = String(params.model ?? 'unknown');
     let reasoningContent = '';
+    let providerRequestId: string | undefined;
 
     try {
       for await (const chunk of stream) {
         const c = chunk as Record<string, unknown>;
+        providerRequestId ??= _nonEmptyId(c.id);
         const choices = c.choices as Array<Record<string, unknown>> | undefined;
         const delta = choices?.[0]?.delta as
           | Record<string, unknown>
@@ -383,7 +404,7 @@ export class WrappedCompletions {
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
             cacheReadInputTokens: state.cacheReadTokens ?? 0,
-            defaultProvider: 'openai',
+            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -394,6 +415,7 @@ export class WrappedCompletions {
         ...contextFields(sessionCtx),
         modelName,
         provider: this._providerName,
+        providerRequestId,
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
         inputTokens: state.inputTokens,
@@ -560,11 +582,14 @@ export class WrappedResponses {
       if (usage?.input_tokens != null && usage?.output_tokens != null) {
         try {
           costUsd = calculateCost({
-            modelName,
+            modelName:
+              this._providerName === 'fireworks'
+                ? String(requestParams.model ?? modelName)
+                : modelName,
             inputTokens: usage.input_tokens,
             outputTokens: usage.output_tokens,
             reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
-            defaultProvider: 'openai',
+            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -575,6 +600,7 @@ export class WrappedResponses {
         ...contextFields(ctx),
         modelName,
         provider: this._providerName,
+        providerRequestId: _nonEmptyId(resp.id),
         responseContent: responseText,
         latencyMs,
         inputTokens: usage?.input_tokens,
@@ -668,10 +694,12 @@ export class WrappedResponses {
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
     accumulator.model = String(params.model ?? 'unknown');
+    let providerRequestId: string | undefined;
 
     try {
       for await (const event of stream) {
         const e = event as Record<string, unknown>;
+        providerRequestId ??= _nonEmptyId(e.id);
         const type = e.type as string | undefined;
         if (type === 'response.output_text.delta') {
           const delta = e.delta;
@@ -679,6 +707,7 @@ export class WrappedResponses {
         } else if (type === 'response.completed') {
           const response = e.response as OpenAIResponse | undefined;
           if (response != null) {
+            providerRequestId ??= _nonEmptyId(response.id);
             const outputText = extractResponsesText(response);
             if (outputText.length > 0) {
               accumulator.content = outputText;
@@ -711,7 +740,7 @@ export class WrappedResponses {
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
-            defaultProvider: 'openai',
+            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -721,6 +750,7 @@ export class WrappedResponses {
         ...contextFields(sessionCtx),
         modelName: String(accumulator.model ?? params.model ?? 'unknown'),
         provider: this._providerName,
+        providerRequestId,
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
         inputTokens: state.inputTokens,
@@ -802,6 +832,10 @@ function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
     typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] ===
       'function'
   );
+}
+
+function _nonEmptyId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 export function extractSystemPrompt(

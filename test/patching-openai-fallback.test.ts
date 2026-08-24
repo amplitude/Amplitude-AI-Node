@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runWithContextAsync, SessionContext } from '../src/context.js';
 
 const mockCreate = vi.fn(async () => ({
+  id: 'fw-patched-123',
   model: 'gpt-4o',
   choices: [{ message: { content: 'hello' }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
@@ -9,9 +10,11 @@ const mockCreate = vi.fn(async () => ({
 
 const mockOpenAIModule: Record<string, unknown> = {
   OpenAI: class MockOpenAI {
+    baseURL?: string;
     chat: { completions: { create: typeof mockCreate } };
 
-    constructor() {
+    constructor(options?: { baseURL?: string }) {
+      this.baseURL = options?.baseURL;
       // Keep completions on the instance only so prototype path lookup fails.
       this.chat = {
         completions: {
@@ -70,12 +73,16 @@ describe('patchOpenAI constructor fallback', (): void => {
     });
 
     await runWithContextAsync(ctx, async () => {
-      const OpenAIClass = mockOpenAIModule.OpenAI as new () => {
+      const OpenAIClass = mockOpenAIModule.OpenAI as new (options?: {
+        baseURL?: string;
+      }) => {
         chat: {
           completions: { create: (params: unknown) => Promise<unknown> };
         };
       };
-      const client = new OpenAIClass();
+      const client = new OpenAIClass({
+        baseURL: 'https://api.fireworks.ai/inference/v1',
+      });
       await client.chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: 'hi' }],
@@ -83,5 +90,11 @@ describe('patchOpenAI constructor fallback', (): void => {
     });
 
     expect(amplitudeAI.trackAiMessage).toHaveBeenCalledTimes(1);
+    expect(amplitudeAI.trackAiMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'fireworks',
+        providerRequestId: 'fw-patched-123',
+      }),
+    );
   });
 });

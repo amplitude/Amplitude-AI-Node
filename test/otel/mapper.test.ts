@@ -11,6 +11,7 @@ import {
   AMP_SKIP_AUTO_USER_TRACKING,
   GENAI_OPERATION_NAME,
   GENAI_PROVIDER_NAME,
+  GENAI_RESPONSE_ID,
   GENAI_RESPONSE_MODEL,
   GENAI_INPUT_TOKENS,
   GENAI_OUTPUT_TOKENS,
@@ -155,6 +156,37 @@ describe('SpanEventMapper', () => {
     const types = amplitude.track.mock.calls.map((c: unknown[]) => (c[0] as Record<string, unknown>)?.event_type);
     expect(types).toContain('[Agent] User Message');
     expect(types).toContain('[Agent] AI Response');
+  });
+
+  it('maps gen_ai.response.id only onto the AI response', () => {
+    const span = makeSpan({
+      [GENAI_OPERATION_NAME]: OP_CHAT,
+      [GENAI_PROVIDER_NAME]: 'fireworks',
+      [GENAI_RESPONSE_MODEL]: 'accounts/fireworks/models/kimi-k3',
+      [GENAI_RESPONSE_ID]: 'fw-otel-123',
+      [GENAI_INPUT_MESSAGES]: JSON.stringify([
+        { role: 'user', content: 'hello' },
+      ]),
+      [GENAI_OUTPUT_MESSAGES]: JSON.stringify([
+        { role: 'assistant', content: 'hi' },
+      ]),
+    });
+
+    mapper.mapAndTrack(span);
+
+    const events = amplitude.track.mock.calls.map((call) => call[0]);
+    const aiEvent = events.find(
+      (event) => event?.event_type === '[Agent] AI Response',
+    );
+    const userEvent = events.find(
+      (event) => event?.event_type === '[Agent] User Message',
+    );
+    expect(
+      aiEvent?.event_properties?.['[Agent] Provider Request ID'],
+    ).toBe('fw-otel-123');
+    expect(userEvent?.event_properties).not.toHaveProperty(
+      '[Agent] Provider Request ID',
+    );
   });
 
   it('preserves complete usage and prefers authoritative cost', () => {

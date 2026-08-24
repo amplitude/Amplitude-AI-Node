@@ -34,6 +34,7 @@ import {
   GENAI_REQUEST_TEMPERATURE,
   GENAI_REQUEST_TOP_P,
   GENAI_RESPONSE_MODEL,
+  GENAI_RESPONSE_ID,
   GENAI_USAGE_COST,
   OP_CHAT,
 } from '../otel/conventions.js';
@@ -348,6 +349,9 @@ export abstract class BaseAIProvider {
           [GENAI_RESPONSE_MODEL]: opts.modelName,
           [GENAI_PROVIDER_NAME]: opts.provider,
         };
+        if (opts.providerRequestId) {
+          spanAttrs[GENAI_RESPONSE_ID] = opts.providerRequestId;
+        }
         if (opts.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = opts.inputTokens;
         if (opts.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = opts.outputTokens;
         if (opts.reasoningTokens != null) {
@@ -475,6 +479,7 @@ export class SimpleStreamingTracker {
   readonly accumulator: StreamingAccumulator;
   private _modelName = 'unknown';
   private _providerName: string;
+  private _providerRequestId: string | null = null;
   private _inputMessages: Array<Record<string, unknown>> = [];
   private _autoUserTracked = false;
   private _skipAutoUserTracking = false;
@@ -511,6 +516,12 @@ export class SimpleStreamingTracker {
   setModel(model: string): void {
     this._modelName = model;
     this.accumulator.model = model;
+  }
+
+  setProviderRequestId(providerRequestId: string): void {
+    if (!this._providerRequestId && providerRequestId) {
+      this._providerRequestId = providerRequestId;
+    }
   }
 
   addContent(chunk: string): void {
@@ -562,6 +573,9 @@ export class SimpleStreamingTracker {
           [GENAI_RESPONSE_MODEL]: this._modelName,
           [GENAI_PROVIDER_NAME]: this._providerName,
         };
+        if (this._providerRequestId) {
+          spanAttrs[GENAI_RESPONSE_ID] = this._providerRequestId;
+        }
         if (state.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = state.inputTokens;
         if (state.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = state.outputTokens;
         if (state.reasoningTokens != null) {
@@ -608,6 +622,7 @@ export class SimpleStreamingTracker {
       ...contextFields(ctx),
       modelName: this._modelName,
       provider: this._providerName,
+      providerRequestId: this._providerRequestId,
       responseContent:
         (state.content?.trim()
           ? state.content

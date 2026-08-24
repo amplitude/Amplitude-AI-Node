@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   calculateCost,
+  fireworksExplicitPriceCost,
   getGenaiPriceLookupCandidates,
   inferProvider,
   stripProviderPrefix,
@@ -315,28 +316,66 @@ describe('calculateCost', () => {
       defaultProvider: 'fireworks',
     };
 
+    // GLM contract rates are intentionally not copied into this package.
+    // Price only when the installed public genai-prices catalog contains it.
     expect(
-      calculateCost({
+      fireworksExplicitPriceCost({
         ...baseOptions,
         inputTokens: 1_000_000,
         outputTokens: 0,
       }),
-    ).toBeCloseTo(1.4, 10);
+    ).toBeNull();
+    const publicCatalogCost = calculateCost({
+      ...baseOptions,
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+    });
+    if (publicCatalogCost != null) {
+      expect(publicCatalogCost).toBeCloseTo(1.4, 10);
+    }
+  });
+
+  it('uses public Fireworks rates for standard and fast Router IDs', (): void => {
     expect(
-      calculateCost({
-        ...baseOptions,
+      fireworksExplicitPriceCost({
+        modelName: 'fireworks:accounts/fireworks/models/kimi-k3',
         inputTokens: 1_000_000,
         outputTokens: 0,
-        cacheReadInputTokens: 1_000_000,
       }),
-    ).toBeCloseTo(0.14, 10);
+    ).toBe(3);
     expect(
-      calculateCost({
-        ...baseOptions,
-        inputTokens: 0,
-        outputTokens: 1_000_000,
+      fireworksExplicitPriceCost({
+        modelName: 'accounts/fireworks/routers/kimi-k3-fast',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        defaultProvider: 'fireworks',
       }),
-    ).toBeCloseTo(4.4, 10);
+    ).toBe(4.5);
+  });
+
+  it('supports Fireworks period aliases after account model normalization', (): void => {
+    expect(
+      getGenaiPriceLookupCandidates(
+        'fireworks:accounts/fireworks/models/kimi-k2p6',
+      ),
+    ).toContainEqual({ model: 'kimi-k2.6', providerId: 'moonshotai' });
+  });
+
+  it('does not ship private Fireworks contract rates', (): void => {
+    for (const modelName of [
+      'fireworks:accounts/fireworks/models/glm-5p2',
+      'accounts/fireworks/routers/glm-5p2-fast',
+      'fireworks:accounts/fireworks/models/kimi-k2p7-code',
+    ]) {
+      expect(
+        fireworksExplicitPriceCost({
+          modelName,
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+          defaultProvider: 'fireworks',
+        }),
+      ).toBeNull();
+    }
   });
 
   it('does not price the Fireworks model under a different provider', (): void => {

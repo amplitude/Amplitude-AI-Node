@@ -119,6 +119,7 @@ export interface ChatCompletionParams {
  * Describes the subset of the OpenAI SDK's response shape that the SDK tracks.
  */
 export interface ChatCompletionResponse {
+  id?: string;
   model: string;
   choices: ChatChoice[];
   usage?: OpenAITokenUsage;
@@ -187,6 +188,7 @@ export interface OpenAIResponseUsage {
  * Structural interface for OpenAI Responses API responses.
  */
 export interface OpenAIResponse {
+  id?: string;
   model?: string;
   status?: string;
   output_text?: string;
@@ -421,6 +423,7 @@ export interface TrackCallOptions {
   modelName: string;
   provider: string;
   responseContent: string;
+  providerRequestId?: string | null;
   latencyMs: number;
   sessionId?: string | null;
   traceId?: string | null;

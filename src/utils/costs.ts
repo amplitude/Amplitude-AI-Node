@@ -16,6 +16,36 @@ import { calcPrice, updatePrices } from '@pydantic/genai-prices';
 let _livePricesEnabled = false;
 const warnedCostLookupFailures = new Set<string>();
 const MAX_COST_LOOKUP_WARNINGS = 100;
+const FIREWORKS_MODEL_ID_PREFIXES = [
+  'accounts/fireworks/models/',
+  'accounts/fireworks/routers/',
+] as const;
+
+/** Fireworks-published USD rates per million tokens. */
+const FIREWORKS_PUBLIC_RATES_PER_MTOK: Record<
+  string,
+  { input: number; output: number; cacheRead: number; cacheWrite: number }
+> = {
+  'kimi-k3': { input: 3.0, cacheRead: 0.3, cacheWrite: 3.0, output: 15.0 },
+  'kimi-k3-fast': {
+    input: 4.5,
+    cacheRead: 0.45,
+    cacheWrite: 4.5,
+    output: 22.5,
+  },
+  'deepseek-v4-flash-0731': {
+    input: 0.14,
+    cacheRead: 0.028,
+    cacheWrite: 0.14,
+    output: 0.28,
+  },
+  'deepseek-v4-flash-0731-fast': {
+    input: 0.21,
+    cacheRead: 0.042,
+    cacheWrite: 0.21,
+    output: 0.42,
+  },
+};
 
 function warnCostLookupFailure(
   modelName: string,
@@ -101,6 +131,67 @@ function normalizeProviderForGenaiPrices(
   return provider;
 }
 
+function stripFireworksModelIdPrefix(modelName: string): string {
+  for (const prefix of FIREWORKS_MODEL_ID_PREFIXES) {
+    if (modelName.startsWith(prefix)) return modelName.slice(prefix.length);
+  }
+  return modelName;
+}
+
+function getFireworksPeriodAliasCandidates(
+  modelName: string,
+): Array<{ model: string; providerId?: string }> {
+  const modelId = stripFireworksModelIdPrefix(modelName);
+  const dottedModelId = modelId.replace(/(?<=\d)p(?=\d)/g, '.');
+  if (dottedModelId === modelId) return [];
+  return dottedModelId.startsWith('kimi-')
+    ? [
+        { model: dottedModelId, providerId: 'moonshotai' },
+        { model: dottedModelId },
+      ]
+    : [{ model: dottedModelId }];
+}
+
+export function fireworksExplicitPriceCost(options: {
+  modelName: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  defaultProvider?: string;
+}): number | null {
+  const bare = stripFireworksModelIdPrefix(
+    stripProviderPrefix(options.modelName),
+  );
+  const rates = FIREWORKS_PUBLIC_RATES_PER_MTOK[bare];
+  if (!rates) return null;
+
+  const provider = normalizeProviderForGenaiPrices(
+    options.modelName.includes(':')
+      ? options.modelName.split(':', 1)[0]
+      : options.defaultProvider,
+  );
+  if (provider && provider !== 'fireworks') return null;
+
+  const cacheRead = Math.max(0, safeInt(options.cacheReadInputTokens));
+  const cacheWrite = Math.max(0, safeInt(options.cacheCreationInputTokens));
+  const uncached = Math.max(
+    0,
+    safeInt(options.inputTokens) - cacheRead - cacheWrite,
+  );
+  const inputCost =
+    (uncached * rates.input +
+      cacheRead * rates.cacheRead +
+      cacheWrite * rates.cacheWrite) /
+    1_000_000;
+  const outputCost =
+    (Math.max(0, safeInt(options.outputTokens)) * rates.output) / 1_000_000;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
+}
+
+/** Backward-compatible name matching the Python public helper. */
+export const fireworksFastTierCost = fireworksExplicitPriceCost;
+
 /**
  * Generate candidate (modelRef, providerId) pairs for price lookup.
  *
@@ -118,7 +209,12 @@ export function getGenaiPriceLookupCandidates(
   defaultProvider?: string,
 ): Array<{ model: string; providerId?: string }> {
   const stripped = stripProviderPrefix(modelName);
-  const inferred = defaultProvider ?? tryInferProviderFromModel(stripped);
+  const prefix = modelName.includes(':')
+    ? modelName.slice(0, modelName.indexOf(':'))
+    : '';
+  const explicitProvider = prefix && !prefix.includes('.') ? prefix : undefined;
+  const inferred =
+    explicitProvider ?? defaultProvider ?? tryInferProviderFromModel(stripped);
 
   const isBedrock =
     inferred === 'bedrock' ||
@@ -131,6 +227,9 @@ export function getGenaiPriceLookupCandidates(
   const candidates: Array<{ model: string; providerId?: string }> = [
     { model: stripped, providerId },
   ];
+  if (providerId === 'fireworks') {
+    candidates.push(...getFireworksPeriodAliasCandidates(stripped));
+  }
   // For Bedrock, also try without provider for globally-matched models (e.g. Claude)
   if (isBedrock) {
     candidates.push({ model: stripped, providerId: undefined });
@@ -232,6 +331,16 @@ export function calculateCost(options: {
   ) {
     return 0;
   }
+
+  const explicitFireworksCost = fireworksExplicitPriceCost({
+    modelName,
+    inputTokens,
+    outputTokens,
+    cacheReadInputTokens,
+    cacheCreationInputTokens,
+    defaultProvider,
+  });
+  if (explicitFireworksCost != null) return explicitFireworksCost;
 
   try {
     const candidates = getGenaiPriceLookupCandidates(

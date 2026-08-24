@@ -25,6 +25,7 @@ import { _GeminiModule, GEMINI_AVAILABLE } from './providers/gemini.js';
 import { _MistralModule, MISTRAL_AVAILABLE } from './providers/mistral.js';
 import { _OpenAIModule, OPENAI_AVAILABLE } from './providers/openai.js';
 import { warnIfProviderMismatch } from './utils/provider-detect.js';
+import { resolveOpenAIProvider } from './utils/openai-provider.js';
 import { tryRequire } from './utils/resolve-module.js';
 
 type PatchRecord = {
@@ -928,6 +929,7 @@ async function* _wrapPatchedStream(
   let totalTokens: number | undefined;
   let reasoningTokens: number | undefined;
   let cachedTokens: number | undefined;
+  let providerRequestId: string | undefined;
   const streamToolCalls: Array<Record<string, unknown>> = [];
   let isError = false;
   let errorMessage: string | undefined;
@@ -935,6 +937,7 @@ async function* _wrapPatchedStream(
   try {
     for await (const chunk of stream) {
       const c = chunk as Record<string, unknown>;
+      providerRequestId ??= _nonEmptyString(c.id);
       const choices = c.choices as Array<Record<string, unknown>> | undefined;
       const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
       if (delta?.content != null) content += String(delta.content);
@@ -998,7 +1001,10 @@ async function* _wrapPatchedStream(
       if (inputTokens != null && outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: model,
+            modelName:
+              providerName === 'fireworks'
+                ? String(req?.model ?? model)
+                : model,
             inputTokens,
             outputTokens,
             reasoningTokens: reasoningTokens ?? 0,
@@ -1018,6 +1024,7 @@ async function* _wrapPatchedStream(
         sessionId: ctx.sessionId,
         model,
         provider: providerName,
+        providerRequestId,
         latencyMs,
         traceId: ctx.traceId,
         inputTokens,
@@ -1494,7 +1501,17 @@ function _patchConstructor(
         string,
         unknown
       >;
-      _patchInstanceCompletions(instance, amplitudeAI, providerName);
+      const constructorOpts = args[0] as Record<string, unknown> | undefined;
+      const effectiveProvider =
+        providerName === 'openai'
+          ? resolveOpenAIProvider(
+              instance.baseURL ??
+                constructorOpts?.baseURL ??
+                constructorOpts?.baseUrl,
+              constructorOpts?.provider,
+            )
+          : providerName;
+      _patchInstanceCompletions(instance, amplitudeAI, effectiveProvider);
       return instance;
     },
   };
@@ -1852,12 +1869,14 @@ function _trackCompletionResponse(
   const inputTokens = usage?.prompt_tokens as number | undefined;
   const outputTokens = usage?.completion_tokens as number | undefined;
   const modelName = String(resp.model ?? req?.model ?? 'unknown');
+  const pricingModel =
+    providerName === 'fireworks' ? String(req?.model ?? modelName) : modelName;
 
   let costUsd: number | null = null;
   if (inputTokens != null && outputTokens != null) {
     try {
       costUsd = calculateCost({
-        modelName,
+        modelName: pricingModel,
         inputTokens,
         outputTokens,
         reasoningTokens: reasoningTokens ?? 0,
@@ -1878,6 +1897,7 @@ function _trackCompletionResponse(
     sessionId: ctx.sessionId,
     model: modelName,
     provider: providerName,
+    providerRequestId: _nonEmptyString(resp.id),
     latencyMs,
     traceId: ctx.traceId,
     inputTokens,
@@ -2299,11 +2319,14 @@ function _trackResponsesResponse(
             .reasoning_tokens as number)
         : 0;
       costUsd = calculateCost({
-        modelName,
+        modelName:
+          providerName === 'fireworks'
+            ? String(opts?.model ?? modelName)
+            : modelName,
         inputTokens,
         outputTokens,
         reasoningTokens,
-        defaultProvider: 'openai',
+        defaultProvider: providerName,
       });
     } catch {
       // cost calculation is best-effort
@@ -2322,6 +2345,7 @@ function _trackResponsesResponse(
     sessionId: ctx.sessionId,
     model: modelName,
     provider: providerName,
+    providerRequestId: _nonEmptyString(resp.id),
     latencyMs: performance.now() - startTime,
     traceId: ctx.traceId,
     inputTokens,
@@ -2380,16 +2404,19 @@ async function* _wrapPatchedResponsesStream(
   let isError = false;
   let errorMessage: string | undefined;
   let completedOutput: unknown;
+  let providerRequestId: string | undefined;
 
   try {
     for await (const event of stream) {
       const e = event as Record<string, unknown>;
+      providerRequestId ??= _nonEmptyString(e.id);
       const type = e.type as string | undefined;
       if (type === 'response.output_text.delta') {
         const delta = e.delta;
         if (typeof delta === 'string') content += delta;
       } else if (type === 'response.completed') {
         const response = e.response as Record<string, unknown> | undefined;
+        providerRequestId ??= _nonEmptyString(response?.id);
         const usage = response?.usage as Record<string, unknown> | undefined;
         const outputText = response?.output_text;
         if (typeof outputText === 'string' && outputText.length > 0) {
@@ -2424,7 +2451,7 @@ async function* _wrapPatchedResponsesStream(
             inputTokens,
             outputTokens,
             reasoningTokens: reasoningTokens ?? 0,
-            defaultProvider: 'openai',
+            defaultProvider: providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -2443,6 +2470,7 @@ async function* _wrapPatchedResponsesStream(
         sessionId: ctx.sessionId,
         model,
         provider: providerName,
+        providerRequestId,
         latencyMs: performance.now() - startTime,
         traceId: ctx.traceId,
         inputTokens,
@@ -2500,6 +2528,10 @@ function _extractResponsesFinishReason(
   if (!Array.isArray(output) || output.length === 0) return undefined;
   const first = output[0] as Record<string, unknown> | undefined;
   return typeof first?.status === 'string' ? first.status : undefined;
+}
+
+function _nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function _extractResponsesOutputToolCalls(

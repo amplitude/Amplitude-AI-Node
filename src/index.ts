@@ -73,6 +73,7 @@ export {
   PROP_TRACE_ID,
   PROP_TURN_ID,
   PROP_MESSAGE_ID,
+  PROP_PROVIDER_REQUEST_ID,
   PROP_MODEL_NAME,
   PROP_PROVIDER,
   PROP_LATENCY_MS,
@@ -250,6 +251,7 @@ export {
   OPENAI_AVAILABLE,
   WrappedResponses,
   extractSystemPrompt,
+  resolveOpenAIProvider,
 } from './providers/openai.js';
 export {
   Anthropic,
@@ -306,6 +308,8 @@ export {
   stripProviderPrefix,
   inferProvider,
   getGenaiPriceLookupCandidates,
+  fireworksExplicitPriceCost,
+  fireworksFastTierCost,
 } from './utils/costs.js';
 export {
   countTokens,

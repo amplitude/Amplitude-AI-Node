@@ -16,6 +16,7 @@ export const PROP_SESSION_ID = '[Agent] Session ID';
 export const PROP_TRACE_ID = '[Agent] Trace ID';
 export const PROP_TURN_ID = '[Agent] Turn ID';
 export const PROP_MESSAGE_ID = '[Agent] Message ID';
+export const PROP_PROVIDER_REQUEST_ID = '[Agent] Provider Request ID';
 export const PROP_MODEL_NAME = '[Agent] Model Name';
 export const PROP_PROVIDER = '[Agent] Provider';
 export const PROP_LATENCY_MS = '[Agent] Latency Ms';
