@@ -2409,14 +2409,13 @@ async function* _wrapPatchedResponsesStream(
   try {
     for await (const event of stream) {
       const e = event as Record<string, unknown>;
-      providerRequestId ??= _nonEmptyString(e.id);
+      const response = e.response as Record<string, unknown> | undefined;
+      providerRequestId ??= _nonEmptyString(response?.id);
       const type = e.type as string | undefined;
       if (type === 'response.output_text.delta') {
         const delta = e.delta;
         if (typeof delta === 'string') content += delta;
       } else if (type === 'response.completed') {
-        const response = e.response as Record<string, unknown> | undefined;
-        providerRequestId ??= _nonEmptyString(response?.id);
         const usage = response?.usage as Record<string, unknown> | undefined;
         const outputText = response?.output_text;
         if (typeof outputText === 'string' && outputText.length > 0) {

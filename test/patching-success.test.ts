@@ -182,10 +182,21 @@ describe('patching success paths', () => {
 
   it('patchOpenAI tracks responses stream payloads', async (): Promise<void> => {
     async function* events(): AsyncGenerator<Record<string, unknown>> {
-      yield { type: 'response.output_text.delta', delta: 'hello ' };
       yield {
+        id: 'event-envelope-id',
+        type: 'response.created',
+        response: { id: 'resp-body-id' },
+      };
+      yield {
+        id: 'another-event-envelope-id',
+        type: 'response.output_text.delta',
+        delta: 'hello ',
+      };
+      yield {
+        id: 'completed-event-envelope-id',
         type: 'response.completed',
         response: {
+          id: 'resp-body-id',
           model: 'gpt-4.1',
           status: 'completed',
           output_text: 'hello world',
@@ -210,5 +221,6 @@ describe('patching success paths', () => {
     expect(callArg?.provider).toBe('openai');
     expect(callArg?.content).toBe('hello world');
     expect(callArg?.isStreaming).toBe(true);
+    expect(callArg?.providerRequestId).toBe('resp-body-id');
   });
 });

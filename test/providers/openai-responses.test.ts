@@ -201,8 +201,18 @@ describe('OpenAI Responses wrapper', () => {
 
   it('tracks streamed responses payloads', async (): Promise<void> => {
     async function* streamEvents(): AsyncGenerator<Record<string, unknown>> {
-      yield { type: 'response.output_text.delta', delta: 'hello ' };
       yield {
+        id: 'event-envelope-id',
+        type: 'response.created',
+        response: { id: 'resp-stream-fw-123' },
+      };
+      yield {
+        id: 'another-event-envelope-id',
+        type: 'response.output_text.delta',
+        delta: 'hello ',
+      };
+      yield {
+        id: 'completed-event-envelope-id',
         type: 'response.completed',
         response: {
           id: 'resp-stream-fw-123',

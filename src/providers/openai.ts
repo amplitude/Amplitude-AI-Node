@@ -699,15 +699,14 @@ export class WrappedResponses {
     try {
       for await (const event of stream) {
         const e = event as Record<string, unknown>;
-        providerRequestId ??= _nonEmptyId(e.id);
+        const response = e.response as OpenAIResponse | undefined;
+        providerRequestId ??= _nonEmptyId(response?.id);
         const type = e.type as string | undefined;
         if (type === 'response.output_text.delta') {
           const delta = e.delta;
           if (typeof delta === 'string') accumulator.addContent(delta);
         } else if (type === 'response.completed') {
-          const response = e.response as OpenAIResponse | undefined;
           if (response != null) {
-            providerRequestId ??= _nonEmptyId(response.id);
             const outputText = extractResponsesText(response);
             if (outputText.length > 0) {
               accumulator.content = outputText;
