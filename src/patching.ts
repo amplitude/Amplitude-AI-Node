@@ -25,6 +25,12 @@ import { _GeminiModule, GEMINI_AVAILABLE } from './providers/gemini.js';
 import { _MistralModule, MISTRAL_AVAILABLE } from './providers/mistral.js';
 import { _OpenAIModule, OPENAI_AVAILABLE } from './providers/openai.js';
 import { warnIfProviderMismatch } from './utils/provider-detect.js';
+import { resolveOpenAIProvider } from './utils/openai-provider.js';
+import {
+  extractBodyResponseId,
+  extractProviderRequestId,
+  resolveProviderResponse,
+} from './utils/provider-request-id.js';
 import { tryRequire } from './utils/resolve-module.js';
 
 type PatchRecord = {
@@ -802,8 +808,8 @@ function _makeCompletionWrapper(
       throw syncErr;
     }
     if (result instanceof Promise) {
-      return result
-        .then((response) => {
+      return _resolvePatchedProviderResponse(result, providerName)
+        .then(({ data: response, headerRequestId }) => {
           if (_isAsyncIterable(response)) {
             if (providerName === 'anthropic') {
               return _wrapPatchedAnthropicStream(
@@ -819,6 +825,7 @@ function _makeCompletionWrapper(
               startTime,
               args[0],
               providerName,
+              headerRequestId,
             );
           }
           if (providerName === 'anthropic') {
@@ -830,6 +837,7 @@ function _makeCompletionWrapper(
               startTime,
               args[0],
               providerName,
+              headerRequestId,
             );
           }
           return response;
@@ -902,12 +910,23 @@ function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   );
 }
 
+async function _resolvePatchedProviderResponse(
+  result: Promise<unknown>,
+  providerName: string,
+): Promise<{ data: unknown; headerRequestId?: string }> {
+  if (providerName === 'openai' || providerName === 'fireworks') {
+    return resolveProviderResponse(result);
+  }
+  return { data: await result };
+}
+
 async function* _wrapPatchedStream(
   ai: AmplitudeAI,
   stream: AsyncIterable<unknown>,
   startTime: number,
   requestOpts: unknown,
   providerName: string,
+  headerRequestId?: string,
 ): AsyncGenerator<unknown> {
   if (providerName === 'gemini') {
     yield* _wrapPatchedGeminiStream(ai, stream, startTime, requestOpts);
@@ -928,6 +947,7 @@ async function* _wrapPatchedStream(
   let totalTokens: number | undefined;
   let reasoningTokens: number | undefined;
   let cachedTokens: number | undefined;
+  let bodyProviderRequestId: string | undefined;
   const streamToolCalls: Array<Record<string, unknown>> = [];
   let isError = false;
   let errorMessage: string | undefined;
@@ -935,6 +955,7 @@ async function* _wrapPatchedStream(
   try {
     for await (const chunk of stream) {
       const c = chunk as Record<string, unknown>;
+      bodyProviderRequestId ??= extractBodyResponseId(c);
       const choices = c.choices as Array<Record<string, unknown>> | undefined;
       const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
       if (delta?.content != null) content += String(delta.content);
@@ -998,7 +1019,10 @@ async function* _wrapPatchedStream(
       if (inputTokens != null && outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: model,
+            modelName:
+              providerName === 'fireworks'
+                ? String(req?.model ?? model)
+                : model,
             inputTokens,
             outputTokens,
             reasoningTokens: reasoningTokens ?? 0,
@@ -1018,6 +1042,7 @@ async function* _wrapPatchedStream(
         sessionId: ctx.sessionId,
         model,
         provider: providerName,
+        providerRequestId: bodyProviderRequestId ?? headerRequestId,
         latencyMs,
         traceId: ctx.traceId,
         inputTokens,
@@ -1494,7 +1519,17 @@ function _patchConstructor(
         string,
         unknown
       >;
-      _patchInstanceCompletions(instance, amplitudeAI, providerName);
+      const constructorOpts = args[0] as Record<string, unknown> | undefined;
+      const effectiveProvider =
+        providerName === 'openai'
+          ? resolveOpenAIProvider(
+              instance.baseURL ??
+                constructorOpts?.baseURL ??
+                constructorOpts?.baseUrl,
+              constructorOpts?.provider,
+            )
+          : providerName;
+      _patchInstanceCompletions(instance, amplitudeAI, effectiveProvider);
       return instance;
     },
   };
@@ -1680,8 +1715,8 @@ function _makeResponsesWrapper(
       throw syncErr;
     }
     if (result instanceof Promise) {
-      return result
-        .then((response) => {
+      return _resolvePatchedProviderResponse(result, providerName)
+        .then(({ data: response, headerRequestId }) => {
           if (_isAsyncIterable(response)) {
             return _wrapPatchedResponsesStream(
               amplitudeAI,
@@ -1689,6 +1724,7 @@ function _makeResponsesWrapper(
               startTime,
               args[0],
               providerName,
+              headerRequestId,
             );
           }
           _trackResponsesResponse(
@@ -1697,6 +1733,7 @@ function _makeResponsesWrapper(
             startTime,
             args[0],
             providerName,
+            headerRequestId,
           );
           return response;
         })
@@ -1824,6 +1861,7 @@ function _trackCompletionResponse(
   startTime: number,
   requestOpts: unknown,
   providerName: string,
+  headerRequestId?: string,
 ): void {
   if (response == null || typeof response !== 'object') return;
 
@@ -1852,12 +1890,14 @@ function _trackCompletionResponse(
   const inputTokens = usage?.prompt_tokens as number | undefined;
   const outputTokens = usage?.completion_tokens as number | undefined;
   const modelName = String(resp.model ?? req?.model ?? 'unknown');
+  const pricingModel =
+    providerName === 'fireworks' ? String(req?.model ?? modelName) : modelName;
 
   let costUsd: number | null = null;
   if (inputTokens != null && outputTokens != null) {
     try {
       costUsd = calculateCost({
-        modelName,
+        modelName: pricingModel,
         inputTokens,
         outputTokens,
         reasoningTokens: reasoningTokens ?? 0,
@@ -1878,6 +1918,7 @@ function _trackCompletionResponse(
     sessionId: ctx.sessionId,
     model: modelName,
     provider: providerName,
+    providerRequestId: extractProviderRequestId(resp, headerRequestId),
     latencyMs,
     traceId: ctx.traceId,
     inputTokens,
@@ -2270,6 +2311,7 @@ function _trackResponsesResponse(
   startTime: number,
   requestOpts: unknown,
   providerName: string,
+  headerRequestId?: string,
 ): void {
   if (response == null || typeof response !== 'object') return;
   const ctx = getActiveContext();
@@ -2299,11 +2341,14 @@ function _trackResponsesResponse(
             .reasoning_tokens as number)
         : 0;
       costUsd = calculateCost({
-        modelName,
+        modelName:
+          providerName === 'fireworks'
+            ? String(opts?.model ?? modelName)
+            : modelName,
         inputTokens,
         outputTokens,
         reasoningTokens,
-        defaultProvider: 'openai',
+        defaultProvider: providerName,
       });
     } catch {
       // cost calculation is best-effort
@@ -2322,6 +2367,7 @@ function _trackResponsesResponse(
     sessionId: ctx.sessionId,
     model: modelName,
     provider: providerName,
+    providerRequestId: extractProviderRequestId(resp, headerRequestId),
     latencyMs: performance.now() - startTime,
     traceId: ctx.traceId,
     inputTokens,
@@ -2363,6 +2409,7 @@ async function* _wrapPatchedResponsesStream(
   startTime: number,
   requestOpts: unknown,
   providerName: string,
+  headerRequestId?: string,
 ): AsyncGenerator<unknown> {
   const ctx = getActiveContext();
   if (ctx == null) {
@@ -2370,7 +2417,7 @@ async function* _wrapPatchedResponsesStream(
     return;
   }
   const opts = requestOpts as Record<string, unknown> | undefined;
-  const model = String(opts?.model ?? 'unknown');
+  let model = String(opts?.model ?? 'unknown');
   let content = '';
   let finishReason = '';
   let inputTokens: number | undefined;
@@ -2380,16 +2427,21 @@ async function* _wrapPatchedResponsesStream(
   let isError = false;
   let errorMessage: string | undefined;
   let completedOutput: unknown;
+  let bodyProviderRequestId: string | undefined;
 
   try {
     for await (const event of stream) {
       const e = event as Record<string, unknown>;
+      const response = e.response as Record<string, unknown> | undefined;
+      bodyProviderRequestId ??= extractBodyResponseId(response);
       const type = e.type as string | undefined;
       if (type === 'response.output_text.delta') {
         const delta = e.delta;
         if (typeof delta === 'string') content += delta;
       } else if (type === 'response.completed') {
-        const response = e.response as Record<string, unknown> | undefined;
+        if (typeof response?.model === 'string' && response.model.length > 0) {
+          model = response.model;
+        }
         const usage = response?.usage as Record<string, unknown> | undefined;
         const outputText = response?.output_text;
         if (typeof outputText === 'string' && outputText.length > 0) {
@@ -2420,11 +2472,14 @@ async function* _wrapPatchedResponsesStream(
       if (inputTokens != null && outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: model,
+            modelName:
+              providerName === 'fireworks'
+                ? String(opts?.model ?? model)
+                : model,
             inputTokens,
             outputTokens,
             reasoningTokens: reasoningTokens ?? 0,
-            defaultProvider: 'openai',
+            defaultProvider: providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -2443,6 +2498,7 @@ async function* _wrapPatchedResponsesStream(
         sessionId: ctx.sessionId,
         model,
         provider: providerName,
+        providerRequestId: bodyProviderRequestId ?? headerRequestId,
         latencyMs: performance.now() - startTime,
         traceId: ctx.traceId,
         inputTokens,

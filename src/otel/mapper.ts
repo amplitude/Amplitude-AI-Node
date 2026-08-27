@@ -89,6 +89,7 @@ import {
   GENAI_REQUEST_TEMPERATURE,
   GENAI_REQUEST_TOP_P,
   GENAI_RESPONSE_MODEL,
+  GENAI_RESPONSE_ID,
   GENAI_USAGE_COST,
   GENAI_SYSTEM_INSTRUCTIONS,
   GENAI_TOOL_NAME,
@@ -197,6 +198,7 @@ export class SpanEventMapper {
     // GenAI fields
     const model = String(attrs[GENAI_RESPONSE_MODEL] ?? attrs[GENAI_REQUEST_MODEL] ?? 'unknown');
     const provider = String(attrs[GENAI_PROVIDER_NAME] ?? (attrs['gen_ai.system'] as string | undefined) ?? 'unknown');
+    const providerRequestId = strOrNull(attrs[GENAI_RESPONSE_ID]);
     const inputTokens = safeInt(attrs[GENAI_INPUT_TOKENS]);
     const outputTokens = safeInt(attrs[GENAI_OUTPUT_TOKENS]);
     const totalTokens = inputTokens != null || outputTokens != null
@@ -277,6 +279,7 @@ export class SpanEventMapper {
       context: contextDict ?? undefined,
       env: env ?? undefined,
       groups: groups ?? undefined,
+      providerRequestId: providerRequestId ?? undefined,
       privacyConfig: this._privacyConfig,
     };
 

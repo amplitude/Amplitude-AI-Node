@@ -64,6 +64,7 @@ import {
   PROP_PARENT_SPAN_ID,
   PROP_PROMPT_ID,
   PROP_PROVIDER,
+  PROP_PROVIDER_REQUEST_ID,
   PROP_REASONING_TOKENS,
   PROP_RUNTIME,
   PROP_SCORE_NAME,
@@ -366,6 +367,8 @@ export interface TrackAiMessageOptions {
   modelName: string;
   provider: string;
   responseContent: string;
+  /** Provider-owned inference identifier (for example, a Fireworks Router request ID). */
+  providerRequestId?: string | null;
   latencyMs: number;
   sessionId?: string | null;
   traceId?: string | null;
@@ -452,6 +455,8 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
   );
 
   if (opts.sessionId) properties[PROP_SESSION_ID] = opts.sessionId;
+  if (opts.providerRequestId)
+    properties[PROP_PROVIDER_REQUEST_ID] = opts.providerRequestId;
   if (opts.traceId) properties[PROP_TRACE_ID] = opts.traceId;
   if (opts.conversationId && !opts.sessionId)
     properties[PROP_SESSION_ID] = opts.conversationId;

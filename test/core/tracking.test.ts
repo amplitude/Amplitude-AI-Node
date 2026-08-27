@@ -38,6 +38,7 @@ import {
   PROP_PARENT_MESSAGE_ID,
   PROP_PARENT_SPAN_ID,
   PROP_PROVIDER,
+  PROP_PROVIDER_REQUEST_ID,
   PROP_REASONING_CONTENT,
   PROP_RUNTIME,
   PROP_SCORE_NAME,
@@ -227,6 +228,7 @@ describe('trackAiMessage', () => {
       userId: 'u1',
       modelName: 'gpt-4o',
       provider: 'openai',
+      providerRequestId: 'provider-request-123',
       responseContent: 'Hello there!',
       latencyMs: 250,
       sessionId: 'sess-1',
@@ -242,6 +244,7 @@ describe('trackAiMessage', () => {
     const props = event.event_properties as Record<string, unknown>;
     expect(props[PROP_MODEL_NAME]).toBe('gpt-4o');
     expect(props[PROP_PROVIDER]).toBe('openai');
+    expect(props[PROP_PROVIDER_REQUEST_ID]).toBe('provider-request-123');
     expect(props[PROP_LATENCY_MS]).toBe(250);
     expect(props[PROP_IS_ERROR]).toBe(false);
     expect(props[PROP_COMPONENT_TYPE]).toBe('llm');

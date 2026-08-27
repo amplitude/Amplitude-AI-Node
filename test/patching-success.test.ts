@@ -63,6 +63,20 @@ const { patchOpenAI, unpatchOpenAI, unpatch } = await import(
   '../src/patching.js'
 );
 
+function withResponse<T>(
+  data: T,
+  headers: Record<string, string>,
+): Promise<T> {
+  const promise = Promise.resolve(data) as Promise<T> & {
+    withResponse(): Promise<unknown>;
+  };
+  promise.withResponse = async () => ({
+    data,
+    response: { headers: new Headers(headers) },
+  });
+  return promise;
+}
+
 describe('patching success paths', () => {
   const ai = {
     trackAiMessage: vi.fn(),
@@ -111,6 +125,33 @@ describe('patching success paths', () => {
       ).completions as Record<string, unknown>
     ).create;
     expect(restoredRef).toBe(originalRef);
+  });
+
+  it('patchOpenAI captures Fireworks headers when body ID is absent', async () => {
+    fakeCreate.mockImplementationOnce(() =>
+      withResponse(
+        {
+          model: 'selected-model',
+          choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+        },
+        {
+          'x-fireworks-request-id': 'patched-fireworks-header',
+          'x-request-id': 'patched-generic-header',
+        },
+      ),
+    );
+    patchOpenAI({ amplitudeAI: ai as never });
+
+    const client = new (FakeOpenAI as unknown as new () => {
+      chat: { completions: { create: (opts: unknown) => Promise<unknown> } };
+    })();
+    await client.chat.completions.create({ model: 'requested-model' });
+
+    expect(ai.trackAiMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerRequestId: 'patched-fireworks-header',
+      }),
+    );
   });
 
   it('throws when patching same provider with a different AmplitudeAI instance', (): void => {
@@ -182,8 +223,18 @@ describe('patching success paths', () => {
 
   it('patchOpenAI tracks responses stream payloads', async (): Promise<void> => {
     async function* events(): AsyncGenerator<Record<string, unknown>> {
-      yield { type: 'response.output_text.delta', delta: 'hello ' };
       yield {
+        id: 'event-envelope-id',
+        type: 'response.created',
+        response: {},
+      };
+      yield {
+        id: 'another-event-envelope-id',
+        type: 'response.output_text.delta',
+        delta: 'hello ',
+      };
+      yield {
+        id: 'completed-event-envelope-id',
         type: 'response.completed',
         response: {
           model: 'gpt-4.1',
@@ -193,7 +244,11 @@ describe('patching success paths', () => {
         },
       };
     }
-    fakeResponsesStream.mockResolvedValueOnce(events());
+    fakeResponsesStream.mockImplementationOnce(() =>
+      withResponse(events(), {
+        'x-fireworks-request-id': 'patched-stream-header',
+      }),
+    );
     patchOpenAI({ amplitudeAI: ai as never });
 
     const client = new (FakeOpenAI as unknown as new () => {
@@ -210,5 +265,6 @@ describe('patching success paths', () => {
     expect(callArg?.provider).toBe('openai');
     expect(callArg?.content).toBe('hello world');
     expect(callArg?.isStreaming).toBe(true);
+    expect(callArg?.providerRequestId).toBe('patched-stream-header');
   });
 });
