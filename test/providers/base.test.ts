@@ -176,6 +176,19 @@ describe('SimpleStreamingTracker', () => {
     expect(call[0].latencyMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('lets the first body ID replace a header ID and remain stable', (): void => {
+    const provider = new TestProvider(createMockAmplitude(), 'fireworks');
+    const tracker = provider.createStreamingTracker();
+    tracker.setProviderRequestId('header-id');
+    tracker.setProviderRequestId('first-body-id', true);
+    tracker.setProviderRequestId('later-body-id', true);
+
+    tracker.finalize({ userId: 'u1' });
+
+    const calls = (trackAiMessage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.at(-1)?.[0].providerRequestId).toBe('first-body-id');
+  });
+
   it('calculates cost from complete streaming usage', (): void => {
     const provider = new TestProvider(createMockAmplitude(), 'openai');
     const tracker = provider.createStreamingTracker();

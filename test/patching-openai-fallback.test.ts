@@ -13,7 +13,7 @@ const mockOpenAIModule: Record<string, unknown> = {
     baseURL?: string;
     chat: { completions: { create: typeof mockCreate } };
 
-    constructor(options?: { baseURL?: string }) {
+    constructor(options?: { baseURL?: string; provider?: string }) {
       this.baseURL = options?.baseURL;
       // Keep completions on the instance only so prototype path lookup fails.
       this.chat = {
@@ -87,9 +87,17 @@ describe('patchOpenAI constructor fallback', (): void => {
         model: 'gpt-4o',
         messages: [{ role: 'user', content: 'hi' }],
       });
+      const proxyClient = new OpenAIClass({
+        baseURL: 'https://gateway.example/v1',
+        provider: 'fireworks',
+      });
+      await proxyClient.chat.completions.create({
+        model: 'router',
+        messages: [],
+      });
     });
 
-    expect(amplitudeAI.trackAiMessage).toHaveBeenCalledTimes(1);
+    expect(amplitudeAI.trackAiMessage).toHaveBeenCalledTimes(2);
     expect(amplitudeAI.trackAiMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'fireworks',

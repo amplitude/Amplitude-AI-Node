@@ -23,6 +23,11 @@ import type {
 } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
 import { resolveOpenAIProvider } from '../utils/openai-provider.js';
+import {
+  extractBodyResponseId,
+  extractProviderRequestId,
+  resolveProviderResponse,
+} from '../utils/provider-request-id.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import {
@@ -194,7 +199,10 @@ export class WrappedCompletions {
         ctx,
         amplitudeOverrides?.trackInputMessages ?? true,
       );
-      const response = await createFn.call(this._original, requestParams);
+      const resolved = await resolveProviderResponse(
+        createFn.call(this._original, requestParams),
+      );
+      const response = resolved.data;
 
       if (requestParams.stream === true && _isAsyncIterable(response)) {
         return this._wrapStream(
@@ -202,6 +210,7 @@ export class WrappedCompletions {
           requestParams,
           startTime,
           ctx,
+          resolved.headerRequestId,
         );
       }
 
@@ -246,7 +255,10 @@ export class WrappedCompletions {
         ...contextFields(ctx),
         modelName,
         provider: this._providerName,
-        providerRequestId: _nonEmptyId(resp.id),
+        providerRequestId: extractProviderRequestId(
+          resp,
+          resolved.headerRequestId,
+        ),
         responseContent: String(choice?.message?.content ?? ''),
         latencyMs,
         inputTokens: usage?.prompt_tokens,
@@ -313,16 +325,20 @@ export class WrappedCompletions {
     params: Record<string, unknown>,
     _startTime: number,
     sessionCtx: ProviderTrackOptions,
+    headerRequestId?: string,
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
     accumulator.model = String(params.model ?? 'unknown');
     let reasoningContent = '';
-    let providerRequestId: string | undefined;
+    let bodyProviderRequestId: string | undefined;
 
     try {
       for await (const chunk of stream) {
         const c = chunk as Record<string, unknown>;
-        providerRequestId ??= _nonEmptyId(c.id);
+        bodyProviderRequestId ??= extractBodyResponseId(c);
+        if (typeof c.model === 'string' && c.model.length > 0) {
+          accumulator.model = c.model;
+        }
         const choices = c.choices as Array<Record<string, unknown>> | undefined;
         const delta = choices?.[0]?.delta as
           | Record<string, unknown>
@@ -394,12 +410,16 @@ export class WrappedCompletions {
     } finally {
       const state = accumulator.getState();
       const modelName = String(accumulator.model ?? params.model ?? 'unknown');
+      const pricingModel =
+        this._providerName === 'fireworks'
+          ? String(params.model ?? modelName)
+          : modelName;
 
       let costUsd: number | null = null;
       if (state.inputTokens != null && state.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName,
+            modelName: pricingModel,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
@@ -415,7 +435,7 @@ export class WrappedCompletions {
         ...contextFields(sessionCtx),
         modelName,
         provider: this._providerName,
-        providerRequestId,
+        providerRequestId: bodyProviderRequestId ?? headerRequestId,
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
         inputTokens: state.inputTokens,
@@ -561,13 +581,17 @@ export class WrappedResponses {
         ctx,
         amplitudeOverrides?.trackInputMessages ?? true,
       );
-      const response = await createFn.call(this._original, requestParams);
+      const resolved = await resolveProviderResponse(
+        createFn.call(this._original, requestParams),
+      );
+      const response = resolved.data;
       if (requestParams.stream === true && _isAsyncIterable(response)) {
         return this._wrapStream(
           response as AsyncIterable<unknown>,
           requestParams,
           startTime,
           ctx,
+          resolved.headerRequestId,
         );
       }
 
@@ -600,7 +624,10 @@ export class WrappedResponses {
         ...contextFields(ctx),
         modelName,
         provider: this._providerName,
-        providerRequestId: _nonEmptyId(resp.id),
+        providerRequestId: extractProviderRequestId(
+          resp,
+          resolved.headerRequestId,
+        ),
         responseContent: responseText,
         latencyMs,
         inputTokens: usage?.input_tokens,
@@ -661,7 +688,10 @@ export class WrappedResponses {
         ctx,
         amplitudeOverrides?.trackInputMessages ?? true,
       );
-      const response = await streamFn.call(this._original, requestParams);
+      const resolved = await resolveProviderResponse(
+        streamFn.call(this._original, requestParams),
+      );
+      const response = resolved.data;
       if (!_isAsyncIterable(response)) {
         throw new Error('OpenAI responses.stream did not return AsyncIterable');
       }
@@ -670,6 +700,7 @@ export class WrappedResponses {
         requestParams,
         startTime,
         ctx,
+        resolved.headerRequestId,
       );
     } catch (error) {
       this._trackFn({
@@ -691,22 +722,26 @@ export class WrappedResponses {
     params: Record<string, unknown>,
     _startTime: number,
     sessionCtx: ProviderTrackOptions,
+    headerRequestId?: string,
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
     accumulator.model = String(params.model ?? 'unknown');
-    let providerRequestId: string | undefined;
+    let bodyProviderRequestId: string | undefined;
 
     try {
       for await (const event of stream) {
         const e = event as Record<string, unknown>;
         const response = e.response as OpenAIResponse | undefined;
-        providerRequestId ??= _nonEmptyId(response?.id);
+        bodyProviderRequestId ??= extractBodyResponseId(response);
         const type = e.type as string | undefined;
         if (type === 'response.output_text.delta') {
           const delta = e.delta;
           if (typeof delta === 'string') accumulator.addContent(delta);
         } else if (type === 'response.completed') {
           if (response != null) {
+            if (typeof response.model === 'string' && response.model.length > 0) {
+              accumulator.model = response.model;
+            }
             const outputText = extractResponsesText(response);
             if (outputText.length > 0) {
               accumulator.content = outputText;
@@ -731,11 +766,16 @@ export class WrappedResponses {
       throw error;
     } finally {
       const state = accumulator.getState();
+      const modelName = String(accumulator.model ?? params.model ?? 'unknown');
+      const pricingModel =
+        this._providerName === 'fireworks'
+          ? String(params.model ?? modelName)
+          : modelName;
       let costUsd: number | null = null;
       if (state.inputTokens != null && state.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: String(accumulator.model ?? params.model ?? 'unknown'),
+            modelName: pricingModel,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
@@ -747,9 +787,9 @@ export class WrappedResponses {
       }
       this._trackFn({
         ...contextFields(sessionCtx),
-        modelName: String(accumulator.model ?? params.model ?? 'unknown'),
+        modelName,
         provider: this._providerName,
-        providerRequestId,
+        providerRequestId: bodyProviderRequestId ?? headerRequestId,
         responseContent: state.content,
         latencyMs: accumulator.elapsedMs,
         inputTokens: state.inputTokens,
@@ -831,10 +871,6 @@ function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
     typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] ===
       'function'
   );
-}
-
-function _nonEmptyId(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 export function extractSystemPrompt(

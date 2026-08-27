@@ -32,6 +32,20 @@ function lastTrackOpts(): TrackAiMessageOptions {
   return last[0] as TrackAiMessageOptions;
 }
 
+function withResponse<T>(
+  data: T,
+  headers: Record<string, string>,
+): Promise<T> {
+  const promise = Promise.resolve(data) as Promise<T> & {
+    withResponse(): Promise<unknown>;
+  };
+  promise.withResponse = async () => ({
+    data,
+    response: { headers: new Headers(headers) },
+  });
+  return promise;
+}
+
 describe('OpenAI Responses wrapper', () => {
   beforeEach((): void => {
     vi.clearAllMocks();
@@ -75,6 +89,36 @@ describe('OpenAI Responses wrapper', () => {
     expect(opts.finishReason).toBe('completed');
     expect(opts.providerRequestId).toBe('resp-fw-123');
     expect(typeof opts.totalCostUsd).toBe('number');
+  });
+
+  it('falls back to Fireworks response headers when body ID is absent', async () => {
+    const fakeCreate = vi.fn(() =>
+      withResponse(
+        {
+          model: 'selected-model',
+          status: 'completed',
+          output_text: 'hello',
+        },
+        {
+          'x-fireworks-request-id': 'fw-response-header',
+          'x-request-id': 'generic-response-header',
+        },
+      ),
+    );
+    const amp = createMockAmplitude();
+    const provider = new TestProvider(amp);
+    const wrapper = new WrappedResponses(
+      { responses: { create: fakeCreate } },
+      provider as never,
+      amp,
+      null,
+      false,
+      'fireworks',
+    );
+
+    await wrapper.create({ model: 'accounts/fireworks/routers/test', input: [] });
+
+    expect(lastTrackOpts().providerRequestId).toBe('fw-response-header');
   });
 
   it('extracts tool calls from output blocks', async (): Promise<void> => {
@@ -215,15 +259,19 @@ describe('OpenAI Responses wrapper', () => {
         id: 'completed-event-envelope-id',
         type: 'response.completed',
         response: {
-          id: 'resp-stream-fw-123',
-          model: 'gpt-4.1',
+          id: 'later-response-body-id',
+          model: 'selected-model',
           status: 'completed',
           output_text: 'hello stream',
           usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 },
         },
       };
     }
-    const fakeCreate = vi.fn().mockResolvedValueOnce(streamEvents());
+    const fakeCreate = vi.fn(() =>
+      withResponse(streamEvents(), {
+        'x-fireworks-request-id': 'response-stream-header',
+      }),
+    );
     const amp = createMockAmplitude();
     const provider = new TestProvider(amp);
     const wrapper = new WrappedResponses(
@@ -246,6 +294,7 @@ describe('OpenAI Responses wrapper', () => {
     expect(opts.responseContent).toBe('hello stream');
     expect(opts.totalTokens).toBe(5);
     expect(opts.providerRequestId).toBe('resp-stream-fw-123');
+    expect(opts.modelName).toBe('selected-model');
   });
 
   it('supports responses.stream helper when SDK exposes stream()', async (): Promise<void> => {

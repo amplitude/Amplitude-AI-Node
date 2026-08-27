@@ -32,6 +32,20 @@ async function* fakeStreamChunks(
   }
 }
 
+function streamWithResponse<T>(
+  data: T,
+  headers: Record<string, string>,
+): Promise<T> {
+  const promise = Promise.resolve(data) as Promise<T> & {
+    withResponse(): Promise<unknown>;
+  };
+  promise.withResponse = async () => ({
+    data,
+    response: { headers: new Headers(headers) },
+  });
+  return promise;
+}
+
 function createWrappedCompletions(
   fakeCreate: ReturnType<typeof vi.fn>,
 ): WrappedCompletions {
@@ -53,10 +67,11 @@ describe('OpenAI streaming', () => {
     const chunks = [
       {
         id: 'fw-stream-123',
+        model: 'selected-model',
         choices: [{ delta: { content: 'Hello' }, finish_reason: null }],
       },
       {
-        id: 'fw-stream-123',
+        id: 'later-body-id',
         choices: [{ delta: { content: ' world' }, finish_reason: null }],
       },
       {
@@ -65,7 +80,11 @@ describe('OpenAI streaming', () => {
       },
     ];
 
-    const fakeCreate = vi.fn().mockResolvedValueOnce(fakeStreamChunks(chunks));
+    const fakeCreate = vi.fn(() =>
+      streamWithResponse(fakeStreamChunks(chunks), {
+        'x-fireworks-request-id': 'header-id',
+      }),
+    );
     const completions = createWrappedCompletions(fakeCreate);
 
     const result = await completions.create({
@@ -91,6 +110,7 @@ describe('OpenAI streaming', () => {
     expect(opts.inputTokens).toBe(10);
     expect(opts.outputTokens).toBe(5);
     expect(opts.providerRequestId).toBe('fw-stream-123');
+    expect(opts.modelName).toBe('selected-model');
   });
 
   it('tracks error when stream throws mid-iteration', async (): Promise<void> => {

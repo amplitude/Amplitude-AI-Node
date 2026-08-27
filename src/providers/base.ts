@@ -480,6 +480,7 @@ export class SimpleStreamingTracker {
   private _modelName = 'unknown';
   private _providerName: string;
   private _providerRequestId: string | null = null;
+  private _bodyProviderRequestIdSet = false;
   private _inputMessages: Array<Record<string, unknown>> = [];
   private _autoUserTracked = false;
   private _skipAutoUserTracking = false;
@@ -518,8 +519,19 @@ export class SimpleStreamingTracker {
     this.accumulator.model = model;
   }
 
-  setProviderRequestId(providerRequestId: string): void {
-    if (!this._providerRequestId && providerRequestId) {
+  setProviderRequestId(
+    providerRequestId: string,
+    bodyPreferred = false,
+  ): void {
+    if (!providerRequestId) return;
+    if (bodyPreferred) {
+      if (!this._bodyProviderRequestIdSet) {
+        this._providerRequestId = providerRequestId;
+        this._bodyProviderRequestIdSet = true;
+      }
+      return;
+    }
+    if (!this._providerRequestId) {
       this._providerRequestId = providerRequestId;
     }
   }

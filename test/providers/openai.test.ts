@@ -42,6 +42,20 @@ function lastTrackOpts(): TrackAiMessageOptions {
   return last[0] as TrackAiMessageOptions;
 }
 
+function withResponse<T>(
+  data: T,
+  headers: Record<string, string>,
+): Promise<T> {
+  const promise = Promise.resolve(data) as Promise<T> & {
+    withResponse(): Promise<unknown>;
+  };
+  promise.withResponse = async () => ({
+    data,
+    response: { headers: new Headers(headers) },
+  });
+  return promise;
+}
+
 function createWrappedCompletions(
   amp: { track: ReturnType<typeof vi.fn> },
   fakeCreate: ReturnType<typeof vi.fn>,
@@ -114,7 +128,13 @@ describe('OpenAI provider', () => {
           'https://api.fireworks.ai/inference/v1',
         ),
       ).toBe('fireworks');
+      expect(resolveOpenAIProvider('https://api.fireworks.ai./v1')).toBe(
+        'fireworks',
+      );
       expect(resolveOpenAIProvider('not a url', 'fireworks')).toBe('fireworks');
+      expect(
+        resolveOpenAIProvider('https://gateway.example/v1', 'openai'),
+      ).toBe('openai');
     });
 
     it('rejects lookalike, apex, and invalid hosts', () => {
@@ -123,6 +143,10 @@ describe('OpenAI provider', () => {
       ).toBe('openai');
       expect(resolveOpenAIProvider('https://fireworks.ai/v1')).toBe('openai');
       expect(resolveOpenAIProvider('fireworks.ai')).toBe('openai');
+      expect(resolveOpenAIProvider('ftp://api.fireworks.ai/v1')).toBe('openai');
+      expect(resolveOpenAIProvider('https://user@api.fireworks.ai/v1')).toBe(
+        'openai',
+      );
     });
   });
 
@@ -171,6 +195,54 @@ describe('OpenAI provider', () => {
       await completions.create({ model: 'gpt-4', messages: [] });
 
       expect(lastTrackOpts().providerRequestId).toBe('fw-request-123');
+    });
+
+    it('prefers body ID, then Fireworks and generic request headers', async () => {
+      const fakeCreate = vi
+        .fn()
+        .mockImplementationOnce(() =>
+          withResponse(
+            {
+              id: 'body-id',
+              model: 'gpt-4',
+              choices: [{ message: { content: 'ok' } }],
+            },
+            {
+              'x-fireworks-request-id': 'fireworks-header-id',
+              'x-request-id': 'generic-header-id',
+            },
+          ),
+        )
+        .mockImplementationOnce(() =>
+          withResponse(
+            {
+              model: 'gpt-4',
+              choices: [{ message: { content: 'ok' } }],
+            },
+            {
+              'x-fireworks-request-id': 'fireworks-header-id',
+              'x-request-id': 'generic-header-id',
+            },
+          ),
+        )
+        .mockImplementationOnce(() =>
+          withResponse(
+            {
+              model: 'gpt-4',
+              choices: [{ message: { content: 'ok' } }],
+            },
+            { 'x-request-id': 'generic-header-id' },
+          ),
+        );
+      const amp = createMockAmplitude();
+      const { completions } = createWrappedCompletions(amp, fakeCreate);
+
+      await completions.create({ model: 'gpt-4', messages: [] });
+      expect(lastTrackOpts().providerRequestId).toBe('body-id');
+      await completions.create({ model: 'gpt-4', messages: [] });
+      expect(lastTrackOpts().providerRequestId).toBe('fireworks-header-id');
+      await completions.create({ model: 'gpt-4', messages: [] });
+      expect(lastTrackOpts().providerRequestId).toBe('generic-header-id');
     });
 
     it('successful completion extracts token usage', async (): Promise<void> => {
