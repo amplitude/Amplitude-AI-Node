@@ -34,14 +34,18 @@ jobs:
       - name: Dispatch to docs repo
         env:
           GH_TOKEN: ${{ secrets.DOCS_REPO_PAT }}
+          SOURCE_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           # Read large multiline values from files to avoid the OS argument-size limit.
+          # Keep GitHub context in env vars so commit messages cannot inject into the shell.
           payload=$(jq -n \
-            --arg source_repo "${{ github.repository }}" \
+            --arg source_repo "$SOURCE_REPO" \
             --rawfile readme_content /tmp/readme_content.txt \
             --rawfile readme_diff /tmp/readme_diff.txt \
-            --arg commit_sha "${{ github.sha }}" \
-            --arg commit_message "${{ github.event.head_commit.message }}" \
+            --arg commit_sha "$COMMIT_SHA" \
+            --arg commit_message "$COMMIT_MESSAGE" \
             '{
               event_type: "readme-sync",
               client_payload: {
@@ -54,9 +58,9 @@ jobs:
             }')
 
           echo "::group::Dispatching to $DOCS_REPO"
-          echo "Source repo: ${{ github.repository }}"
-          echo "Commit SHA: ${{ github.sha }}"
-          echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "Source repo: $SOURCE_REPO"
+          echo "Commit SHA: $COMMIT_SHA"
+          echo "Commit message: $COMMIT_MESSAGE"
           echo "::endgroup::"
 
           # Use gh api to dispatch — handles auth and encoding
