@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ValidationError } from '../exceptions.js';
 import type {
   AmplitudeEvent,
@@ -189,18 +189,49 @@ function withSdkManagedProperties(
 }
 
 /**
+ * Deterministic numeric alias of an agent session ID, used as the top-level
+ * Amplitude `session_id` when no browser session ID is supplied. The value
+ * must be identical for the same agent session no matter which process or
+ * pipeline computes it — the server-side enrichment pipeline (Langley) and
+ * the Python SDK derive the same value so that raw agent events and
+ * server-emitted evaluation events land in the same Amplitude session.
+ *
+ * Spec (do not change without updating amplitude_ai and Langley to match):
+ * first 6 bytes of SHA-256(UTF-8 agent session ID), big-endian unsigned.
+ * Always positive (never -1/0) and < 2^48, so safe as a JS number.
+ */
+export function deriveSessionIdFromAgentSessionId(
+  agentSessionId: string,
+): number {
+  const digest = createHash('sha256').update(agentSessionId, 'utf8').digest();
+  return digest.readUIntBE(0, 6) || 1;
+}
+
+/**
  * Set `event.session_id` from a browser session ID when valid and positive.
  * Idempotent: does not overwrite an existing `session_id`.
+ *
+ * Without a browser session ID, falls back to a value derived from the
+ * event's `[Agent] Session ID` property. `session_id = -1` ("out of
+ * session") makes the event invisible to session charts, so every agent
+ * event must carry a positive session_id; the derived value groups all
+ * events of one agent session together.
  */
 function applyBrowserSessionId(
   event: AmplitudeEvent,
   browserSessionId: string | number | null | undefined,
 ): void {
   if (event.session_id != null) return;
-  if (browserSessionId == null) return;
-  const numericSessionId = Number(browserSessionId);
-  if (!Number.isNaN(numericSessionId) && numericSessionId > 0) {
-    event.session_id = numericSessionId;
+  if (browserSessionId != null) {
+    const numericSessionId = Number(browserSessionId);
+    if (!Number.isNaN(numericSessionId) && numericSessionId > 0) {
+      event.session_id = numericSessionId;
+      return;
+    }
+  }
+  const agentSessionId = event.event_properties?.[PROP_SESSION_ID];
+  if (typeof agentSessionId === 'string' && agentSessionId) {
+    event.session_id = deriveSessionIdFromAgentSessionId(agentSessionId);
   }
 }
 
