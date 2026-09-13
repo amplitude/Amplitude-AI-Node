@@ -20,32 +20,32 @@ jobs:
       - name: Extract README content and diff
         id: readme
         run: |
-          # Read the full current README
-          readme_content=$(cat README.md)
+          # Preserve the full README without passing it through a shell variable.
+          cp README.md /tmp/readme_content.txt
 
           # Try to diff against previous commit; if README is brand new, use full content as diff
           if git show HEAD~1:README.md > /dev/null 2>&1; then
-            readme_diff=$(git diff HEAD~1 HEAD -- README.md)
+            git diff HEAD~1 HEAD -- README.md > /tmp/readme_diff.txt
           else
             echo "README.md is new — using full content as diff"
-            readme_diff="$readme_content"
+            cp README.md /tmp/readme_diff.txt
           fi
-
-          # Write to files for safe multiline handling
-          echo "$readme_content" > /tmp/readme_content.txt
-          echo "$readme_diff" > /tmp/readme_diff.txt
 
       - name: Dispatch to docs repo
         env:
           GH_TOKEN: ${{ secrets.DOCS_REPO_PAT }}
+          SOURCE_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          # Build the JSON payload using jq to safely handle multiline strings
+          # Read large multiline values from files to avoid the OS argument-size limit.
+          # Keep GitHub context in env vars so commit messages cannot inject into the shell.
           payload=$(jq -n \
-            --arg source_repo "${{ github.repository }}" \
-            --arg readme_content "$(cat /tmp/readme_content.txt)" \
-            --arg readme_diff "$(cat /tmp/readme_diff.txt)" \
-            --arg commit_sha "${{ github.sha }}" \
-            --arg commit_message "${{ github.event.head_commit.message }}" \
+            --arg source_repo "$SOURCE_REPO" \
+            --rawfile readme_content /tmp/readme_content.txt \
+            --rawfile readme_diff /tmp/readme_diff.txt \
+            --arg commit_sha "$COMMIT_SHA" \
+            --arg commit_message "$COMMIT_MESSAGE" \
             '{
               event_type: "readme-sync",
               client_payload: {
@@ -58,9 +58,9 @@ jobs:
             }')
 
           echo "::group::Dispatching to $DOCS_REPO"
-          echo "Source repo: ${{ github.repository }}"
-          echo "Commit SHA: ${{ github.sha }}"
-          echo "Commit message: ${{ github.event.head_commit.message }}"
+          echo "Source repo: $SOURCE_REPO"
+          echo "Commit SHA: $COMMIT_SHA"
+          echo "Commit message: $COMMIT_MESSAGE"
           echo "::endgroup::"
 
           # Use gh api to dispatch — handles auth and encoding
