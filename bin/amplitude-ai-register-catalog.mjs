@@ -7,12 +7,17 @@
  * This script reads the bundled agent_event_catalog.json and prints
  * executable curl commands — it makes NO network requests itself.
  *
+ * Credentials are never embedded in the output: the generated script reads
+ * AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY from the environment at
+ * execution time and builds the Authorization header itself.
+ *
  * Usage:
- *   npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET
- *   npx amplitude-ai-register-catalog                # prints commands with placeholder keys
+ *   npx amplitude-ai-register-catalog > register.sh
+ *   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash register.sh
  *
  * Pipe to bash to execute:
- *   npx amplitude-ai-register-catalog --api-key KEY --secret-key SECRET | bash
+ *   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET \
+ *     npx amplitude-ai-register-catalog | bash
  */
 
 import { readFileSync } from 'node:fs';
@@ -22,6 +27,7 @@ import { parseArgs } from 'node:util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CATEGORY = 'Agent Analytics';
+const AUTH_VAR = 'AMPLITUDE_REGISTER_AUTH';
 
 function loadCatalog() {
   const catalogPath = join(__dirname, '..', 'data', 'agent_event_catalog.json');
@@ -45,52 +51,68 @@ function main() {
   if (values.help) {
     console.log(`Generate curl commands to register [Agent] event schema in your Amplitude data catalog.
 
+Credentials are read from the environment when the generated script runs —
+they are never embedded in the output.
+
 Usage:
-  npx amplitude-ai-register-catalog --api-key KEY --secret-key SECRET
-  npx amplitude-ai-register-catalog                # uses placeholder keys
-  npx amplitude-ai-register-catalog ... | bash     # pipe to execute
+  npx amplitude-ai-register-catalog > register.sh
+  AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash register.sh
+
+  AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET \\
+    npx amplitude-ai-register-catalog | bash
 
 Options:
-  --api-key      Amplitude project API key
-  --secret-key   Amplitude project Secret key
   --eu           Use EU data residency endpoint
   --help         Show this help message
 
 Alternatively, use the Python CLI for direct execution:
   pip install amplitude-ai
-  amplitude-ai-register-catalog --api-key KEY --secret-key SECRET`);
+  AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET amplitude-ai-register-catalog`);
     process.exit(0);
   }
 
-  const apiKey = values['api-key'] || 'YOUR_API_KEY';
-  const secretKey = values['secret-key'] || 'YOUR_SECRET_KEY';
-  const baseUrl = values.eu ? 'https://analytics.eu.amplitude.com/api/2' : 'https://amplitude.com/api/2';
-
-  const authHeader = `Basic ${Buffer.from(`${apiKey}:${secretKey}`).toString('base64')}`;
-  const catalog = loadCatalog();
-
-  if (!values['api-key'] || !values['secret-key']) {
+  // Credentials on argv are visible to every local user via `ps` and persist
+  // in shell history and CI logs, so they are rejected rather than embedded.
+  if (values['api-key'] || values['secret-key']) {
     console.error(
-      '# WARNING: No --api-key / --secret-key provided. Commands use placeholders.',
+      '# WARNING: --api-key / --secret-key are no longer accepted and were IGNORED.',
     );
     console.error(
-      '# Replace YOUR_API_KEY and YOUR_SECRET_KEY, or pass them as arguments.',
+      '# Command-line credentials are visible to other local users (ps), shell',
     );
+    console.error('# history, and CI logs. Provide them via the environment instead:');
+    console.error('#   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET \\');
+    console.error('#     npx amplitude-ai-register-catalog | bash');
     console.error('');
   }
+
+  const baseUrl = values.eu ? 'https://analytics.eu.amplitude.com/api/2' : 'https://amplitude.com/api/2';
+  const catalog = loadCatalog();
 
   console.log('#!/usr/bin/env bash');
   console.log('# Auto-generated curl commands to register [Agent] event schema');
   console.log(`# ${catalog.length} events, ${catalog.reduce((n, e) => n + e.properties.length, 0)} total properties`);
+  console.log('#');
+  console.log('# Requires AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY in the environment.');
+  console.log('# Credentials are intentionally not embedded in this file so it is safe');
+  console.log('# to save, share, or commit.');
   console.log('set -euo pipefail');
   console.log('');
+  console.log(': "${AMPLITUDE_API_KEY:?Set AMPLITUDE_API_KEY (Amplitude > Settings > Projects)}"');
+  console.log(': "${AMPLITUDE_SECRET_KEY:?Set AMPLITUDE_SECRET_KEY (Amplitude > Settings > Projects)}"');
+  console.log(
+    `${AUTH_VAR}="Basic $(printf '%s:%s' "$AMPLITUDE_API_KEY" "$AMPLITUDE_SECRET_KEY" | base64 | tr -d '\\n')"`,
+  );
+  console.log('');
+
+  const authHeaderArg = `"Authorization: \${${AUTH_VAR}}"`;
 
   // Create category
   console.log('# Create event category');
   console.log(
     `curl -s -X POST ${shellEscape(`${baseUrl}/taxonomy/category`)} \\`,
   );
-  console.log(`  -H ${shellEscape(`Authorization: ${authHeader}`)} \\`);
+  console.log(`  -H ${authHeaderArg} \\`);
   console.log(`  -d ${shellEscape(`name=${CATEGORY}`)}`);
   console.log('echo ""');
   console.log('');
@@ -112,7 +134,7 @@ Alternatively, use the Python CLI for direct execution:
     console.log(
       `curl -s -X POST ${shellEscape(`${baseUrl}/taxonomy/event`)} \\`,
     );
-    console.log(`  -H ${shellEscape(`Authorization: ${authHeader}`)} \\`);
+    console.log(`  -H ${authHeaderArg} \\`);
     console.log(`  -d ${shellEscape(eventData)}`);
     console.log('echo ""');
 
@@ -125,7 +147,7 @@ Alternatively, use the Python CLI for direct execution:
     console.log(
       `curl -s -X PUT ${shellEscape(`${baseUrl}/taxonomy/event/${encodedEvent}`)} \\`,
     );
-    console.log(`  -H ${shellEscape(`Authorization: ${authHeader}`)} \\`);
+    console.log(`  -H ${authHeaderArg} \\`);
     console.log(`  -d ${shellEscape(updateData)}`);
     console.log('echo ""');
 
@@ -143,7 +165,7 @@ Alternatively, use the Python CLI for direct execution:
       console.log(
         `curl -s -X POST ${shellEscape(`${baseUrl}/taxonomy/event-property`)} \\`,
       );
-      console.log(`  -H ${shellEscape(`Authorization: ${authHeader}`)} \\`);
+      console.log(`  -H ${authHeaderArg} \\`);
       console.log(`  -d ${shellEscape(propData)}`);
       console.log('echo ""');
     }
