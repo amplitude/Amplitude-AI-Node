@@ -8,11 +8,14 @@
  * repo URLs are sanitized before use.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 function runGitCommand(args: string[]): string | null {
   try {
-    const result = execSync(['git', ...args].join(' '), {
+    // execFileSync (no shell) — joining args into an execSync string would
+    // re-parse any future non-literal argument as shell syntax. The Python
+    // SDK's _run_git_command uses the same list-form invocation.
+    const result = execFileSync('git', args, {
       timeout: 2000,
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf-8',

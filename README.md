@@ -2846,20 +2846,23 @@ Amplitude's [Data Catalog](https://amplitude.com/docs/data/data-catalog) documen
 
 ### Option A: Generate curl commands (JS-native, no dependencies)
 
-The bundled CLI reads `data/agent_event_catalog.json` and prints executable curl commands — it makes **no network requests** itself.
+The bundled CLI reads `data/agent_event_catalog.json` and prints executable curl commands — it makes **no network requests** itself. Credentials are never embedded in the output: the generated script reads `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` from the environment when it runs, so the script is safe to save, share, or commit. Never pass credentials on the command line — argv is visible to other local users via `ps` and persists in shell history and CI logs.
 
 ```bash
-# Preview the curl commands (uses placeholder keys)
+# Preview the curl commands
 npx amplitude-ai-register-catalog
 
-# Generate with your real keys
-npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET
+# Save the script, then execute with credentials from the environment
+npx amplitude-ai-register-catalog > register.sh
+AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash register.sh
 
-# Pipe to bash to execute immediately
-npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET | bash
+# Or pipe to bash to execute immediately. The env vars go on the bash side
+# of the pipe — a prefix on npx applies only to npx, not to the bash that
+# runs the script.
+npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
 
 # EU data residency
-npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET --eu | bash
+npx amplitude-ai-register-catalog --eu | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
 ```
 
 ### Option B: Python CLI (direct execution)
@@ -2868,7 +2871,7 @@ If you have Python available, the `amplitude-ai` package provides a CLI that cal
 
 ```bash
 pip install amplitude-ai
-amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET
+AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET amplitude-ai-register-catalog
 ```
 
 ### What gets registered
