@@ -2856,13 +2856,13 @@ npx amplitude-ai-register-catalog
 npx amplitude-ai-register-catalog > register.sh
 AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash register.sh
 
-# Or pipe to bash to execute immediately
-AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET \
-  npx amplitude-ai-register-catalog | bash
+# Or pipe to bash to execute immediately. The env vars go on the bash side
+# of the pipe — a prefix on npx applies only to npx, not to the bash that
+# runs the script.
+npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
 
 # EU data residency
-AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET \
-  npx amplitude-ai-register-catalog --eu | bash
+npx amplitude-ai-register-catalog --eu | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
 ```
 
 ### Option B: Python CLI (direct execution)

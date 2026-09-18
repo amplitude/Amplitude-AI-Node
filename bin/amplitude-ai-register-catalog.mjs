@@ -9,15 +9,16 @@
  *
  * Credentials are never embedded in the output: the generated script reads
  * AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY from the environment at
- * execution time and builds the Authorization header itself.
+ * execution time and feeds the Authorization header to each curl via stdin
+ * (curl -K -), so it never appears in any process's argv either.
  *
  * Usage:
  *   npx amplitude-ai-register-catalog > register.sh
  *   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash register.sh
  *
- * Pipe to bash to execute:
- *   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET \
- *     npx amplitude-ai-register-catalog | bash
+ * Pipe to bash to execute (env vars go on the bash side of the pipe —
+ * a prefix on npx would not reach the bash that runs the script):
+ *   npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash
  */
 
 import { readFileSync } from 'node:fs';
@@ -27,7 +28,10 @@ import { parseArgs } from 'node:util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CATEGORY = 'Agent Analytics';
-const AUTH_VAR = 'AMPLITUDE_REGISTER_AUTH';
+// Holds a curl config line ('header = "Authorization: ..."') fed to each curl
+// via stdin (-K -). Passing the header as -H would put the reversible Basic
+// value in curl's argv, visible to other local users via ps.
+const AUTH_CONFIG_VAR = 'AMPLITUDE_REGISTER_AUTH_CONFIG';
 
 function loadCatalog() {
   const catalogPath = join(__dirname, '..', 'data', 'agent_event_catalog.json');
@@ -58,8 +62,7 @@ Usage:
   npx amplitude-ai-register-catalog > register.sh
   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash register.sh
 
-  AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET \\
-    npx amplitude-ai-register-catalog | bash
+  npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash
 
 Options:
   --eu           Use EU data residency endpoint
@@ -81,8 +84,7 @@ Alternatively, use the Python CLI for direct execution:
       '# Command-line credentials are visible to other local users (ps), shell',
     );
     console.error('# history, and CI logs. Provide them via the environment instead:');
-    console.error('#   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET \\');
-    console.error('#     npx amplitude-ai-register-catalog | bash');
+    console.error('#   npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash');
     console.error('');
   }
 
@@ -95,25 +97,25 @@ Alternatively, use the Python CLI for direct execution:
   console.log('#');
   console.log('# Requires AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY in the environment.');
   console.log('# Credentials are intentionally not embedded in this file so it is safe');
-  console.log('# to save, share, or commit.');
+  console.log('# to save, share, or commit. The Authorization header is fed to curl via');
+  console.log('# stdin (-K -) so it never appears in any process argument list (ps).');
   console.log('set -euo pipefail');
   console.log('');
   console.log(': "${AMPLITUDE_API_KEY:?Set AMPLITUDE_API_KEY (Amplitude > Settings > Projects)}"');
   console.log(': "${AMPLITUDE_SECRET_KEY:?Set AMPLITUDE_SECRET_KEY (Amplitude > Settings > Projects)}"');
   console.log(
-    `${AUTH_VAR}="Basic $(printf '%s:%s' "$AMPLITUDE_API_KEY" "$AMPLITUDE_SECRET_KEY" | base64 | tr -d '\\n')"`,
+    `${AUTH_CONFIG_VAR}="header = \\"Authorization: Basic $(printf '%s:%s' "$AMPLITUDE_API_KEY" "$AMPLITUDE_SECRET_KEY" | base64 | tr -d '\\n')\\""`,
   );
   console.log('');
 
-  const authHeaderArg = `"Authorization: \${${AUTH_VAR}}"`;
+  const authStdinRedirect = `<<< "\${${AUTH_CONFIG_VAR}}"`;
 
   // Create category
   console.log('# Create event category');
   console.log(
-    `curl -s -X POST ${shellEscape(`${baseUrl}/taxonomy/category`)} \\`,
+    `curl -s -K - -X POST ${shellEscape(`${baseUrl}/taxonomy/category`)} \\`,
   );
-  console.log(`  -H ${authHeaderArg} \\`);
-  console.log(`  -d ${shellEscape(`name=${CATEGORY}`)}`);
+  console.log(`  -d ${shellEscape(`name=${CATEGORY}`)} ${authStdinRedirect}`);
   console.log('echo ""');
   console.log('');
 
@@ -132,10 +134,9 @@ Alternatively, use the Python CLI for direct execution:
       category: CATEGORY,
     }).toString();
     console.log(
-      `curl -s -X POST ${shellEscape(`${baseUrl}/taxonomy/event`)} \\`,
+      `curl -s -K - -X POST ${shellEscape(`${baseUrl}/taxonomy/event`)} \\`,
     );
-    console.log(`  -H ${authHeaderArg} \\`);
-    console.log(`  -d ${shellEscape(eventData)}`);
+    console.log(`  -d ${shellEscape(eventData)} ${authStdinRedirect}`);
     console.log('echo ""');
 
     // Update event (PUT) to ensure description is current
@@ -145,10 +146,9 @@ Alternatively, use the Python CLI for direct execution:
       category: CATEGORY,
     }).toString();
     console.log(
-      `curl -s -X PUT ${shellEscape(`${baseUrl}/taxonomy/event/${encodedEvent}`)} \\`,
+      `curl -s -K - -X PUT ${shellEscape(`${baseUrl}/taxonomy/event/${encodedEvent}`)} \\`,
     );
-    console.log(`  -H ${authHeaderArg} \\`);
-    console.log(`  -d ${shellEscape(updateData)}`);
+    console.log(`  -d ${shellEscape(updateData)} ${authStdinRedirect}`);
     console.log('echo ""');
 
     // Register each property
@@ -163,10 +163,9 @@ Alternatively, use the Python CLI for direct execution:
       }).toString();
 
       console.log(
-        `curl -s -X POST ${shellEscape(`${baseUrl}/taxonomy/event-property`)} \\`,
+        `curl -s -K - -X POST ${shellEscape(`${baseUrl}/taxonomy/event-property`)} \\`,
       );
-      console.log(`  -H ${authHeaderArg} \\`);
-      console.log(`  -d ${shellEscape(propData)}`);
+      console.log(`  -d ${shellEscape(propData)} ${authStdinRedirect}`);
       console.log('echo ""');
     }
     console.log('');
