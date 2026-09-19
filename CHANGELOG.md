@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.17.0
+
+### Security (AA-152019)
+- **`amplitude-ai-register-catalog` no longer accepts or embeds credentials.**
+  The generated script resolves `AMPLITUDE_API_KEY` / `AMPLITUDE_SECRET_KEY` from
+  the environment at execution time and feeds the Authorization header to each
+  curl via stdin (`-K -`), so credentials never appear in the script, in stdout,
+  or in any process argument list. `--api-key` / `--secret-key` flags are now
+  ignored with a warning. **Breaking for scripted usage:** pipe invocations must
+  set the env vars on the bash side of the pipe:
+  `npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash`.
+- Git metadata capture uses `execFileSync` (no shell) instead of `execSync`.
 
 ### Added (AA-151730)
 - **Gateway partnership parity:** OpenRouter / LiteLLM / Requesty SDK-through recipes,
