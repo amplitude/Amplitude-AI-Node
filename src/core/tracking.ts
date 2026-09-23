@@ -29,6 +29,7 @@ import {
   PROP_CACHE_READ_TOKENS,
   PROP_COMMENT,
   PROP_COMPONENT_TYPE,
+  PROP_CONTENT_MODE,
   PROP_CONTEXT,
   PROP_COST_USD,
   PROP_CUSTOMER_ORG_ID,
@@ -273,6 +274,7 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
       [PROP_COMPONENT_TYPE]: 'user_input',
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -451,6 +453,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
       [PROP_COMPONENT_TYPE]: 'llm',
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -678,6 +681,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
       [PROP_COMPONENT_TYPE]: 'tool',
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -958,6 +962,7 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
       [PROP_COMPONENT_TYPE]: 'embedding',
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -1061,6 +1066,7 @@ export function trackSpan(opts: TrackSpanOptions): string {
       [PROP_IS_ERROR]: opts.isError ?? false,
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -1166,6 +1172,7 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
       [PROP_SESSION_ID]: opts.sessionId,
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -1264,6 +1271,7 @@ export function trackSessionEnrichment(
       [PROP_SESSION_ID]: opts.sessionId,
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
@@ -1363,6 +1371,7 @@ export function trackScore(opts: TrackScoreOptions): void {
       [PROP_EVALUATION_SOURCE]: opts.source ?? 'user',
       [PROP_SDK_VERSION]: SDK_VERSION,
       [PROP_RUNTIME]: SDK_RUNTIME,
+      [PROP_CONTENT_MODE]: effectiveMode,
     },
   );
 
