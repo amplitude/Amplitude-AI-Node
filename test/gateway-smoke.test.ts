@@ -64,7 +64,7 @@ describe('OpenRouter canonical model', () => {
     expect(cost).toEqual(expect.any(Number));
     expect(Number(cost)).toBeGreaterThan(0);
     expect(parseContext(props)).toEqual(ctx);
-    expect(mock.summary()).toContain('11/11 passed');
+    expect(mock.summary()).toContain('12/12 passed');
   });
 
   it('documents OpenRouter-shaped baseURL for SDK-through recipes', (): void => {
@@ -116,7 +116,7 @@ describe('LiteLLM canonical model', () => {
     expect(cost).toEqual(expect.any(Number));
     expect(Number(cost)).toBeGreaterThan(0);
     expect(parseContext(props)).toEqual(ctx);
-    expect(mock.summary()).toContain('11/11 passed');
+    expect(mock.summary()).toContain('12/12 passed');
   });
 
   it('documents LiteLLM-shaped baseURL for SDK-through recipes', (): void => {

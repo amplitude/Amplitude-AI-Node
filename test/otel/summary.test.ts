@@ -33,7 +33,7 @@ describe('MockAmplitudeAI.summary()', () => {
       s.trackToolCall('search', 50, true);
     });
     const result = mock.summary();
-    expect(result).toContain('11/11 passed');
+    expect(result).toContain('12/12 passed');
   });
 
   it('counts an explicitly supplied zero cost as filled', () => {
@@ -49,7 +49,44 @@ describe('MockAmplitudeAI.summary()', () => {
       });
     });
 
-    expect(mock.summary()).toContain('11/11 passed');
+    expect(mock.summary()).toContain('12/12 passed');
+  });
+
+  it('detects empty message content in full mode', () => {
+    // The prod shape behind AA-152308: every other gate passes, so without this
+    // one an agent that sends no content at all looks perfectly instrumented.
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('test-agent', { userId: 'u1' });
+    const session = agent.session({ userId: 'u1' });
+    session.run((s) => {
+      s.trackUserMessage('');
+      s.trackAiMessage('', 'gpt-4o-mini', 'openai', 150, {
+        inputTokens: 10,
+        outputTokens: 20,
+      });
+    });
+
+    const report = mock.summary();
+    expect(report).toContain('Message Content');
+    expect(report).not.toContain('12/12 passed');
+    expect(report).toContain('Thread view shows no messages');
+  });
+
+  it('does not flag absent content when the mode strips it deliberately', () => {
+    // metadata_only is a supported posture, not a defect. Flagging it here would
+    // teach regulated customers to ignore the gate.
+    const mock = new MockAmplitudeAI(new AIConfig({ contentMode: 'metadata_only' }));
+    const agent = mock.agent('test-agent', { userId: 'u1' });
+    const session = agent.session({ userId: 'u1' });
+    session.run((s) => {
+      s.trackUserMessage('a real question');
+      s.trackAiMessage('a real answer', 'gpt-4o-mini', 'openai', 150, {
+        inputTokens: 10,
+        outputTokens: 20,
+      });
+    });
+
+    expect(mock.summary()).toContain('12/12 passed');
   });
 
   it('detects missing session ID', () => {

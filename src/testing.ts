@@ -4,7 +4,9 @@ import {
   EVENT_AI_RESPONSE,
   EVENT_SESSION_END,
   EVENT_TOOL_CALL,
+  EVENT_USER_MESSAGE,
   PROP_AGENT_ID,
+  PROP_CONTENT_MODE,
   PROP_COST_USD,
   PROP_INPUT_TOKENS,
   PROP_LATENCY_MS,
@@ -230,7 +232,7 @@ export class MockAmplitudeAI extends AmplitudeAI {
   /**
    * Fill-rate report for local verification.
    *
-   * Checks 8 gates across tracked events and returns a human-readable
+   * Checks 10 gates across tracked events and returns a human-readable
    * summary with impact/fix hints for missing fields. Useful for verifying
    * instrumentation completeness during development.
    */
@@ -356,6 +358,34 @@ export class MockAmplitudeAI extends AmplitudeAI {
       pass: !(toolCalls.length > 0 && aiResponses.length === 0),
       impact: 'Batch/artifact runs show $0 spend on Monitor',
       fix: 'Call trackRunCost() at run end with totalCostUsd',
+    });
+
+    // 10. Message content. An empty string is dropped rather than sent
+    // (sanitizeContent returns early on zero-length text), so passing '' produces
+    // an event that looks structurally perfect and carries nothing to read. Every
+    // other gate here passes in that state, which is how an agent can be shipped
+    // emitting no content at all.
+    //
+    // Only meaningful in 'full' mode: metadata_only and customer_enriched strip
+    // content deliberately, and flagging them would train people to ignore this.
+    // User messages only. An AI Response legitimately carries no text -- a tool-only
+    // turn, or the synthetic response trackRunCost() emits to record batch spend --
+    // but a user message exists because a human said something, so an empty one is
+    // always a defect.
+    const contentBearing = this.events.filter((e) => e.event_type === EVENT_USER_MESSAGE);
+    const contentExpected = contentBearing.filter((e) => {
+      const mode = e.event_properties?.[PROP_CONTENT_MODE];
+      return mode === undefined || mode === 'full';
+    });
+    const hasContent = contentExpected.every((e) => {
+      const msg = e.event_properties?.$llm_message;
+      return msg != null && msg !== '';
+    });
+    gates.push({
+      name: 'Message Content',
+      pass: contentExpected.length === 0 || hasContent,
+      impact: 'Thread view shows no messages, and content-based signals are not scored',
+      fix: "Pass the actual message text to trackUserMessage()/trackAiMessage() — an empty string is silently dropped",
     });
 
     // 10. Tool names

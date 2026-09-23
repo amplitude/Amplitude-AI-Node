@@ -888,7 +888,7 @@ If the app uses a different framework or endpoint shape, adapt the curl accordin
 Verification complete:
   Doctor checks:        6/6 passed
   Event sequence test:  PASSED (N events captured)
-  Data quality gate:    7/7 fields verified
+  Data quality gate:    8/8 fields verified
     Identity (userId/deviceId):  ✓ set
     Session ID:                  ✓ set
     Model:                       ✓ "gpt-4o-mini" (recognized by genai-prices)
@@ -896,6 +896,7 @@ Verification complete:
     Latency:                     ✓ 150ms
     Tokens:                      ✓ in=42, out=96
     Cost:                        ✓ $0.0023
+    Message content:             ✓ present on user and AI messages
   TypeScript check:     PASSED
   Existing tests:       PASSED
 
@@ -907,7 +908,7 @@ Next steps:
   3. Deploy and verify live events in Amplitude
 ```
 
-> **If any data quality field fails:** `cost = $0` usually means the model name is not in genai-prices — use the canonical provider model ID (e.g. `claude-sonnet-4-20250514`, not `claude-sonnet-4-6`) or set `totalCostUsd` explicitly. `tokens = 0` means `usage` was not extracted from the LLM response. `identity missing` means neither `userId` nor `deviceId` was set on the tracking call.
+> **If any data quality field fails:** `cost = $0` usually means the model name is not in genai-prices — use the canonical provider model ID (e.g. `claude-sonnet-4-20250514`, not `claude-sonnet-4-6`) or set `totalCostUsd` explicitly. `tokens = 0` means `usage` was not extracted from the LLM response. `identity missing` means neither `userId` nor `deviceId` was set on the tracking call. `message content missing` means the text argument was empty at the call site — an empty string is dropped rather than sent, so the events look structurally perfect and carry nothing to read.
 
 ### Step 4f: Remediation loop
 
@@ -925,7 +926,8 @@ Common issues and fixes:
 | Cost USD: 0% | Monitor cost coverage is incomplete | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
 | Tokens: 0% | Token consumption charts empty | For manual `trackAiMessage`: pass `inputTokens`/`outputTokens` from the `response.usage` object. For provider wrappers: verify the response has a `.usage` field. |
 | Latency: 0% | Latency trend charts empty | Wrap the LLM call in `performance.now()` and pass `latencyMs` |
-| Content empty (metadata_only) | Thread tab empty, signals/evaluators can't judge | Switch to `contentMode: 'full'` with `redactPii: true`, or accept that LLM-based evaluators won't work |
+| Content empty, mode is `full` | Thread tab empty; task-completion and response-quality signals are not scored at all | The text argument is empty at the call site. An empty string is dropped, not sent, so nothing else looks wrong — log the value you pass to `trackUserMessage()`/`trackAiMessage()` and confirm it is populated before the call. For streamed responses, confirm the stream is drained before you record the text. |
+| Content empty, mode is `metadata_only`/`customer_enriched` | Thread tab empty; content-based signals not scored. Structural signals (data quality, cost, latency) still work | Expected — content is stripped by design. Switch to `contentMode: 'full'` with `redactPii: true` only if you want LLM-judged quality signals. |
 
 After each fix:
   1. Update the verify test if needed
