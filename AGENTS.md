@@ -67,6 +67,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
 - Works-with partners (OpenRouter, LiteLLM, Requesty, Strands): see **Works with** in `amplitude-ai.md` and README.
+- Agent runs on a hosted platform (Sierra, Decagon): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 
 ## MCP Surface
 
@@ -137,6 +138,8 @@ Prompt:
 
 - `amplitude-ai.md` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
+- `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
 
 ## Event Schema (names)
 

@@ -31,3 +31,7 @@ amplitude-ai://instrument-guide
 [Agent] Tool Call
 [Agent] Topic Classification
 [Agent] User Message
+
+[integrations]
+sierra=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md
+decagon=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md

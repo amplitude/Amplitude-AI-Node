@@ -109,6 +109,7 @@
   "files": [
     "amplitude-ai.md",
     "AGENTS.md",
+    "docs/integrations",
     "dist",
     "bin",
     "data",

@@ -607,6 +607,8 @@ Sending an `[Agent] AI Response` with empty `$llm_message` content produces **no
 
 For platform integrations where installing the SDK isn't practical (e.g., Sierra webhooks, Intercom bots, custom chat platforms), you can send `[Agent]` events directly to the [Amplitude HTTP V2 API](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/).
 
+**Hosted agent platforms:** if the agent runs on Sierra or Decagon, stop here and follow the platform guide instead; each is a complete, self-contained procedure with a tested forwarder: [`docs/integrations/sierra.md`](docs/integrations/sierra.md), [`docs/integrations/decagon.md`](docs/integrations/decagon.md). For other platforms, the same guides' forwarder core works with your own `normalize` function.
+
 **Required structure** — each event in the `events` array:
 
 ```json
