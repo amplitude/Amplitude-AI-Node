@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.0
+
+### Added (AA-152308)
+- **`[Agent] Content Mode` now ships on every tracked event**, carrying `full`,
+  `metadata_only`, or `customer_enriched`. It rides the metadata channel, so it
+  survives the very modes whose content it describes. Without it a session that
+  arrives with no message text is ambiguous: a caller who deliberately chose
+  `metadata_only` and one whose instrumentation dropped the text look identical,
+  and Amplitude's enrichment scored both as an agent that answered nothing.
+- **`MockAmplitudeAI.summary()` gained a message-content gate.** An empty message
+  string is dropped rather than sent, so an agent wired to an unpopulated
+  variable passed all nine existing gates while delivering nothing to read. The
+  gate covers user messages -- an AI response legitimately carries no text on a
+  tool-only turn -- and is skipped under `metadata_only` / `customer_enriched`,
+  where stripped content is the point of the mode.
+
 ## 0.17.0
 
 ### Security (AA-152019)

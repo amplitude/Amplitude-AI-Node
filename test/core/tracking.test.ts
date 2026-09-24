@@ -17,6 +17,7 @@ import {
   PROP_CACHE_READ_TOKENS,
   PROP_COMMENT,
   PROP_COMPONENT_TYPE,
+  PROP_CONTENT_MODE,
   PROP_EDITED_MESSAGE_ID,
   PROP_ENRICHMENTS,
   PROP_ERROR_MESSAGE,
@@ -1514,5 +1515,88 @@ describe('trackAiMessage model config and system prompt', () => {
       expect.arrayContaining(['image', 'csv']),
     );
     expect(props[PROP_TOTAL_ATTACHMENT_SIZE]).toBe(7000);
+  });
+});
+
+describe('content mode is reported as metadata', () => {
+  // The whole point of this property is that it survives the modes that strip
+  // content. A contentless session is otherwise ambiguous downstream: enrichment
+  // can't separate "customer chose metadata_only" from "instrumentation dropped
+  // the text", so it scores both as though the agent answered nothing.
+  it.each([
+    ['full', 'full'],
+    ['metadata_only', 'metadata_only'],
+    ['customer_enriched', 'customer_enriched'],
+  ])('reports %s on a user message', (contentMode, expected): void => {
+    const amp = createMockAmplitude();
+    trackUserMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      messageContent: 'hello',
+      privacyConfig: new PrivacyConfig({
+        contentMode: contentMode as 'full' | 'metadata_only' | 'customer_enriched',
+      }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe(expected);
+  });
+
+  it('ships alongside stripped content rather than being stripped with it', () => {
+    const amp = createMockAmplitude();
+    trackAiMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      responseContent: 'a secret answer',
+      modelName: 'gpt-4o',
+      provider: 'openai',
+      privacyConfig: new PrivacyConfig({ contentMode: 'metadata_only' }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props.$llm_message).toBeUndefined();
+    expect(props[PROP_CONTENT_MODE]).toBe('metadata_only');
+  });
+
+  it('defaults to full when no privacy config is supplied', () => {
+    const amp = createMockAmplitude();
+    trackUserMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      messageContent: 'hello',
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe('full');
+  });
+
+  it('resolves the legacy privacyMode boolean to metadata_only', () => {
+    const amp = createMockAmplitude();
+    trackUserMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      messageContent: 'hello',
+      privacyConfig: new PrivacyConfig({ privacyMode: true }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe('metadata_only');
+  });
+
+  it('reports the mode on a session end, which carries no content at all', () => {
+    const amp = createMockAmplitude();
+    trackSessionEnd({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      privacyConfig: new PrivacyConfig({ contentMode: 'customer_enriched' }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe('customer_enriched');
   });
 });

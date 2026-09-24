@@ -45,6 +45,11 @@ export const PROP_TOOL_INPUT = '[Agent] Tool Input';
 export const PROP_TOOL_OUTPUT = '[Agent] Tool Output';
 export const PROP_SDK_VERSION = '[Agent] SDK Version';
 export const PROP_RUNTIME = '[Agent] Runtime';
+// The privacy posture the caller chose, as a metadata channel so it ships in every
+// mode. Without it a contentless session is ambiguous downstream: enrichment cannot
+// tell a deliberate metadata_only session from one whose instrumentation dropped the
+// text, so it scores both as though the agent had answered nothing.
+export const PROP_CONTENT_MODE = '[Agent] Content Mode';
 export const PROP_ENV = '[Agent] Env';
 export const PROP_LOCALE = '[Agent] Locale';
 export const PROP_SPAN_KIND = '[Agent] Span Kind';
