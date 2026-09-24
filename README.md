@@ -120,6 +120,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 - [Event Property Reference](#event-property-reference)
 - [Event JSON Examples](#event-json-examples)
 - [Sending Events Without the SDK](#sending-events-without-the-sdk)
+  - [Hosted agent platforms (Sierra, Decagon)](#hosted-agent-platforms-sierra-decagon)
 - [Register Event Schema in Your Data Catalog](#register-event-schema-in-your-data-catalog)
 - [Utilities and Type Exports](#utilities-and-type-exports)
 - [Constants](#constants)
@@ -2390,7 +2391,7 @@ All event properties are prefixed with `[Agent]` (except `[Amplitude] Session Re
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
 | `[Agent] Trace ID` | string | No | Groups events into a single "Turn" in the trace viewer. All events in one user-to-AI-response exchange share the same trace ID. Each distinct trace ID becomes a collapsible turn card. Events without a trace ID fall back to the session ID and collapse into Turn 1. |
 | `[Agent] Turn ID` | number | No | Monotonically increasing counter for event ordering within a session. |
-| `[Agent] Agent ID` | string | No | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
+| `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). Events without it are accepted by the HTTP API but never appear in Agent Analytics. |
 | `[Agent] Parent Agent ID` | string | No | For multi-agent orchestration: the agent that delegated to this agent. |
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
@@ -2773,6 +2774,13 @@ A realistic example of what gets sent to Amplitude for an AI response:
 
 The `[Agent]` event schema is not tied to this SDK. If your stack doesn't have an Amplitude AI SDK, you can send the same events directly via Amplitude's ingestion APIs.
 
+### Hosted agent platforms (Sierra, Decagon)
+
+If your agent runs on a hosted platform, the platform makes the LLM calls, so there is nothing for the SDK to wrap. Forward each finished conversation to Amplitude over HTTP instead. Step-by-step guides, written for engineers and coding agents alike, are in [`docs/integrations/`](docs/integrations/README.md):
+
+- [Sierra](docs/integrations/sierra.md)
+- [Decagon](docs/integrations/decagon.md)
+
 ### What the SDK handles for you
 
 When you use this SDK, the following are managed automatically. If you send events directly, you are responsible for these:
@@ -2780,7 +2788,7 @@ When you use this SDK, the following are managed automatically. If you send even
 | Concern                      | SDK behavior                                                                                                                                                              | DIY equivalent                                                                                                                                |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Session ID**               | Generated once per `session()` and propagated to every event                                                                                                              | Generate a UUID per conversation and include it as `[Agent] Session ID` on every event                                                        |
-| **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set a unique `insert_id` per event to prevent duplicates on retry                                                                             |
+| **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set an `insert_id` per event derived from your source IDs (not a fresh UUID per send), so retries and re-imports deduplicate                  |
 | **Property prefixing**       | All properties are prefixed with `[Agent]`                                                                                                                                | You must include the `[Agent] ` prefix in every property name                                                                                 |
 | **Cost / token calculation** | Auto-computed from model and token counts                                                                                                                                 | Compute and send `[Agent] Cost USD`, `[Agent] Input Tokens`, etc. yourself                                                                    |
 | **Server-side enrichment**   | `[Agent] Session Record`, `[Agent] Topic Classification`, and `[Agent] Score` events are emitted automatically by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Just send the SDK-level events and close the session with `[Agent] Session End`. |
@@ -2790,6 +2798,10 @@ When you use this SDK, the following are managed automatically. If you send even
 | Method                     | Best for                                          | Docs                                                                                               |
 | -------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | **HTTP V2 API**            | Real-time, low-to-medium volume                   | [HTTP V2 API docs](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/)          |
+| **Batch API**              | Scheduled syncs, higher volume                    | [Batch Event Upload API docs](https://amplitude.com/docs/apis/analytics/batch-event-upload)        |
+| **Amazon S3 Import**       | Bulk historical backfill                          | [Amazon S3 Import docs](https://amplitude.com/docs/data/source-catalog/amazon-s3)                  |
+
+All three are processed identically by Agent Analytics, and historical `time` values are kept as sent.
 
 ### Minimal HTTP API example
 
@@ -2818,7 +2830,7 @@ curl -X POST https://api2.amplitude.com/2/httpapi \
         "event_properties": {
           "[Agent] Session ID": "sess-abc123",
           "[Agent] Trace ID": "trace-def456",
-          "[Agent] Turn ID": 1,
+          "[Agent] Turn ID": 2,
           "[Agent] Message ID": "msg-002",
           "[Agent] Agent ID": "support-bot",
           "[Agent] Model Name": "gpt-4o",

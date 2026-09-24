@@ -26,6 +26,10 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const catalog = JSON.parse(
   readFileSync(join(root, 'data', 'agent_event_catalog.json'), 'utf8'),
 );
+const integrations = JSON.parse(
+  readFileSync(join(root, 'docs', 'integrations', 'manifest.json'), 'utf8'),
+);
+const platforms = integrations.platforms;
 
 const toolNames = [
   'get_event_schema',
@@ -118,6 +122,7 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
 - Works-with partners (OpenRouter, LiteLLM, Requesty, Strands): see **Works with** in \`amplitude-ai.md\` and README.
+- Agent runs on a hosted platform (${platforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
 
 ## MCP Surface
 
@@ -178,6 +183,7 @@ Prompt:
 
 - \`amplitude-ai.md\` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
+${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${p.name} conversation ingestion over the HTTP API (no SDK)`).join('\n')}
 
 ## Event Schema (names)
 
@@ -197,6 +203,9 @@ ${resources.join('\n')}
 
 [events]
 ${events.join('\n')}
+
+[integrations]
+${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
 `;
 
 const mcpSchema = JSON.stringify(
