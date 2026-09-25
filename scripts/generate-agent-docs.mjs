@@ -30,6 +30,13 @@ const integrations = JSON.parse(
   readFileSync(join(root, 'docs', 'integrations', 'manifest.json'), 'utf8'),
 );
 const platforms = integrations.platforms;
+const hostedPlatforms = platforms.filter((p) => p.category === 'hosted_agent_platform');
+const tracingTools = platforms.filter((p) => p.category === 'tracing_tool');
+const warehouses = integrations.warehouses;
+const platformGuideLabel = (p) =>
+  p.category === 'tracing_tool'
+    ? `${p.name} trace forwarding over the HTTP API (no SDK)`
+    : `${p.name} conversation ingestion over the HTTP API (no SDK)`;
 
 const toolNames = [
   'get_event_schema',
@@ -122,7 +129,9 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
 - Works-with partners (OpenRouter, LiteLLM, Requesty, Strands): see **Works with** in \`amplitude-ai.md\` and README.
-- Agent runs on a hosted platform (${platforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
+- Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
+- Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
+- Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
 
 ## MCP Surface
 
@@ -183,7 +192,8 @@ Prompt:
 
 - \`amplitude-ai.md\` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
-${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${p.name} conversation ingestion over the HTTP API (no SDK)`).join('\n')}
+${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
+- \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
 
 ## Event Schema (names)
 
@@ -206,6 +216,8 @@ ${events.join('\n')}
 
 [integrations]
 ${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
+warehouses=${warehouses.raw_url}
+${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
 `;
 
 const mcpSchema = JSON.stringify(

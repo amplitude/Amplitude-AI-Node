@@ -1,5 +1,5 @@
 {
-  "description": "Hosted agent platforms whose conversations can be ingested into Amplitude Agent Analytics over the Amplitude HTTP API.",
+  "description": "Agent platforms, LLM tracing tools, and data warehouses whose conversations can be ingested into Amplitude Agent Analytics without the SDK.",
   "index": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/README.md",
     "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md"
@@ -8,6 +8,7 @@
     {
       "id": "sierra",
       "name": "Sierra",
+      "category": "hosted_agent_platform",
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/sierra.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md",
       "extraction_methods": ["webhook", "scheduled_export"],
@@ -18,12 +19,72 @@
     {
       "id": "decagon",
       "name": "Decagon",
+      "category": "hosted_agent_platform",
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/decagon.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md",
       "extraction_methods": ["export_api"],
       "vendor_format_source": "vendor_public_docs_archived_2025_02",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
       "last_verified": "2026-09-23"
+    },
+    {
+      "id": "langfuse",
+      "name": "Langfuse",
+      "category": "tracing_tool",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/langfuse.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md",
+      "extraction_methods": ["query_api"],
+      "vendor_format_source": "vendor_public_openapi_2026_09",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-09-24"
+    },
+    {
+      "id": "langsmith",
+      "name": "LangSmith",
+      "category": "tracing_tool",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/langsmith.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md",
+      "extraction_methods": ["query_api"],
+      "vendor_format_source": "vendor_public_openapi_2026_09",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-09-24"
+    },
+    {
+      "id": "braintrust",
+      "name": "Braintrust",
+      "category": "tracing_tool",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/braintrust.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md",
+      "extraction_methods": ["query_api"],
+      "vendor_format_source": "vendor_public_docs_2026_09",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-09-24"
+    }
+  ],
+  "warehouses": {
+    "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/warehouses/README.md",
+    "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md",
+    "sources": ["Snowflake", "BigQuery", "Databricks"],
+    "formats": [
+      { "id": "message-rows", "ingestion_path": "warehouse_import" },
+      { "id": "turn-rows", "ingestion_path": "warehouse_import" },
+      { "id": "openai-messages", "ingestion_path": "warehouse_import" },
+      { "id": "otel-genai", "ingestion_path": "otlp_replay" },
+      { "id": "openinference", "ingestion_path": "otlp_replay" },
+      { "id": "mlflow-tracing", "ingestion_path": "otlp_replay" }
+    ],
+    "last_verified": "2026-09-24"
+  },
+  "tools": [
+    {
+      "id": "check-agent-events",
+      "description": "Checks a CSV, JSON, or NDJSON file of [Agent] events against the shared ingestion rules.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs"
+    },
+    {
+      "id": "otlp-replay",
+      "description": "Converts exported OpenTelemetry GenAI, OpenInference, or MLflow spans to OTLP and sends them to Amplitude.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs"
     }
   ]
 }

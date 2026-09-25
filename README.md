@@ -121,6 +121,8 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 - [Event JSON Examples](#event-json-examples)
 - [Sending Events Without the SDK](#sending-events-without-the-sdk)
   - [Hosted agent platforms (Sierra, Decagon)](#hosted-agent-platforms-sierra-decagon)
+  - [LLM tracing tools (Langfuse, LangSmith, Braintrust)](#llm-tracing-tools-langfuse-langsmith-braintrust)
+  - [Data warehouses (Snowflake, BigQuery, Databricks)](#data-warehouses-snowflake-bigquery-databricks)
 - [Register Event Schema in Your Data Catalog](#register-event-schema-in-your-data-catalog)
 - [Utilities and Type Exports](#utilities-and-type-exports)
 - [Constants](#constants)
@@ -2780,6 +2782,20 @@ If your agent runs on a hosted platform, the platform makes the LLM calls, so th
 
 - [Sierra](docs/integrations/sierra.md)
 - [Decagon](docs/integrations/decagon.md)
+
+### LLM tracing tools (Langfuse, LangSmith, Braintrust)
+
+If your conversations are already traced in an LLM tracing tool, a scheduled job can read finished sessions or threads from the tool's API and forward them, including history, with the same forwarder core:
+
+- [Langfuse](docs/integrations/langfuse.md)
+- [LangSmith](docs/integrations/langsmith.md)
+- [Braintrust](docs/integrations/braintrust.md)
+
+If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
+
+### Data warehouses (Snowflake, BigQuery, Databricks)
+
+If conversations or traces already land in a warehouse, a SQL view turns them into `[Agent]` events for Amplitude's warehouse import, and exported spans can be replayed to the OTLP endpoint. See the [warehouse guide](docs/integrations/warehouses/README.md). [`check-agent-events.mjs`](docs/integrations/check-agent-events.mjs) checks any file of `[Agent]` events before you send or import it.
 
 ### What the SDK handles for you
 
