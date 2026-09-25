@@ -40,7 +40,7 @@ Cost stays empty: the logged fields this adapter reads carry tokens, not cost, a
 
 1. An Amplitude project and its API key.
 2. A Braintrust API key and the project ID. Self-hosted data planes use their own API URL (`BRAINTRUST_API_URL`).
-3. A conversation ID in span metadata. Braintrust has no built-in conversation concept, so the application must log one (for example `metadata.session_id`) on root spans. Traces without it are skipped.
+3. A conversation ID in span metadata. Braintrust has no built-in conversation concept, so the application must log one (for example `metadata.session_id`) on root spans. Traces without it are skipped and counted.
 4. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
@@ -94,7 +94,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
@@ -813,11 +813,14 @@ export async function syncBraintrust(projectId: string, watermark: string): Prom
   const logs = `project_logs(${quote(projectId)})`;
   const key = `metadata.${CONVERSATION_KEY}`;
   const conversationIds = new Set<string>();
+  let tracesWithoutConversation = 0;
+  let conversationsWithoutUser = 0;
   for await (const root of queryBraintrust(
     `SELECT root_span_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(watermark)} AND created < ${quote(until)} LIMIT 1000`,
   )) {
     const id = (root as unknown as { conversation_id?: unknown }).conversation_id;
     if (typeof id === 'string' && id) conversationIds.add(id);
+    else tracesWithoutConversation += 1;
   }
 
   const since = new Date(Date.parse(watermark) - LOOKBACK_MS).toISOString();
@@ -844,12 +847,21 @@ export async function syncBraintrust(projectId: string, watermark: string): Prom
         return typeof value === 'string' ? value : undefined;
       },
     });
+    if (!conversation.userId) {
+      conversationsWithoutUser += 1;
+      continue;
+    }
     const events = toAgentEvents(conversation, { redact });
     if (process.env.AMPLITUDE_DRY_RUN) {
       console.log(JSON.stringify(events, null, 2));
       continue;
     }
     await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+  }
+  if (tracesWithoutConversation || conversationsWithoutUser) {
+    console.warn(
+      `Skipped ${tracesWithoutConversation} traces without ${key} and ${conversationsWithoutUser} conversations without a user ID`,
+    );
   }
   return until;
 }
@@ -901,6 +913,7 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Filters missing a dimension | Sent as `[Agent] Tags` or as a flat property instead of a key in `[Agent] Context` |
 | `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
 | Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_MS` |
+| Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
 | No conversations found | `CONVERSATION_KEY` does not match the metadata field, or it is logged on child spans instead of root spans |
 | Queries time out | A discovery query lost its `created` range; keep it |
 | `429` responses | Over the plan's query limit; run less often or narrow the window |

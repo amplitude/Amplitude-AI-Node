@@ -596,6 +596,31 @@ describe('forwarder core and adapters', () => {
     return items;
   }
 
+  it('skips and counts conversations without a session or user ID instead of failing the sync', async () => {
+    const root = { traceId: 't1', type: 'AGENT', startTime: '2026-01-15T12:00:00.000Z', isRootObservation: true, input: '"hi"', output: '"hello"' };
+    const pages = [
+      { data: [{ ...root, id: 'a', sessionId: 's1' }, { ...root, id: 'b', traceId: 't2' }], meta: {} },
+      { data: [{ ...root, id: 'a', sessionId: 's1' }], meta: {} },
+    ];
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return new Response(JSON.stringify(pages.shift() ?? { data: [] }));
+      }),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await tracing.langfuse.syncLangfuse('2026-01-15T00:00:00.000Z');
+      expect(urls).toHaveLength(2);
+      expect(urls.every((u) => u.includes('/api/public/v2/observations'))).toBe(true);
+      expect(warn).toHaveBeenCalledWith('Skipped 1 traces without a sessionId and 1 sessions without a user ID');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('follows each tracing tool API cursor and retries 429', async () => {
     const calls: { url: string; body?: string }[] = [];
     const respond = (responses: Response[]) =>

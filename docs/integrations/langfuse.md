@@ -40,7 +40,7 @@ Langfuse scores (`GET /api/public/v2/scores`) are not forwarded by this adapter.
 
 1. An Amplitude project and its API key.
 2. A Langfuse public key and secret key for the project, and the host: `https://cloud.langfuse.com` (EU), `https://us.cloud.langfuse.com` (US), or your self-hosted URL.
-3. Langfuse sessions: the adapter groups traces by `sessionId`. Traces without one are skipped.
+3. Langfuse sessions: the adapter groups traces by `sessionId`. Traces without one are skipped and counted.
 4. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
@@ -92,7 +92,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
@@ -824,6 +824,8 @@ const redact = (text: string): string => text; // replace with your PII redactio
 export async function syncLangfuse(watermark: string): Promise<string> {
   const until = new Date(Date.now() - SETTLE_MS).toISOString();
   const sessionIds = new Set<string>();
+  let tracesWithoutSession = 0;
+  let sessionsWithoutUser = 0;
   for await (const o of listLangfuseObservations({
     fields: 'core,basic',
     isRootObservation: 'true',
@@ -831,6 +833,7 @@ export async function syncLangfuse(watermark: string): Promise<string> {
     toStartTime: until,
   })) {
     if (o.sessionId) sessionIds.add(o.sessionId);
+    else tracesWithoutSession += 1;
   }
 
   for (const sessionId of sessionIds) {
@@ -843,12 +846,21 @@ export async function syncLangfuse(watermark: string): Promise<string> {
       agentId: 'TODO-confirmed-agent-id',
       resolveUserId: (root) => root.userId ?? undefined, // TODO: confirm this matches product analytics
     });
+    if (!conversation.userId) {
+      sessionsWithoutUser += 1;
+      continue;
+    }
     const events = toAgentEvents(conversation, { redact });
     if (process.env.AMPLITUDE_DRY_RUN) {
       console.log(JSON.stringify(events, null, 2));
       continue;
     }
     await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+  }
+  if (tracesWithoutSession || sessionsWithoutUser) {
+    console.warn(
+      `Skipped ${tracesWithoutSession} traces without a sessionId and ${sessionsWithoutUser} sessions without a user ID`,
+    );
   }
   return until;
 }
@@ -900,6 +912,7 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Filters missing a dimension | Sent as `[Agent] Tags` or as a flat property instead of a key in `[Agent] Context` |
 | `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
 | Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_MS` |
+| Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
 | No sessions found | Traces have no `sessionId`, or the watermark window has no root observations |
 | `404` from `/api/public/v2/observations` | Self-hosted Langfuse predates the v2 API; upgrade |
 | Tool calls missing | Tools are logged as another observation type; adjust the filter in `normalizeLangfuseSession` |
