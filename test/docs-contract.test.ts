@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
@@ -88,44 +89,16 @@ function transpileTo(dir: string, name: string, source: string): string {
   return path;
 }
 
-function assertForwarderRules(events: AgentEvent[]): void {
+function assertForwarderRules(events: AgentEvent[], options: { metadataOnly?: boolean } = {}): void {
+  const result = checkAgentEvents(events, options);
+  expect(result.errors).toEqual([]);
+  expect(result.warnings).toEqual([]);
+
   const conversational = events.filter((e) =>
     ['[Agent] User Message', '[Agent] Tool Call', '[Agent] AI Response'].includes(e.event_type),
   );
-
-  for (const event of events) {
-    expect(event.user_id ?? event.device_id).toBeTruthy();
-    expect(event.event_properties['[Agent] Agent ID']).toBeTruthy();
-    expect(event.event_properties['[Agent] Session ID']).toBeTruthy();
-    expect(typeof event.time).toBe('number');
-    expect(event.insert_id).toBeTruthy();
-    if (event.event_type !== '[Agent] AI Response') {
-      expect(event.event_properties).not.toHaveProperty('[Agent] Cost USD');
-    }
-    if ('$llm_message' in event.event_properties) {
-      expect(event.event_properties.$llm_message).toEqual({ text: expect.any(String) });
-    }
-  }
-
-  expect(new Set(events.map((e) => e.insert_id)).size).toBe(events.length);
-
   const turnIds = conversational.map((e) => e.event_properties['[Agent] Turn ID'] as number);
   turnIds.forEach((id, i) => expect(id).toBe(i + 1));
-
-  for (const event of conversational) {
-    const idProp =
-      event.event_type === '[Agent] Tool Call' ? '[Agent] Invocation ID' : '[Agent] Message ID';
-    expect(event.event_properties[idProp]).toBe(event.insert_id);
-  }
-
-  const last = events[events.length - 1];
-  const lastConversational = conversational[conversational.length - 1];
-  if (last?.event_type === '[Agent] Session End') {
-    expect(last.event_properties['[Agent] Trace ID']).toBe(
-      lastConversational?.event_properties['[Agent] Trace ID'],
-    );
-  }
-  expect(events.filter((e) => e.event_type === '[Agent] Session End').length).toBeLessThanOrEqual(1);
 }
 
 describe('docs/integrations contract', () => {
@@ -257,6 +230,59 @@ describe('forwarder core and adapters', () => {
     expect(JSON.parse(events[0]?.event_properties['[Agent] Context'] as string)).toEqual(
       fixture.context,
     );
+  });
+
+  it('sends UI components as spans in the same turn and never an empty reply', () => {
+    const withComponent = {
+      ...fixture,
+      messages: [
+        ...fixture.messages,
+        { id: 'u3', role: 'user', text: 'Show my options', timestamp: t0 + 12_000 },
+        {
+          id: 'a3',
+          role: 'assistant',
+          text: '',
+          timestamp: t0 + 13_000,
+          spans: [
+            {
+              id: 'k1',
+              name: 'order-options',
+              timestamp: t0 + 13_000,
+              output: { options: ['refund', 'exchange'] },
+              latencyMs: 40,
+            },
+          ],
+        },
+      ],
+    };
+    const events: AgentEvent[] = core.toAgentEvents(withComponent);
+    assertForwarderRules(events);
+
+    const reply = events.find((e) => e.insert_id === 'conv_1:a3');
+    const span = events.find((e) => e.event_type === '[Agent] Span');
+    expect(reply?.event_properties.$llm_message).toEqual({ text: '[Displayed: order-options]' });
+    expect(span?.insert_id).toBe('conv_1:k1');
+    expect(span?.event_properties['[Agent] Span Name']).toBe('order-options');
+    expect(span?.event_properties['[Agent] Trace ID']).toBe(reply?.event_properties['[Agent] Trace ID']);
+    expect(span?.event_properties['[Agent] Turn ID']).toBe(reply?.event_properties['[Agent] Turn ID']);
+    expect(JSON.parse(span?.event_properties['[Agent] Output State'] as string)).toEqual({
+      options: ['refund', 'exchange'],
+    });
+
+    const metadataOnly: AgentEvent[] = core.toAgentEvents(withComponent, { contentMode: 'metadata_only' });
+    const metadataSpan = metadataOnly.find((e) => e.event_type === '[Agent] Span');
+    expect(metadataSpan?.event_properties).not.toHaveProperty('[Agent] Output State');
+  });
+
+  it('flags an empty AI Response with no component as an error', () => {
+    const events: AgentEvent[] = core.toAgentEvents({
+      ...fixture,
+      messages: fixture.messages.map((m) => (m.id === 'a2' ? { ...m, text: '' } : m)),
+    });
+    const { errors } = checkAgentEvents(events);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.insertId).toBe('conv_1:a2');
+    expect(errors[0]?.message).toContain('[Displayed: <component>]');
   });
 
   it('produces identical IDs when the same conversation is converted twice', () => {
