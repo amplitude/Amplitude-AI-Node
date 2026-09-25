@@ -570,20 +570,20 @@ When your agent renders **embedded UI components** — forms, accordions, sugges
 s.trackSpan({
   name: 'disclaimer-accordion',       // component type
   latencyMs: 0,                        // rendering latency, or 0 for static
-  inputState: { disclaimerType: 'VA_loan', sections: ['eligibility', 'terms'] },
+  inputState: { disclaimerType: 'return_policy', sections: ['eligibility', 'terms'] },
   outputState: { userExpanded: true, accepted: false },
 });
 
 s.trackSpan({
-  name: 'suggestions',
+  name: 'order-options',
   latencyMs: 0,
-  inputState: { options: ['Buy a home', 'Refinance', 'Cash-out'] },
-  outputState: { selected: 'Buy a home' },
+  inputState: { options: ['Track order', 'Return an item', 'Exchange'] },
+  outputState: { selected: 'Return an item' },
 });
 ```
 
 **Key points:**
-- Use `name` as the component type (e.g., `disclaimer-accordion`, `suggestions`, `inline-form`).
+- Use `name` as the component type (e.g., `disclaimer-accordion`, `order-options`, `inline-form`).
 - Put the component's data payload in `inputState` (what was rendered) and user interaction data in `outputState` (what the user did).
 - These spans inherit the session's trace context, so they appear in the correct turn.
 - Span events appear in the **trace tab** but not in the **conversation view**. For the conversation view, the `[Agent] AI Response` with text content is what drives the chat bubbles.
@@ -592,12 +592,12 @@ s.trackSpan({
 If your agent's response is purely a UI component with no text, you still need an `[Agent] AI Response` event for turn counting. Put a brief description in the content so the session viewer shows a readable bubble:
 
 ```typescript
-s.trackAiMessage('[Displayed: loan options comparison table]', 'gpt-4o', 'openai', 200);
+s.trackAiMessage('[Displayed: plan-comparison-table]', 'gpt-4o', 'openai', 200);
 // Then emit the span with the full component data:
 s.trackSpan({
-  name: 'loan-comparison-table',
+  name: 'plan-comparison-table',
   latencyMs: 200,
-  inputState: { loans: [{ type: '30yr-fixed', rate: 6.5 }, ...] },
+  inputState: { plans: [{ name: 'Basic', monthlyPrice: 10 }, ...] },
 });
 ```
 
