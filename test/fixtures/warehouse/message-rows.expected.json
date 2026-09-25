@@ -1,0 +1,285 @@
+[
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478400000,
+    "insert_id": "conv_1:a0",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "conv_1:a0",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "$llm_message": {
+        "text": "Hi! How can I help?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478401000,
+    "insert_id": "conv_1:u1",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-2",
+      "[Agent] Turn ID": 2,
+      "[Agent] Message ID": "conv_1:u1",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Where is my order?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_12345",
+    "time": 1768478402000,
+    "insert_id": "conv_1:c1",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-2",
+      "[Agent] Turn ID": 3,
+      "[Agent] Invocation ID": "conv_1:c1",
+      "[Agent] Component Type": "tool",
+      "[Agent] Tool Name": "lookup_order",
+      "[Agent] Tool Success": true,
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 120,
+      "[Agent] Parent Message ID": "conv_1:u1",
+      "[Agent] Tool Input": "{\"id\":\"A1\"}",
+      "[Agent] Tool Output": "ok"
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478405000,
+    "insert_id": "conv_1:a1",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Message ID": "conv_1:a1",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 900,
+      "[Agent] Model Name": "gpt-4o",
+      "[Agent] Input Tokens": 310,
+      "[Agent] Output Tokens": 12,
+      "[Agent] Cost USD": 0.0012,
+      "$llm_message": {
+        "text": "It arrives Thursday."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] Span",
+    "user_id": "user_12345",
+    "time": 1768478405000,
+    "insert_id": "conv_1:k1",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Is Error": false,
+      "[Agent] Span ID": "conv_1:k1",
+      "[Agent] Span Name": "order-status-card",
+      "[Agent] Input State": "{\"order\":\"A1\",\"eta\":\"Thursday\"}",
+      "[Agent] Output State": "{\"clicked\":\"track_package\"}"
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478410000,
+    "insert_id": "conv_1:u2",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-3",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "conv_1:u2",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Thanks"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478411000,
+    "insert_id": "conv_1:a2",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-3",
+      "[Agent] Turn ID": 6,
+      "[Agent] Message ID": "conv_1:a2",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "$llm_message": {
+        "text": "Anytime."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_12345",
+    "time": 1768478411000,
+    "insert_id": "conv_1:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "conv_1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Trace ID": "conv_1:trace-3"
+    },
+    "import_cursor": "2026-01-15 14:00:11"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_67890",
+    "time": 1768478460000,
+    "insert_id": "conv_2:m1",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "conv_2:m1",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Cancel my plan"
+      }
+    },
+    "import_cursor": "2026-01-15 14:01:04"
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_67890",
+    "time": 1768478461000,
+    "insert_id": "conv_2:m2",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-1",
+      "[Agent] Turn ID": 2,
+      "[Agent] Invocation ID": "conv_2:m2",
+      "[Agent] Component Type": "tool",
+      "[Agent] Tool Name": "cancel_plan",
+      "[Agent] Tool Success": false,
+      "[Agent] Is Error": true,
+      "[Agent] Latency Ms": 3000,
+      "[Agent] Parent Message ID": "conv_2:m1",
+      "[Agent] Tool Input": "{\"plan\":\"pro\"}",
+      "[Agent] Tool Output": "timeout"
+    },
+    "import_cursor": "2026-01-15 14:01:04"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_67890",
+    "time": 1768478464000,
+    "insert_id": "conv_2:m3",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-1",
+      "[Agent] Turn ID": 3,
+      "[Agent] Message ID": "conv_2:m3",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 700,
+      "[Agent] Model Name": "gpt-4o",
+      "[Agent] Input Tokens": 280,
+      "[Agent] Output Tokens": 0,
+      "[Agent] Cost USD": 0.0009,
+      "$llm_message": {
+        "text": "[Displayed: callback-form]"
+      }
+    },
+    "import_cursor": "2026-01-15 14:01:04"
+  },
+  {
+    "event_type": "[Agent] Span",
+    "user_id": "user_67890",
+    "time": 1768478464000,
+    "insert_id": "conv_2:m4",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-1",
+      "[Agent] Turn ID": 3,
+      "[Agent] Is Error": false,
+      "[Agent] Span ID": "conv_2:m4",
+      "[Agent] Span Name": "callback-form",
+      "[Agent] Input State": "{\"fields\":[\"phone\",\"preferred_time\"]}",
+      "[Agent] Output State": "{\"submitted\":true}"
+    },
+    "import_cursor": "2026-01-15 14:01:04"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_67890",
+    "time": 1768478464000,
+    "insert_id": "conv_2:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-1"
+    },
+    "import_cursor": "2026-01-15 14:01:04"
+  }
+]

@@ -57,6 +57,7 @@ Stop and ask the user for these. Never infer them from field names:
 
 1. **The user identity field.** Which field in the Sierra payload holds the same user ID their product analytics uses. If none does, ask how to map it.
 2. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the agent's name as it appears in their Sierra agent list.
+3. **What the user saw at each kind of agent step.** For every kind of assistant message or event in the payload: did the user see text, a UI component (card, form, carousel, quick replies), or nothing (a routing or handoff step)? Text becomes an AI Response. A component becomes a span on the reply it came with. A step the user never saw becomes a span, never an empty AI Response.
 
 ### Phase 1: Detect
 
@@ -68,7 +69,7 @@ Find out and print:
 - Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
 - Whether a real sample Sierra payload is available.
 
-**PAUSE.** Show the findings and ask the user to confirm them, plus the two do-not-guess answers. If no sample payload exists, stop here and give the user the list under "What you need before starting". Do not proceed on an assumed schema.
+**PAUSE.** Show the findings and ask the user to confirm them, plus the three do-not-guess answers. If no sample payload exists, stop here and give the user the list under "What you need before starting". Do not proceed on an assumed schema.
 
 ### Phase 2: Map
 
@@ -82,9 +83,10 @@ Read the actual sample payload. Fill in `normalizeSierraConversation` (below) so
 | `context` | One key per dimension the user wants to filter on (channel, locale, agent version). Always include `platform: 'sierra'`. Never a concatenated string |
 | `messages[].id` | The vendor message ID; if absent, the message's position (`m0`, `m1`, ...) |
 | `messages[].role` | `user` for the end user, `assistant` for the agent. Skip system and internal messages |
-| `messages[].text` | Message text. For turns where the agent rendered UI instead of text, a short description such as `order status card displayed` |
+| `messages[].text` | Message text. If the reply was only a UI component, leave it empty and put the component in `spans`; the core sends `[Displayed: <name>]` |
 | `messages[].timestamp` | Epoch milliseconds. Convert from the vendor format and state the timezone assumption |
 | `messages[].toolCalls` | Tool or action calls made before that assistant reply, with the vendor's call ID |
+| `messages[].spans` | UI components shown with that reply (name, what was rendered, what the user did) and steps the user never saw, such as routing. Never emit an assistant message with neither text nor spans |
 | `scores` | Post-conversation ratings such as CSAT, if present |
 | `endedAt` | When the conversation ended. Leave unset if it may still be open |
 
@@ -107,7 +109,8 @@ Copy the forwarder core below verbatim into a file named `amplitude-agent-forwar
    - all events share one session
    - the Trace tab shows exactly one "Turn" card per exchange
    - tool calls appear before the reply they led to, and messages are in order
-   - message text renders in the thread view
+   - message text renders in the thread view, and no reply bubble is empty
+   - UI components appear as spans in the Trace tab, inside the turn of the reply they came with
    - the user is the real user, not `unknown`
    - context keys appear in the session filters
 4. Send the same conversation again and confirm nothing duplicates.
@@ -129,13 +132,13 @@ Each of these is something a real integration got wrong. The forwarder core impl
 1. **Send user identity on every event.** Without `user_id` or `device_id`, the session lands under `unknown` and cannot join to product analytics.
 2. **Always set `[Agent] Agent ID`.** Without it the HTTP API still returns `200`, but the event never appears in Agent Analytics.
 3. **One `[Agent] Trace ID` per exchange.** A new Trace ID for each user round trip, on the user message, every tool call, and the AI response. The session viewer draws one turn per Trace ID and counts turns by Trace ID: reusing one merges exchanges, minting one per event splits them. Session End carries the final exchange's Trace ID.
-4. **`[Agent] Turn ID` orders messages.** An integer that increases by one per message within the session (user message, each tool call, AI response, next user message), derived from the message's position in the transcript.
+4. **`[Agent] Turn ID` orders messages.** An integer that increases by one per message within the session (user message, each tool call, AI response, next user message), derived from the message's position in the transcript. A span shares the Turn ID of the reply it belongs to.
 5. **Deterministic event IDs.** `[Agent] Message ID` on messages and `[Agent] Invocation ID` on tool calls, derived from the vendor's IDs and scoped by conversation ID, with the same value as the top-level `insert_id`. Never a fresh UUID per send, or retries and re-imports create duplicate rows.
 6. **Real timestamps.** Top-level `time` in epoch milliseconds from the transcript. Without it, everything lands at import time.
 7. **Close sessions with `[Agent] Session End`** once the conversation is finished, sent last. Otherwise the server closes the session after 30 idle minutes.
 8. **Filterable dimensions go in `[Agent] Context`**, as a JSON string with one key per dimension, on every event. Not `[Agent] Tags`, which is not read on ingest.
 9. **`$llm_message` is an object: `{ "text": "..." }`.** A plain string is ignored and the thread view shows no content.
-10. **Never leave an AI Response empty.** For UI-rendering turns, send a short description of what was shown.
+10. **Never leave an AI Response empty.** An empty reply scores as an incomplete or abandoned turn, and the session viewer shows no bubble. When the agent showed a UI component instead of text, the core sends `[Displayed: <component name>]` as the reply and the component itself as an `[Agent] Span`. A step the user never saw, such as routing or a handoff, is a span, not an AI Response.
 11. **Cost and tokens only on AI Response, and only if the platform provides them.** The server sums cost across events, so cost elsewhere inflates totals. Amplitude does not compute cost for events sent directly.
 12. **Do not build your own short idle timer.** Rotating session IDs after quiet periods splits one conversation into several sessions. For long-lived conversations, add `idle_timeout_minutes` inside the `[Agent] Context` JSON.
 
@@ -146,6 +149,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
 | `[Agent] Tool Call` | Each tool or action call | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output` |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
+| `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | Post-conversation rating, such as CSAT | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
 | `[Agent] Session End` | Once, last, when the conversation is finished | `[Agent] Trace ID` of the final exchange |
 
@@ -303,6 +307,20 @@ export interface ForwarderToolCall {
   latencyMs?: number;
 }
 
+export interface ForwarderSpan {
+  /** Stable ID for this component or step, unique within the conversation. */
+  id: string;
+  /** Component or step name, for example `order-status-card`. Becomes [Agent] Span Name. */
+  name: string;
+  /** Epoch milliseconds. */
+  timestamp: number;
+  /** What was rendered or passed in. */
+  input?: unknown;
+  /** What the user did with it, or what the step returned. */
+  output?: unknown;
+  latencyMs?: number;
+}
+
 export interface ForwarderMessage {
   /** Vendor's message ID, or a stable position such as `m0`, `m1`. Never a fresh UUID. */
   id: string;
@@ -312,6 +330,12 @@ export interface ForwarderMessage {
   timestamp: number;
   /** Tool calls the agent made before this assistant reply, in execution order. */
   toolCalls?: ForwarderToolCall[];
+  /**
+   * UI components shown with this reply, and internal steps the user never saw
+   * (routing, handoff). Emitted as [Agent] Span after the reply. If `text` is
+   * empty, the reply is sent as `[Displayed: <first span name>]`.
+   */
+  spans?: ForwarderSpan[];
   /** Only if the platform exposes them. Never estimate. */
   model?: string;
   provider?: string;
@@ -462,6 +486,8 @@ export function toAgentEvents(
     }
 
     const messageId = scoped(message.id);
+    const text =
+      message.text || (message.spans?.[0] ? `[Displayed: ${message.spans[0].name}]` : '');
     turnId += 1;
     events.push(
       event('[Agent] AI Response', message.timestamp, messageId, {
@@ -479,9 +505,29 @@ export function toAgentEvents(
           ? { '[Agent] Output Tokens': message.outputTokens }
           : {}),
         ...(message.costUsd !== undefined ? { '[Agent] Cost USD': message.costUsd } : {}),
-        ...(full ? { $llm_message: { text: redact(message.text) } } : {}),
+        ...(full && text ? { $llm_message: { text: redact(text) } } : {}),
       }),
     );
+
+    for (const span of message.spans ?? []) {
+      const spanId = scoped(span.id);
+      events.push(
+        event('[Agent] Span', span.timestamp, spanId, {
+          '[Agent] Trace ID': traceId,
+          '[Agent] Turn ID': turnId,
+          '[Agent] Span ID': spanId,
+          '[Agent] Span Name': span.name,
+          '[Agent] Is Error': false,
+          ...(span.latencyMs !== undefined ? { '[Agent] Latency Ms': span.latencyMs } : {}),
+          ...(full && span.input !== undefined
+            ? { '[Agent] Input State': serialize(span.input) }
+            : {}),
+          ...(full && span.output !== undefined
+            ? { '[Agent] Output State': serialize(span.output) }
+            : {}),
+        }),
+      );
+    }
   }
 
   if (events.length === 0) return events;

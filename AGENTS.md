@@ -68,6 +68,8 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
 - Works-with partners (OpenRouter, LiteLLM, Requesty, Strands): see **Works with** in `amplitude-ai.md` and README.
 - Agent runs on a hosted platform (Sierra, Decagon): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
+- Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
+- Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
 
 ## MCP Surface
 
@@ -140,6 +142,10 @@ Prompt:
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
 - `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/langfuse.md` — Langfuse trace forwarding over the HTTP API (no SDK)
+- `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
+- `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
+- `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
 
 ## Event Schema (names)
 

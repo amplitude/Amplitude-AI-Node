@@ -1,10 +1,10 @@
-# Decagon + Amplitude Agent Analytics: conversation ingestion
+# Braintrust + Amplitude Agent Analytics: trace ingestion
 
-**Amplitude Agent Analytics can ingest conversations from Decagon agents over the Amplitude HTTP API, with no SDK required.**
+**Amplitude Agent Analytics can ingest agent conversations traced in Braintrust over the Amplitude HTTP API, with no SDK required.**
 
-Last verified: 2026-09-23. This is an Amplitude-authored guide. Decagon is a trademark of its owner; this guide is not affiliated with or endorsed by Decagon. Corrections are welcome as a pull request.
+Last verified: 2026-09-24. This is an Amplitude-authored guide. Braintrust is a trademark of its owner; this guide is not affiliated with or endorsed by Braintrust. Corrections are welcome as a pull request.
 
-**Provenance of Decagon details.** The export API described here comes from Decagon's public API documentation as archived in February 2025 ("Exporting Conversations via API"). Decagon's current documentation requires a login and was not checked against a live API for this guide. Treat every Decagon field name below as a starting point, and confirm it against a real response in Phase 2.
+**Provenance of Braintrust details.** The query API described here comes from Braintrust's public API reference ("Query by SQL"), its SQL reference, and its knowledge-base articles on pagination and rate limits, read in September 2026. It was not checked against a live Braintrust account for this guide. Treat every Braintrust field name below as a starting point, and confirm it against a real response in Phase 2.
 
 ---
 
@@ -12,32 +12,45 @@ Last verified: 2026-09-23. This is an Amplitude-authored guide. Decagon is a tra
 
 ### What this is
 
-Decagon runs your customer-facing agent. Amplitude Agent Analytics measures whether those conversations worked for the user and what they did for your business. This guide is the recipe for getting Decagon conversations into Agent Analytics: a scheduled job, running in your infrastructure, that pulls finished conversations from Decagon's export API, turns each one into `[Agent]` events, and posts them to the Amplitude HTTP API.
+Your agent runs in your own code and is logged to Braintrust. Amplitude Agent Analytics measures whether those conversations worked for the user and what they did for your business. This guide is the recipe for forwarding Braintrust logs to Agent Analytics: a scheduled job, running in your infrastructure, that finds conversations that have gone quiet, reads their spans with SQL, turns each conversation into `[Agent]` events, and posts them to the Amplitude HTTP API.
 
 ```text
 scheduled job (for example, hourly)
-  -> GET https://api.decagon.ai/conversation/export   conversations updated in a time window
-  -> normalize(conversation)   Decagon fields -> one neutral conversation shape
+  -> POST /btql   root spans in a time window -> conversation IDs from metadata
+  -> POST /btql   root spans of each settled conversation, then every span in those traces
+  -> normalize(...)            Braintrust fields -> one neutral conversation shape
   -> toAgentEvents(conv)       neutral shape -> [Agent] events
   -> send(events)              POST https://api2.amplitude.com/2/httpapi
-  -> Agent Analytics sessions, turns, CSAT, enrichment
+  -> Agent Analytics sessions, turns, tool calls, enrichment
 ```
+
+**If your application already emits OpenTelemetry**, you can instead add Amplitude as a second OTLP exporter next to Braintrust and skip this job. Amplitude's endpoint, authentication, and attribute mapping are documented in [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). This guide is for teams that want to forward what is already in Braintrust, including history.
 
 ### What you get
 
 - Every conversation as an Agent Analytics session, turn by turn, in the session viewer.
 - Automatic quality signals on every closed session: task completion, response quality, user friction, and more.
-- Decagon CSAT ratings as `[Agent] Score` events on the session.
+- Tool calls with name, success, latency, and, unless you send metadata only, input and output.
+- Model and token counts from `llm` spans.
 - Agent sessions joined to your product analytics through the same user ID.
-- Filters on any dimension you send as context, such as Decagon tags or safe metadata fields.
 
-Model, token, and cost data are not in Decagon's export, so those fields stay empty rather than estimated. Tool and action calls are also not in the documented export; if your Decagon account exposes them, map them into `toolCalls`.
+Cost stays empty: the logged fields this adapter reads carry tokens, not cost, and Amplitude does not estimate it. Braintrust scores are not forwarded; if the user wants them, map them to `ForwarderScore`.
+
+### What your traces must already contain
+
+This job forwards what is already in Braintrust; it cannot add what the application never logged.
+
+- **Conversation ID:** Braintrust has no built-in conversation; the application must log one in root-span metadata, under a key you confirm.
+- **User ID:** also metadata only, under a key you confirm. It must be the same ID your product analytics uses.
+- **Message text:** the root span's input and output, exactly as logged.
+
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as Braintrust retains them.
 
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A Decagon API key, issued from the Decagon dashboard.
-3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses. Decagon's `user_id` matches only if your Decagon widget is configured to pass your own user ID.
+2. A Braintrust API key and the project ID. Self-hosted data planes use their own API URL (`BRAINTRUST_API_URL`).
+3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
 
@@ -53,54 +66,57 @@ Typically a few days of engineering: the job, the mapping, and verification in A
 
 Stop and ask the user for these. Never infer them from field names:
 
-1. **The user identity field.** Whether Decagon's `user_id` equals the user ID their product analytics uses, or which `metadata` key does. If neither, ask how to map it.
-2. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the name of the Decagon agent or workflow as the team refers to it.
-3. **What the user saw at each kind of agent step.** For every kind of assistant message or event in the payload: did the user see text, a UI component (card, form, carousel, quick replies), or nothing (a routing or handoff step)? Text becomes an AI Response. A component becomes a span on the reply it came with. A step the user never saw becomes a span, never an empty AI Response.
+1. **The conversation key.** Which metadata field holds the conversation ID. This sets `CONVERSATION_KEY`.
+2. **The user identity field.** Which metadata field, if any, holds the user ID their product analytics uses. The adapter reads `metadata.user_id` as a placeholder.
+3. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the project name or the root span name.
+4. **What the user saw at each kind of agent step.** For each observation or span type in their traces: did the user see text, a UI component (card, form, quick replies), or nothing (routing, retrieval, a guardrail check)? The root's output becomes the AI Response text. A component becomes a span on that reply. A step the user never saw becomes a span only if the user wants it in Agent Analytics, and never an empty AI Response.
+5. **How long a conversation can go quiet and resume.** This sets `SETTLE_MS`, and whether conversations can span more than 7 days sets `LOOKBACK_MS`.
 
 ### Phase 1: Detect
 
 Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language.
-- Whether Amplitude and Decagon API keys are available as configuration (never hard-code them).
+- Whether Amplitude and Braintrust credentials are available as configuration (never hard-code them).
 - Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
-- Whether a real Decagon export response is available, or whether you may call the export API once with a narrow time window to get one.
+- Whether root spans carry a conversation ID in metadata, and under which key.
+- The Braintrust plan: Starter and Pro allow about 20 queries per minute.
+- Whether you may run one query for one known conversation to get a real response.
 
-**PAUSE.** Show the findings and ask the user to confirm them, plus the three do-not-guess answers.
+**PAUSE.** Show the findings and ask the user to confirm them, plus the do-not-guess answers.
 
 ### Phase 2: Map
 
-Fetch or read one real export response. Compare it to the documented shape below and adjust the adapter where they differ:
+Run the adapter's queries for one real conversation and compare the rows to the adapter:
 
-- **The pagination field.** Decagon's documentation names it three ways: `next_page_cursor` in the parameter description, `next_page_updated_after` in the example response, and `next_cursor` in the example code. The adapter accepts all three. Confirm which one your response has, and that following it returns the next page rather than the same one.
-- **Message roles.** Documented as `USER` and `AI`. Messages with other roles (for example, a human agent after handoff) are skipped. Ask the user whether to keep them.
-- **Timestamps.** Documented as `2024-01-01 21:42:10.309970`, with no timezone. The adapter assumes UTC. Confirm.
-- **Message IDs.** The documented export has none, so the adapter uses each message's position in the conversation. That stays stable as long as Decagon only appends messages. If your response has message IDs, use them.
-- **UI components and internal steps.** The archived export documents only text messages. If your response has structured blocks (cards, forms, quick replies) or routing and handoff steps, map each to `spans` on the reply it belongs to, as confirmed in do-not-guess answer 3. Never emit an assistant message with neither text nor spans.
-- **Context.** Decagon tags become one boolean context key each. Only `metadata` keys the user explicitly allows become context; metadata often contains personal data such as email.
+- **Exchanges.** The adapter treats each trace (root span) in a conversation as one exchange: the root's `input` holds the user message and its `output` the reply. If the application logs a whole conversation in one trace, change the grouping.
+- **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, OpenAI-style `choices`, and common keys. Check it returns what the user typed and saw.
+- **Tool calls.** Spans with `span_attributes.type` `tool` become tool calls, named by `span_attributes.name`.
+- **Timing and usage.** Times come from `metrics.start` and `metrics.end` (Unix seconds), falling back to `created`. Tokens come from `metrics.prompt_tokens` and `metrics.completion_tokens` on `llm` spans; the model from `metadata.model`. Confirm these are populated.
+- **Spans.** Only the span types the user chose in do-not-guess answer 4 go in `spanTypes`.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
 
 ### Phase 3: Implement
 
-Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Decagon adapter below it, then schedule `syncDecagon` to run periodically, persisting the watermark it returns between runs. Add a dry-run flag that prints events instead of sending them.
+Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Braintrust adapter below it, then schedule `syncBraintrust` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
    - the Trace tab shows exactly one "Turn" card per exchange, and messages are in order
    - message text renders in the thread view, and no reply bubble is empty
-   - UI components appear as spans in the Trace tab, inside the turn of the reply they came with
+   - tool calls appear inside the turn they belong to
    - the user is the real user, not `unknown`
-   - CSAT appears as a score, and context keys appear in the session filters
 4. Run the same window again and confirm nothing duplicates.
 
 ### Phase 5: Ship
 
-- Keep to Decagon's documented global limit of 1 request per second; the adapter waits between pages.
+- Keep to Braintrust's query limit of about 20 per minute on Starter and Pro plans; the adapter waits 3.1 seconds between pages and backs off on `429`. Each conversation costs at least two queries, so size the schedule to your conversation volume.
+- Every discovery query has a `created` range, as Braintrust recommends to avoid timeouts.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 
@@ -142,24 +158,24 @@ Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude ge
 
 ### Example: one complete session
 
-A two-exchange conversation with a CSAT rating, as produced by `toAgentEvents` from a normalized Decagon conversation. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
+A two-exchange conversation with a tool call, as produced by `toAgentEvents` from `normalizeBraintrustConversation`. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
 
 ```json
 [
   {
     "event_type": "[Agent] User Message",
-    "user_id": "user_48213",
-    "time": 1788282000000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m0",
+    "user_id": "user_12345",
+    "time": 1768478400000,
+    "insert_id": "conv-1:span-root-1:user",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-1",
+      "[Agent] Context": "{\"platform\":\"braintrust\"}",
+      "[Agent] Trace ID": "conv-1:trace-1",
       "[Agent] Turn ID": 1,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m0",
+      "[Agent] Message ID": "conv-1:span-root-1:user",
       "[Agent] Component Type": "user_input",
       "$llm_message": {
         "text": "Where is my order?"
@@ -168,97 +184,108 @@ A two-exchange conversation with a CSAT rating, as produced by `toAgentEvents` f
   },
   {
     "event_type": "[Agent] AI Response",
-    "user_id": "user_48213",
-    "time": 1788282004000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m1",
+    "user_id": "user_12345",
+    "time": 1768478402000,
+    "insert_id": "conv-1:span-root-1:reply",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-1",
+      "[Agent] Context": "{\"platform\":\"braintrust\"}",
+      "[Agent] Trace ID": "conv-1:trace-1",
       "[Agent] Turn ID": 2,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m1",
+      "[Agent] Message ID": "conv-1:span-root-1:reply",
       "[Agent] Component Type": "llm",
       "[Agent] Is Error": false,
+      "[Agent] Model Name": "gpt-4o-mini",
+      "[Agent] Input Tokens": 120,
+      "[Agent] Output Tokens": 14,
       "$llm_message": {
-        "text": "Your order shipped yesterday and arrives Thursday."
+        "text": "Let me check. What is the order number?"
       }
     }
   },
   {
     "event_type": "[Agent] User Message",
-    "user_id": "user_48213",
-    "time": 1788282030000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m2",
+    "user_id": "user_12345",
+    "time": 1768478430000,
+    "insert_id": "conv-1:span-root-2:user",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2",
+      "[Agent] Context": "{\"platform\":\"braintrust\"}",
+      "[Agent] Trace ID": "conv-1:trace-2",
       "[Agent] Turn ID": 3,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m2",
+      "[Agent] Message ID": "conv-1:span-root-2:user",
       "[Agent] Component Type": "user_input",
       "$llm_message": {
-        "text": "Thanks!"
+        "text": "A1001"
       }
+    }
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_12345",
+    "time": 1768478431000,
+    "insert_id": "conv-1:span-tool-2",
+    "event_properties": {
+      "[Agent] Session ID": "conv-1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Context": "{\"platform\":\"braintrust\"}",
+      "[Agent] Trace ID": "conv-1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Invocation ID": "conv-1:span-tool-2",
+      "[Agent] Tool Name": "lookup_order",
+      "[Agent] Tool Success": true,
+      "[Agent] Is Error": false,
+      "[Agent] Component Type": "tool",
+      "[Agent] Latency Ms": 250,
+      "[Agent] Parent Message ID": "conv-1:span-root-2:user",
+      "[Agent] Tool Input": "{\"order_id\":\"A1001\"}",
+      "[Agent] Tool Output": "{\"status\":\"shipped\"}"
     }
   },
   {
     "event_type": "[Agent] AI Response",
-    "user_id": "user_48213",
-    "time": 1788282031000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m3",
+    "user_id": "user_12345",
+    "time": 1768478434000,
+    "insert_id": "conv-1:span-root-2:reply",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2",
-      "[Agent] Turn ID": 4,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m3",
+      "[Agent] Context": "{\"platform\":\"braintrust\"}",
+      "[Agent] Trace ID": "conv-1:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "conv-1:span-root-2:reply",
       "[Agent] Component Type": "llm",
       "[Agent] Is Error": false,
+      "[Agent] Model Name": "gpt-4o-mini",
+      "[Agent] Input Tokens": 160,
+      "[Agent] Output Tokens": 8,
       "$llm_message": {
-        "text": "Happy to help."
+        "text": "It arrives Thursday."
       }
     }
   },
   {
-    "event_type": "[Agent] Score",
-    "user_id": "user_48213",
-    "time": 1788282060000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:score-csat",
-    "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
-      "[Agent] Agent ID": "order-support",
-      "[Agent] Runtime": "custom",
-      "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2",
-      "[Agent] Score Name": "csat",
-      "[Agent] Score Value": 5,
-      "[Agent] Target ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
-      "[Agent] Target Type": "session",
-      "[Agent] Evaluation Source": "user"
-    }
-  },
-  {
     "event_type": "[Agent] Session End",
-    "user_id": "user_48213",
-    "time": 1788282060000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:session-end",
+    "user_id": "user_12345",
+    "time": 1768478434000,
+    "insert_id": "conv-1:session-end",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2"
+      "[Agent] Context": "{\"platform\":\"braintrust\"}",
+      "[Agent] Trace ID": "conv-1:trace-2"
     }
   }
 ]
@@ -600,157 +627,239 @@ async function postBatch(
 ```
 <!-- forwarder-core:end -->
 
-### Decagon adapter
+### Braintrust adapter
 
-Field names follow Decagon's archived export documentation. Confirm each against a real response in Phase 2.
+Field names follow Braintrust's public API and SQL references. Confirm each against a real response in Phase 2.
 
 ```ts
 import {
   send,
   toAgentEvents,
   type ForwarderMessage,
+  type ForwarderSpan,
+  type ForwarderToolCall,
   type NormalizedConversation,
 } from './amplitude-agent-forwarder';
 
-interface DecagonMessage {
-  text: string;
-  role: string; // documented: 'USER' | 'AI'
-  created_at: string; // documented: '2024-01-01 21:42:10.309970', no timezone
+/** One span from project_logs, as returned by POST /btql. */
+export interface BraintrustSpan {
+  id: string;
+  span_id: string;
+  root_span_id: string;
+  span_parents?: string[] | null;
+  is_root?: boolean | null;
+  created: string;
+  input?: unknown;
+  output?: unknown;
+  error?: unknown;
+  metadata?: Record<string, unknown> | null;
+  metrics?: { start?: number | null; end?: number | null; prompt_tokens?: number | null; completion_tokens?: number | null } | null;
+  span_attributes?: { name?: string | null; type?: string | null } | null; // type: llm, tool, function, task, ...
 }
 
-interface DecagonConversation {
-  conversation_id: string;
-  user_id?: string | null;
-  created_at: string;
-  metadata?: Record<string, unknown>;
-  messages: DecagonMessage[];
-  csat_rating?: number | null;
-  tags?: { name: string; level?: number }[];
-}
-
-interface DecagonExportPage {
-  conversations?: DecagonConversation[];
-  next_page_cursor?: string | number | null;
-  next_cursor?: string | number | null;
-  next_page_updated_after?: string | number | null;
-}
-
-const DECAGON_EXPORT_URL = 'https://api.decagon.ai/conversation/export';
+const BRAINTRUST_API_URL = process.env.BRAINTRUST_API_URL ?? 'https://api.braintrust.dev';
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
 
-/** Yields conversations last updated between minTimestamp and maxTimestamp (epoch seconds). */
-export async function* exportDecagonConversations(params: {
-  apiKey: string;
-  minTimestamp: number;
-  maxTimestamp: number;
-}): AsyncGenerator<DecagonConversation> {
-  let cursor: string | number | undefined;
+/** Runs a SQL query against /btql and yields every row, following the x-bt-cursor header. */
+export async function* queryBraintrust(sql: string): AsyncGenerator<BraintrustSpan> {
+  let cursor: string | null = null;
   for (;;) {
-    const query = new URLSearchParams({
-      min_timestamp: String(params.minTimestamp),
-      max_timestamp: String(params.maxTimestamp),
+    const response = await fetch(`${BRAINTRUST_API_URL}/btql`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.BRAINTRUST_API_KEY ?? ''}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query: cursor ? `${sql} OFFSET ${quote(cursor)}` : sql, fmt: 'jsonl' }),
     });
-    if (cursor !== undefined) query.set('cursor', String(cursor));
-    const response = await fetch(`${DECAGON_EXPORT_URL}?${query}`, {
-      headers: { Authorization: `Bearer ${params.apiKey}` },
-    });
-    if (response.status === 429) {
-      await sleep(5000);
+    if (response.status === 429 || response.status >= 500) {
+      await sleep(Number(response.headers.get('retry-after') ?? 10) * 1000);
       continue;
     }
-    if (!response.ok) {
-      throw new Error(`Decagon export returned ${response.status}: ${await response.text()}`);
-    }
-    const page = (await response.json()) as DecagonExportPage;
-    const conversations = page.conversations ?? [];
-    for (const conversation of conversations) yield conversation;
-
-    const next = page.next_page_cursor ?? page.next_cursor ?? page.next_page_updated_after;
-    if (!next || next === cursor || conversations.length === 0) return;
-    cursor = next;
-    await sleep(1100); // documented global limit: 1 request per second
+    if (!response.ok) throw new Error(`Braintrust returned ${response.status}: ${await response.text()}`);
+    const text = await response.text();
+    for (const line of text.split('\n')) if (line.trim()) yield JSON.parse(line) as BraintrustSpan;
+    cursor = response.headers.get('x-bt-cursor') ?? response.headers.get('x-amz-meta-bt_cursor');
+    if (!cursor) return;
+    await sleep(3100); // Starter and Pro plans allow about 20 queries per minute
   }
 }
 
-/** Assumes UTC when the value has no timezone. Confirm in Phase 2. */
-function parseDecagonTime(value: string): number {
-  const iso = value.trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
-  const hasZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(iso);
-  const ms = Date.parse(hasZone ? iso : `${iso}Z`);
-  if (Number.isNaN(ms)) throw new Error(`Unparseable Decagon timestamp: ${value}`);
-  return ms;
+/** Best-effort text from a chat payload. Confirm against real spans in Phase 2. */
+export function textFrom(value: unknown, role: 'user' | 'assistant'): string {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  const contentText = (content: unknown): string =>
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((part) => (typeof part === 'string' ? part : (part as { text?: string })?.text ?? ''))
+            .join('')
+        : '';
+  const roles = role === 'user' ? ['user', 'human'] : ['assistant', 'ai'];
+  const fromMessages = (messages: unknown[]): string => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i] as { role?: string; type?: string; content?: unknown; message?: { role?: string; content?: unknown } };
+      const message = m?.message ?? m;
+      if (roles.includes(String(message?.role ?? m?.type ?? '').toLowerCase())) return contentText(message.content);
+    }
+    return '';
+  };
+  if (typeof parsed === 'string') return parsed;
+  if (Array.isArray(parsed)) return fromMessages(parsed);
+  if (parsed && typeof parsed === 'object') {
+    const o = parsed as Record<string, unknown>;
+    if (Array.isArray(o.messages)) return fromMessages(o.messages);
+    if (Array.isArray(o.choices)) {
+      return contentText((o.choices[0] as { message?: { content?: unknown } })?.message?.content);
+    }
+    if (roles.includes(String(o.role ?? o.type ?? '').toLowerCase())) return contentText(o.content);
+    for (const key of ['content', 'text', 'output', 'answer', 'response', 'input', 'query', 'question']) {
+      if (typeof o[key] === 'string') return o[key] as string;
+    }
+  }
+  return '';
 }
 
-export interface DecagonMappingOptions {
+export interface BraintrustMappingOptions {
   agentId: string;
   /** Must return the user ID your product analytics uses. Confirm with the user. */
-  resolveUserId: (conversation: DecagonConversation) => string | undefined;
-  /** Metadata keys that are safe, non-personal filter dimensions. */
-  contextMetadataKeys?: string[];
+  resolveUserId: (root: BraintrustSpan) => string | undefined;
+  /** Span types to send as [Agent] Span, for example ['function']. Confirm in Phase 2. */
+  spanTypes?: string[];
 }
 
-export function normalizeDecagonConversation(
-  conversation: DecagonConversation,
-  options: DecagonMappingOptions,
+const startOf = (s: BraintrustSpan) => (s.metrics?.start ? s.metrics.start * 1000 : Date.parse(s.created));
+const endOf = (s: BraintrustSpan) => (s.metrics?.end ? s.metrics.end * 1000 : startOf(s));
+const sum = (values: (number | null | undefined)[]) =>
+  values.some((v) => typeof v === 'number') ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : undefined;
+
+/** One conversation (the traces that share a conversation ID) -> one NormalizedConversation. Each trace is one exchange. */
+export function normalizeBraintrustConversation(
+  conversationId: string,
+  spans: BraintrustSpan[],
+  options: BraintrustMappingOptions,
 ): NormalizedConversation {
+  const roots = spans
+    .filter((s) => s.is_root || !s.span_parents?.length)
+    .sort((a, b) => startOf(a) - startOf(b));
   const messages: ForwarderMessage[] = [];
-  conversation.messages.forEach((message, index) => {
-    const role = message.role === 'USER' ? 'user' : message.role === 'AI' ? 'assistant' : null;
-    if (!role) return;
+  for (const root of roots) {
+    const inTrace = spans
+      .filter((s) => s.root_span_id === root.root_span_id && s !== root)
+      .sort((a, b) => startOf(a) - startOf(b));
+    const start = startOf(root);
+    const userText = textFrom(root.input, 'user');
+    if (userText) messages.push({ id: `${root.root_span_id}:user`, role: 'user', text: userText, timestamp: start });
+
+    const toolCalls: ForwarderToolCall[] = inTrace
+      .filter((s) => s.span_attributes?.type === 'tool')
+      .map((s) => ({
+        id: s.span_id,
+        name: s.span_attributes?.name ?? 'tool',
+        timestamp: startOf(s),
+        input: s.input,
+        output: s.output,
+        success: !s.error,
+        latencyMs: endOf(s) - startOf(s),
+      }));
+    const extraSpans: ForwarderSpan[] = inTrace
+      .filter((s) => (options.spanTypes ?? []).includes(s.span_attributes?.type ?? ''))
+      .map((s) => ({
+        id: s.span_id,
+        name: s.span_attributes?.name ?? 'span',
+        timestamp: startOf(s),
+        input: s.input,
+        output: s.output,
+        latencyMs: endOf(s) - startOf(s),
+      }));
+    const llmSpans = inTrace.filter((s) => s.span_attributes?.type === 'llm');
+    const model = llmSpans[llmSpans.length - 1]?.metadata?.model;
     messages.push({
-      id: `m${index}`,
-      role,
-      text: message.text,
-      timestamp: parseDecagonTime(message.created_at),
+      id: `${root.root_span_id}:reply`,
+      role: 'assistant',
+      text: textFrom(root.output, 'assistant'),
+      timestamp: Math.max(endOf(root), start + 1),
+      toolCalls,
+      spans: extraSpans,
+      model: typeof model === 'string' ? model : undefined,
+      inputTokens: sum(llmSpans.map((s) => s.metrics?.prompt_tokens)),
+      outputTokens: sum(llmSpans.map((s) => s.metrics?.completion_tokens)),
     });
-  });
-
-  const context: Record<string, string | number | boolean> = { platform: 'decagon' };
-  for (const key of options.contextMetadataKeys ?? []) {
-    const value = conversation.metadata?.[key];
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      context[key] = value;
-    }
-  }
-  for (const tag of conversation.tags ?? []) {
-    context[`tag_${tag.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`] = true;
   }
 
-  const endedAt = messages.length
-    ? Math.max(...messages.map((message) => message.timestamp))
-    : parseDecagonTime(conversation.created_at);
-
+  const first = roots[0];
   return {
-    conversationId: conversation.conversation_id,
+    conversationId,
     agentId: options.agentId,
-    userId: options.resolveUserId(conversation),
-    context,
+    userId: first ? options.resolveUserId(first) : undefined,
+    context: { platform: 'braintrust' },
     messages,
-    scores:
-      typeof conversation.csat_rating === 'number'
-        ? [{ name: 'csat', value: conversation.csat_rating, timestamp: endedAt, source: 'user' }]
-        : undefined,
-    endedAt,
+    endedAt: messages.length ? Math.max(...messages.map((m) => m.timestamp)) : undefined,
   };
 }
 
-/** Only conversations untouched for this long are treated as finished. */
-const SETTLE_SECONDS = 2 * 60 * 60;
+/** The metadata key your app logs the conversation ID under. Confirm with the user. */
+const CONVERSATION_KEY = 'session_id';
+/** Only conversations with no new traces for this long are treated as finished. */
+const SETTLE_MS = 2 * 60 * 60 * 1000;
+/** How far back a conversation's earlier traces may start. */
+const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const redact = (text: string): string => text; // replace with your PII redaction
 
-/** Forwards conversations last updated after `watermark` (epoch seconds). Returns the next watermark. */
-export async function syncDecagon(watermark: number): Promise<number> {
-  const maxTimestamp = Math.floor(Date.now() / 1000) - SETTLE_SECONDS;
-  for await (const raw of exportDecagonConversations({
-    apiKey: process.env.DECAGON_API_KEY ?? '',
-    minTimestamp: watermark,
-    maxTimestamp,
-  })) {
-    const conversation = normalizeDecagonConversation(raw, {
+/** Forwards conversations active after `watermark` (ISO 8601) that have since settled. Returns the next watermark. */
+export async function syncBraintrust(projectId: string, watermark: string): Promise<string> {
+  const until = new Date(Date.now() - SETTLE_MS).toISOString();
+  const logs = `project_logs(${quote(projectId)})`;
+  const key = `metadata.${CONVERSATION_KEY}`;
+  const conversationIds = new Set<string>();
+  let tracesWithoutConversation = 0;
+  let conversationsWithoutUser = 0;
+  for await (const root of queryBraintrust(
+    `SELECT root_span_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(watermark)} AND created < ${quote(until)} LIMIT 1000`,
+  )) {
+    const id = (root as unknown as { conversation_id?: unknown }).conversation_id;
+    if (typeof id === 'string' && id) conversationIds.add(id);
+    else tracesWithoutConversation += 1;
+  }
+
+  const since = new Date(Date.parse(watermark) - LOOKBACK_MS).toISOString();
+  for (const conversationId of conversationIds) {
+    const roots: BraintrustSpan[] = [];
+    for await (const root of queryBraintrust(
+      `SELECT root_span_id, created FROM ${logs} WHERE is_root = true AND ${key} = ${quote(conversationId)} AND created >= ${quote(since)} LIMIT 1000`,
+    )) {
+      roots.push(root);
+    }
+    // Still active: a later run finds it again through its newer traces.
+    if (roots.some((r) => Date.parse(r.created) >= Date.parse(until))) continue;
+
+    // No created range here: an ID predicate already bounds the scan, and a range can drop earlier spans.
+    const ids = roots.map((r) => quote(r.root_span_id)).join(', ');
+    const spans: BraintrustSpan[] = [];
+    for await (const span of queryBraintrust(`SELECT * FROM ${logs} WHERE root_span_id IN (${ids}) LIMIT 1000`)) {
+      spans.push(span);
+    }
+    const conversation = normalizeBraintrustConversation(conversationId, spans, {
       agentId: 'TODO-confirmed-agent-id',
-      resolveUserId: (c) => c.user_id ?? undefined, // TODO: confirm this matches product analytics
+      resolveUserId: (root) => {
+        const value = root.metadata?.user_id; // TODO: confirm this matches product analytics
+        return typeof value === 'string' ? value : undefined;
+      },
     });
+    if (!conversation.userId) {
+      conversationsWithoutUser += 1;
+      continue;
+    }
     const events = toAgentEvents(conversation, { redact });
     if (process.env.AMPLITUDE_DRY_RUN) {
       console.log(JSON.stringify(events, null, 2));
@@ -758,11 +867,16 @@ export async function syncDecagon(watermark: number): Promise<number> {
     }
     await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
   }
-  return maxTimestamp;
+  if (tracesWithoutConversation || conversationsWithoutUser) {
+    console.warn(
+      `Skipped ${tracesWithoutConversation} traces without ${key} and ${conversationsWithoutUser} conversations without a user ID`,
+    );
+  }
+  return until;
 }
 ```
 
-**Why the settle window.** The export returns conversations by last-updated time, and returns a conversation again whenever it gets new messages. Forwarding only conversations untouched for `SETTLE_SECONDS` means they are finished before Session End is sent. If a conversation is updated after it was forwarded, the next run sends it again: messages already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
+**Why the settle window.** Braintrust has no "conversation finished" signal. Forwarding only conversations with no root span newer than `SETTLE_MS` means they are finished before Session End is sent. If a conversation resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
 
 ### Privacy
 
@@ -770,12 +884,12 @@ On the HTTP path you own redaction, and it must run before sending. Content trav
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call
-- `[Agent] Comment` on Score
+- `[Agent] Input State` and `[Agent] Output State` on Span
 - `[Agent] System Prompt` on AI Response (the core never sends it)
 
-The core's `redact` option runs on all of these. `contentMode: 'metadata_only'` sends none of them; sessions, turns, timing, CSAT, and user joins still work, but content-based quality signals will be weaker.
+The core's `redact` option runs on all of these. `contentMode: 'metadata_only'` sends none of them; sessions, turns, timing, tokens, and user joins still work, but content-based quality signals will be weaker.
 
-Keep personal data such as emails out of `[Agent] Context`; it is a filterable dimension, not a content field. That is why the adapter only copies metadata keys you list.
+Keep personal data out of `[Agent] Context`; it is a filterable dimension, not a content field. The adapter copies no metadata into context by default.
 
 ### HTTP API behavior
 
@@ -806,13 +920,18 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Everything landed at import time | No top-level `time` |
 | Messages show no text | `$llm_message` sent as a string instead of `{ "text": ... }` |
 | Filters missing a dimension | Sent as `[Agent] Tags` or as a flat property instead of a key in `[Agent] Context` |
-| Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_SECONDS` |
-| Only the first page of conversations arrives | The pagination field differs from all three documented names |
-| Times off by hours | Decagon timestamps are not UTC for your account; adjust `parseDecagonTime` |
 | `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
+| Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_MS` |
+| Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
+| No conversations found | `CONVERSATION_KEY` does not match the metadata field, or it is logged on child spans instead of root spans |
+| Queries time out | A discovery query lost its `created` range; keep it |
+| `429` responses | Over the plan's query limit; run less often or narrow the window |
+| Replies show JSON instead of text | `textFrom` does not recognize the payload shape; extend it |
 
 ### More
 
+- [Query by SQL](https://www.braintrust.dev/docs/api-reference/query) and [SQL reference](https://www.braintrust.dev/docs/reference/sql) (Braintrust docs)
 - [Send agent events without the AI SDK](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) (Amplitude docs)
+- [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) (Amplitude docs)
 - [Agent Analytics taxonomy](https://amplitude.com/docs/amplitude-ai/agent-analytics/taxonomy)
 - [Other supported platforms](./README.md)

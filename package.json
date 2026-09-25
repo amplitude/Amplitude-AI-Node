@@ -123,6 +123,8 @@
     "build": "tsdown",
     "check:generated": "node scripts/generate-agent-docs.mjs --check",
     "clean": "rimraf dist",
+    "docs:warehouse": "node scripts/render-warehouse-sql.mjs",
+    "check:warehouse": "node scripts/render-warehouse-sql.mjs --check",
     "generate:agent-docs": "node scripts/generate-agent-docs.mjs",
     "lint": "eslint --cache --ext .js,.jsx,.ts,.tsx --quiet . && biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
     "lint:fix": "eslint --fix --ext .js,.jsx,.ts,.tsx . --cache && biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
@@ -139,6 +141,7 @@
   "devDependencies": {
     "@amplitude/analytics-node": "1.3.5",
     "@biomejs/biome": "1.9.4",
+    "@duckdb/node-api": "1.5.5-r.5",
     "@modelcontextprotocol/sdk": "1.27.1",
     "@typescript-eslint/eslint-plugin": "8.29.1",
     "@typescript-eslint/parser": "8.29.1",

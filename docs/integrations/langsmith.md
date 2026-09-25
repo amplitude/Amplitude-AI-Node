@@ -1,10 +1,10 @@
-# Decagon + Amplitude Agent Analytics: conversation ingestion
+# LangSmith + Amplitude Agent Analytics: trace ingestion
 
-**Amplitude Agent Analytics can ingest conversations from Decagon agents over the Amplitude HTTP API, with no SDK required.**
+**Amplitude Agent Analytics can ingest agent conversations traced in LangSmith over the Amplitude HTTP API, with no SDK required.**
 
-Last verified: 2026-09-23. This is an Amplitude-authored guide. Decagon is a trademark of its owner; this guide is not affiliated with or endorsed by Decagon. Corrections are welcome as a pull request.
+Last verified: 2026-09-24. This is an Amplitude-authored guide. LangSmith is a trademark of its owner; this guide is not affiliated with or endorsed by LangChain. Corrections are welcome as a pull request.
 
-**Provenance of Decagon details.** The export API described here comes from Decagon's public API documentation as archived in February 2025 ("Exporting Conversations via API"). Decagon's current documentation requires a login and was not checked against a live API for this guide. Treat every Decagon field name below as a starting point, and confirm it against a real response in Phase 2.
+**Provenance of LangSmith details.** The runs query API described here comes from LangSmith's public OpenAPI specification (`https://api.smith.langchain.com/openapi.json`) and its documentation on threads, exporting traces, and the trace query syntax, read in September 2026. It was not checked against a live LangSmith account for this guide. Treat every LangSmith field name below as a starting point, and confirm it against a real response in Phase 2.
 
 ---
 
@@ -12,32 +12,45 @@ Last verified: 2026-09-23. This is an Amplitude-authored guide. Decagon is a tra
 
 ### What this is
 
-Decagon runs your customer-facing agent. Amplitude Agent Analytics measures whether those conversations worked for the user and what they did for your business. This guide is the recipe for getting Decagon conversations into Agent Analytics: a scheduled job, running in your infrastructure, that pulls finished conversations from Decagon's export API, turns each one into `[Agent]` events, and posts them to the Amplitude HTTP API.
+Your agent runs in your own code and is traced in LangSmith. Amplitude Agent Analytics measures whether those conversations worked for the user and what they did for your business. This guide is the recipe for forwarding LangSmith threads to Agent Analytics: a scheduled job, running in your infrastructure, that finds threads that have gone quiet, reads their runs, turns each thread into `[Agent]` events, and posts them to the Amplitude HTTP API.
 
 ```text
 scheduled job (for example, hourly)
-  -> GET https://api.decagon.ai/conversation/export   conversations updated in a time window
-  -> normalize(conversation)   Decagon fields -> one neutral conversation shape
+  -> POST /api/v1/runs/query   root runs in a time window -> thread IDs
+  -> POST /api/v1/runs/query   root runs of each settled thread, then every run in each trace
+  -> normalize(...)            LangSmith fields -> one neutral conversation shape
   -> toAgentEvents(conv)       neutral shape -> [Agent] events
   -> send(events)              POST https://api2.amplitude.com/2/httpapi
-  -> Agent Analytics sessions, turns, CSAT, enrichment
+  -> Agent Analytics sessions, turns, tool calls, enrichment
 ```
+
+**If your application already emits OpenTelemetry**, you can instead add Amplitude as a second OTLP exporter next to LangSmith and skip this job. Amplitude's endpoint, authentication, and attribute mapping are documented in [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). This guide is for teams that want to forward what is already in LangSmith, including history.
 
 ### What you get
 
 - Every conversation as an Agent Analytics session, turn by turn, in the session viewer.
 - Automatic quality signals on every closed session: task completion, response quality, user friction, and more.
-- Decagon CSAT ratings as `[Agent] Score` events on the session.
+- Tool calls with name, success, latency, and, unless you send metadata only, input and output.
+- Model, provider, token counts, and cost from `llm` runs. Cost is the value LangSmith calculated; Amplitude does not recompute it.
 - Agent sessions joined to your product analytics through the same user ID.
-- Filters on any dimension you send as context, such as Decagon tags or safe metadata fields.
 
-Model, token, and cost data are not in Decagon's export, so those fields stay empty rather than estimated. Tool and action calls are also not in the documented export; if your Decagon account exposes them, map them into `toolCalls`.
+LangSmith feedback is not forwarded by this adapter. If the user wants it, map thread-level feedback to a `ForwarderScore`.
+
+### What your traces must already contain
+
+This job forwards what is already in LangSmith; it cannot add what the application never logged.
+
+- **Conversation ID:** a LangSmith thread, which exists only if the application sets the `session_id` or `thread_id` metadata key on its runs.
+- **User ID:** LangSmith has no built-in user field; it must be in run metadata, under a key you confirm. It must be the same ID your product analytics uses.
+- **Message text:** the root run's inputs and outputs, exactly as logged. If the application hides inputs and outputs from LangSmith, send metadata only.
+
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as LangSmith retains them.
 
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A Decagon API key, issued from the Decagon dashboard.
-3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses. Decagon's `user_id` matches only if your Decagon widget is configured to pass your own user ID.
+2. A LangSmith API key, the tracing project's ID (a UUID), and the host: `https://api.smith.langchain.com` (US), `https://eu.api.smith.langchain.com` (EU), or your self-hosted URL.
+3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
 
@@ -53,54 +66,54 @@ Typically a few days of engineering: the job, the mapping, and verification in A
 
 Stop and ask the user for these. Never infer them from field names:
 
-1. **The user identity field.** Whether Decagon's `user_id` equals the user ID their product analytics uses, or which `metadata` key does. If neither, ask how to map it.
-2. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the name of the Decagon agent or workflow as the team refers to it.
-3. **What the user saw at each kind of agent step.** For every kind of assistant message or event in the payload: did the user see text, a UI component (card, form, carousel, quick replies), or nothing (a routing or handoff step)? Text becomes an AI Response. A component becomes a span on the reply it came with. A step the user never saw becomes a span, never an empty AI Response.
+1. **The user identity field.** Which run metadata key, if any, holds the user ID their product analytics uses. The adapter reads `user_id` from root-run metadata as a placeholder.
+2. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the root run name or the project name.
+3. **What the user saw at each kind of agent step.** For each observation or span type in their traces: did the user see text, a UI component (card, form, quick replies), or nothing (routing, retrieval, a guardrail check)? The root's output becomes the AI Response text. A component becomes a span on that reply. A step the user never saw becomes a span only if the user wants it in Agent Analytics, and never an empty AI Response.
+4. **How long a conversation can go quiet and resume.** This sets `SETTLE_MS`, and whether threads can span more than 7 days sets `LOOKBACK_MS`.
 
 ### Phase 1: Detect
 
 Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language.
-- Whether Amplitude and Decagon API keys are available as configuration (never hard-code them).
+- Whether Amplitude and LangSmith credentials are available as configuration (never hard-code them).
 - Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
-- Whether a real Decagon export response is available, or whether you may call the export API once with a narrow time window to get one.
+- Whether root runs carry `session_id` or `thread_id` metadata, and which key the application uses.
+- Whether you may call the runs query API once, for one known thread, to get a real response.
 
-**PAUSE.** Show the findings and ask the user to confirm them, plus the three do-not-guess answers.
+**PAUSE.** Show the findings and ask the user to confirm them, plus the do-not-guess answers.
 
 ### Phase 2: Map
 
-Fetch or read one real export response. Compare it to the documented shape below and adjust the adapter where they differ:
+Fetch one real thread (root runs filtered by thread metadata, then `trace` for each) and compare it to the adapter:
 
-- **The pagination field.** Decagon's documentation names it three ways: `next_page_cursor` in the parameter description, `next_page_updated_after` in the example response, and `next_cursor` in the example code. The adapter accepts all three. Confirm which one your response has, and that following it returns the next page rather than the same one.
-- **Message roles.** Documented as `USER` and `AI`. Messages with other roles (for example, a human agent after handoff) are skipped. Ask the user whether to keep them.
-- **Timestamps.** Documented as `2024-01-01 21:42:10.309970`, with no timezone. The adapter assumes UTC. Confirm.
-- **Message IDs.** The documented export has none, so the adapter uses each message's position in the conversation. That stays stable as long as Decagon only appends messages. If your response has message IDs, use them.
-- **UI components and internal steps.** The archived export documents only text messages. If your response has structured blocks (cards, forms, quick replies) or routing and handoff steps, map each to `spans` on the reply it belongs to, as confirmed in do-not-guess answer 3. Never emit an assistant message with neither text nor spans.
-- **Context.** Decagon tags become one boolean context key each. Only `metadata` keys the user explicitly allows become context; metadata often contains personal data such as email.
+- **Exchanges.** The adapter treats each root run in a thread as one exchange: its `inputs` hold the user message and its `outputs` the reply. If the application sends the whole message history as input on every turn, `textFrom` takes the last user message; confirm that is the new one.
+- **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}` (including serialized LangChain messages), and common keys such as `input` and `output`. Check it returns what the user typed and saw.
+- **Tool calls.** Runs with `run_type` `tool` become tool calls, named by the run name.
+- **Usage and cost.** The adapter sums `prompt_tokens`, `completion_tokens`, and `total_cost` over the exchange's `llm` runs, and reads the model and provider from `ls_model_name` and `ls_provider` metadata. Confirm these are populated.
+- **Spans.** Only the run types the user chose in do-not-guess answer 3 go in `spanRunTypes`.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
 
 ### Phase 3: Implement
 
-Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Decagon adapter below it, then schedule `syncDecagon` to run periodically, persisting the watermark it returns between runs. Add a dry-run flag that prints events instead of sending them.
+Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the LangSmith adapter below it, then schedule `syncLangSmith` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
    - the Trace tab shows exactly one "Turn" card per exchange, and messages are in order
    - message text renders in the thread view, and no reply bubble is empty
-   - UI components appear as spans in the Trace tab, inside the turn of the reply they came with
+   - tool calls appear inside the turn they belong to
    - the user is the real user, not `unknown`
-   - CSAT appears as a score, and context keys appear in the session filters
 4. Run the same window again and confirm nothing duplicates.
 
 ### Phase 5: Ship
 
-- Keep to Decagon's documented global limit of 1 request per second; the adapter waits between pages.
+- LangSmith rate-limits API calls per workspace; the adapter backs off on `429`. The per-trace query is the expensive step; keep the schedule no more frequent than the settle window needs.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 
@@ -142,24 +155,24 @@ Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude ge
 
 ### Example: one complete session
 
-A two-exchange conversation with a CSAT rating, as produced by `toAgentEvents` from a normalized Decagon conversation. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
+A two-exchange thread with a tool call, as produced by `toAgentEvents` from `normalizeLangSmithThread`. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
 
 ```json
 [
   {
     "event_type": "[Agent] User Message",
-    "user_id": "user_48213",
-    "time": 1788282000000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m0",
+    "user_id": "user_12345",
+    "time": 1768478400000,
+    "insert_id": "thread-1:run-root-1:user",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "thread-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-1",
+      "[Agent] Context": "{\"platform\":\"langsmith\"}",
+      "[Agent] Trace ID": "thread-1:trace-1",
       "[Agent] Turn ID": 1,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m0",
+      "[Agent] Message ID": "thread-1:run-root-1:user",
       "[Agent] Component Type": "user_input",
       "$llm_message": {
         "text": "Where is my order?"
@@ -168,97 +181,112 @@ A two-exchange conversation with a CSAT rating, as produced by `toAgentEvents` f
   },
   {
     "event_type": "[Agent] AI Response",
-    "user_id": "user_48213",
-    "time": 1788282004000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m1",
+    "user_id": "user_12345",
+    "time": 1768478402000,
+    "insert_id": "thread-1:run-root-1:reply",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "thread-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-1",
+      "[Agent] Context": "{\"platform\":\"langsmith\"}",
+      "[Agent] Trace ID": "thread-1:trace-1",
       "[Agent] Turn ID": 2,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m1",
+      "[Agent] Message ID": "thread-1:run-root-1:reply",
       "[Agent] Component Type": "llm",
       "[Agent] Is Error": false,
+      "[Agent] Model Name": "gpt-4o-mini",
+      "[Agent] Provider": "openai",
+      "[Agent] Input Tokens": 120,
+      "[Agent] Output Tokens": 14,
+      "[Agent] Cost USD": 3e-05,
       "$llm_message": {
-        "text": "Your order shipped yesterday and arrives Thursday."
+        "text": "Let me check. What is the order number?"
       }
     }
   },
   {
     "event_type": "[Agent] User Message",
-    "user_id": "user_48213",
-    "time": 1788282030000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m2",
+    "user_id": "user_12345",
+    "time": 1768478430000,
+    "insert_id": "thread-1:run-root-2:user",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "thread-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2",
+      "[Agent] Context": "{\"platform\":\"langsmith\"}",
+      "[Agent] Trace ID": "thread-1:trace-2",
       "[Agent] Turn ID": 3,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m2",
+      "[Agent] Message ID": "thread-1:run-root-2:user",
       "[Agent] Component Type": "user_input",
       "$llm_message": {
-        "text": "Thanks!"
+        "text": "A1001"
       }
+    }
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_12345",
+    "time": 1768478431000,
+    "insert_id": "thread-1:run-tool-2",
+    "event_properties": {
+      "[Agent] Session ID": "thread-1",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Context": "{\"platform\":\"langsmith\"}",
+      "[Agent] Trace ID": "thread-1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Invocation ID": "thread-1:run-tool-2",
+      "[Agent] Tool Name": "lookup_order",
+      "[Agent] Tool Success": true,
+      "[Agent] Is Error": false,
+      "[Agent] Component Type": "tool",
+      "[Agent] Latency Ms": 250,
+      "[Agent] Parent Message ID": "thread-1:run-root-2:user",
+      "[Agent] Tool Input": "{\"order_id\":\"A1001\"}",
+      "[Agent] Tool Output": "{\"status\":\"shipped\"}"
     }
   },
   {
     "event_type": "[Agent] AI Response",
-    "user_id": "user_48213",
-    "time": 1788282031000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m3",
+    "user_id": "user_12345",
+    "time": 1768478434000,
+    "insert_id": "thread-1:run-root-2:reply",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "thread-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2",
-      "[Agent] Turn ID": 4,
-      "[Agent] Message ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:m3",
+      "[Agent] Context": "{\"platform\":\"langsmith\"}",
+      "[Agent] Trace ID": "thread-1:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "thread-1:run-root-2:reply",
       "[Agent] Component Type": "llm",
       "[Agent] Is Error": false,
+      "[Agent] Model Name": "gpt-4o-mini",
+      "[Agent] Provider": "openai",
+      "[Agent] Input Tokens": 160,
+      "[Agent] Output Tokens": 8,
+      "[Agent] Cost USD": 3e-05,
       "$llm_message": {
-        "text": "Happy to help."
+        "text": "It arrives Thursday."
       }
     }
   },
   {
-    "event_type": "[Agent] Score",
-    "user_id": "user_48213",
-    "time": 1788282060000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:score-csat",
-    "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
-      "[Agent] Agent ID": "order-support",
-      "[Agent] Runtime": "custom",
-      "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2",
-      "[Agent] Score Name": "csat",
-      "[Agent] Score Value": 5,
-      "[Agent] Target ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
-      "[Agent] Target Type": "session",
-      "[Agent] Evaluation Source": "user"
-    }
-  },
-  {
     "event_type": "[Agent] Session End",
-    "user_id": "user_48213",
-    "time": 1788282060000,
-    "insert_id": "8ba9020c-0424-4bb2-ba5f-971a522c84de:session-end",
+    "user_id": "user_12345",
+    "time": 1768478434000,
+    "insert_id": "thread-1:session-end",
     "event_properties": {
-      "[Agent] Session ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de",
+      "[Agent] Session ID": "thread-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
-      "[Agent] Context": "{\"platform\":\"decagon\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
-      "[Agent] Trace ID": "8ba9020c-0424-4bb2-ba5f-971a522c84de:trace-2"
+      "[Agent] Context": "{\"platform\":\"langsmith\"}",
+      "[Agent] Trace ID": "thread-1:trace-2"
     }
   }
 ]
@@ -600,157 +628,264 @@ async function postBatch(
 ```
 <!-- forwarder-core:end -->
 
-### Decagon adapter
+### LangSmith adapter
 
-Field names follow Decagon's archived export documentation. Confirm each against a real response in Phase 2.
+Field names follow LangSmith's public OpenAPI specification and trace query syntax. Confirm each against a real response in Phase 2.
 
 ```ts
 import {
   send,
   toAgentEvents,
   type ForwarderMessage,
+  type ForwarderSpan,
+  type ForwarderToolCall,
   type NormalizedConversation,
 } from './amplitude-agent-forwarder';
 
-interface DecagonMessage {
-  text: string;
-  role: string; // documented: 'USER' | 'AI'
-  created_at: string; // documented: '2024-01-01 21:42:10.309970', no timezone
+/** One run from POST /api/v1/runs/query. */
+export interface LangSmithRun {
+  id: string;
+  name: string;
+  run_type: string; // llm, chain, tool, retriever, embedding, prompt, parser
+  start_time: string; // UTC, sometimes without a trailing Z
+  end_time?: string | null;
+  inputs?: Record<string, unknown> | null;
+  outputs?: Record<string, unknown> | null;
+  error?: string | null;
+  extra?: { metadata?: Record<string, unknown>; invocation_params?: Record<string, unknown> } | null;
+  trace_id: string;
+  parent_run_id?: string | null;
+  thread_id?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_cost?: string | number | null;
 }
 
-interface DecagonConversation {
-  conversation_id: string;
-  user_id?: string | null;
-  created_at: string;
-  metadata?: Record<string, unknown>;
-  messages: DecagonMessage[];
-  csat_rating?: number | null;
-  tags?: { name: string; level?: number }[];
+interface RunsPage {
+  runs: LangSmithRun[];
+  cursors?: { next?: string | null };
 }
 
-interface DecagonExportPage {
-  conversations?: DecagonConversation[];
-  next_page_cursor?: string | number | null;
-  next_cursor?: string | number | null;
-  next_page_updated_after?: string | number | null;
-}
-
-const DECAGON_EXPORT_URL = 'https://api.decagon.ai/conversation/export';
+/** US: https://api.smith.langchain.com, EU: https://eu.api.smith.langchain.com, or your self-hosted URL. */
+const LANGSMITH_ENDPOINT = process.env.LANGSMITH_ENDPOINT ?? 'https://api.smith.langchain.com';
+const RUN_FIELDS = [
+  'id', 'name', 'run_type', 'start_time', 'end_time', 'inputs', 'outputs', 'error', 'extra',
+  'trace_id', 'parent_run_id', 'thread_id', 'prompt_tokens', 'completion_tokens', 'total_cost',
+];
+const THREAD_KEYS = ['session_id', 'thread_id'];
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Yields conversations last updated between minTimestamp and maxTimestamp (epoch seconds). */
-export async function* exportDecagonConversations(params: {
-  apiKey: string;
-  minTimestamp: number;
-  maxTimestamp: number;
-}): AsyncGenerator<DecagonConversation> {
-  let cursor: string | number | undefined;
+export async function* queryLangSmithRuns(body: Record<string, unknown>): AsyncGenerator<LangSmithRun> {
+  let cursor: string | undefined;
   for (;;) {
-    const query = new URLSearchParams({
-      min_timestamp: String(params.minTimestamp),
-      max_timestamp: String(params.maxTimestamp),
+    const response = await fetch(`${LANGSMITH_ENDPOINT}/api/v1/runs/query`, {
+      method: 'POST',
+      headers: { 'x-api-key': process.env.LANGSMITH_API_KEY ?? '', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ select: RUN_FIELDS, ...body, ...(cursor ? { cursor } : {}) }),
     });
-    if (cursor !== undefined) query.set('cursor', String(cursor));
-    const response = await fetch(`${DECAGON_EXPORT_URL}?${query}`, {
-      headers: { Authorization: `Bearer ${params.apiKey}` },
-    });
-    if (response.status === 429) {
-      await sleep(5000);
+    if (response.status === 429 || response.status >= 500) {
+      await sleep(Number(response.headers.get('retry-after') ?? 5) * 1000);
       continue;
     }
-    if (!response.ok) {
-      throw new Error(`Decagon export returned ${response.status}: ${await response.text()}`);
-    }
-    const page = (await response.json()) as DecagonExportPage;
-    const conversations = page.conversations ?? [];
-    for (const conversation of conversations) yield conversation;
-
-    const next = page.next_page_cursor ?? page.next_cursor ?? page.next_page_updated_after;
-    if (!next || next === cursor || conversations.length === 0) return;
-    cursor = next;
-    await sleep(1100); // documented global limit: 1 request per second
+    if (!response.ok) throw new Error(`LangSmith returned ${response.status}: ${await response.text()}`);
+    const page = (await response.json()) as RunsPage;
+    for (const run of page.runs) yield run;
+    cursor = page.cursors?.next ?? undefined;
+    if (!cursor || body.trace) return;
   }
 }
 
-/** Assumes UTC when the value has no timezone. Confirm in Phase 2. */
-function parseDecagonTime(value: string): number {
-  const iso = value.trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
-  const hasZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(iso);
-  const ms = Date.parse(hasZone ? iso : `${iso}Z`);
-  if (Number.isNaN(ms)) throw new Error(`Unparseable Decagon timestamp: ${value}`);
-  return ms;
+/** Best-effort text from a chat payload. Confirm against real runs in Phase 2. */
+export function textFrom(value: unknown, role: 'user' | 'assistant'): string {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  const contentText = (content: unknown): string =>
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((part) => (typeof part === 'string' ? part : (part as { text?: string })?.text ?? ''))
+            .join('')
+        : '';
+  const roles = role === 'user' ? ['user', 'human'] : ['assistant', 'ai'];
+  const fromMessages = (messages: unknown[]): string => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i] as { role?: string; type?: string; content?: unknown; kwargs?: { content?: unknown }; id?: string[] };
+      const kind = String(m?.role ?? m?.type ?? '').toLowerCase();
+      const lcClass = Array.isArray(m?.id) ? String(m.id[m.id.length - 1]) : '';
+      const lcRole = lcClass === 'HumanMessage' ? 'human' : lcClass === 'AIMessage' ? 'ai' : '';
+      if (roles.includes(kind)) return contentText(m.content);
+      if (roles.includes(lcRole)) return contentText(m.kwargs?.content);
+    }
+    return '';
+  };
+  if (typeof parsed === 'string') return parsed;
+  if (Array.isArray(parsed)) return fromMessages(parsed.flat());
+  if (parsed && typeof parsed === 'object') {
+    const o = parsed as Record<string, unknown>;
+    if (Array.isArray(o.messages)) return fromMessages(o.messages.flat());
+    if (Array.isArray(o.choices)) {
+      return contentText((o.choices[0] as { message?: { content?: unknown } })?.message?.content);
+    }
+    if (roles.includes(String(o.role ?? o.type ?? '').toLowerCase())) return contentText(o.content);
+    for (const key of ['content', 'text', 'output', 'answer', 'response', 'input', 'query', 'question']) {
+      if (typeof o[key] === 'string') return o[key] as string;
+    }
+  }
+  return '';
 }
 
-export interface DecagonMappingOptions {
+export interface LangSmithMappingOptions {
   agentId: string;
   /** Must return the user ID your product analytics uses. Confirm with the user. */
-  resolveUserId: (conversation: DecagonConversation) => string | undefined;
-  /** Metadata keys that are safe, non-personal filter dimensions. */
-  contextMetadataKeys?: string[];
+  resolveUserId: (root: LangSmithRun) => string | undefined;
+  /** Run types to send as [Agent] Span, for example ['retriever']. Confirm in Phase 2. */
+  spanRunTypes?: string[];
 }
 
-export function normalizeDecagonConversation(
-  conversation: DecagonConversation,
-  options: DecagonMappingOptions,
+const time = (value: string) => Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`);
+const sum = (values: (number | undefined)[]) =>
+  values.some((v) => v !== undefined) ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : undefined;
+const num = (value: unknown) => (value === null || value === undefined || value === '' ? undefined : Number(value));
+
+export function threadIdOf(run: LangSmithRun): string | undefined {
+  if (run.thread_id) return run.thread_id;
+  for (const key of THREAD_KEYS) {
+    const value = run.extra?.metadata?.[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
+/** One LangSmith thread (its root runs plus every run in their traces) -> one conversation. Each trace is one exchange. */
+export function normalizeLangSmithThread(
+  threadId: string,
+  runs: LangSmithRun[],
+  options: LangSmithMappingOptions,
 ): NormalizedConversation {
+  const roots = runs
+    .filter((r) => !r.parent_run_id)
+    .sort((a, b) => time(a.start_time) - time(b.start_time));
   const messages: ForwarderMessage[] = [];
-  conversation.messages.forEach((message, index) => {
-    const role = message.role === 'USER' ? 'user' : message.role === 'AI' ? 'assistant' : null;
-    if (!role) return;
+  for (const root of roots) {
+    const inTrace = runs
+      .filter((r) => r.trace_id === root.trace_id && r !== root)
+      .sort((a, b) => time(a.start_time) - time(b.start_time));
+    const start = time(root.start_time);
+    const end = time(root.end_time ?? root.start_time);
+    const userText = textFrom(root.inputs, 'user');
+    if (userText) messages.push({ id: `${root.trace_id}:user`, role: 'user', text: userText, timestamp: start });
+
+    const toolCalls: ForwarderToolCall[] = inTrace
+      .filter((r) => r.run_type === 'tool')
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        timestamp: time(r.start_time),
+        input: r.inputs ?? undefined,
+        output: r.outputs ?? undefined,
+        success: !r.error,
+        latencyMs: r.end_time ? time(r.end_time) - time(r.start_time) : undefined,
+      }));
+    const spans: ForwarderSpan[] = inTrace
+      .filter((r) => (options.spanRunTypes ?? []).includes(r.run_type))
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        timestamp: time(r.start_time),
+        input: r.inputs ?? undefined,
+        output: r.outputs ?? undefined,
+        latencyMs: r.end_time ? time(r.end_time) - time(r.start_time) : undefined,
+      }));
+    const llmRuns = inTrace.filter((r) => r.run_type === 'llm');
+    const lastLlm = llmRuns[llmRuns.length - 1];
+    const model = lastLlm?.extra?.metadata?.ls_model_name ?? lastLlm?.extra?.invocation_params?.model;
+    const provider = lastLlm?.extra?.metadata?.ls_provider;
     messages.push({
-      id: `m${index}`,
-      role,
-      text: message.text,
-      timestamp: parseDecagonTime(message.created_at),
+      id: `${root.trace_id}:reply`,
+      role: 'assistant',
+      text: textFrom(root.outputs, 'assistant'),
+      timestamp: Math.max(end, start + 1),
+      toolCalls,
+      spans,
+      model: typeof model === 'string' ? model : undefined,
+      provider: typeof provider === 'string' ? provider : undefined,
+      inputTokens: sum(llmRuns.map((r) => num(r.prompt_tokens))),
+      outputTokens: sum(llmRuns.map((r) => num(r.completion_tokens))),
+      costUsd: sum(llmRuns.map((r) => num(r.total_cost))),
     });
-  });
-
-  const context: Record<string, string | number | boolean> = { platform: 'decagon' };
-  for (const key of options.contextMetadataKeys ?? []) {
-    const value = conversation.metadata?.[key];
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      context[key] = value;
-    }
-  }
-  for (const tag of conversation.tags ?? []) {
-    context[`tag_${tag.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`] = true;
   }
 
-  const endedAt = messages.length
-    ? Math.max(...messages.map((message) => message.timestamp))
-    : parseDecagonTime(conversation.created_at);
-
+  const first = roots[0];
   return {
-    conversationId: conversation.conversation_id,
+    conversationId: threadId,
     agentId: options.agentId,
-    userId: options.resolveUserId(conversation),
-    context,
+    userId: first ? options.resolveUserId(first) : undefined,
+    context: { platform: 'langsmith' },
     messages,
-    scores:
-      typeof conversation.csat_rating === 'number'
-        ? [{ name: 'csat', value: conversation.csat_rating, timestamp: endedAt, source: 'user' }]
-        : undefined,
-    endedAt,
+    endedAt: messages.length ? Math.max(...messages.map((m) => m.timestamp)) : undefined,
   };
 }
 
-/** Only conversations untouched for this long are treated as finished. */
-const SETTLE_SECONDS = 2 * 60 * 60;
+/** Only threads with no new traces for this long are treated as finished. */
+const SETTLE_MS = 2 * 60 * 60 * 1000;
+/** How far back a thread's earlier traces may start. */
+const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const redact = (text: string): string => text; // replace with your PII redaction
 
-/** Forwards conversations last updated after `watermark` (epoch seconds). Returns the next watermark. */
-export async function syncDecagon(watermark: number): Promise<number> {
-  const maxTimestamp = Math.floor(Date.now() / 1000) - SETTLE_SECONDS;
-  for await (const raw of exportDecagonConversations({
-    apiKey: process.env.DECAGON_API_KEY ?? '',
-    minTimestamp: watermark,
-    maxTimestamp,
+/** Forwards threads active after `watermark` (ISO 8601) that have since settled. Returns the next watermark. */
+export async function syncLangSmith(projectId: string, watermark: string): Promise<string> {
+  const until = new Date(Date.now() - SETTLE_MS).toISOString();
+  const threadIds = new Set<string>();
+  let tracesWithoutThread = 0;
+  let threadsWithoutUser = 0;
+  for await (const root of queryLangSmithRuns({
+    session: [projectId],
+    is_root: true,
+    start_time: watermark,
+    filter: `lt(start_time, "${until}")`,
+    select: ['id', 'trace_id', 'thread_id', 'extra', 'start_time'],
   })) {
-    const conversation = normalizeDecagonConversation(raw, {
+    const threadId = threadIdOf(root);
+    if (threadId) threadIds.add(threadId);
+    else tracesWithoutThread += 1;
+  }
+
+  for (const threadId of threadIds) {
+    const roots: LangSmithRun[] = [];
+    for await (const root of queryLangSmithRuns({
+      session: [projectId],
+      is_root: true,
+      start_time: new Date(Date.parse(watermark) - LOOKBACK_MS).toISOString(),
+      filter: `and(in(metadata_key, ${JSON.stringify(THREAD_KEYS)}), eq(metadata_value, ${JSON.stringify(threadId)}))`,
+    })) {
+      roots.push(root);
+    }
+    // Still active: a later run finds it again through its newer traces.
+    if (roots.some((r) => time(r.start_time) >= Date.parse(until))) continue;
+
+    const runs: LangSmithRun[] = [];
+    for (const root of roots) {
+      for await (const run of queryLangSmithRuns({ session: [projectId], trace: root.trace_id })) runs.push(run);
+    }
+    const conversation = normalizeLangSmithThread(threadId, runs, {
       agentId: 'TODO-confirmed-agent-id',
-      resolveUserId: (c) => c.user_id ?? undefined, // TODO: confirm this matches product analytics
+      resolveUserId: (root) => {
+        const value = root.extra?.metadata?.user_id; // TODO: confirm this matches product analytics
+        return typeof value === 'string' ? value : undefined;
+      },
     });
+    if (!conversation.userId) {
+      threadsWithoutUser += 1;
+      continue;
+    }
     const events = toAgentEvents(conversation, { redact });
     if (process.env.AMPLITUDE_DRY_RUN) {
       console.log(JSON.stringify(events, null, 2));
@@ -758,11 +893,16 @@ export async function syncDecagon(watermark: number): Promise<number> {
     }
     await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
   }
-  return maxTimestamp;
+  if (tracesWithoutThread || threadsWithoutUser) {
+    console.warn(
+      `Skipped ${tracesWithoutThread} traces without thread metadata and ${threadsWithoutUser} threads without a user ID`,
+    );
+  }
+  return until;
 }
 ```
 
-**Why the settle window.** The export returns conversations by last-updated time, and returns a conversation again whenever it gets new messages. Forwarding only conversations untouched for `SETTLE_SECONDS` means they are finished before Session End is sent. If a conversation is updated after it was forwarded, the next run sends it again: messages already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
+**Why the settle window.** LangSmith has no "thread finished" signal. Forwarding only threads with no root run newer than `SETTLE_MS` means they are finished before Session End is sent. If a thread resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
 
 ### Privacy
 
@@ -770,12 +910,12 @@ On the HTTP path you own redaction, and it must run before sending. Content trav
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call
-- `[Agent] Comment` on Score
+- `[Agent] Input State` and `[Agent] Output State` on Span
 - `[Agent] System Prompt` on AI Response (the core never sends it)
 
-The core's `redact` option runs on all of these. `contentMode: 'metadata_only'` sends none of them; sessions, turns, timing, CSAT, and user joins still work, but content-based quality signals will be weaker.
+The core's `redact` option runs on all of these. `contentMode: 'metadata_only'` sends none of them; sessions, turns, timing, tokens, and user joins still work, but content-based quality signals will be weaker.
 
-Keep personal data such as emails out of `[Agent] Context`; it is a filterable dimension, not a content field. That is why the adapter only copies metadata keys you list.
+If the application hides inputs and outputs from LangSmith, the adapter forwards empty text, and the checker flags empty replies. In that case use `contentMode: 'metadata_only'`. Keep personal data out of `[Agent] Context`; it is a filterable dimension, not a content field.
 
 ### HTTP API behavior
 
@@ -806,13 +946,18 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Everything landed at import time | No top-level `time` |
 | Messages show no text | `$llm_message` sent as a string instead of `{ "text": ... }` |
 | Filters missing a dimension | Sent as `[Agent] Tags` or as a flat property instead of a key in `[Agent] Context` |
-| Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_SECONDS` |
-| Only the first page of conversations arrives | The pagination field differs from all three documented names |
-| Times off by hours | Decagon timestamps are not UTC for your account; adjust `parseDecagonTime` |
 | `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
+| Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_MS` |
+| Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
+| No threads found | Root runs have no `session_id` or `thread_id` metadata, or the project ID is wrong |
+| A thread is missing earlier exchanges | Those root runs started before `LOOKBACK_MS`; raise it |
+| Tool calls or tokens missing | Child runs were not returned; check the `trace` query and that the API key can read the project |
+| Replies show JSON instead of text | `textFrom` does not recognize the payload shape; extend it |
 
 ### More
 
+- [Configure threads](https://docs.langchain.com/langsmith/threads) and [trace query syntax](https://docs.langchain.com/langsmith/trace-query-syntax) (LangSmith docs)
 - [Send agent events without the AI SDK](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) (Amplitude docs)
+- [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) (Amplitude docs)
 - [Agent Analytics taxonomy](https://amplitude.com/docs/amplitude-ai/agent-analytics/taxonomy)
 - [Other supported platforms](./README.md)
