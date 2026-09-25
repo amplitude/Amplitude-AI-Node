@@ -8,7 +8,12 @@ import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
-const PLATFORM_PAGES = ['sierra.md', 'decagon.md'];
+const PLATFORM_PAGES = ['sierra.md', 'decagon.md', 'langfuse.md', 'langsmith.md', 'braintrust.md'];
+const TRACING_ADAPTERS = [
+  { name: 'langfuse', page: 'langfuse.md', heading: '### Langfuse adapter' },
+  { name: 'langsmith', page: 'langsmith.md', heading: '### LangSmith adapter' },
+  { name: 'braintrust', page: 'braintrust.md', heading: '### Braintrust adapter' },
+];
 const CORE_START = '<!-- forwarder-core:start -->';
 const CORE_END = '<!-- forwarder-core:end -->';
 
@@ -128,6 +133,20 @@ describe('docs/integrations contract', () => {
     }
   });
 
+  it('points every manifest warehouse format and tool at a file that exists', () => {
+    const manifest = JSON.parse(readPage('manifest.json')) as {
+      warehouses: { raw_url: string; formats: { id: string }[] };
+      tools: { raw_url: string }[];
+    };
+    const prefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/';
+    const pages = readdirSync(join(DOCS_DIR, 'warehouses')).filter((f) => f.endsWith('.md') && f !== 'README.md');
+    expect(manifest.warehouses.formats.map((f) => `${f.id}.md`).sort()).toEqual(pages.sort());
+    for (const url of [manifest.warehouses.raw_url, ...manifest.tools.map((t) => t.raw_url)]) {
+      expect(url.startsWith(prefix)).toBe(true);
+      expect(() => readPage(url.slice(prefix.length))).not.toThrow();
+    }
+  });
+
   it('carries a byte-identical forwarder core on every platform page', () => {
     const cores = PLATFORM_PAGES.map((page) => extractCore(readPage(page)));
     for (const core of cores) expect(core).toBe(cores[0]);
@@ -150,6 +169,8 @@ describe('forwarder core and adapters', () => {
   let core: any;
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   let decagon: any;
+  // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
+  const tracing: Record<string, any> = {};
 
   const t0 = Date.UTC(2026, 0, 15, 12, 0, 0);
   const fixture = {
@@ -186,9 +207,20 @@ describe('forwarder core and adapters', () => {
     writeFileSync(join(dir, 'decagon.ts'), decagonSource);
     writeFileSync(join(dir, 'sierra.ts'), sierraSource);
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
+    const tracingSources = TRACING_ADAPTERS.map((a) => ({
+      name: a.name,
+      source: extractFencedBlockAfter(readPage(a.page), a.heading, 'ts'),
+    }));
+    for (const { name, source } of tracingSources) writeFileSync(join(dir, `${name}.ts`), source);
 
     const diagnostics = typeCheck(
-      ['amplitude-agent-forwarder.ts', 'decagon.ts', 'sierra.ts', 'env.d.ts'].map((f) => join(dir, f)),
+      [
+        'amplitude-agent-forwarder.ts',
+        'decagon.ts',
+        'sierra.ts',
+        ...tracingSources.map((s) => `${s.name}.ts`),
+        'env.d.ts',
+      ].map((f) => join(dir, f)),
     );
     expect(diagnostics).toEqual([]);
 
@@ -196,6 +228,9 @@ describe('forwarder core and adapters', () => {
     const decagonPath = transpileTo(dir, 'decagon', decagonSource);
     core = await import(pathToFileURL(corePath).href);
     decagon = await import(pathToFileURL(decagonPath).href);
+    for (const { name, source } of tracingSources) {
+      tracing[name] = await import(pathToFileURL(transpileTo(dir, name, source)).href);
+    }
   });
 
   afterAll(() => {
@@ -445,5 +480,162 @@ describe('forwarder core and adapters', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  const EXPECTED_EXCHANGES = [
+    '[Agent] User Message',
+    '[Agent] AI Response',
+    '[Agent] User Message',
+    '[Agent] Tool Call',
+    '[Agent] AI Response',
+    '[Agent] Session End',
+  ];
+
+  it('normalizes a Langfuse session: one exchange per trace, tools, usage, and opt-in spans', () => {
+    const obs = (o: Record<string, unknown>) => ({ parentObservationId: 'root-2', ...o });
+    const observations = [
+      { id: 'root-1', traceId: 't1', type: 'AGENT', startTime: '2026-01-15T12:00:00.000Z', endTime: '2026-01-15T12:00:02.000Z', isRootObservation: true, userId: 'user_12345', sessionId: 's1', environment: 'production', input: '{"messages":[{"role":"user","content":"Where is my order?"}]}', output: '{"role":"assistant","content":"Order number?"}' },
+      { id: 'gen-1', traceId: 't1', type: 'GENERATION', startTime: '2026-01-15T12:00:00.500Z', parentObservationId: 'root-1', model: 'gpt-4o-mini', usageDetails: { input: 120, output: 14 }, costDetails: { total: 0.001 } },
+      { id: 'root-2', traceId: 't2', type: 'AGENT', startTime: '2026-01-15T12:00:30.000Z', endTime: '2026-01-15T12:00:34.000Z', isRootObservation: true, userId: 'user_12345', sessionId: 's1', input: '"A1001"', output: '"It arrives Thursday."' },
+      obs({ id: 'tool-2', traceId: 't2', type: 'TOOL', name: 'lookup_order', startTime: '2026-01-15T12:00:31.000Z', endTime: '2026-01-15T12:00:31.250Z', input: '{"id":"A1001"}', output: '{"status":"shipped"}', level: 'ERROR' }),
+      obs({ id: 'guard-2', traceId: 't2', type: 'GUARDRAIL', name: 'pii-check', startTime: '2026-01-15T12:00:30.500Z' }),
+      obs({ id: 'gen-2a', traceId: 't2', type: 'GENERATION', startTime: '2026-01-15T12:00:30.600Z', model: 'gpt-4o-mini', usageDetails: { input: 100, output: 5 }, costDetails: { total: 0.001 } }),
+      obs({ id: 'gen-2b', traceId: 't2', type: 'GENERATION', startTime: '2026-01-15T12:00:32.000Z', model: 'gpt-4o', usageDetails: { input: 160, output: 8 }, costDetails: { total: 0.002 } }),
+    ];
+    const options = { agentId: 'order-support', resolveUserId: (r: { userId: string }) => r.userId };
+    const conversation = tracing.langfuse.normalizeLangfuseSession('s1', observations, options);
+    expect(conversation.context).toEqual({ platform: 'langfuse', environment: 'production' });
+    const events: AgentEvent[] = core.toAgentEvents(conversation);
+    assertForwarderRules(events);
+    expect(events.map((e) => e.event_type)).toEqual(EXPECTED_EXCHANGES);
+    expect(events[0]?.event_properties.$llm_message).toEqual({ text: 'Where is my order?' });
+    expect(events[1]?.event_properties.$llm_message).toEqual({ text: 'Order number?' });
+    expect(events[2]?.event_properties.$llm_message).toEqual({ text: 'A1001' });
+    expect(events[3]?.event_properties['[Agent] Tool Success']).toBe(false);
+    expect(events[3]?.event_properties['[Agent] Latency Ms']).toBe(250);
+    expect(events[4]?.event_properties).toMatchObject({
+      '[Agent] Model Name': 'gpt-4o',
+      '[Agent] Input Tokens': 260,
+      '[Agent] Output Tokens': 13,
+      '[Agent] Cost USD': 0.003,
+    });
+    expect(events.some((e) => e.event_type === '[Agent] Span')).toBe(false);
+
+    const withSpans: AgentEvent[] = core.toAgentEvents(
+      tracing.langfuse.normalizeLangfuseSession('s1', observations, { ...options, spanTypes: ['GUARDRAIL'] }),
+    );
+    assertForwarderRules(withSpans);
+    expect(withSpans.find((e) => e.event_type === '[Agent] Span')?.event_properties['[Agent] Span Name']).toBe('pii-check');
+  });
+
+  it('normalizes a LangSmith thread: UTC times without Z, string cost, and model metadata', () => {
+    const md = { thread_id: 'th1', user_id: 'user_12345' };
+    const llm = { ls_model_name: 'gpt-4o-mini', ls_provider: 'openai' };
+    const runs = [
+      { id: 'r1', name: 'agent', run_type: 'chain', start_time: '2026-01-15T12:00:00.000000', end_time: '2026-01-15T12:00:02.000000', trace_id: 'r1', inputs: { messages: [{ role: 'user', content: 'Where is my order?' }] }, outputs: { messages: [{ role: 'user', content: 'Where is my order?' }, { role: 'assistant', content: 'Order number?' }] }, extra: { metadata: md } },
+      { id: 'l1', name: 'ChatOpenAI', run_type: 'llm', start_time: '2026-01-15T12:00:00.500000', trace_id: 'r1', parent_run_id: 'r1', prompt_tokens: 120, completion_tokens: 14, total_cost: '0.001', extra: { metadata: { ...md, ...llm } } },
+      { id: 'r2', name: 'agent', run_type: 'chain', start_time: '2026-01-15T12:00:30.000000', end_time: '2026-01-15T12:00:34.000000', trace_id: 'r2', inputs: { messages: [[{ lc: 1, type: 'constructor', id: ['langchain', 'schema', 'messages', 'HumanMessage'], kwargs: { content: 'A1001' } }]] }, outputs: { output: 'It arrives Thursday.' }, extra: { metadata: md } },
+      { id: 't2', name: 'lookup_order', run_type: 'tool', start_time: '2026-01-15T12:00:31.000000', end_time: '2026-01-15T12:00:31.250000', trace_id: 'r2', parent_run_id: 'r2', inputs: { id: 'A1001' }, outputs: { status: 'shipped' }, error: null, extra: { metadata: md } },
+      { id: 'l2', name: 'ChatOpenAI', run_type: 'llm', start_time: '2026-01-15T12:00:32.000000', trace_id: 'r2', parent_run_id: 'r2', prompt_tokens: 160, completion_tokens: 8, total_cost: '0.002', extra: { metadata: { ...md, ...llm } } },
+    ];
+    expect(tracing.langsmith.threadIdOf(runs[0])).toBe('th1');
+    expect(tracing.langsmith.threadIdOf({ extra: { metadata: { session_id: 'sx' } } })).toBe('sx');
+    const conversation = tracing.langsmith.normalizeLangSmithThread('th1', runs, {
+      agentId: 'order-support',
+      resolveUserId: (r: { extra: { metadata: { user_id: string } } }) => r.extra.metadata.user_id,
+    });
+    const events: AgentEvent[] = core.toAgentEvents(conversation);
+    assertForwarderRules(events);
+    expect(events.map((e) => e.event_type)).toEqual(EXPECTED_EXCHANGES);
+    expect(events[0]?.time).toBe(Date.UTC(2026, 0, 15, 12, 0, 0));
+    expect(events[1]?.event_properties.$llm_message).toEqual({ text: 'Order number?' });
+    expect(events[2]?.event_properties.$llm_message).toEqual({ text: 'A1001' });
+    expect(events[4]?.event_properties).toMatchObject({
+      '[Agent] Model Name': 'gpt-4o-mini',
+      '[Agent] Provider': 'openai',
+      '[Agent] Input Tokens': 160,
+      '[Agent] Output Tokens': 8,
+      '[Agent] Cost USD': 0.002,
+    });
+  });
+
+  it('normalizes a Braintrust conversation: metrics timing, tokens, and no cost', () => {
+    const s = Date.UTC(2026, 0, 15, 12, 0, 0) / 1000;
+    const spans = [
+      { id: 'a', span_id: 'root-1', root_span_id: 'root-1', is_root: true, created: '2026-01-15T12:00:00Z', input: [{ role: 'user', content: 'Where is my order?' }], output: 'Order number?', metadata: { session_id: 'c1', user_id: 'user_12345' }, metrics: { start: s, end: s + 2 }, span_attributes: { name: 'agent', type: 'task' } },
+      { id: 'b', span_id: 'llm-1', root_span_id: 'root-1', span_parents: ['root-1'], created: '2026-01-15T12:00:00Z', metadata: { model: 'gpt-4o-mini' }, metrics: { start: s + 0.5, end: s + 1.9, prompt_tokens: 120, completion_tokens: 14 }, span_attributes: { name: 'Chat Completion', type: 'llm' } },
+      { id: 'c', span_id: 'root-2', root_span_id: 'root-2', span_parents: [], created: '2026-01-15T12:00:30Z', input: 'A1001', output: { choices: [{ message: { role: 'assistant', content: 'It arrives Thursday.' } }] }, metadata: { session_id: 'c1', user_id: 'user_12345' }, metrics: { start: s + 30, end: s + 34 }, span_attributes: { name: 'agent', type: 'task' } },
+      { id: 'd', span_id: 'tool-2', root_span_id: 'root-2', span_parents: ['root-2'], created: '2026-01-15T12:00:31Z', input: { id: 'A1001' }, output: { status: 'shipped' }, metrics: { start: s + 31, end: s + 31.25 }, span_attributes: { name: 'lookup_order', type: 'tool' } },
+    ];
+    const conversation = tracing.braintrust.normalizeBraintrustConversation('c1', spans, {
+      agentId: 'order-support',
+      resolveUserId: (r: { metadata: { user_id: string } }) => r.metadata.user_id,
+    });
+    const events: AgentEvent[] = core.toAgentEvents(conversation);
+    assertForwarderRules(events);
+    expect(events.map((e) => e.event_type)).toEqual(EXPECTED_EXCHANGES);
+    expect(events[1]?.time).toBe(Date.UTC(2026, 0, 15, 12, 0, 2));
+    expect(events[1]?.event_properties).toMatchObject({ '[Agent] Model Name': 'gpt-4o-mini', '[Agent] Input Tokens': 120 });
+    expect(events[3]?.event_properties['[Agent] Latency Ms']).toBe(250);
+    expect(events[4]?.event_properties.$llm_message).toEqual({ text: 'It arrives Thursday.' });
+    expect(events.some((e) => '[Agent] Cost USD' in e.event_properties)).toBe(false);
+  });
+
+  async function drain<T>(iterable: AsyncIterable<T>): Promise<T[]> {
+    const items: T[] = [];
+    vi.useFakeTimers();
+    try {
+      const run = (async () => {
+        for await (const item of iterable) items.push(item);
+      })();
+      await vi.runAllTimersAsync();
+      await run;
+    } finally {
+      vi.useRealTimers();
+    }
+    return items;
+  }
+
+  it('follows each tracing tool API cursor and retries 429', async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const respond = (responses: Response[]) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: { body?: string }) => {
+          calls.push({ url, body: init?.body });
+          return responses.shift() ?? new Response('{}', { status: 500 });
+        }),
+      );
+
+    respond([
+      new Response('{}', { status: 429, headers: { 'retry-after': '0' } }),
+      new Response(JSON.stringify({ data: [{ id: 'o1' }], meta: { cursor: 'next1' } })),
+      new Response(JSON.stringify({ data: [{ id: 'o2' }], meta: {} })),
+    ]);
+    const observations = await drain(tracing.langfuse.listLangfuseObservations({ sessionId: 's1' }));
+    expect(observations.map((o: { id: string }) => o.id)).toEqual(['o1', 'o2']);
+    expect(calls[0]?.url).toContain('/api/public/v2/observations?limit=1000&sessionId=s1');
+    expect(calls[2]?.url).toContain('cursor=next1');
+
+    calls.length = 0;
+    respond([
+      new Response(JSON.stringify({ runs: [{ id: 'r1' }], cursors: { next: 'c2' } })),
+      new Response(JSON.stringify({ runs: [{ id: 'r2' }], cursors: { next: null } })),
+    ]);
+    const runs = await drain(tracing.langsmith.queryLangSmithRuns({ session: ['p1'], is_root: true }));
+    expect(runs.map((r: { id: string }) => r.id)).toEqual(['r1', 'r2']);
+    expect(calls[0]?.url).toContain('/api/v1/runs/query');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({ session: ['p1'], is_root: true });
+    expect(JSON.parse(calls[1]?.body ?? '{}').cursor).toBe('c2');
+
+    calls.length = 0;
+    respond([
+      new Response('{"span_id":"a"}\n{"span_id":"b"}\n', { headers: { 'x-bt-cursor': 'cur1' } }),
+      new Response('{"span_id":"c"}\n'),
+    ]);
+    const spans = await drain(tracing.braintrust.queryBraintrust("SELECT * FROM project_logs('p1') LIMIT 1000"));
+    expect(spans.map((r: { span_id: string }) => r.span_id)).toEqual(['a', 'b', 'c']);
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toEqual({ query: "SELECT * FROM project_logs('p1') LIMIT 1000", fmt: 'jsonl' });
+    expect(JSON.parse(calls[1]?.body ?? '{}').query).toBe("SELECT * FROM project_logs('p1') LIMIT 1000 OFFSET 'cur1'");
   });
 });
