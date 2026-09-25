@@ -23,6 +23,16 @@ Your agent runs in your own code and is already traced; the forwarder reads sess
 | LangSmith | [langsmith.md](./langsmith.md) | Scheduled pull of threads from the runs query API | 2026-09-24 |
 | Braintrust | [braintrust.md](./braintrust.md) | Scheduled SQL queries against project logs | 2026-09-24 |
 
+These guides forward what the application already logged, including past conversations. Set expectations with the customer up front:
+
+| Tool | Conversation ID | User ID | Message text |
+|---|---|---|---|
+| Langfuse | Built in (`sessionId`), if the app sets it | Built in (`userId`), if the app sets it | As logged |
+| LangSmith | Thread metadata (`session_id` or `thread_id`), if the app sets it | Run metadata only | As logged, unless hidden |
+| Braintrust | Span metadata only | Span metadata only | As logged |
+
+The user ID must match the one used in product analytics. Conversations without a conversation ID or a user ID are skipped and counted, not sent.
+
 If your application already emits OpenTelemetry, you can skip the forwarder and add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
 
 ## Data warehouses

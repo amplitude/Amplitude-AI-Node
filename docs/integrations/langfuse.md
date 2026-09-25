@@ -36,12 +36,21 @@ scheduled job (for example, hourly)
 
 Langfuse scores (`GET /api/public/v2/scores`) are not forwarded by this adapter. If the user wants them, map each session-level score to a `ForwarderScore`.
 
+### What your traces must already contain
+
+This job forwards what is already in Langfuse; it cannot add what the application never logged.
+
+- **Conversation ID:** Langfuse's built-in `sessionId`, if the application sets it on its traces.
+- **User ID:** Langfuse's built-in `userId`, if set. It must be the same ID your product analytics uses.
+- **Message text:** the root trace's input and output, exactly as logged. If that is a full prompt rather than what the user typed and saw, Phase 2 adjusts the extraction. Content Langfuse masked stays masked.
+
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as Langfuse retains them.
+
 ### What you need before starting
 
 1. An Amplitude project and its API key.
 2. A Langfuse public key and secret key for the project, and the host: `https://cloud.langfuse.com` (EU), `https://us.cloud.langfuse.com` (US), or your self-hosted URL.
-3. Langfuse sessions: the adapter groups traces by `sessionId`. Traces without one are skipped and counted.
-4. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
+3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
 

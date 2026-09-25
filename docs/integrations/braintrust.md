@@ -36,12 +36,21 @@ scheduled job (for example, hourly)
 
 Cost stays empty: the logged fields this adapter reads carry tokens, not cost, and Amplitude does not estimate it. Braintrust scores are not forwarded; if the user wants them, map them to `ForwarderScore`.
 
+### What your traces must already contain
+
+This job forwards what is already in Braintrust; it cannot add what the application never logged.
+
+- **Conversation ID:** Braintrust has no built-in conversation; the application must log one in root-span metadata, under a key you confirm.
+- **User ID:** also metadata only, under a key you confirm. It must be the same ID your product analytics uses.
+- **Message text:** the root span's input and output, exactly as logged.
+
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as Braintrust retains them.
+
 ### What you need before starting
 
 1. An Amplitude project and its API key.
 2. A Braintrust API key and the project ID. Self-hosted data planes use their own API URL (`BRAINTRUST_API_URL`).
-3. A conversation ID in span metadata. Braintrust has no built-in conversation concept, so the application must log one (for example `metadata.session_id`) on root spans. Traces without it are skipped and counted.
-4. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
+3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
 

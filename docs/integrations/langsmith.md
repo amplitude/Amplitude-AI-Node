@@ -36,12 +36,21 @@ scheduled job (for example, hourly)
 
 LangSmith feedback is not forwarded by this adapter. If the user wants it, map thread-level feedback to a `ForwarderScore`.
 
+### What your traces must already contain
+
+This job forwards what is already in LangSmith; it cannot add what the application never logged.
+
+- **Conversation ID:** a LangSmith thread, which exists only if the application sets the `session_id` or `thread_id` metadata key on its runs.
+- **User ID:** LangSmith has no built-in user field; it must be in run metadata, under a key you confirm. It must be the same ID your product analytics uses.
+- **Message text:** the root run's inputs and outputs, exactly as logged. If the application hides inputs and outputs from LangSmith, send metadata only.
+
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as LangSmith retains them.
+
 ### What you need before starting
 
 1. An Amplitude project and its API key.
 2. A LangSmith API key, the tracing project's ID (a UUID), and the host: `https://api.smith.langchain.com` (US), `https://eu.api.smith.langchain.com` (EU), or your self-hosted URL.
-3. LangSmith threads: the application must set the `session_id` or `thread_id` metadata key. LangSmith's documentation asks for it on every run in a trace; the adapter needs it at least on root runs. Traces without one are skipped and counted.
-4. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
+3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
 
