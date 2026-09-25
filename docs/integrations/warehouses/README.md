@@ -46,12 +46,24 @@ If conversations are still happening in code you run, instrument live instead wi
 - Filters on any dimension you map into context, such as channel, locale, or agent version.
 - Model, token, and cost data when your table records them. Stage 2 never estimates them.
 
+### What your table must already contain
+
+The query imports what your table already records; it cannot add what was never logged. Past conversations import too, with their original timestamps.
+
+| Data | Needed for | If the table doesn't have it |
+|---|---|---|
+| Conversation ID | Grouping rows into a session | Rows are dropped |
+| Per-row ID or position, role, and timestamp | Turn order and deduplication | Rows are dropped |
+| User ID matching product analytics (or a device ID) | Tying the session to a user | Rows are dropped; a user ID that doesn't match imports but won't join to product data |
+| Agent ID | Sessions appearing in Agent Analytics | Use a constant if the table holds one agent |
+| Message text | The thread view and content-based quality signals | Import metadata only (`include_content = FALSE`) |
+| Tool calls, UI components, model, tokens, cost | Richer turns and cost reporting | Left empty, never estimated |
+
 ### What you need before starting
 
 1. An Amplitude project with access to warehouse sources (Amplitude Data, **Catalog > Sources**).
 2. Warehouse credentials set up per Amplitude's source guide: [Snowflake](https://amplitude.com/docs/data/source-catalog/snowflake), [BigQuery](https://amplitude.com/docs/data/source-catalog/bigquery), or [Databricks](https://amplitude.com/docs/data/source-catalog/databricks).
-3. The table that holds conversations, with a stable conversation ID, a per-row ID or position, a role, text, and a timestamp.
-4. A decision on which column identifies the user. It must match the `user_id` your product analytics already uses, or sessions cannot join to product behavior.
+3. A decision on which column identifies the user. It must match the `user_id` your product analytics already uses, or sessions cannot join to product behavior.
 
 ### Effort
 
@@ -93,7 +105,9 @@ Open the format page and copy the query for the user's warehouse. Then:
 3. Put each filterable dimension in `context` as one JSON key per dimension.
 4. Set `settle_hours` from do-not-guess answer 4.
 
-**PAUSE.** Show the user the mapping and the `canonical` rows for one sample conversation (run the query up to `canonical` with `SELECT * FROM canonical`).
+5. Measure coverage over the whole table: the share of conversations with no user or device ID, and with no agent ID. Stage 2 drops those rows, so they never reach Amplitude.
+
+**PAUSE.** Show the user the mapping, the coverage numbers, and the `canonical` rows for one sample conversation (run the query up to `canonical` with `SELECT * FROM canonical`). If coverage is low, say so plainly; do not invent a fallback identity.
 
 ### Phase 3: Run and check
 
@@ -143,8 +157,8 @@ Stage 1 produces one row per message, tool call, or span, with these columns:
 | `message_id` | string | Yes | Stable per-row ID, unique within the session. Never a random UUID. |
 | `role` | 'user' \| 'assistant' \| 'tool' \| 'span' | Yes | `assistant` is a reply the user sees. `span` is a UI component, or a step the user never saw (routing, handoff). Other roles are dropped. |
 | `event_time` | timestamp (UTC) | Yes | When the message was sent or the tool ran. |
-| `agent_id` | string | Yes | Becomes `[Agent] Agent ID`. Events without it never appear in Agent Analytics. |
-| `user_id` | string | No | Same user ID as your product analytics. At least one of `user_id` and `device_id` is required. |
+| `agent_id` | string | Yes | Becomes `[Agent] Agent ID`. Rows without it are dropped. |
+| `user_id` | string | No | Same user ID as your product analytics. Rows with neither `user_id` nor `device_id` are dropped. |
 | `device_id` | string | No | Use when there is no logged-in user. |
 | `content` | string | No | Message text (user and assistant rows). An empty reply followed by a span gets `[Displayed: <span_name>]`. |
 | `tool_name` | string | No | Tool rows only. |
@@ -275,7 +289,7 @@ If your format is public and others would use it, a pull request adding a format
 | Test SQL says a required column is missing | An alias changed case, or quotes were removed in Snowflake | Keep the output aliases exactly as generated |
 | Test SQL rejects `event_properties` | The column is JSON text, not an object | Keep the generated `OBJECT_CONSTRUCT` (Snowflake) or `JSON_OBJECT` (BigQuery); on Databricks, import from the table with the generated `from_json` query |
 | Test SQL returns no rows | No conversation has settled yet, or the sample filter excludes them | Check `settle_hours`; test on older conversations |
-| Sessions appear under `unknown` | `user_id` and `device_id` are both empty | Map the identity column in Stage 1 |
+| Some conversations never appear | Their rows have no user or device ID, or no agent ID, so Stage 2 drops them | Map the identity and agent columns in Stage 1; measure coverage as in Phase 2 |
 | A reply bubble is empty, or turns score as incomplete | An agent row with no text is mapped to `assistant` | Map UI components and routing or handoff steps to `span` |
 | One conversation shows as several sessions | `session_id` isn't stable, or different tables use different IDs | Use one stable conversation ID |
 | Messages out of order | Timestamps lack precision or a timezone | Convert to UTC with at least millisecond precision |

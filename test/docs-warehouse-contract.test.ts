@@ -156,6 +156,25 @@ describe('message-rows query', () => {
     expect(byId.get('conv_2:m2')?.event_properties['[Agent] Tool Success']).toBe(false);
   });
 
+  it('drops rows with no user or device ID, or no agent ID, instead of sending events the import rejects', async () => {
+    const format = MESSAGE_FORMATS['message-rows'];
+    const names = format.sourceColumns.map(([name]) => name);
+    const conv = names.indexOf('conversation_id');
+    const sessionsWith = async (dropFrom: string, column: string, value: string | null) => {
+      const target = names.indexOf(column);
+      const rows = format.sampleRows.map((row) =>
+        row.map((cell, i) => (row[conv] === dropFrom && i === target ? value : cell)),
+      );
+      const source = renderSample(DIALECTS.duckdb, format.sourceColumns, rows);
+      const events = await runDuckDb(renderMessageQuery(format, 'duckdb', { source }));
+      expect(checkAgentEvents(events).errors).toEqual([]);
+      return [...new Set(events.map((e) => e.event_properties['[Agent] Session ID']))];
+    };
+    expect(await sessionsWith('conv_1', 'customer_id', '')).toEqual(['conv_2']);
+    expect(await sessionsWith('conv_1', 'customer_id', null)).toEqual(['conv_2']);
+    expect(await sessionsWith('conv_2', 'agent_name', null)).toEqual(['conv_1']);
+  });
+
   it('produces the same events as the hosted-platform forwarder core', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-warehouse-parity-'));
     try {

@@ -117,6 +117,8 @@ ordered AS (
     AND c.session_id IS NOT NULL
     AND c.message_id IS NOT NULL
     AND c.event_time IS NOT NULL
+    AND NULLIF(c.agent_id, '') IS NOT NULL
+    AND (NULLIF(c.user_id, '') IS NOT NULL OR NULLIF(c.device_id, '') IS NOT NULL)
 ),
 sequenced AS (
   SELECT
@@ -304,6 +306,8 @@ ordered AS (
     AND c.session_id IS NOT NULL
     AND c.message_id IS NOT NULL
     AND c.event_time IS NOT NULL
+    AND NULLIF(c.agent_id, '') IS NOT NULL
+    AND (NULLIF(c.user_id, '') IS NOT NULL OR NULLIF(c.device_id, '') IS NOT NULL)
 ),
 sequenced AS (
   SELECT
@@ -494,6 +498,8 @@ ordered AS (
     AND c.session_id IS NOT NULL
     AND c.message_id IS NOT NULL
     AND c.event_time IS NOT NULL
+    AND NULLIF(c.agent_id, '') IS NOT NULL
+    AND (NULLIF(c.user_id, '') IS NOT NULL OR NULLIF(c.device_id, '') IS NOT NULL)
 ),
 sequenced AS (
   SELECT

@@ -39,6 +39,8 @@ If your application already emits OpenTelemetry, you can skip the forwarder and 
 
 Conversations or traces already land in Snowflake, BigQuery, or Databricks; a SQL view turns them into `[Agent]` events that Amplitude's warehouse import reads. Span exports (OpenTelemetry GenAI, OpenInference, MLflow Tracing) are replayed to Amplitude's OTLP endpoint instead. Start at [warehouses/README.md](./warehouses/README.md).
 
+As with tracing tools, the import brings in what the table already records, including past conversations. It needs a conversation ID and a user ID matching product analytics on every row; rows without them are dropped. Message text is needed for content-based quality signals; without it, import metadata only.
+
 ## Tools
 
 - [check-agent-events.mjs](./check-agent-events.mjs): checks a file of `[Agent]` events (CSV, JSON, or NDJSON) against the rules every guide shares, before you send or import it. No dependencies: `node check-agent-events.mjs events.json`.

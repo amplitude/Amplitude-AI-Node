@@ -11,8 +11,8 @@ export const CANONICAL_COLUMNS = [
   ['message_id', 'string', true, 'Stable per-row ID, unique within the session. Never a random UUID.'],
   ['role', "'user' | 'assistant' | 'tool' | 'span'", true, "`assistant` is a reply the user sees. `span` is a UI component, or a step the user never saw (routing, handoff). Other roles are dropped."],
   ['event_time', 'timestamp (UTC)', true, 'When the message was sent or the tool ran.'],
-  ['agent_id', 'string', true, 'Becomes `[Agent] Agent ID`. Events without it never appear in Agent Analytics.'],
-  ['user_id', 'string', false, 'Same user ID as your product analytics. At least one of `user_id` and `device_id` is required.'],
+  ['agent_id', 'string', true, 'Becomes `[Agent] Agent ID`. Rows without it are dropped.'],
+  ['user_id', 'string', false, 'Same user ID as your product analytics. Rows with neither `user_id` nor `device_id` are dropped.'],
   ['device_id', 'string', false, 'Use when there is no logged-in user.'],
   ['content', 'string', false, 'Message text (user and assistant rows). An empty reply followed by a span gets `[Displayed: <span_name>]`.'],
   ['tool_name', 'string', false, 'Tool rows only.'],
@@ -144,6 +144,8 @@ ordered AS (
     AND c.session_id IS NOT NULL
     AND c.message_id IS NOT NULL
     AND c.event_time IS NOT NULL
+    AND NULLIF(c.agent_id, '') IS NOT NULL
+    AND (NULLIF(c.user_id, '') IS NOT NULL OR NULLIF(c.device_id, '') IS NOT NULL)
 ),
 sequenced AS (
   SELECT
