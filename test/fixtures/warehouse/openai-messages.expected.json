@@ -1,0 +1,125 @@
+[
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478401000,
+    "insert_id": "chat_1:m1",
+    "event_properties": {
+      "[Agent] Session ID": "chat_1",
+      "[Agent] Agent ID": "travel-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Trace ID": "chat_1:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "chat_1:m1",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Is my flight on time?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:06"
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_12345",
+    "time": 1768478402001,
+    "insert_id": "chat_1:call_1",
+    "event_properties": {
+      "[Agent] Session ID": "chat_1",
+      "[Agent] Agent ID": "travel-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Trace ID": "chat_1:trace-1",
+      "[Agent] Turn ID": 2,
+      "[Agent] Invocation ID": "chat_1:call_1",
+      "[Agent] Component Type": "tool",
+      "[Agent] Tool Name": "flight_status",
+      "[Agent] Tool Success": true,
+      "[Agent] Is Error": false,
+      "[Agent] Parent Message ID": "chat_1:m1",
+      "[Agent] Tool Input": "{\"flight\":\"XY12\"}",
+      "[Agent] Tool Output": "{\"status\":\"on_time\"}"
+    },
+    "import_cursor": "2026-01-15 14:00:06"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478404000,
+    "insert_id": "chat_1:m4",
+    "event_properties": {
+      "[Agent] Session ID": "chat_1",
+      "[Agent] Agent ID": "travel-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Trace ID": "chat_1:trace-1",
+      "[Agent] Turn ID": 3,
+      "[Agent] Message ID": "chat_1:m4",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Model Name": "gpt-4o-mini",
+      "$llm_message": {
+        "text": "Yes, XY12 is on time."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:06"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478405000,
+    "insert_id": "chat_1:m5",
+    "event_properties": {
+      "[Agent] Session ID": "chat_1",
+      "[Agent] Agent ID": "travel-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Trace ID": "chat_1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Message ID": "chat_1:m5",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Great, thanks."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:06"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478406000,
+    "insert_id": "chat_1:m6",
+    "event_properties": {
+      "[Agent] Session ID": "chat_1",
+      "[Agent] Agent ID": "travel-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Trace ID": "chat_1:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "chat_1:m6",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Model Name": "gpt-4o-mini",
+      "[Agent] Input Tokens": 210,
+      "[Agent] Output Tokens": 9,
+      "$llm_message": {
+        "text": "Safe travels!"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:06"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_12345",
+    "time": 1768478406000,
+    "insert_id": "chat_1:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "chat_1",
+      "[Agent] Agent ID": "travel-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Trace ID": "chat_1:trace-2"
+    },
+    "import_cursor": "2026-01-15 14:00:06"
+  }
+]

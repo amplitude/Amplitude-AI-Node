@@ -1,0 +1,134 @@
+[
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478400000,
+    "insert_id": "sess_1:turn-1-user",
+    "event_properties": {
+      "[Agent] Session ID": "sess_1",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"locale\":\"en-US\"}",
+      "[Agent] Trace ID": "sess_1:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "sess_1:turn-1-user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "What plans do you offer?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:45"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478402000,
+    "insert_id": "sess_1:turn-1-response",
+    "event_properties": {
+      "[Agent] Session ID": "sess_1",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"locale\":\"en-US\"}",
+      "[Agent] Trace ID": "sess_1:trace-1",
+      "[Agent] Turn ID": 2,
+      "[Agent] Message ID": "sess_1:turn-1-response",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 1800,
+      "[Agent] Model Name": "claude-sonnet-4",
+      "[Agent] Input Tokens": 120,
+      "[Agent] Output Tokens": 20,
+      "[Agent] Cost USD": 0.0009,
+      "$llm_message": {
+        "text": "We have Basic and Pro."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:45"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478430000,
+    "insert_id": "sess_1:turn-2-user",
+    "event_properties": {
+      "[Agent] Session ID": "sess_1",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"locale\":\"en-US\"}",
+      "[Agent] Trace ID": "sess_1:trace-2",
+      "[Agent] Turn ID": 3,
+      "[Agent] Message ID": "sess_1:turn-2-user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "How much is Pro?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:45"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478431000,
+    "insert_id": "sess_1:turn-2-response",
+    "event_properties": {
+      "[Agent] Session ID": "sess_1",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"locale\":\"en-US\"}",
+      "[Agent] Trace ID": "sess_1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Message ID": "sess_1:turn-2-response",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 1100,
+      "[Agent] Model Name": "claude-sonnet-4",
+      "[Agent] Input Tokens": 160,
+      "[Agent] Output Tokens": 14,
+      "[Agent] Cost USD": 0.0011,
+      "$llm_message": {
+        "text": "Pro is $20 per month."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:45"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_12345",
+    "time": 1768478445000,
+    "insert_id": "sess_1:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "sess_1",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"locale\":\"en-US\"}",
+      "[Agent] Trace ID": "sess_1:trace-3"
+    },
+    "import_cursor": "2026-01-15 14:00:45"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478445000,
+    "insert_id": "sess_1:turn-3-user",
+    "event_properties": {
+      "[Agent] Session ID": "sess_1",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Context": "{\"locale\":\"en-US\"}",
+      "[Agent] Trace ID": "sess_1:trace-3",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "sess_1:turn-3-user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Thanks, bye"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:45"
+  }
+]

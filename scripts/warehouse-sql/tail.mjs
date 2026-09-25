@@ -7,28 +7,28 @@ export const SQL_VERSION = 'warehouse-sql/1.0';
 
 /** Columns every Stage 1 `canonical` CTE must produce, in this order. */
 export const CANONICAL_COLUMNS = [
-  ['session_id', 'string', true, 'Stable conversation ID. Becomes [Agent] Session ID.'],
+  ['session_id', 'string', true, 'Stable conversation ID. Becomes `[Agent] Session ID`.'],
   ['message_id', 'string', true, 'Stable per-row ID, unique within the session. Never a random UUID.'],
-  ['role', "'user' | 'assistant' | 'tool' | 'span'", true, "assistant = a reply the user sees. span = a UI component or an internal hop (router, handoff). Other roles are dropped."],
+  ['role', "'user' | 'assistant' | 'tool' | 'span'", true, "`assistant` is a reply the user sees. `span` is a UI component, or a step the user never saw (routing, handoff). Other roles are dropped."],
   ['event_time', 'timestamp (UTC)', true, 'When the message was sent or the tool ran.'],
-  ['agent_id', 'string', true, 'Becomes [Agent] Agent ID. Events without it never appear in Agent Analytics.'],
-  ['user_id', 'string', false, 'Same user ID as your product analytics. At least one of user_id / device_id.'],
+  ['agent_id', 'string', true, 'Becomes `[Agent] Agent ID`. Events without it never appear in Agent Analytics.'],
+  ['user_id', 'string', false, 'Same user ID as your product analytics. At least one of `user_id` and `device_id` is required.'],
   ['device_id', 'string', false, 'Use when there is no logged-in user.'],
-  ['content', 'string', false, 'Message text (user and assistant rows). An empty reply followed by a span gets [Displayed: <span_name>].'],
+  ['content', 'string', false, 'Message text (user and assistant rows). An empty reply followed by a span gets `[Displayed: <span_name>]`.'],
   ['tool_name', 'string', false, 'Tool rows only.'],
   ['tool_input', 'string', false, 'Tool rows only; JSON text is fine.'],
   ['tool_output', 'string', false, 'Tool rows only.'],
-  ['tool_success', 'boolean', false, 'Tool rows only; NULL means success.'],
+  ['tool_success', 'boolean', false, 'Tool rows only; `NULL` means success.'],
   ['latency_ms', 'number', false, 'Tool and assistant rows.'],
   ['model', 'string', false, 'Assistant rows. Only if recorded; never guess.'],
   ['provider', 'string', false, 'Assistant rows.'],
   ['input_tokens', 'integer', false, 'Assistant rows.'],
   ['output_tokens', 'integer', false, 'Assistant rows.'],
   ['cost_usd', 'number', false, 'Assistant rows. Only if recorded; never estimate.'],
-  ['span_name', 'string', false, 'Span rows: component or step name, for example order-status-card.'],
+  ['span_name', 'string', false, 'Span rows: component or step name, for example `order-status-card`.'],
   ['span_input', 'string (JSON text)', false, 'Span rows: what was rendered or passed in.'],
   ['span_output', 'string (JSON text)', false, 'Span rows: what the user did, or what the step returned.'],
-  ['context', 'string (JSON object text)', false, 'Filterable dimensions. Becomes [Agent] Context.'],
+  ['context', 'string (JSON object text)', false, 'Filterable dimensions, one key per dimension. Becomes `[Agent] Context`.'],
 ];
 
 /** Every event property the tail can emit, with the Databricks import type. */

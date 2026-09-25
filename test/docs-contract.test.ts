@@ -104,7 +104,9 @@ function assertForwarderRules(events: AgentEvent[], options: { metadataOnly?: bo
 describe('docs/integrations contract', () => {
   it('uses only [Agent] names that exist in the SDK constants or event catalog', () => {
     const known = knownAgentNames();
-    const files = readdirSync(DOCS_DIR).filter((f) => f.endsWith('.md'));
+    const files = readdirSync(DOCS_DIR, { recursive: true })
+      .map(String)
+      .filter((f) => f.endsWith('.md'));
     const unknown: string[] = [];
     for (const file of files) {
       for (const match of readPage(file).matchAll(/[`'"](\[Agent\] [A-Za-z][A-Za-z0-9 ]*?)[`'"]/g)) {
