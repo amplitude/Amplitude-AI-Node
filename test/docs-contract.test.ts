@@ -253,6 +253,10 @@ describe('forwarder core and adapters', () => {
       '[Agent] Session End',
     ]);
 
+    expect(events[0]?.event_properties['[Agent] Ingestion Path']).toBe('http_forwarder');
+    expect(events[0]?.event_properties['[Agent] Source']).toBe('custom');
+    expect(events[0]?.event_properties['[Agent] Content Mode']).toBe('full');
+
     const traces = events.map((e) => e.event_properties['[Agent] Trace ID']);
     // An AI-initiated opener is its own exchange; each user message after a reply starts a new one.
     expect(traces[0]).not.toBe(traces[1]);
@@ -309,6 +313,7 @@ describe('forwarder core and adapters', () => {
     const metadataOnly: AgentEvent[] = core.toAgentEvents(withComponent, { contentMode: 'metadata_only' });
     const metadataSpan = metadataOnly.find((e) => e.event_type === '[Agent] Span');
     expect(metadataSpan?.event_properties).not.toHaveProperty('[Agent] Output State');
+    expect(metadataOnly.every((e) => e.event_properties['[Agent] Content Mode'] === 'metadata_only')).toBe(true);
   });
 
   it('flags an empty AI Response with no component as an error', () => {

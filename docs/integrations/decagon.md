@@ -362,6 +362,8 @@ export interface ToAgentEventsOptions {
   contentMode?: 'full' | 'metadata_only';
   /** Runs on every piece of content before it leaves your infrastructure. */
   redact?: (text: string) => string;
+  /** Platform that produced the conversation. Becomes [Agent] Source. */
+  source?: string;
 }
 
 export const FORWARDER_VERSION = 'http-forwarder/1.0';
@@ -398,6 +400,9 @@ export function toAgentEvents(
       '[Agent] Agent ID': conversation.agentId,
       '[Agent] Runtime': 'custom',
       '[Agent] SDK Version': FORWARDER_VERSION,
+      '[Agent] Ingestion Path': 'http_forwarder',
+      '[Agent] Source': options.source ?? 'custom',
+      '[Agent] Content Mode': options.contentMode ?? 'full',
       ...(conversation.context
         ? { '[Agent] Context': JSON.stringify(conversation.context) }
         : {}),
@@ -751,7 +756,7 @@ export async function syncDecagon(watermark: number): Promise<number> {
       agentId: 'TODO-confirmed-agent-id',
       resolveUserId: (c) => c.user_id ?? undefined, // TODO: confirm this matches product analytics
     });
-    const events = toAgentEvents(conversation, { redact });
+    const events = toAgentEvents(conversation, { redact, source: 'decagon' });
     if (process.env.AMPLITUDE_DRY_RUN) {
       console.log(JSON.stringify(events, null, 2));
       continue;

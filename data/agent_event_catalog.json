@@ -73,6 +73,21 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
+        },
+        {
           "name": "[Agent] Runtime",
           "type": "string",
           "description": "SDK runtime: 'python' or 'node'.",
@@ -218,6 +233,21 @@
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -536,6 +566,21 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
+        },
+        {
           "name": "[Agent] Runtime",
           "type": "string",
           "description": "SDK runtime: 'python' or 'node'.",
@@ -696,6 +741,21 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
+        },
+        {
           "name": "[Agent] Runtime",
           "type": "string",
           "description": "SDK runtime: 'python' or 'node'.",
@@ -825,6 +885,21 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
+        },
+        {
           "name": "[Agent] Runtime",
           "type": "string",
           "description": "SDK runtime: 'python' or 'node'.",
@@ -948,6 +1023,21 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
+        },
+        {
           "name": "[Agent] Runtime",
           "type": "string",
           "description": "SDK runtime: 'python' or 'node'.",
@@ -1037,6 +1127,21 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
+        },
+        {
           "name": "[Agent] Runtime",
           "type": "string",
           "description": "SDK runtime: 'python' or 'node'.",
@@ -1115,6 +1220,21 @@
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",

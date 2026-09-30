@@ -50,6 +50,8 @@ export const PROP_RUNTIME = '[Agent] Runtime';
 // tell a deliberate metadata_only session from one whose instrumentation dropped the
 // text, so it scores both as though the agent had answered nothing.
 export const PROP_CONTENT_MODE = '[Agent] Content Mode';
+export const PROP_INGESTION_PATH = '[Agent] Ingestion Path';
+export const PROP_SOURCE = '[Agent] Source';
 export const PROP_ENV = '[Agent] Env';
 export const PROP_LOCALE = '[Agent] Locale';
 export const PROP_SPAN_KIND = '[Agent] Span Kind';
