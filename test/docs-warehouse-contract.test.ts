@@ -122,6 +122,9 @@ describe.each(Object.keys(MESSAGE_FORMATS))('%s query on DuckDB', (formatId) => 
       for (const key of ['$llm_message', '[Agent] Tool Input', '[Agent] Tool Output', '[Agent] Input State', '[Agent] Output State']) {
         expect(event.event_properties).not.toHaveProperty(key);
       }
+      expect(event.event_properties['[Agent] Content Mode']).toBe('metadata_only');
+      expect(event.event_properties['[Agent] Ingestion Path']).toBe('warehouse_import');
+      expect(event.event_properties['[Agent] Source']).toBe('warehouse-sql');
     }
     expect(checkAgentEvents(events, { metadataOnly: true }).errors).toEqual([]);
   });

@@ -384,6 +384,8 @@ export interface ToAgentEventsOptions {
   contentMode?: 'full' | 'metadata_only';
   /** Runs on every piece of content before it leaves your infrastructure. */
   redact?: (text: string) => string;
+  /** Platform that produced the conversation. Becomes [Agent] Source. */
+  source?: string;
 }
 
 export const FORWARDER_VERSION = 'http-forwarder/1.0';
@@ -420,6 +422,9 @@ export function toAgentEvents(
       '[Agent] Agent ID': conversation.agentId,
       '[Agent] Runtime': 'custom',
       '[Agent] SDK Version': FORWARDER_VERSION,
+      '[Agent] Ingestion Path': 'http_forwarder',
+      '[Agent] Source': options.source ?? 'custom',
+      '[Agent] Content Mode': options.contentMode ?? 'full',
       ...(conversation.context
         ? { '[Agent] Context': JSON.stringify(conversation.context) }
         : {}),
@@ -650,7 +655,7 @@ export function normalizeSierraConversation(payload: SierraPayload): NormalizedC
 const redact = (text: string): string => text; // replace with your PII redaction
 
 export async function forwardSierraConversation(payload: SierraPayload): Promise<void> {
-  const events = toAgentEvents(normalizeSierraConversation(payload), { redact });
+  const events = toAgentEvents(normalizeSierraConversation(payload), { redact, source: 'sierra' });
   if (process.env.AMPLITUDE_DRY_RUN) {
     console.log(JSON.stringify(events, null, 2));
     return;
