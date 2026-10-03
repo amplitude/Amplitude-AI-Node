@@ -28,6 +28,34 @@ describe('reportOfflineEval', () => {
     expect(headers.authorization).not.toContain('secret');
   });
 
+  it('surfaces the validation errors of a 400', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      headers: { get: () => null },
+      text: async () =>
+        JSON.stringify({
+          error_code: 'invalid_document',
+          validation_errors: [
+            { field: 'evaluators.issue_labels', code: 'detector_polarity_required' },
+          ],
+        }),
+    }));
+
+    await expect(
+      reportOfflineEval(
+        { schema_version: 1 },
+        { apiKey: 'key', secretKey: 'secret', fetchImpl: fetchImpl as never },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_document',
+      validationErrors: [
+        { field: 'evaluators.issue_labels', code: 'detector_polarity_required' },
+      ],
+    });
+  });
+
   it('retries a 503 and then returns the result', async () => {
     const fetchImpl = vi
       .fn()
@@ -71,6 +99,17 @@ describe('offline eval document', () => {
     expect(schema.required).toEqual(
       expect.arrayContaining(['schema_version', 'dataset', 'evaluators', 'arms']),
     );
+  });
+
+  it('accepts the complete example in the guide', () => {
+    const guide = readFileSync(
+      new URL('../docs/integrations/offline-eval.md', import.meta.url),
+      'utf8',
+    );
+    const section = guide.slice(guide.indexOf('### Example: one complete run'));
+    const block = section.match(/```json\n([\s\S]*?)\n```/)?.[1];
+    expect(block).toBeDefined();
+    expect(checkOfflineEval(JSON.parse(block ?? ''))).toEqual([]);
   });
 
   it('maps one Braintrust experiment per model and skips a null score', () => {

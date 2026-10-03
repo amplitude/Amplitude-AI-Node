@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://amplitude.com/schemas/offline-eval-document-1.json",
   "title": "OfflineEvalDocument",
-  "description": "One arm of an offline eval bake-off, or one chunk of a larger run. schema_version is 1. See offline-eval-upload.md.",
+  "description": "One arm of an offline eval bake-off, or one chunk of a larger run. schema_version is 1. See offline-eval.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [

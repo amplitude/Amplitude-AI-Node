@@ -28,11 +28,17 @@ export interface OfflineEvalUploadResult {
   warnings: Array<{ field: string; code: string; count: number }>;
 }
 
+export interface OfflineEvalValidationError {
+  field: string;
+  code: string;
+}
+
 export class OfflineEvalUploadError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     readonly retryable: boolean,
+    readonly validationErrors: OfflineEvalValidationError[] = [],
   ) {
     super(`Offline eval upload failed (${status} ${code})`);
     this.name = 'OfflineEvalUploadError';
@@ -69,7 +75,10 @@ export async function reportOfflineEval(
 
     const code = typeof payload.error_code === 'string' ? payload.error_code : 'upload_failed';
     const retryable = response.status === 429 || response.status === 503;
-    lastError = new OfflineEvalUploadError(response.status, code, retryable);
+    const validationErrors = Array.isArray(payload.validation_errors)
+      ? (payload.validation_errors as OfflineEvalValidationError[])
+      : [];
+    lastError = new OfflineEvalUploadError(response.status, code, retryable, validationErrors);
     if (!retryable || attempt === 3) throw lastError;
     const retryAfter = Number(response.headers.get('retry-after') ?? '1');
     await new Promise((resolve) => {
