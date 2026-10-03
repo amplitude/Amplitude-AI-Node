@@ -325,5 +325,16 @@ export {
 } from './utils/model-tiers.js';
 export { inferProviderFromModel } from './utils/providers.js';
 export { enableLivePriceUpdates } from './utils/costs.js';
+export { reportOfflineEval, OfflineEvalUploadError } from './offline-eval.js';
+export type {
+  OfflineEvalServerZone,
+  OfflineEvalUploadResult,
+  ReportOfflineEvalOptions,
+} from './offline-eval.js';
+export { braintrustExperimentsToDocument } from './integrations/braintrust-experiment.js';
+export type {
+  BraintrustExperiment,
+  BraintrustExperimentRow,
+} from './integrations/braintrust-experiment.js';
 export { getGitMetadata, _resetCache as _resetGitCache } from './utils/git_metadata.js';
 export type { GitMetadata } from './utils/git_metadata.js';
