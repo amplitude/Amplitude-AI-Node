@@ -326,6 +326,7 @@ export {
 export { inferProviderFromModel } from './utils/providers.js';
 export { enableLivePriceUpdates } from './utils/costs.js';
 export { reportOfflineEval, OfflineEvalUploadError } from './offline-eval.js';
+export type { OfflineEvalValidationError } from './offline-eval.js';
 export type {
   OfflineEvalServerZone,
   OfflineEvalUploadResult,
