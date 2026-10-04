@@ -147,7 +147,7 @@ Prompt:
 - `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
-- `docs/integrations/offline-eval.md` — Offline eval run upload from any eval runner (`reportOfflineEval`)
+- `docs/integrations/offline-eval.md` — Offline eval run upload from any eval runner (HTTP POST)
 
 ## Event Schema (names)
 
