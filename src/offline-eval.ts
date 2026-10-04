@@ -70,7 +70,14 @@ export async function reportOfflineEval(
       body,
     });
     const text = await response.text();
-    const payload = text.length === 0 ? {} : (JSON.parse(text) as Record<string, unknown>);
+    let payload: Record<string, unknown> = {};
+    if (text.length > 0) {
+      try {
+        payload = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        payload = {};
+      }
+    }
     if (response.ok) return payload as unknown as OfflineEvalUploadResult;
 
     const code = typeof payload.error_code === 'string' ? payload.error_code : 'upload_failed';

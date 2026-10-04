@@ -56,6 +56,30 @@ describe('reportOfflineEval', () => {
     });
   });
 
+  it('retries a 503 whose body is not JSON', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        headers: { get: () => '0' },
+        text: async () => '<html>unavailable</html>',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => JSON.stringify({ result_id: 'run-1', replayed: false }),
+      });
+
+    const result = await reportOfflineEval(
+      { schema_version: 1 },
+      { apiKey: 'key', secretKey: 'secret', fetchImpl: fetchImpl as never },
+    );
+    expect(result.result_id).toBe('run-1');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a 503 and then returns the result', async () => {
     const fetchImpl = vi
       .fn()
