@@ -254,7 +254,7 @@ DELETE `/v1/agent-analytics/offline-eval-results/{idempotency_key}` removes that
 
 ### Large runs
 
-A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk, with no repeated row id or session id. A chunk that breaks that is 409 `group_conflict`.
+A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk, with no repeated row id, session id, or chunk index, and no more chunks than `chunk_count`. A chunk that breaks that is 409 `group_conflict`.
 
 ### Rate limits
 
@@ -274,7 +274,7 @@ Per IP, 30 requests per minute. Per project, 20 requests and 80 MB per minute, a
 | 400, `validation_errors` has `multiple_baselines` | More than one arm has `baseline: true` | Mark one |
 | 400 `unknown_gold_dataset` | `gold_dataset_id` is missing, has no project, or belongs to another project | Remove it, or create the gold dataset in this project first |
 | 409 on a CI retry | The run changed under the same key | Include the git sha and chunk index in the key |
-| 409 `group_conflict` | A chunk is not the same bake-off as the chunks already stored: arms, baseline, evaluators, chunk count, dataset name, source, or a repeated row id or session id | Repeat the same arm identity, including prompt text, on every chunk, and give each chunk its own rows and session ids |
+| 409 `group_conflict` | A chunk is not the same bake-off as the chunks already stored: arms, baseline, evaluators, chunk count, dataset name, source, a repeated row id, session id, or chunk index, or a chunk past `chunk_count` | Repeat the same arm identity, including prompt text, on every chunk, and give each chunk its own rows, session ids, and chunk index |
 | `warnings` lists `grade_source` | A grade source was downgraded to `single_judge` | Use one of the four values, and `reviewed_by` with `gold_verified` |
 | No winner for an evaluator | It has no `issue_labels` | Expected; value counts are shown instead |
 
