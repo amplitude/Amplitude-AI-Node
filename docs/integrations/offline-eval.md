@@ -57,7 +57,7 @@ Stop and ask the user for these. Never infer them from names:
 1. **The issue values of each detector.** For each evaluator that flags a problem, which values mean "this row has the issue" (for example `[true]`, `[1]`, or `["refusal"]`). This sets `issue_labels`. An evaluator without them is uploaded as a `classifier` or `rubric`, and no winner is shown for it.
 2. **The baseline arm.** Which model or prompt the others are compared against. Without one, the first arm by name is the baseline.
 3. **Whether rows are production sessions.** Set `dataset.rows[].session_id` only when the user confirms a row was taken from a real session in this project.
-4. **A gold dataset.** Set `dataset.gold_dataset_id` only when the user names a gold dataset that already exists in Agent Analytics. The upload never creates one.
+4. **A gold dataset.** Set `dataset.gold_dataset_id` only when the user names a gold dataset that already exists in this project. The upload never creates one. A dataset in another project is `unknown_gold_dataset`.
 5. **Whether prompt text and row bodies may leave their environment.** If not, use `content_mode: "metadata"`; the server drops them before storage.
 6. **Who reviewed the labels.** Use `grade_source: "gold_verified"` only with a `reviewed_by`; otherwise the label is stored as `single_judge`.
 
@@ -129,7 +129,7 @@ Use the experiment id, the git sha, and the chunk index as `idempotency_key`, so
 3. Every label's `row_id` is a dataset row, and every `evaluator_id` is an evaluator in the same document. At most one label per arm, row, and evaluator.
 4. A detector must have `issue_labels`.
 5. `grade_source` is `gold_verified`, `provisional_consensus`, `single_judge`, or `human_feedback`. Anything else, and `gold_verified` without `reviewed_by`, is stored as `single_judge` and returned in `warnings`.
-6. A row's `session_id` that belongs to another project in the organization is rejected. A session that was never ingested is stored as given.
+6. A row's `session_id` is stored as given. The upload does not look up sessions in other projects.
 7. Limits per request: 20 arms, 50 evaluators, 5,000 rows, 100,000 labels, 8,000,000 bytes, 64 KiB for a prompt or a row body, 256 characters for an id.
 8. The request body is plain JSON. Gzip or any other `Content-Encoding` is refused with 415.
 
@@ -241,7 +241,7 @@ DELETE removes the run with its arms, labels, and dataset rows. It returns 409, 
 
 | Status | Meaning | Retry |
 |---|---|---|
-| 400 | `error_code` is `invalid_document` (with `validation_errors`, one `field` and `code` each), `project_mismatch`, `foreign_session`, or `unknown_gold_dataset` | No |
+| 400 | `error_code` is `invalid_document` (with `validation_errors`, one `field` and `code` each), `project_mismatch`, or `unknown_gold_dataset` | No |
 | 401 | Missing or wrong API key or secret key | No |
 | 403 | `operation_not_enabled`: Amplitude has turned off uploads for the organization | No |
 | 409 | The idempotency key already holds a different document | No |
@@ -271,8 +271,7 @@ Per IP, 30 requests per minute. Per project, 20 requests and 80 MB per minute, a
 | 400, `validation_errors` has `detector_polarity_required` | A detector has no `issue_labels` | Ask the user which values are issues, or make it a classifier |
 | 400, `validation_errors` has `unknown_row` or `unknown_evaluator` | A label points at a row or evaluator not in the document | Include every row and evaluator the labels use |
 | 400, `validation_errors` has `multiple_baselines` | More than one arm has `baseline: true` | Mark one |
-| 400 `unknown_gold_dataset` | `gold_dataset_id` names a dataset that does not exist | Remove it, or create the gold dataset first |
-| 400 `foreign_session` | A row's `session_id` belongs to another project | Remove it from that row |
+| 400 `unknown_gold_dataset` | `gold_dataset_id` is missing, has no project, or belongs to another project | Remove it, or create the gold dataset in this project first |
 | 409 on a CI retry | The run changed under the same key | Include the git sha and chunk index in the key |
 | `warnings` lists `grade_source` | A grade source was downgraded to `single_judge` | Use one of the four values, and `reviewed_by` with `gold_verified` |
 | No winner for an evaluator | It has no `issue_labels` | Expected; value counts are shown instead |
