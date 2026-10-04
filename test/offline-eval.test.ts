@@ -104,6 +104,37 @@ describe('reportOfflineEval', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('caps Retry-After at 60 seconds', async () => {
+    const delays: number[] = [];
+    vi.spyOn(global, 'setTimeout').mockImplementation(((fn: TimerHandler, ms?: number) => {
+      delays.push(Number(ms));
+      if (typeof fn === 'function') fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => '100000' },
+        text: async () => JSON.stringify({ error_code: 'rate_limited' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => JSON.stringify({ result_id: 'run-1', replayed: false }),
+      });
+
+    const result = await reportOfflineEval(
+      { schema_version: 1 },
+      { apiKey: 'key', secretKey: 'secret', fetchImpl: fetchImpl as never },
+    );
+    expect(result.result_id).toBe('run-1');
+    expect(delays).toEqual([60_000]);
+    vi.restoreAllMocks();
+  });
+
   it('fails before the network when the secret is missing', async () => {
     vi.stubEnv('AMPLITUDE_API_KEY', '');
     vi.stubEnv('AMPLITUDE_SECRET_KEY', '');

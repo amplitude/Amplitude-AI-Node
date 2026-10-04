@@ -45,6 +45,15 @@ export class OfflineEvalUploadError extends Error {
   }
 }
 
+/** Seconds to wait. A missing, non-numeric, negative, or non-finite header waits 1. */
+export function offlineEvalRetryDelaySeconds(header: string | null): number {
+  if (header == null || header.trim() === '') return 1;
+  const delay = Number(header);
+  if (!Number.isFinite(delay) || delay < 0) return 1;
+  if (delay > 60) return 60;
+  return delay;
+}
+
 export async function reportOfflineEval(
   document: unknown,
   options: ReportOfflineEvalOptions = {},
@@ -87,9 +96,9 @@ export async function reportOfflineEval(
       : [];
     lastError = new OfflineEvalUploadError(response.status, code, retryable, validationErrors);
     if (!retryable || attempt === 3) throw lastError;
-    const retryAfter = Number(response.headers.get('retry-after') ?? '1');
+    const retryAfter = offlineEvalRetryDelaySeconds(response.headers.get('retry-after'));
     await new Promise((resolve) => {
-      setTimeout(resolve, (Number.isFinite(retryAfter) ? retryAfter : 1) * 1000);
+      setTimeout(resolve, retryAfter * 1000);
     });
   }
   throw lastError ?? new OfflineEvalUploadError(503, 'upload_failed', true);
