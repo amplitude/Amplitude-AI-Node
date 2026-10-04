@@ -39,12 +39,20 @@ export function checkOfflineEval(document) {
   }
 
   const rows = new Set();
+  const sessions = new Set();
   for (const row of document?.dataset?.rows ?? []) {
     if (rows.has(row.id)) {
       push('dataset.rows.id', 'duplicate_row');
       break;
     }
     rows.add(row.id);
+    if (typeof row.session_id === 'string' && row.session_id !== '') {
+      if (sessions.has(row.session_id)) {
+        push('dataset.rows.session_id', 'duplicate_session');
+        break;
+      }
+      sessions.add(row.session_id);
+    }
   }
   if (rows.size < 1) push('dataset.rows', 'required');
 

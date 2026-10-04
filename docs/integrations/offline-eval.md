@@ -130,7 +130,7 @@ Use the experiment id, the git sha, and the chunk index as `idempotency_key`, so
 3. Every label's `row_id` is a dataset row, and every `evaluator_id` is an evaluator in the same document. At most one label per arm, row, and evaluator.
 4. A detector must have `issue_labels`.
 5. `grade_source` is `gold_verified`, `provisional_consensus`, `single_judge`, or `human_feedback`. Anything else, and `gold_verified` without `reviewed_by`, is stored as `single_judge` and returned in `warnings`.
-6. A row's `session_id` is stored as given. The upload does not look up sessions in other projects. A label is keyed by `row_id`; it also carries that `session_id` when its row named one.
+6. A row's `session_id` is stored as given. The upload does not look up sessions in other projects. A label is keyed by `row_id`; it also carries that `session_id` when its row named one. The same session id on two rows is rejected.
 7. Limits per request: 20 arms, 50 evaluators, 5,000 rows, 100,000 labels, 8,000,000 bytes, 64 KiB for a prompt or a row body, 256 characters for an id.
 8. The request body is plain JSON. Gzip or any other `Content-Encoding` is refused with 415.
 

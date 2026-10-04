@@ -267,6 +267,31 @@ describe('offline eval document', () => {
     expect(checkOfflineEval(forward).errors).toEqual([]);
   });
 
+  it('rejects two rows that name the same session', () => {
+    const document = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      issueLabels: { tone: [true] },
+      experiments: [
+        {
+          id: 'exp-a',
+          name: 'gpt',
+          baseline: true,
+          rows: [
+            { id: 'row-1', scores: { tone: true } },
+            { id: 'row-2', scores: { tone: false } },
+          ],
+        },
+      ],
+    });
+    const rows = document.dataset as { rows: Array<Record<string, unknown>> };
+    rows.rows[0] = { ...rows.rows[0], session_id: 'sess-1' };
+    rows.rows[1] = { ...rows.rows[1], session_id: 'sess-1' };
+    expect(checkOfflineEval(document).errors.map((error) => error.code)).toContain(
+      'duplicate_session',
+    );
+  });
+
   it('warns that an ootb evaluator is stored as custom', () => {
     const document = braintrustExperimentsToDocument({
       datasetName: 'refunds',
