@@ -133,7 +133,7 @@ describe('offline eval document', () => {
     const section = guide.slice(guide.indexOf('### Example: one complete run'));
     const block = section.match(/```json\n([\s\S]*?)\n```/)?.[1];
     expect(block).toBeDefined();
-    expect(checkOfflineEval(JSON.parse(block ?? ''))).toEqual([]);
+    expect(checkOfflineEval(JSON.parse(block ?? ''))).toEqual({ errors: [], warnings: [] });
   });
 
   it('maps one Braintrust experiment per model and skips a null score', () => {
@@ -153,8 +153,51 @@ describe('offline eval document', () => {
         },
       ],
     });
-    expect(checkOfflineEval(document)).toEqual([]);
+    expect(checkOfflineEval(document)).toEqual({ errors: [], warnings: [] });
     const arm = (document.arms as Array<{ labels: unknown[] }> )[0];
     expect(arm?.labels).toHaveLength(1);
+  });
+
+  it('reports an empty issue label list as an error', () => {
+    const document = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      issueLabels: { tone: [] },
+      experiments: [
+        {
+          id: 'exp-a',
+          name: 'gpt',
+          baseline: true,
+          rows: [{ id: 'row-1', scores: { tone: true } }],
+        },
+      ],
+    });
+    expect(checkOfflineEval(document).errors.map((error) => error.code)).toContain(
+      'detector_polarity_required',
+    );
+  });
+
+  it('warns when gold_verified has no reviewer and still passes', () => {
+    const document = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      issueLabels: { tone: [true] },
+      experiments: [
+        {
+          id: 'exp-a',
+          name: 'gpt',
+          baseline: true,
+          rows: [{ id: 'row-1', scores: { tone: true } }],
+        },
+      ],
+    });
+    const arm = (document.arms as Array<{ labels: Array<Record<string, unknown>> }>)[0];
+    const label = arm?.labels[0];
+    if (label) label.grade_source = 'gold_verified';
+    const result = checkOfflineEval(document);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([
+      { field: 'arms.labels.grade_source', code: 'gold_verified_downgraded' },
+    ]);
   });
 });
