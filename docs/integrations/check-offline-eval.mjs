@@ -74,6 +74,11 @@ export function checkOfflineEval(document) {
     ) {
       warn(`evaluators.${evaluator.id}.score_min`, 'rubric_bounds_missing');
     }
+    // The server stores every evaluator as `custom`. An `ootb` one is kept
+    // as a custom evaluator that maps to the built-in id.
+    if (evaluator.source === 'ootb') {
+      warn(`evaluators.${evaluator.id}.source`, 'evaluator_source_downgraded');
+    }
   }
 
   const armNames = new Set();

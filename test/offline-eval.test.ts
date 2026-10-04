@@ -267,6 +267,29 @@ describe('offline eval document', () => {
     expect(checkOfflineEval(forward).errors).toEqual([]);
   });
 
+  it('warns that an ootb evaluator is stored as custom', () => {
+    const document = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      issueLabels: { tone: [true] },
+      experiments: [
+        {
+          id: 'exp-a',
+          name: 'gpt',
+          baseline: true,
+          rows: [{ id: 'row-1', scores: { tone: true } }],
+        },
+      ],
+    });
+    const evaluators = document.evaluators as Array<Record<string, unknown>>;
+    evaluators[0] = { ...evaluators[0], source: 'ootb' };
+    const checked = checkOfflineEval(document);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings.map((warning) => warning.code)).toContain(
+      'evaluator_source_downgraded',
+    );
+  });
+
   it('omits a Braintrust latency that does not fit an integer column', () => {
     const document = braintrustExperimentsToDocument({
       datasetName: 'refunds',

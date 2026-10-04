@@ -79,7 +79,7 @@ Find out and print:
 Build the document for one real run and show it to the user:
 
 - **Dataset.** One `dataset.rows[]` entry per row, with its stable `id`. Put the input, and the expected output if any, in `body`.
-- **Evaluators.** One entry per evaluator: `kind` is `detector` when it flags an issue (with `issue_labels`), `classifier` when it returns one of a fixed set of values, `rubric` when it returns a score (set `score_min` and `score_max` when known). `source` is `custom` unless the evaluator is one of Amplitude's built-in evaluators, then `ootb`.
+- **Evaluators.** One entry per evaluator: `kind` is `detector` when it flags an issue (with `issue_labels`), `classifier` when it returns one of a fixed set of values, `rubric` when it returns a score (set `score_min` and `score_max` when known). `source` is `custom` unless the evaluator is one of Amplitude's built-in evaluators, then `ootb`. The server stores every evaluator as `custom`; an `ootb` one keeps the built-in id in `maps_to_evaluator_id` and comes back with warning `evaluator_source_downgraded`.
 - **Arms.** One per model or prompt variant, with `model_id`, `provider`, `model_version`, `prompt_version`, and `prompt_text` when known. Mark exactly one `baseline: true`.
 - **Labels.** One per row, evaluator, and arm: `row_id`, `evaluator_id`, `value`, `grade_source`, and optionally `cost_usd` and `latency_ms`.
 
@@ -130,7 +130,7 @@ Use the experiment id, the git sha, and the chunk index as `idempotency_key`, so
 3. Every label's `row_id` is a dataset row, and every `evaluator_id` is an evaluator in the same document. At most one label per arm, row, and evaluator.
 4. A detector must have `issue_labels`.
 5. `grade_source` is `gold_verified`, `provisional_consensus`, `single_judge`, or `human_feedback`. Anything else, and `gold_verified` without `reviewed_by`, is stored as `single_judge` and returned in `warnings`.
-6. A row's `session_id` is stored as given. The upload does not look up sessions in other projects.
+6. A row's `session_id` is stored as given. The upload does not look up sessions in other projects. A label is keyed by `row_id`; it also carries that `session_id` when its row named one.
 7. Limits per request: 20 arms, 50 evaluators, 5,000 rows, 100,000 labels, 8,000,000 bytes, 64 KiB for a prompt or a row body, 256 characters for an id.
 8. The request body is plain JSON. Gzip or any other `Content-Encoding` is refused with 415.
 
