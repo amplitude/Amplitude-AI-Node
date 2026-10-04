@@ -34,7 +34,7 @@ scheduled job (for example, hourly)
 - Model, token counts, and cost from `GENERATION` observations. Cost is the value Langfuse calculated or ingested; Amplitude does not recompute it.
 - Agent sessions joined to your product analytics through the same user ID.
 
-Langfuse scores (`GET /api/public/v2/scores`) are not forwarded by this adapter. If the user wants them, map each session-level score to a `ForwarderScore`.
+Langfuse scores (`GET /api/public/v2/scores`) are not forwarded by this adapter. If the user wants them on a production conversation, map each session-level score to a `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`.
 
 ### What your traces must already contain
 

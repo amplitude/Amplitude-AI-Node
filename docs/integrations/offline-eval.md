@@ -24,10 +24,10 @@ eval runner (CI, notebook, scheduled job)
 
 ### What you get
 
-- The run stored in your project, keyed by an idempotency key you choose, so a CI retry never duplicates it.
+- The run stored in your project, keyed by an idempotency key you choose. A retry of the same document returns the stored run. A different document under that key is rejected.
 - Per evaluator, a pairwise comparison of every arm against the baseline arm, on the rows both arms scored. A missing label is never counted as a pass.
 - A winner only for evaluators whose issue values you name (`issue_labels`). Other evaluators show value counts, and rubric scores show a mean without treating higher as better.
-- Rows tied to a production session, when you say they are one, so a regression can be traced back to the session.
+- An optional `session_id` on a row, stored exactly as you send it. The upload does not check that the session exists. Comparisons are keyed by `row_id`.
 
 ### What your run must already contain
 
@@ -57,7 +57,7 @@ Stop and ask the user for these. Never infer them from names:
 1. **The issue values of each detector.** For each evaluator that flags a problem, which values mean "this row has the issue" (for example `[true]`, `[1]`, or `["refusal"]`). This sets `issue_labels`. An evaluator without them is uploaded as a `classifier` or `rubric`, and no winner is shown for it.
 2. **The baseline arm.** Which model or prompt the others are compared against. Without one, the first arm by name is the baseline. The comparison uses that name. `baseline: true` on an arm means the customer marked it.
 3. **Rubric bounds.** For each rubric, the user names `score_min` and `score_max`. Without both, the comparison shows value counts and no mean.
-4. **Whether rows are production sessions.** Set `dataset.rows[].session_id` only when the user confirms a row was taken from a real session in this project.
+4. **Whether a row names a production session.** Set `dataset.rows[].session_id` only when the user says that row came from one. The upload stores the id and does not check that the session exists.
 5. **A gold dataset.** Set `dataset.gold_dataset_id` only when the user names a gold dataset that already exists in this project. The upload never creates one. A dataset in another project is `unknown_gold_dataset`.
 6. **Whether prompt text and row bodies may leave their environment.** If not, use `content_mode: "metadata"`; the server drops them before storage.
 7. **Who reviewed the labels.** Use `grade_source: "gold_verified"` only with a `reviewed_by`; otherwise the label is stored as `single_judge`.
@@ -105,7 +105,7 @@ console.log(result.result_id, result.replayed, result.warnings);
 
 `reportOfflineEval` reads `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` when `apiKey` and `secretKey` are omitted. EU projects pass `serverZone: 'EU'`. Python runners use `report_offline_eval` from `amplitude-ai` with the same document. For Braintrust experiments, use the adapter in the Reference.
 
-Use the experiment id, the git sha, and the chunk index as `idempotency_key`, so a retried CI job replays instead of duplicating.
+Use the experiment id, the git sha, and the chunk index as `idempotency_key`. A retry replays only when the rest of the document is identical too, including `ran_at` and row order.
 
 ### Phase 4: Verify
 
@@ -130,7 +130,7 @@ Use the experiment id, the git sha, and the chunk index as `idempotency_key`, so
 3. Every label's `row_id` is a dataset row, and every `evaluator_id` is an evaluator in the same document. At most one label per arm, row, and evaluator.
 4. A detector must have `issue_labels`.
 5. `grade_source` is `gold_verified`, `provisional_consensus`, `single_judge`, or `human_feedback`. Anything else, and `gold_verified` without `reviewed_by`, is stored as `single_judge` and returned in `warnings`.
-6. A row's `session_id` is stored as given. The upload does not look up sessions in other projects. A label is keyed by `row_id`; it also carries that `session_id` when its row named one. The same session id on two rows is rejected.
+6. A row's `session_id` is stored as given. The upload does not look the session up, in this project or any other. The run query and the disagreement page return `rowId`, and the comparison is keyed by `row_id`. The stored label also carries `session_id` when the row named one. The same session id on two rows of one document is rejected.
 7. Limits per request: 20 arms, 50 evaluators, 5,000 rows, 100,000 labels, 8,000,000 bytes, 64 KiB for a prompt or a row body, 256 characters for an id.
 8. The request body is plain JSON. Gzip or any other `Content-Encoding` is refused with 415.
 
@@ -199,6 +199,7 @@ import { braintrustExperimentsToDocument, reportOfflineEval } from '@amplitude/a
 const document = braintrustExperimentsToDocument({
   datasetName: 'refunds',
   gitSha: process.env.GITHUB_SHA,
+  ranAt: experimentCreatedAt,
   idempotencyKey: `${experimentId}+${process.env.GITHUB_SHA}`,
   issueLabels: { 'refund-error': [1] },
   experiments: [
@@ -208,6 +209,8 @@ const document = braintrustExperimentsToDocument({
 });
 await reportOfflineEval(document);
 ```
+
+Pass a stable `ranAt`, such as the experiment's created time. The adapter otherwise sets `ran_at` to the current time, and `ran_at` is part of the document the idempotency hash covers, so a retry would not replay. A retry replays only when the rest of the document is identical too, including row order.
 
 `rows` are the experiment's rows: `id`, `input`, `expected`, `scores`, and `metrics.start` and `metrics.end` (Unix seconds, used for `latency_ms`). The Braintrust log-forwarding guide ([braintrust.md](./braintrust.md)) stays the path for production conversations.
 
@@ -245,7 +248,7 @@ DELETE `/v1/agent-analytics/offline-eval-results/{idempotency_key}` removes that
 | 400 | `error_code` is `invalid_document` (with `validation_errors`, one `field` and `code` each), `project_mismatch`, or `unknown_gold_dataset` | No |
 | 401 | Missing or wrong API key or secret key | No |
 | 403 | `operation_not_enabled`: Amplitude has turned off uploads for the organization | No |
-| 409 | The idempotency key already holds a different document, or a chunk disagrees with its group (`group_conflict`) | No |
+| 409 | The idempotency key already holds a different document (`idempotency_conflict`), is already used by an Amplitude-written result (`idempotency_key_in_use`), or a chunk disagrees with its group or the group is already full (`group_conflict`) | No |
 | 411 | No `Content-Length` | No |
 | 413 | The body is over 8 MB; split it into chunks | No |
 | 415 | The body was compressed | No |
@@ -254,7 +257,7 @@ DELETE `/v1/agent-analytics/offline-eval-results/{idempotency_key}` removes that
 
 ### Large runs
 
-A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk, with no repeated row id, session id, or chunk index, and no more chunks than `chunk_count`. A chunk that breaks that is 409 `group_conflict`.
+A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk. A `metadata` chunk still sends the same `prompt_text`: the text is dropped after the prompt hash is taken, and a missing prompt is a different hash. A `chunk_index` greater than or equal to `chunk_count` is 400 `chunk_out_of_range`, including on the first request. 409 `group_conflict` is the group already holding `chunk_count` chunks, or a later chunk that repeats a row id, a session id, or a chunk index, or that disagrees with the chunks already stored.
 
 ### Rate limits
 
@@ -273,8 +276,10 @@ Per IP, 30 requests per minute. Per project, 20 requests and 80 MB per minute, a
 | 400, `validation_errors` has `unknown_row` or `unknown_evaluator` | A label points at a row or evaluator not in the document | Include every row and evaluator the labels use |
 | 400, `validation_errors` has `multiple_baselines` | More than one arm has `baseline: true` | Mark one |
 | 400 `unknown_gold_dataset` | `gold_dataset_id` is missing, has no project, or belongs to another project | Remove it, or create the gold dataset in this project first |
-| 409 on a CI retry | The run changed under the same key | Include the git sha and chunk index in the key |
-| 409 `group_conflict` | A chunk is not the same bake-off as the chunks already stored: arms, baseline, evaluators, chunk count, dataset name, source, a repeated row id, session id, or chunk index, or a chunk past `chunk_count` | Repeat the same arm identity, including prompt text, on every chunk, and give each chunk its own rows, session ids, and chunk index |
+| 400, `validation_errors` has `chunk_out_of_range` | `chunk_index` is greater than or equal to `chunk_count` | Use an index from 0 up to, but not including, `chunk_count` |
+| 409 on a CI retry | The run changed under the same key, or `ran_at` was the current time | Include the git sha and chunk index in the key, and send a stable `ran_at` |
+| 409 `idempotency_key_in_use` | That key is already used by an Amplitude-written result | Choose another idempotency key. This upload does not replace or delete that result |
+| 409 `group_conflict` | A chunk is not the same bake-off as the chunks already stored: arms, baseline, evaluators, chunk count, dataset name, source, a repeated row id, session id, or chunk index, or the group already holds `chunk_count` chunks | Repeat the same arm identity, including prompt text, on every chunk, and give each chunk its own rows, session ids, and chunk index |
 | `warnings` lists `grade_source` | A grade source was downgraded to `single_judge` | Use one of the four values, and `reviewed_by` with `gold_verified` |
 | No winner for an evaluator | It has no `issue_labels` | Expected; value counts are shown instead |
 

@@ -38,6 +38,8 @@ Span formats don't need SQL: Amplitude's [OTLP endpoint](https://amplitude.com/d
 
 If conversations are still happening in code you run, instrument live instead with the Amplitude AI SDK ([Node](../../../README.md), [Python](https://pypi.org/project/amplitude-ai/)) or send OpenTelemetry directly. Warehouse import is for data that already lands in the warehouse.
 
+An offline bake-off is the document in [offline-eval.md](../offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`.
+
 ### What you get
 
 - Every conversation as an Agent Analytics session, turn by turn, with tool calls and UI components, in the session viewer.
