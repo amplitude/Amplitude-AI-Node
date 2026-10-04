@@ -70,6 +70,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Agent runs on a hosted platform (Sierra, Decagon): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
+- Offline eval run or model bake-off (Braintrust, LangSmith, Langfuse, MLflow, or any runner): not `[Agent]` events. Build one document, check it with `docs/integrations/check-offline-eval.mjs`, and post it with `reportOfflineEval()` by following `docs/integrations/offline-eval.md`. Ask which values of each detector are issues; never guess.
 
 ## MCP Surface
 
@@ -146,6 +147,7 @@ Prompt:
 - `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
+- `docs/integrations/offline-eval.md` — Offline eval run upload from any eval runner (`reportOfflineEval`)
 
 ## Event Schema (names)
 

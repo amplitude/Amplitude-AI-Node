@@ -41,9 +41,14 @@ Conversations or traces already land in Snowflake, BigQuery, or Databricks; a SQ
 
 As with tracing tools, the import brings in what the table already records, including past conversations. It needs a conversation ID and a user ID matching product analytics on every row; rows without them are dropped. Message text is needed for content-based quality signals; without it, import metadata only.
 
+## Offline eval runs
+
+A model bake-off from your eval runner (Braintrust experiments, LangSmith or Langfuse datasets, MLflow, a notebook) is not a conversation. It is uploaded as one document, from CI, with the project API key and secret key, and stored as a run you can compare arm by arm. Do not send it as `[Agent]` events. See [offline-eval.md](./offline-eval.md) (last verified 2026-10-03).
+
 ## Tools
 
 - [check-agent-events.mjs](./check-agent-events.mjs): checks a file of `[Agent]` events (CSV, JSON, or NDJSON) against the rules every guide shares, before you send or import it. No dependencies: `node check-agent-events.mjs events.json`.
+- [check-offline-eval.mjs](./check-offline-eval.mjs): checks an offline eval document before it is uploaded. No dependencies: `node check-offline-eval.mjs run.json`. The full JSON Schema is [offline-eval-document.schema.json](./offline-eval-document.schema.json).
 - [warehouses/otlp-replay.mjs](./warehouses/otlp-replay.mjs): converts exported spans to OTLP and sends them to Amplitude. No dependencies.
 
 A machine-readable list of these guides is in [manifest.json](./manifest.json).
@@ -60,6 +65,7 @@ Fetch the raw page for the source and follow "Part 2: Coding agent procedure":
 - LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md`
 - Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
+- Offline eval runs: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/offline-eval.md`
 
 ## Your source is not listed
 
