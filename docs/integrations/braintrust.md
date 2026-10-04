@@ -34,7 +34,7 @@ scheduled job (for example, hourly)
 - Model and token counts from `llm` spans.
 - Agent sessions joined to your product analytics through the same user ID.
 
-Cost stays empty: the logged fields this adapter reads carry tokens, not cost, and Amplitude does not estimate it. Braintrust scores are not forwarded; if the user wants them on a production conversation, map them to `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`.
+Cost stays empty: the logged fields this adapter reads carry tokens, not cost, and Amplitude does not estimate it. Braintrust scores are not forwarded; if the user wants them on a production conversation, map them to `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`. Follow the harness field map and the CI procedure on that page.
 
 ### What your traces must already contain
 
