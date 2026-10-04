@@ -55,11 +55,12 @@ Usually a few hours: map the runner's output to the document, check it, and add 
 Stop and ask the user for these. Never infer them from names:
 
 1. **The issue values of each detector.** For each evaluator that flags a problem, which values mean "this row has the issue" (for example `[true]`, `[1]`, or `["refusal"]`). This sets `issue_labels`. An evaluator without them is uploaded as a `classifier` or `rubric`, and no winner is shown for it.
-2. **The baseline arm.** Which model or prompt the others are compared against. Without one, the first arm by name is the baseline.
-3. **Whether rows are production sessions.** Set `dataset.rows[].session_id` only when the user confirms a row was taken from a real session in this project.
-4. **A gold dataset.** Set `dataset.gold_dataset_id` only when the user names a gold dataset that already exists in this project. The upload never creates one. A dataset in another project is `unknown_gold_dataset`.
-5. **Whether prompt text and row bodies may leave their environment.** If not, use `content_mode: "metadata"`; the server drops them before storage.
-6. **Who reviewed the labels.** Use `grade_source: "gold_verified"` only with a `reviewed_by`; otherwise the label is stored as `single_judge`.
+2. **The baseline arm.** Which model or prompt the others are compared against. Without one, the first arm by name is the baseline. The comparison uses that name. `baseline: true` on an arm means the customer marked it.
+3. **Rubric bounds.** For each rubric, the user names `score_min` and `score_max`. Without both, the comparison shows value counts and no mean.
+4. **Whether rows are production sessions.** Set `dataset.rows[].session_id` only when the user confirms a row was taken from a real session in this project.
+5. **A gold dataset.** Set `dataset.gold_dataset_id` only when the user names a gold dataset that already exists in this project. The upload never creates one. A dataset in another project is `unknown_gold_dataset`.
+6. **Whether prompt text and row bodies may leave their environment.** If not, use `content_mode: "metadata"`; the server drops them before storage.
+7. **Who reviewed the labels.** Use `grade_source: "gold_verified"` only with a `reviewed_by`; otherwise the label is stored as `single_judge`.
 
 ### Phase 1: Detect
 
@@ -237,14 +238,14 @@ The response to a POST:
 
 The same key with the same document returns the existing `result_id` and `replayed: true`. A different document under that key returns 409. The run commits whole or not at all, and a rejected request does not use up the key. The idempotency hash covers the document as sent, so changing only the prompt text is still a conflict.
 
-DELETE removes the run with its arms, labels, and dataset rows. It returns 409, and keeps the run, if something else still references one of its arms.
+DELETE `/v1/agent-analytics/offline-eval-results/{idempotency_key}` removes that one request. For a chunked run that is one chunk. `deleteOfflineEvalRun` removes every chunk of the run. A 409 `result_in_use` leaves the targeted row in place.
 
 | Status | Meaning | Retry |
 |---|---|---|
 | 400 | `error_code` is `invalid_document` (with `validation_errors`, one `field` and `code` each), `project_mismatch`, or `unknown_gold_dataset` | No |
 | 401 | Missing or wrong API key or secret key | No |
 | 403 | `operation_not_enabled`: Amplitude has turned off uploads for the organization | No |
-| 409 | The idempotency key already holds a different document | No |
+| 409 | The idempotency key already holds a different document, or a chunk disagrees with its group (`group_conflict`) | No |
 | 411 | No `Content-Length` | No |
 | 413 | The body is over 8 MB; split it into chunks | No |
 | 415 | The body was compressed | No |
@@ -253,7 +254,7 @@ DELETE removes the run with its arms, labels, and dataset rows. It returns 409, 
 
 ### Large runs
 
-A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`).
+A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk, with no repeated row id. A chunk that breaks that is 409 `group_conflict`.
 
 ### Rate limits
 
@@ -273,6 +274,7 @@ Per IP, 30 requests per minute. Per project, 20 requests and 80 MB per minute, a
 | 400, `validation_errors` has `multiple_baselines` | More than one arm has `baseline: true` | Mark one |
 | 400 `unknown_gold_dataset` | `gold_dataset_id` is missing, has no project, or belongs to another project | Remove it, or create the gold dataset in this project first |
 | 409 on a CI retry | The run changed under the same key | Include the git sha and chunk index in the key |
+| 409 `group_conflict` | A chunk is not the same bake-off as the chunks already stored: arms, baseline, evaluators, chunk count, dataset name, source, or a repeated row id | Repeat the same arm identity, including prompt text, on every chunk, and give each chunk its own rows |
 | `warnings` lists `grade_source` | A grade source was downgraded to `single_judge` | Use one of the four values, and `reviewed_by` with `gold_verified` |
 | No winner for an evaluator | It has no `issue_labels` | Expected; value counts are shown instead |
 
