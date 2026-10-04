@@ -68,6 +68,12 @@ export function checkOfflineEval(document) {
     ) {
       push('evaluators.score_min', 'score_range');
     }
+    if (
+      evaluator.kind === 'rubric' &&
+      (typeof evaluator.score_min !== 'number' || typeof evaluator.score_max !== 'number')
+    ) {
+      warn(`evaluators.${evaluator.id}.score_min`, 'rubric_bounds_missing');
+    }
   }
 
   const armNames = new Set();

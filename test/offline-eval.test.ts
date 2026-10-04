@@ -201,6 +201,41 @@ describe('offline eval document', () => {
     ]);
   });
 
+  it('keeps one idempotency key when Braintrust experiments are reordered', () => {
+    const experiments = [
+      {
+        id: 'exp-b',
+        name: 'claude',
+        rows: [{ id: 'row-1', scores: { tone: 0.4 } }],
+      },
+      {
+        id: 'exp-a',
+        name: 'gpt',
+        baseline: true,
+        rows: [{ id: 'row-1', scores: { tone: 0.8 } }],
+      },
+    ];
+    const forward = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      experiments,
+    });
+    const backward = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      experiments: [...experiments].reverse(),
+    });
+    expect(forward.idempotency_key).toBe(backward.idempotency_key);
+    expect(String(forward.idempotency_key)).toMatch(/^braintrust:[0-9a-f]{64}$/);
+    const rubric = (forward.evaluators as Array<Record<string, unknown>>)[0];
+    expect(rubric?.kind).toBe('rubric');
+    expect(rubric?.score_min).toBeUndefined();
+    expect(checkOfflineEval(forward).warnings.map((warning) => warning.code)).toContain(
+      'rubric_bounds_missing',
+    );
+    expect(checkOfflineEval(forward).errors).toEqual([]);
+  });
+
   it('omits a Braintrust latency that does not fit an integer column', () => {
     const document = braintrustExperimentsToDocument({
       datasetName: 'refunds',

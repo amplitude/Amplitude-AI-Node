@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Turns Braintrust experiment rows into one offline-eval document.
  * One experiment is one model. Score names become evaluators. A null score
@@ -22,6 +24,14 @@ export interface BraintrustExperiment {
   promptVersion?: string;
   baseline?: boolean;
   rows: BraintrustExperimentRow[];
+}
+
+function defaultIdempotencyKey(experiments: readonly BraintrustExperiment[]): string {
+  const joined = experiments
+    .map((experiment) => experiment.id)
+    .sort()
+    .join('\n');
+  return `braintrust:${createHash('sha256').update(joined).digest('hex')}`;
 }
 
 function latencyMs(metrics?: { start?: number; end?: number }): number | undefined {
@@ -52,7 +62,7 @@ export function braintrustExperimentsToDocument(input: {
 
   return {
     schema_version: 1,
-    idempotency_key: input.idempotencyKey ?? input.experiments.map((item) => item.id).join('+'),
+    idempotency_key: input.idempotencyKey ?? defaultIdempotencyKey(input.experiments),
     source: 'braintrust',
     runner_name: 'braintrust',
     runner_version: 'experiment',
