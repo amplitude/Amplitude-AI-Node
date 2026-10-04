@@ -200,4 +200,30 @@ describe('offline eval document', () => {
       { field: 'arms.labels.grade_source', code: 'gold_verified_downgraded' },
     ]);
   });
+
+  it('omits a Braintrust latency that does not fit an integer column', () => {
+    const document = braintrustExperimentsToDocument({
+      datasetName: 'refunds',
+      ranAt: '2026-10-03T00:00:00.000Z',
+      issueLabels: { tone: [true] },
+      experiments: [
+        {
+          id: 'exp-a',
+          name: 'gpt',
+          baseline: true,
+          rows: [
+            {
+              id: 'row-1',
+              scores: { tone: true },
+              metrics: { start: 0, end: 1_700_000_000 },
+            },
+          ],
+        },
+      ],
+    });
+    const label = (document.arms as Array<{ labels: Array<Record<string, unknown>> }>)[0]
+      ?.labels[0];
+    expect(label?.latency_ms).toBeUndefined();
+    expect(label?.value).toBe(true);
+  });
 });

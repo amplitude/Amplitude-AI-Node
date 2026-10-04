@@ -24,6 +24,13 @@ export interface BraintrustExperiment {
   rows: BraintrustExperimentRow[];
 }
 
+function latencyMs(metrics?: { start?: number; end?: number }): number | undefined {
+  if (metrics?.start === undefined || metrics.end === undefined) return undefined;
+  const value = Math.round((metrics.end - metrics.start) * 1000);
+  if (!Number.isFinite(value) || value > 2_147_483_647) return undefined;
+  return Math.max(0, value);
+}
+
 export function braintrustExperimentsToDocument(input: {
   datasetName: string;
   experiments: BraintrustExperiment[];
@@ -82,10 +89,7 @@ export function braintrustExperimentsToDocument(input: {
             evaluator_id: evaluatorId,
             value,
             grade_source: 'single_judge',
-            latency_ms:
-              row.metrics?.start !== undefined && row.metrics.end !== undefined
-                ? Math.max(0, Math.round((row.metrics.end - row.metrics.start) * 1000))
-                : undefined,
+            latency_ms: latencyMs(row.metrics),
           })),
       ),
     })),
