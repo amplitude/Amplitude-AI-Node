@@ -75,6 +75,19 @@
     ],
     "last_verified": "2026-09-24"
   },
+  "routers": {
+    "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/routers.md",
+    "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md",
+    "ingestion_paths": ["sdk_wrap", "otlp", "http_v2"],
+    "last_verified": "2026-10-05"
+  },
+  "schemas": [
+    {
+      "id": "analytics-metadata",
+      "description": "Identity an application passes to an inference router or AI gateway on each request.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json"
+    }
+  ],
   "tools": [
     {
       "id": "check-agent-events",

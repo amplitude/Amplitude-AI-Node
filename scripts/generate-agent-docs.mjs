@@ -132,6 +132,7 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
+- Requests go through an inference router or AI gateway (for example Fireworks): follow \`docs/integrations/routers.md\`; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
 
 ## MCP Surface
 
@@ -194,6 +195,7 @@ Prompt:
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
 ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
+- \`docs/integrations/routers.md\` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
 
 ## Event Schema (names)
 
@@ -217,6 +219,8 @@ ${events.join('\n')}
 [integrations]
 ${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
 warehouses=${warehouses.raw_url}
+routers=${integrations.routers.raw_url}
+${integrations.schemas.map((s) => `${s.id}-schema=${s.raw_url}`).join('\n')}
 ${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
 `;
 

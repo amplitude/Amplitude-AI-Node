@@ -70,6 +70,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Agent runs on a hosted platform (Sierra, Decagon): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
+- Requests go through an inference router or AI gateway (for example Fireworks): follow `docs/integrations/routers.md`; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
 
 ## MCP Surface
 
@@ -146,6 +147,7 @@ Prompt:
 - `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
+- `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
 
 ## Event Schema (names)
 
