@@ -356,10 +356,12 @@ LangSmith, Langfuse, MLflow, and a results file use the same document. The harne
 
 ```
 POST   https://developer-api.amplitude.com/v1/agent-analytics/offline-eval-results
-DELETE https://developer-api.amplitude.com/v1/agent-analytics/offline-eval-results/{idempotency_key}
+DELETE https://developer-api.amplitude.com/v1/agent-analytics/offline-eval-results?idempotency_key={idempotency_key}
 Authorization: Basic base64(project_api_key:secret_key)
 Content-Type: application/json
 ```
+
+A key with no `/` can also be deleted at `DELETE /v1/agent-analytics/offline-eval-results/{idempotency_key}`. A key that contains `/` has to use the query form. Percent-encode the query value.
 
 EU projects use `https://developer-api.eu.amplitude.com`. An unknown key and a bad secret return the same 401.
 
@@ -377,7 +379,7 @@ The response to a POST:
 
 The same key with the same document returns the existing `result_id` and `replayed: true`. A different document under that key returns 409. The run commits whole or not at all, and a rejected request does not use up the key. The idempotency hash covers the document as sent, so changing only the prompt text is still a conflict.
 
-DELETE `/v1/agent-analytics/offline-eval-results/{idempotency_key}` removes that one request. For a chunked run that is one chunk. `deleteOfflineEvalRun` removes every chunk of the run. A 409 `result_in_use` leaves the targeted row in place.
+DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that one request, including a key that contains `/`. For a chunked run that is one chunk. `deleteOfflineEvalRun` removes every chunk of the run. A 409 `result_in_use` leaves the targeted row in place.
 
 | Status | Meaning | Retry |
 |---|---|---|
