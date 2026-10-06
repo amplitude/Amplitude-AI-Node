@@ -139,7 +139,7 @@ Two resource attributes are set once per exporter, not per request:
 
 | Resource attribute | Value |
 |---|---|
-| `amplitude.source` | The router or gateway name, stored as `[Agent] Source` |
+| `amplitude.source` | A label for where the spans come from, stored as-is as `[Agent] Source` (for example `gateway` or `fireworks-router`). Defaults to `otlp` |
 | `amplitude.content_mode` | `full`, or `metadata_only` when message text is not exported |
 
 ### Endpoint
