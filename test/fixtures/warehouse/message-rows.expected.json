@@ -219,7 +219,7 @@
         "text": "Cancel my plan"
       }
     },
-    "import_cursor": "2026-01-15 14:01:04"
+    "import_cursor": "2026-01-15 14:01:12"
   },
   {
     "event_type": "[Agent] Tool Call",
@@ -247,7 +247,7 @@
       "[Agent] Tool Input": "{\"plan\":\"pro\"}",
       "[Agent] Tool Output": "timeout"
     },
-    "import_cursor": "2026-01-15 14:01:04"
+    "import_cursor": "2026-01-15 14:01:12"
   },
   {
     "event_type": "[Agent] AI Response",
@@ -277,7 +277,7 @@
         "text": "[Displayed: callback-form]"
       }
     },
-    "import_cursor": "2026-01-15 14:01:04"
+    "import_cursor": "2026-01-15 14:01:12"
   },
   {
     "event_type": "[Agent] Span",
@@ -301,12 +301,89 @@
       "[Agent] Input State": "{\"fields\":[\"phone\",\"preferred_time\"]}",
       "[Agent] Output State": "{\"submitted\":true}"
     },
-    "import_cursor": "2026-01-15 14:01:04"
+    "import_cursor": "2026-01-15 14:01:12"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_67890",
+    "time": 1768478470000,
+    "insert_id": "conv_2:m5",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Message ID": "conv_2:m5",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Tomorrow morning works"
+      }
+    },
+    "import_cursor": "2026-01-15 14:01:12"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_67890",
+    "time": 1768478472000,
+    "insert_id": "conv_2:m6",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "conv_2:m6",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 650,
+      "[Agent] Model Name": "gpt-4o",
+      "[Agent] Input Tokens": 300,
+      "[Agent] Output Tokens": 5,
+      "[Agent] Cost USD": 0.0008,
+      "$llm_message": {
+        "text": "Pick a time below."
+      }
+    },
+    "import_cursor": "2026-01-15 14:01:12"
+  },
+  {
+    "event_type": "[Agent] Span",
+    "user_id": "user_67890",
+    "time": 1768478472000,
+    "insert_id": "conv_2:m6-ui",
+    "event_properties": {
+      "[Agent] Session ID": "conv_2",
+      "[Agent] Agent ID": "order-support",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"channel\":\"sms\"}",
+      "[Agent] Trace ID": "conv_2:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Is Error": false,
+      "[Agent] Span ID": "conv_2:m6-ui",
+      "[Agent] Span Name": "time-picker",
+      "[Agent] Input State": "{\"slots\":[\"9:00\",\"10:30\"]}"
+    },
+    "import_cursor": "2026-01-15 14:01:12"
   },
   {
     "event_type": "[Agent] Session End",
     "user_id": "user_67890",
-    "time": 1768478464000,
+    "time": 1768478472000,
     "insert_id": "conv_2:session-end",
     "event_properties": {
       "[Agent] Session ID": "conv_2",
@@ -317,8 +394,8 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"sms\"}",
-      "[Agent] Trace ID": "conv_2:trace-1"
+      "[Agent] Trace ID": "conv_2:trace-2"
     },
-    "import_cursor": "2026-01-15 14:01:04"
+    "import_cursor": "2026-01-15 14:01:12"
   }
 ]

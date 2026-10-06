@@ -23,7 +23,7 @@ The sample query uses these columns. Your table will differ; map yours in Stage 
 ## What the sample shows
 
 - `conv_1` opens with an agent greeting (its own exchange), looks up an order with a tool, replies, and shows an `order-status-card` component. The card becomes an `[Agent] Span` in the same turn as the reply. A `system` row is dropped.
-- `conv_2` has a failed tool call (`tool_status = 'error'`, so `[Agent] Tool Success` is false) and an agent reply with no text that showed a `callback-form`. The reply becomes `[Displayed: callback-form]` instead of an empty AI Response.
+- `conv_2` has a failed tool call (`tool_status = 'error'`, so `[Agent] Tool Success` is false) and an agent reply with no text that showed a `callback-form`. The reply becomes `[Displayed: callback-form]` instead of an empty AI Response. Its last reply, `m6`, has both text and a `time-picker` component. It becomes the AI Response `m6` plus the span `m6-ui` in the same turn, so neither the text nor the component is lost.
 
 Map a component to a span by setting `role` to `span` and `span_name` to the component name. Map routing and handoff steps the user never saw the same way. An agent row with no text and nothing shown is never `assistant`.
 
@@ -62,15 +62,17 @@ source AS (
   SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:04'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
   UNION ALL
   SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:04'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction
+  UNION ALL
+  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, '2026-01-15 12:01:10'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  UNION ALL
+  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, '2026-01-15 12:01:12'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
 ),
 -- Stage 1b (message-rows): normalize into canonical message rows.
 canonical AS (
   SELECT
     conversation_id AS session_id,
     message_id,
-    CASE
-      WHEN ui_component IS NOT NULL THEN 'span'
-      ELSE CASE LOWER(sender)
+    CASE LOWER(sender)
       WHEN 'user' THEN 'user'
       WHEN 'customer' THEN 'user'
       WHEN 'human' THEN 'user'
@@ -79,7 +81,6 @@ canonical AS (
       WHEN 'bot' THEN 'assistant'
       WHEN 'tool' THEN 'tool'
       WHEN 'function' THEN 'tool'
-      END
     END AS role,
     sent_at AS event_time,
     agent_name AS agent_id,
@@ -96,11 +97,40 @@ canonical AS (
     prompt_tokens AS input_tokens,
     completion_tokens AS output_tokens,
     cost_usd,
+    CAST(NULL AS STRING) AS span_name,
+    CAST(NULL AS STRING) AS span_input,
+    CAST(NULL AS STRING) AS span_output,
+    TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context,
+    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
+  FROM source
+  WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
+  UNION ALL
+  SELECT
+    conversation_id AS session_id,
+    CASE WHEN NULLIF(body, '') IS NULL THEN message_id ELSE message_id || '-ui' END AS message_id,
+    'span' AS role,
+    sent_at AS event_time,
+    agent_name AS agent_id,
+    customer_id AS user_id,
+    CAST(NULL AS STRING) AS device_id,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS tool_name,
+    CAST(NULL AS STRING) AS tool_input,
+    CAST(NULL AS STRING) AS tool_output,
+    CAST(NULL AS BOOLEAN) AS tool_success,
+    CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
+    CAST(NULL AS STRING) AS model,
+    CAST(NULL AS STRING) AS provider,
+    CAST(NULL AS BIGINT) AS input_tokens,
+    CAST(NULL AS BIGINT) AS output_tokens,
+    CAST(NULL AS DOUBLE) AS cost_usd,
     ui_component AS span_name,
     ui_payload AS span_input,
     ui_interaction AS span_output,
-    TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context
+    TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context,
+    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
+  WHERE ui_component IS NOT NULL
 ),
 -- Stage 2 (shared, generated): canonical rows -> [Agent] events. Edit only settings.
 settings AS (
@@ -127,7 +157,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -145,7 +177,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END) IGNORE NULLS
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    DATEADD(hour, settings.settle_hours, s.last_activity) AS import_cursor
+    DATEADD(hour, settings.settle_hours, s.last_change) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),
@@ -257,15 +289,17 @@ source AS (
   SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
   UNION ALL
   SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction
+  UNION ALL
+  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, TIMESTAMP '2026-01-15 12:01:10+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  UNION ALL
+  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, TIMESTAMP '2026-01-15 12:01:12+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
 ),
 -- Stage 1b (message-rows): normalize into canonical message rows.
 canonical AS (
   SELECT
     conversation_id AS session_id,
     message_id,
-    CASE
-      WHEN ui_component IS NOT NULL THEN 'span'
-      ELSE CASE LOWER(sender)
+    CASE LOWER(sender)
       WHEN 'user' THEN 'user'
       WHEN 'customer' THEN 'user'
       WHEN 'human' THEN 'user'
@@ -274,7 +308,6 @@ canonical AS (
       WHEN 'bot' THEN 'assistant'
       WHEN 'tool' THEN 'tool'
       WHEN 'function' THEN 'tool'
-      END
     END AS role,
     sent_at AS event_time,
     agent_name AS agent_id,
@@ -291,11 +324,40 @@ canonical AS (
     prompt_tokens AS input_tokens,
     completion_tokens AS output_tokens,
     cost_usd,
+    CAST(NULL AS STRING) AS span_name,
+    CAST(NULL AS STRING) AS span_input,
+    CAST(NULL AS STRING) AS span_output,
+    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
+  FROM source
+  WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
+  UNION ALL
+  SELECT
+    conversation_id AS session_id,
+    CASE WHEN NULLIF(body, '') IS NULL THEN message_id ELSE message_id || '-ui' END AS message_id,
+    'span' AS role,
+    sent_at AS event_time,
+    agent_name AS agent_id,
+    customer_id AS user_id,
+    CAST(NULL AS STRING) AS device_id,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS tool_name,
+    CAST(NULL AS STRING) AS tool_input,
+    CAST(NULL AS STRING) AS tool_output,
+    CAST(NULL AS BOOL) AS tool_success,
+    CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
+    CAST(NULL AS STRING) AS model,
+    CAST(NULL AS STRING) AS provider,
+    CAST(NULL AS INT64) AS input_tokens,
+    CAST(NULL AS INT64) AS output_tokens,
+    CAST(NULL AS FLOAT64) AS cost_usd,
     ui_component AS span_name,
     ui_payload AS span_input,
     ui_interaction AS span_output,
-    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context
+    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
+  WHERE ui_component IS NOT NULL
 ),
 -- Stage 2 (shared, generated): canonical rows -> [Agent] events. Edit only settings.
 settings AS (
@@ -322,7 +384,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -340,7 +404,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END IGNORE NULLS)
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    TIMESTAMP_ADD(s.last_activity, INTERVAL settings.settle_hours HOUR) AS import_cursor
+    TIMESTAMP_ADD(s.last_change, INTERVAL settings.settle_hours HOUR) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),
@@ -455,15 +519,17 @@ source AS (
   SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
   UNION ALL
   SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction
+  UNION ALL
+  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, TIMESTAMP '2026-01-15 12:01:10' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  UNION ALL
+  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, TIMESTAMP '2026-01-15 12:01:12' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
 ),
 -- Stage 1b (message-rows): normalize into canonical message rows.
 canonical AS (
   SELECT
     conversation_id AS session_id,
     message_id,
-    CASE
-      WHEN ui_component IS NOT NULL THEN 'span'
-      ELSE CASE LOWER(sender)
+    CASE LOWER(sender)
       WHEN 'user' THEN 'user'
       WHEN 'customer' THEN 'user'
       WHEN 'human' THEN 'user'
@@ -472,7 +538,6 @@ canonical AS (
       WHEN 'bot' THEN 'assistant'
       WHEN 'tool' THEN 'tool'
       WHEN 'function' THEN 'tool'
-      END
     END AS role,
     sent_at AS event_time,
     agent_name AS agent_id,
@@ -489,11 +554,40 @@ canonical AS (
     prompt_tokens AS input_tokens,
     completion_tokens AS output_tokens,
     cost_usd,
+    CAST(NULL AS STRING) AS span_name,
+    CAST(NULL AS STRING) AS span_input,
+    CAST(NULL AS STRING) AS span_output,
+    to_json(named_struct('channel', channel)) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
+  FROM source
+  WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
+  UNION ALL
+  SELECT
+    conversation_id AS session_id,
+    CASE WHEN NULLIF(body, '') IS NULL THEN message_id ELSE message_id || '-ui' END AS message_id,
+    'span' AS role,
+    sent_at AS event_time,
+    agent_name AS agent_id,
+    customer_id AS user_id,
+    CAST(NULL AS STRING) AS device_id,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS tool_name,
+    CAST(NULL AS STRING) AS tool_input,
+    CAST(NULL AS STRING) AS tool_output,
+    CAST(NULL AS BOOLEAN) AS tool_success,
+    CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
+    CAST(NULL AS STRING) AS model,
+    CAST(NULL AS STRING) AS provider,
+    CAST(NULL AS BIGINT) AS input_tokens,
+    CAST(NULL AS BIGINT) AS output_tokens,
+    CAST(NULL AS DOUBLE) AS cost_usd,
     ui_component AS span_name,
     ui_payload AS span_input,
     ui_interaction AS span_output,
-    to_json(named_struct('channel', channel)) AS context
+    to_json(named_struct('channel', channel)) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
+  WHERE ui_component IS NOT NULL
 ),
 -- Stage 2 (shared, generated): canonical rows -> [Agent] events. Edit only settings.
 settings AS (
@@ -520,7 +614,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -538,7 +634,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END, TRUE)
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    timestampadd(HOUR, settings.settle_hours, s.last_activity) AS import_cursor
+    timestampadd(HOUR, settings.settle_hours, s.last_change) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),

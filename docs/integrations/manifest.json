@@ -95,13 +95,13 @@
       { "id": "openinference", "ingestion_path": "otlp_replay" },
       { "id": "mlflow-tracing", "ingestion_path": "otlp_replay" }
     ],
-    "last_verified": "2026-09-24"
+    "last_verified": "2026-10-06"
   },
   "routers": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/routers.md",
     "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md",
     "ingestion_paths": ["sdk_wrap", "otlp", "http_v2"],
-    "last_verified": "2026-10-05"
+    "last_verified": "2026-10-06"
   },
   "schemas": [
     {
@@ -117,7 +117,7 @@
     "schema_version": 1,
     "runners": ["Braintrust", "LangSmith", "Langfuse", "MLflow"],
     "ingestion_path": "offline_eval_upload",
-    "last_verified": "2026-10-03"
+    "last_verified": "2026-10-06"
   },
   "tools": [
     {

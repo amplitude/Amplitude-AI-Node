@@ -172,7 +172,9 @@ describe('otlp-replay conversion', () => {
     expect(attr(span, 'openinference.span.kind')).toEqual({ stringValue: 'LLM' });
     expect(attr(span, 'llm.model_name')).toEqual({ stringValue: 'gpt-4o' });
     expect(attr(span, 'session.id')).toEqual({ stringValue: 'conv_1' });
-    expect(attr(span, 'llm.input_messages')).toBeDefined();
+    expect(attr(span, 'llm.input_messages')).toBeUndefined();
+    expect(attr(span, 'llm.input_messages.0.message.role')).toEqual({ stringValue: 'user' });
+    expect(attr(span, 'llm.input_messages.0.message.content')).toEqual({ stringValue: 'Hi' });
   });
 
   it('converts MLflow traces to GenAI chat and tool spans', () => {

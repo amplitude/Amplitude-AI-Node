@@ -8,11 +8,15 @@ MLflow traces are span trees. [`otlp-replay.mjs`](./otlp-replay.mjs) converts ea
 
 | MLflow | Sent as |
 |---|---|
-| Span type `LLM`, `CHAT_MODEL`, or `CHAT` | A chat span (`gen_ai.operation.name` = `chat`): an AI Response, plus a User Message for new user input |
-| Span type `TOOL` or `FUNCTION` | A tool call, named after the span, with its inputs and outputs as arguments and result |
-| Any other span type (`AGENT`, `CHAIN`, `RETRIEVER`, and so on) | An `[Agent] Span` |
-| Span inputs (`messages` list, or a `{role, content}` object) | `gen_ai.input.messages` |
-| Span outputs (`messages`, Chat Completions `choices`, or `{role, content}`) | `gen_ai.output.messages` |
+| [Span type](https://github.com/mlflow/mlflow/blob/master/mlflow/entities/span.py) `LLM` or `CHAT_MODEL` | A chat span (`gen_ai.operation.name` = `chat`, named `chat <model>`): an AI Response, plus a User Message for new user input |
+| Span type `TOOL` | A tool call (`execute_tool <span name>`), with its inputs and outputs as arguments and result |
+| Any other span type (`AGENT`, `CHAIN`, `RETRIEVER`, `EMBEDDING`, `RERANKER`, `PARSER`, `MEMORY`, `WORKFLOW`, `TASK`, `GUARDRAIL`, `EVALUATOR`, `UNKNOWN`) | An `[Agent] Span` |
+| Span inputs (`messages` list, a Responses API `input` string or list, or a `{role, content}` object) | `gen_ai.input.messages` |
+| Span outputs (`messages`, Chat Completions `choices`, a Responses API `output` list, or `{role, content}`) | `gen_ai.output.messages` |
+| [Span attributes](https://github.com/mlflow/mlflow/blob/master/mlflow/tracing/constant.py) `mlflow.llm.model` and `mlflow.llm.provider` | `gen_ai.request.model` and `gen_ai.provider.name` |
+| `mlflow.chat.tokenUsage` (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens` |
+| `mlflow.llm.cost` `total_cost` | `gen_ai.usage.cost`, an Amplitude receiver extension rather than an OpenTelemetry attribute |
+| Span `status.message` (MLflow 3), or `status.description` | The error message on a failed span |
 | Trace metadata `mlflow.trace.session` | The conversation ID |
 | Trace metadata `mlflow.trace.user` | The user ID |
 | `--agent-id`, or an `agent_id` field on the row | The agent ID |
@@ -21,15 +25,15 @@ MLflow traces are span trees. [`otlp-replay.mjs`](./otlp-replay.mjs) converts ea
 
 One JSON object per trace, in either shape:
 
-- MLflow's own trace JSON: `{"info": {...}, "data": {"spans": [...]}}`, as `mlflow.search_traces()` or `Trace.to_json()` return it.
+- MLflow's own trace JSON: `{"info": {...}, "data": {"spans": [...]}}`, as `Trace.to_dict()` or `Trace.to_json()` return it for the traces `mlflow.search_traces()` finds.
 - A table row: `trace_id`, `spans` (the span array), `trace_metadata`, and `tags`, as MLflow traces stored in a Unity Catalog table have.
 
-For example, from the MLflow Python client:
+For example, from the MLflow Python client (`locations` replaced the deprecated `experiment_ids` argument):
 
 ```python
 import json, mlflow
 
-traces = mlflow.search_traces(experiment_ids=["<experiment id>"], return_type="list")
+traces = mlflow.search_traces(locations=["<experiment id>"], return_type="list")
 with open("traces.ndjson", "w") as f:
     for trace in traces:
         f.write(json.dumps(trace.to_dict()) + "\n")
@@ -58,4 +62,4 @@ Check the dry-run output and fix any warning before sending. Add `--region eu` f
 
 ## Verify and keep it running
 
-Verify and schedule as on the [OpenTelemetry GenAI page](./otel-genai.md#verify). Re-sending the same traces never duplicates events.
+Verify and schedule as on the [OpenTelemetry GenAI page](./otel-genai.md#verify). Event `insert_id`s come from trace and span IDs, so re-sending the same traces within Amplitude's [7-day deduplication window](https://amplitude.com/docs/apis/analytics/http-v2#event-deduplication) does not duplicate events. A re-send after that window does.
