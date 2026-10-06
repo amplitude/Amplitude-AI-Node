@@ -328,22 +328,24 @@ describe('Langfuse guide', () => {
     expect(withoutUsage.messages[1]).toMatchObject({ inputTokens: undefined, outputTokens: undefined, costUsd: undefined });
   });
 
-  it('times a reply by the latest end time when the root has none, and scopes tool and span IDs by trace', () => {
+  // GET /api/public/observations/{observationId} addresses an observation by its ID alone within a
+  // project ("The unique langfuse identifier of an observation"), so tool and span IDs are not trace-scoped.
+  it('times a reply by the latest end time when the root has none, and keys tool and span IDs by observation', () => {
     const base = { sessionId: 's', userId: 'user_12345' };
     const observations: Observation[] = [
-      { ...base, id: 'root', traceId: 't1', type: 'AGENT', startTime: at('12:00:00'), input: '"hi"', output: '"hello"' },
-      { ...base, id: 'late-end', traceId: 't1', type: 'SPAN', startTime: at('12:00:01'), endTime: at('12:00:09'), parentObservationId: 'root' },
-      { ...base, id: 'span-1', traceId: 't1', type: 'TOOL', name: 'search', startTime: at('12:00:05'), endTime: at('12:00:06'), parentObservationId: 'root' },
-      { ...base, id: 'root', traceId: 't2', type: 'AGENT', startTime: at('12:01:00'), endTime: at('12:01:05'), input: '"again"', output: '"sure"' },
-      { ...base, id: 'span-1', traceId: 't2', type: 'TOOL', name: 'search', startTime: at('12:01:01'), endTime: at('12:01:02'), parentObservationId: 'root' },
+      { ...base, id: 'root-1', traceId: 't1', type: 'AGENT', startTime: at('12:00:00'), input: '"hi"', output: '"hello"' },
+      { ...base, id: 'late-end', traceId: 't1', type: 'SPAN', startTime: at('12:00:01'), endTime: at('12:00:09'), parentObservationId: 'root-1' },
+      { ...base, id: 'tool-1', traceId: 't1', type: 'TOOL', name: 'search', startTime: at('12:00:05'), endTime: at('12:00:06'), parentObservationId: 'root-1' },
+      { ...base, id: 'root-2', traceId: 't2', type: 'AGENT', startTime: at('12:01:00'), endTime: at('12:01:05'), input: '"again"', output: '"sure"' },
+      { ...base, id: 'tool-2', traceId: 't2', type: 'TOOL', name: 'search', startTime: at('12:01:01'), endTime: at('12:01:02'), parentObservationId: 'root-2' },
     ];
     const conversation = langfuse.normalizeLangfuseSession('s', observations, { ...EXAMPLE_MAPPING, spanTypes: ['SPAN'] });
     expect(conversation.messages[1].timestamp).toBe(Date.parse(at('12:00:09')));
     const events: AgentEvent[] = core.toAgentEvents(conversation, { source: 'langfuse' });
     assertForwarderRules(events);
     const tools = events.filter((e) => e.event_type === '[Agent] Tool Call').map((e) => e.insert_id);
-    expect(tools).toEqual(['s:t1:span-1', 's:t2:span-1']);
-    expect(events.find((e) => e.event_type === '[Agent] Span')?.insert_id).toBe('s:t1:late-end');
+    expect(tools).toEqual(['s:tool-1', 's:tool-2']);
+    expect(events.find((e) => e.event_type === '[Agent] Span')?.insert_id).toBe('s:late-end');
   });
 
   it('calls only the documented observations endpoint, parameters, and field groups, always bounded', async () => {
