@@ -23,7 +23,7 @@ Your agent runs in your own code and is already traced; the forwarder reads sess
 |---|---|---|---|
 | Langfuse | [langfuse.md](./langfuse.md) | Scheduled pull of sessions from the v2 observations API | 2026-09-24 |
 | LangSmith | [langsmith.md](./langsmith.md) | Scheduled pull of threads from the runs query API | 2026-09-24 |
-| Braintrust | [braintrust.md](./braintrust.md) | Scheduled SQL queries against project logs | 2026-09-24 |
+| Braintrust | [braintrust.md](./braintrust.md) | Scheduled SQL queries against project logs | 2026-10-06 |
 
 These guides forward what the application already logged, including past conversations. Set expectations with the customer up front:
 

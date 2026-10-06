@@ -80,7 +80,7 @@
       "extraction_methods": ["query_api"],
       "vendor_format_source": "vendor_public_docs_2026_09",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-24"
+      "last_verified": "2026-10-06"
     }
   ],
   "warehouses": {
