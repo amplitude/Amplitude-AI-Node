@@ -79,7 +79,8 @@ Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language.
 - Whether Amplitude and Salesforce credentials are available as configuration: `AMPLITUDE_API_KEY`, `SALESFORCE_MY_DOMAIN_URL`, `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET`. Never hard-code them.
-- Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
+- Whether the user is on Amplitude's EU data center. If so, set `AMPLITUDE_ENDPOINT=https://api.eu.amplitude.com/2/httpapi`.
+- Whether any user IDs are shorter than 5 characters. If so, set `AMPLITUDE_MIN_ID_LENGTH`; otherwise Amplitude rejects those sessions.
 - What the org exposes. Run `probeAgentforceSchema()` from the adapter, or these queries in Data Cloud's Query Editor:
 
   ```sql
@@ -751,6 +752,7 @@ Table and column names follow Salesforce's live-verified Session Tracing referen
 import {
   send,
   toAgentEvents,
+  type AgentEvent,
   type ForwarderMessage,
   type ForwarderScore,
   type ForwarderSpan,
@@ -1380,18 +1382,43 @@ const MAPPING: AgentforceMappingOptions = {
 
 const FETCH: AgentforceFetchOptions = { excludeChannels: ['Builder'], includeFeedback: true };
 
-type Outcome = 'sent' | 'no_identity' | 'empty';
+type Outcome = 'sent' | 'no_identity' | 'empty' | 'failed';
+
+const amplitude = () => ({
+  apiKey: process.env.AMPLITUDE_API_KEY ?? '',
+  /** EU data residency: https://api.eu.amplitude.com/2/httpapi */
+  endpoint: process.env.AMPLITUDE_ENDPOINT || undefined,
+  /** Set if your user IDs are shorter than 5 characters. */
+  minIdLength: Number(process.env.AMPLITUDE_MIN_ID_LENGTH) || undefined,
+});
+
+/** A rejection that retrying won't fix. Anything else (an outage) stops the run. */
+const isPermanent = (error: unknown) =>
+  /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
 
 async function forward(bundle: AgentforceBundle, mapping: AgentforceMappingOptions): Promise<Outcome> {
-  const conversation = normalizeAgentforceSession(bundle, mapping);
-  if (!conversation.userId && !conversation.deviceId) return 'no_identity';
-  const events = toAgentEvents(conversation, { redact, source: 'agentforce' });
+  const id = value(bundle.session, c('Id'));
+  let events: AgentEvent[];
+  try {
+    const conversation = normalizeAgentforceSession(bundle, mapping);
+    if (!conversation.userId && !conversation.deviceId) return 'no_identity';
+    events = toAgentEvents(conversation, { redact, source: 'agentforce' });
+  } catch (error) {
+    console.error(`Session ${id} could not be mapped:`, error);
+    return 'failed';
+  }
   if (events.length === 0) return 'empty';
   if (process.env.AMPLITUDE_DRY_RUN) {
     console.log(JSON.stringify(events, null, 2));
     return 'sent';
   }
-  await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+  try {
+    await send(events, amplitude());
+  } catch (error) {
+    if (!isPermanent(error)) throw error;
+    console.error(`Session ${id} was rejected by Amplitude:`, error);
+    return 'failed';
+  }
   return 'sent';
 }
 
@@ -1404,6 +1431,9 @@ export async function syncAgentforce(
   watermark: string,
   mapping: AgentforceMappingOptions = MAPPING,
 ): Promise<string> {
+  if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
+    throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
+  }
   const now = Date.now();
   const until = now - SESSION_SETTLE_MS;
   const schema = await probeAgentforceSchema();
@@ -1413,7 +1443,7 @@ export async function syncAgentforce(
     );
   }
   let next = until;
-  const counts = { sent: 0, no_identity: 0, empty: 0, waiting: 0 };
+  const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0, waiting: 0 };
   for (let start = Date.parse(watermark); start < until; start += WINDOW_MS) {
     const window = {
       endedAfter: new Date(start).toISOString(),
@@ -1429,9 +1459,9 @@ export async function syncAgentforce(
       counts[await forward(bundle, mapping)] += 1;
     }
   }
-  if (counts.no_identity || counts.empty || counts.waiting) {
+  if (counts.no_identity || counts.empty || counts.failed || counts.waiting) {
     console.warn(
-      `Skipped ${counts.no_identity} sessions without a user ID and ${counts.empty} with no messages; ${counts.waiting} still waiting for their trace`,
+      `Skipped ${counts.no_identity} sessions without a user ID, ${counts.empty} with no messages, and ${counts.failed} that failed (logged above); ${counts.waiting} still waiting for their trace`,
     );
   }
   return new Date(next).toISOString();

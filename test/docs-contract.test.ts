@@ -1128,6 +1128,59 @@ describe('forwarder core and adapters', () => {
     }
   });
 
+  it('skips a session Amplitude rejects without stopping the run, and needs an API key to send', async () => {
+    const complete = afBundle();
+    const posted: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/services/oauth2/token')) {
+          return new Response(JSON.stringify({ access_token: 't', instance_url: 'https://acme.my.salesforce.com' }));
+        }
+        if (url.includes('amplitude.com')) {
+          posted.push(url);
+          return new Response('{"code":400,"error":"Invalid id length for user_id"}', { status: 400 });
+        }
+        const sql = JSON.parse(init?.body ?? '{}').sql as string;
+        const columns = sql.match(/^SELECT (.*?) FROM /)?.[1]?.split(', ') ?? [];
+        const rows: Record<string, Record<string, unknown>[]> = {
+          ssot__AIAgentSession__dlm: [complete.session],
+          ssot__AiAgentSessionParticipant__dlm: complete.participants,
+          ssot__AIAgentInteraction__dlm: complete.interactions,
+          ssot__AiAgentInteractionMessage__dlm: complete.messages,
+          ssot__AIAgentInteractionStep__dlm: complete.steps,
+        };
+        const table = sql.match(/^SELECT .*? FROM (\S+)/)?.[1] ?? '';
+        const data = sql.endsWith('LIMIT 1') ? [] : (rows[table] ?? []);
+        return new Response(JSON.stringify({ metadata: columns.map((name) => ({ name })), data: data.map((r) => columns.map((col) => r[col] ?? null)), status: { completionStatus: 'Finished', rowCount: data.length } }));
+      }),
+    );
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-06T21:00:00.000Z'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    delete process.env.AMPLITUDE_DRY_RUN;
+    delete process.env.AMPLITUDE_API_KEY;
+    agentforce.resetSalesforceToken();
+    try {
+      await expect(agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions)).rejects.toThrow('AMPLITUDE_API_KEY');
+      process.env.AMPLITUDE_API_KEY = 'key';
+      process.env.AMPLITUDE_ENDPOINT = 'https://api.eu.amplitude.com/2/httpapi';
+      await expect(agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions)).resolves.toBe('2026-10-06T20:45:00.000Z');
+      expect(posted).toEqual(['https://api.eu.amplitude.com/2/httpapi']);
+      expect(String(error.mock.calls[0]?.[0])).toContain(`Session ${AF_SESSION} was rejected`);
+      expect(warn.mock.calls[0]?.[0]).toContain('1 that failed');
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+      vi.useRealTimers();
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+  });
+
   // Field names as published in Salesforce's Session Tracing, Generative AI Audit and Feedback, and
   // Data 360 DMO mapping references. A query naming any other column fails in a real org.
   const ssot = (...names: string[]) => names.map((n) => `ssot__${n}__c`);
