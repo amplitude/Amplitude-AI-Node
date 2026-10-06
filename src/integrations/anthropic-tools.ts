@@ -166,9 +166,11 @@ export class AmplitudeToolLoop {
             sessionId,
             agentId,
             env,
+            turnId: currentTurnId,
             input: toolInput,
             output: output == null ? undefined : String(output),
           });
+          currentTurnId += 1;
 
           toolResults.push({
             type: 'tool_result',
@@ -186,10 +188,12 @@ export class AmplitudeToolLoop {
             sessionId,
             agentId,
             env,
+            turnId: currentTurnId,
             input: toolInput,
             errorMessage:
               error instanceof Error ? error.message : String(error),
           });
+          currentTurnId += 1;
 
           toolResults.push({
             type: 'tool_result',

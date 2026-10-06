@@ -82,6 +82,12 @@ export interface ProviderTrackOptions {
    * Set to false when you already call `trackUserMessage()` explicitly.
    */
   trackInputMessages?: boolean;
+  /**
+   * Next Turn ID for an event in this completion. The first call returns the
+   * id `applySessionContext` already allocated. Later calls take the next
+   * session id, so a user message, tool call, and AI response do not share one.
+   */
+  takeTurnId?: () => number | undefined;
 }
 
 /**
@@ -133,6 +139,26 @@ export function applySessionContext(
     }
   }
 
+  const explicitTurn = overrides.turnId != null;
+  const sessionAllocated = !explicitTurn && ctx != null && result.turnId != null;
+  let started = false;
+  let local = typeof result.turnId === 'number' ? result.turnId : undefined;
+  result.takeTurnId = (): number | undefined => {
+    if (!started) {
+      started = true;
+      return typeof result.turnId === 'number' ? result.turnId : undefined;
+    }
+    if (sessionAllocated && ctx != null) {
+      const nxt = ctx.nextTurnId();
+      if (nxt != null) return nxt;
+    }
+    if (typeof local === 'number') {
+      local += 1;
+      return local;
+    }
+    return undefined;
+  };
+
   return result as unknown as ProviderTrackOptions;
 }
 
@@ -165,7 +191,7 @@ export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
     deviceId: ctx.deviceId ?? undefined,
     sessionId: ctx.sessionId,
     traceId: ctx.traceId,
-    turnId: ctx.turnId ?? undefined,
+    turnId: ctx.takeTurnId?.() ?? ctx.turnId ?? undefined,
     agentId: ctx.agentId,
     parentAgentId: ctx.parentAgentId,
     customerOrgId: ctx.customerOrgId,
@@ -630,6 +656,21 @@ export class SimpleStreamingTracker {
       return '';
     }
 
+    // Users take Turn IDs before the AI response. Emitting them afterwards
+    // would stamp a higher id on the earlier message.
+    const activeCtx = getActiveContext();
+    if (
+      !this._skipAutoUserTracking &&
+      !activeCtx?.skipAutoUserTracking &&
+      !this._autoUserTracked &&
+      (ctx.userId != null || ctx.deviceId != null) &&
+      ctx.sessionId != null &&
+      this._inputMessages.length > 0
+    ) {
+      this._autoUserTracked = true;
+      this._emitAutoUserMessages(ctx);
+    }
+
     const eventId = this._trackFn({
       ...contextFields(ctx),
       modelName: this._modelName,
@@ -661,23 +702,6 @@ export class SimpleStreamingTracker {
       sessionId: ctx.sessionId,
       agentId: ctx.agentId,
     });
-
-    // Emit trackUserMessage() for any new user-role messages in the input
-    // conversation. Mirrors provider wrappers' `_trackInputMessages()` so
-    // custom streaming integrations get zero-instrumentation parity.
-    // Idempotent across repeat finalize() calls via _autoUserTracked.
-    const activeCtx = getActiveContext();
-    if (
-      !this._skipAutoUserTracking &&
-      !activeCtx?.skipAutoUserTracking &&
-      !this._autoUserTracked &&
-      (ctx.userId != null || ctx.deviceId != null) &&
-      ctx.sessionId != null &&
-      this._inputMessages.length > 0
-    ) {
-      this._autoUserTracked = true;
-      this._emitAutoUserMessages(ctx);
-    }
 
     return eventId;
   }
@@ -738,7 +762,7 @@ export class SimpleStreamingTracker {
         messageContent: content,
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
+        turnId: ctx.takeTurnId?.() ?? ctx.turnId ?? undefined,
         messageSource: ctx.parentAgentId ? 'agent' : 'user',
         agentId: ctx.agentId,
         parentAgentId: ctx.parentAgentId,

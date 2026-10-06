@@ -311,7 +311,7 @@ describe('Context field propagation through provider wrappers', () => {
   });
 
   describe('turnId side-effect', () => {
-    it('does not double-increment turnId when applySessionContext is called twice', async (): Promise<void> => {
+    it('gives the user message and the AI response different Turn IDs', async (): Promise<void> => {
       const amp = createMockAmplitude();
       const fakeCreate = vi.fn().mockResolvedValue(fakeOpenAIResponse());
       const completions = makeOpenAICompletions(amp, fakeCreate);
@@ -334,8 +334,8 @@ describe('Context field propagation through provider wrappers', () => {
       );
 
       const opts = aiMessageOpts();
-      expect(opts.turnId).toBe(1);
-      expect(turnCount).toBe(1);
+      expect(opts.turnId).toBe(2);
+      expect(turnCount).toBe(2);
     });
   });
 

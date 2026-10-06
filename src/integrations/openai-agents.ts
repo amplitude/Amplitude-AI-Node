@@ -225,6 +225,7 @@ export class AmplitudeTracingProcessor {
       agentId: this._defaults.agentId,
       env: this._defaults.env,
     });
+    this._turnId += 1;
   }
 
   private _inferKind(
