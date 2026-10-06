@@ -658,8 +658,8 @@ describe('forwarder core and adapters', () => {
     const parts = [
       { id: '1', part_type: 'comment', body: 'Let me check your charges.', created_at: s0 + 3, author: finAuthor },
       { id: '2', part_type: 'note', body: 'internal: VIP customer', created_at: s0 + 4, author: teammate },
-      { id: '3', part_type: 'custom_action_started', body: null, created_at: s0 + 5, author: teammate, event_details: { action: { name: 'Look up charges' } } },
-      { id: '4', part_type: 'custom_action_finished', body: null, created_at: s0 + 7, author: teammate, event_details: { action: { name: 'Look up charges', result: 'success' } } },
+      { id: '3', part_type: 'custom_action_started', body: null, created_at: s0 + 5, author: finAuthor, event_details: { action: { name: 'Look up charges' } } },
+      { id: '4', part_type: 'custom_action_finished', body: null, created_at: s0 + 7, author: finAuthor, event_details: { action: { name: 'Look up charges', result: 'success' } } },
       { id: '5', part_type: 'comment', body: 'I refunded the duplicate charge.', created_at: s0 + 9, author: finAuthor },
       { id: '6', part_type: 'comment', body: 'secret', created_at: s0 + 20, author: contact, redacted: true },
       { id: '7', part_type: 'comment', body: 'Thanks!', created_at: s0 + 60, author: contact },
@@ -833,12 +833,18 @@ describe('forwarder core and adapters', () => {
     process.env.INTERCOM_CLIENT_SECRET = secret;
     process.env.AMPLITUDE_DRY_RUN = '1';
     try {
-      expect(await fin.handleIntercomWebhook(body, 'sha1=0000000000000000000000000000000000000000')).toBe(401);
-      expect(urls).toHaveLength(0);
+      const jobs: { conversationId: string }[] = [];
+      const enqueue = (job: { conversationId: string }) => {
+        jobs.push(job);
+      };
+      expect(await fin.handleIntercomWebhook(body, 'sha1=0000000000000000000000000000000000000000', enqueue)).toBe(401);
       const other = JSON.stringify({ topic: 'conversation.user.replied', data: { item: { id: '9' } } });
-      expect(await fin.handleIntercomWebhook(other, sign(other))).toBe(200);
+      expect(await fin.handleIntercomWebhook(other, sign(other), enqueue)).toBe(200);
+      expect(jobs).toHaveLength(0);
+      expect(await fin.handleIntercomWebhook(body, sign(body), enqueue)).toBe(200);
       expect(urls).toHaveLength(0);
-      expect(await fin.handleIntercomWebhook(body, sign(body))).toBe(200);
+      expect(jobs.map((j) => j.conversationId)).toEqual(['9']);
+      await fin.forwardFinConversation('9');
       expect(urls).toEqual(['https://api.intercom.io/conversations/9?display_as=plaintext']);
       const sent = JSON.parse(log.mock.calls[0]?.[0] as string) as AgentEvent[];
       assertForwarderRules(sent);
