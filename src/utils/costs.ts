@@ -188,11 +188,8 @@ export function fireworksPricingTarget(
   requested: string,
   selected: string | undefined,
 ): { modelName: string; defaultProvider: string | undefined } {
-  if (requested.includes('/routers/')) {
-    const bare = stripFireworksModelIdPrefix(stripProviderPrefix(requested));
-    if (bare.endsWith('-fast') || isPricedFireworksId(bare)) {
-      return { modelName: requested, defaultProvider: 'fireworks' };
-    }
+  if (requested.includes('/routers/') && requested.endsWith('-fast')) {
+    return { modelName: requested, defaultProvider: 'fireworks' };
   }
   const modelName = selected || requested;
   return {

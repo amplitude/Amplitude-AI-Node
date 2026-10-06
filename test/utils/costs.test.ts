@@ -423,6 +423,9 @@ describe('calculateCost', () => {
       defaultProvider: 'fireworks',
     });
     expect(fireworksPricingTarget(fire, undefined)).toEqual({ modelName: fire, defaultProvider: 'fireworks' });
+    expect(
+      fireworksPricingTarget('accounts/fireworks/routers/kimi-k3', 'accounts/fireworks/models/glm-5p3'),
+    ).toEqual({ modelName: 'accounts/fireworks/models/glm-5p3', defaultProvider: 'fireworks' });
     expect(fireworksPricingTarget(fire, 'claude-opus-4-5')).toEqual({
       modelName: 'claude-opus-4-5',
       defaultProvider: undefined,
@@ -485,6 +488,9 @@ describe('calculateCost', () => {
       defaultProvider: 'fireworks',
     });
     expect(fireworksPricingTarget(fire, undefined)).toEqual({ modelName: fire, defaultProvider: 'fireworks' });
+    expect(
+      fireworksPricingTarget('accounts/fireworks/routers/kimi-k3', 'accounts/fireworks/models/glm-5p3'),
+    ).toEqual({ modelName: 'accounts/fireworks/models/glm-5p3', defaultProvider: 'fireworks' });
     expect(fireworksPricingTarget(fire, 'claude-opus-4-5')).toEqual({
       modelName: 'claude-opus-4-5',
       defaultProvider: undefined,
