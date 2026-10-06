@@ -26,6 +26,7 @@ type Span = {
   span_parents?: string[] | null;
   is_root?: boolean | null;
   created: string;
+  _xact_id?: string;
   input?: unknown;
   output?: unknown;
   error?: unknown;
@@ -194,7 +195,7 @@ const MAPPING = {
 
 const unquote = (list: string) => [...list.matchAll(/'((?:[^']|'')*)'/g)].map((m) => (m[1] ?? '').replace(/''/g, "'"));
 
-/** Answers the adapter's three query kinds from an in-memory project_logs table. */
+/** Answers the adapter's four query kinds from an in-memory project_logs table. */
 function fakeProjectLogs(table: Span[]) {
   return (sql: string): Record<string, unknown>[] => {
     const byRoot = sql.match(/WHERE root_span_id IN \((.*?)\) ORDER BY/);
@@ -203,7 +204,7 @@ function fakeProjectLogs(table: Span[]) {
       return table.filter((s) => ids.has(s.root_span_id));
     }
     const rows = (spans: Span[]) =>
-      spans.map((s) => ({ root_span_id: s.root_span_id, created: s.created, conversation_id: s.metadata?.session_id }));
+      spans.map((s) => ({ root_span_id: s.root_span_id, created: s.created, _xact_id: s._xact_id, conversation_id: s.metadata?.session_id }));
     const roots = table.filter((s) => s.is_root);
     const byConversation = sql.match(/metadata\.session_id IN \((.*?)\) AND created >= '([^']+)'/);
     if (byConversation) {
@@ -211,7 +212,12 @@ function fakeProjectLogs(table: Span[]) {
       const since = byConversation[2] ?? '';
       return rows(roots.filter((s) => ids.has(String(s.metadata?.session_id)) && s.created >= since));
     }
-    const window = sql.match(/created >= '([^']+)' AND created < '([^']+)'/);
+    const catchUp = sql.match(/created >= '([^']+)' AND created < '([^']+)' AND _xact_id > (\d+) ORDER BY/);
+    if (catchUp) {
+      const [from, to, above] = [catchUp[1] ?? '', catchUp[2] ?? '', BigInt(catchUp[3] ?? '0')];
+      return rows(roots.filter((s) => s.created >= from && s.created < to && s._xact_id !== undefined && BigInt(s._xact_id) > above));
+    }
+    const window = sql.match(/created >= '([^']+)' AND created < '([^']+)' ORDER BY/);
     if (window) return rows(roots.filter((s) => s.created >= (window[1] ?? '') && s.created < (window[2] ?? '')));
     throw new Error(`unexpected query: ${sql}`);
   };
@@ -359,7 +365,7 @@ describe('Braintrust guide', () => {
     }
     expect(undocumented).toEqual([]);
     expect([...named].sort()).toEqual(
-      ['_pagination_key', 'created', 'error', 'id', 'input', 'is_root', 'metadata', 'metadata.session_id', 'metrics', 'output', 'root_span_id', 'span_attributes', 'span_id', 'span_parents'].sort(),
+      ['_pagination_key', '_xact_id', 'created', 'error', 'id', 'input', 'is_root', 'metadata', 'metadata.session_id', 'metrics', 'output', 'root_span_id', 'span_attributes', 'span_id', 'span_parents'].sort(),
     );
     expect(fieldsIn("SELECT metadata.foo AS x FROM project_logs('p') WHERE bogus = 1")).toEqual(['metadata.foo', 'bogus']);
     const [discovery, lookup, fetchSpans] = btql.map((r) => String(r.body.query));
@@ -588,7 +594,7 @@ describe('Braintrust guide', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const isolated = await withFakeTime('2026-01-16T01:00:00Z', () => braintrust.syncBraintrust('p1', '2026-01-15T00:00:00.000Z', mapping));
     expect(isolated.error).toBeUndefined();
-    expect(isolated.value).toBe('2026-01-15T23:00:00.000Z');
+    expect(JSON.parse(String(isolated.value))).toEqual({ created: '2026-01-15T23:00:00.000Z' });
     expect(amplitude.map((a) => [a.url, sessionOf(a.events)])).toEqual([
       ['https://api.eu.amplitude.com/2/httpapi', 'c-rejected'],
       ['https://api.eu.amplitude.com/2/httpapi', 'c-ok'],
@@ -602,6 +608,127 @@ describe('Braintrust guide', () => {
     stubFetch(table, () => 503);
     const outage = await withFakeTime('2026-01-16T01:00:00Z', () => braintrust.syncBraintrust('p1', '2026-01-15T00:00:00.000Z', mapping));
     expect(String(outage.error)).toContain('Amplitude HTTP API returned 503');
+  });
+
+  /** One dry-run sync at `now`: the conversations it printed, its queries and their times, warnings, and the next watermark. */
+  const dryRun = async (table: Span[], now: string, watermark: string) => {
+    const { btql } = stubFetch(table);
+    const sessions = new Map<string, AgentEvent[]>();
+    const log = vi.spyOn(console, 'log').mockImplementation((text: string) => {
+      const events = JSON.parse(text) as AgentEvent[];
+      sessions.set(String(events[0]?.event_properties['[Agent] Session ID']), events);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { value, error } = await withFakeTime(now, () => braintrust.syncBraintrust('p1', watermark, MAPPING));
+    const warnings = warn.mock.calls.map((c) => String(c[0]));
+    log.mockRestore();
+    warn.mockRestore();
+    return { sessions, queries: btql.map((r) => String(r.body.query)), at: btql.map((r) => r.at), warnings, watermark: String(value), error };
+  };
+  const insertIds = (events: AgentEvent[] | undefined) => (events ?? []).map((e) => e.insert_id);
+
+  it('catches up a root span logged after its window was read, with documented fields only', async () => {
+    setEnv({ AMPLITUDE_DRY_RUN: '1' });
+    // Roots are rows 0 and 2, so the highest root _xact_id is 1002.
+    const table: Span[] = exampleSpans().map((s, i) => ({ ...s, _xact_id: String(1000 + i) }));
+    const first = await dryRun(table, '2026-01-16T01:00:00Z', '2026-01-15T00:00:00.000Z');
+    expect(first.error).toBeUndefined();
+    expect([...first.sessions.keys()]).toEqual(['conv-1']);
+    expect(JSON.parse(first.watermark)).toEqual({ created: '2026-01-15T23:00:00.000Z', xactId: '1002' });
+
+    // Written after that run, with a created time eleven hours behind its watermark.
+    table.push(root('span-root-3', 'conv-1', S + 60, { input: 'Can I change the address?', output: 'Yes, until it ships.', _xact_id: '1010' }));
+    const second = await dryRun(table, '2026-01-16T02:00:00Z', first.watermark);
+    expect(second.error).toBeUndefined();
+    const [discovery, catchUp, lookup, fetchSpans] = second.queries;
+    expect(second.queries).toHaveLength(4);
+    expect(discovery).toContain("created >= '2026-01-15T23:00:00.000Z' AND created < '2026-01-16T00:00:00.000Z' ORDER BY");
+    expect(catchUp).toContain(
+      "WHERE is_root = true AND created >= '2026-01-08T23:00:00.000Z' AND created < '2026-01-16T00:00:00.000Z' AND _xact_id > 1002 ORDER BY _pagination_key DESC LIMIT 1000",
+    );
+    expect(lookup).toContain("metadata.session_id IN ('conv-1') AND created >= '2026-01-01T23:00:00.000Z'");
+    expect(unquote(fetchSpans?.match(/root_span_id IN \((.*?)\)/)?.[1] ?? '').sort()).toEqual(['span-root-1', 'span-root-2', 'span-root-3']);
+    for (const sql of second.queries) {
+      expect(sql.endsWith('ORDER BY _pagination_key DESC LIMIT 1000')).toBe(true);
+      expect(fieldsIn(sql).filter((field) => !DOCUMENTED_FIELDS.has(field))).toEqual([]);
+    }
+    const resent = second.sessions.get('conv-1');
+    expect(insertIds(resent)).toEqual(expect.arrayContaining([...insertIds(first.sessions.get('conv-1')).filter((id) => id !== 'conv-1:session-end'), 'conv-1:span-root-3:user', 'conv-1:span-root-3:reply']));
+    assertForwarderRules(resent ?? []);
+    expect(JSON.parse(second.watermark)).toEqual({ created: '2026-01-16T00:00:00.000Z', xactId: '1010' });
+
+    const third = await dryRun(table, '2026-01-16T03:00:00Z', second.watermark);
+    expect(third.sessions.size).toBe(0);
+    expect(third.queries).toHaveLength(2);
+    expect(third.queries[1]).toContain('AND _xact_id > 1010 ORDER BY');
+    expect(JSON.parse(third.watermark)).toEqual({ created: '2026-01-16T01:00:00.000Z', xactId: '1010' });
+  });
+
+  it('re-forwards a conversation whose root was updated after it was forwarded', async () => {
+    setEnv({ AMPLITUDE_DRY_RUN: '1' });
+    const table: Span[] = [
+      root('r1', 'conv-u', S, { input: 'Where is my order?', output: 'Order number?', _xact_id: '2000' }),
+      root('r2', 'conv-u', S + 30, { input: 'A1001', output: null, _xact_id: '2001' }),
+    ];
+    const first = await dryRun(table, '2026-01-16T01:00:00Z', '2026-01-15T00:00:00.000Z');
+    expect(insertIds(first.sessions.get('conv-u'))).not.toContain('conv-u:r2:reply');
+    expect(JSON.parse(first.watermark).xactId).toBe('2001');
+
+    // The root's output is written by a later update: same row, same created, higher _xact_id.
+    table[1] = { ...(table[1] as Span), output: 'It arrives Thursday.', _xact_id: '2005' };
+    const second = await dryRun(table, '2026-01-16T02:00:00Z', first.watermark);
+    expect(second.error).toBeUndefined();
+    const resent = second.sessions.get('conv-u') ?? [];
+    expect(insertIds(resent)).toEqual(expect.arrayContaining(['conv-u:r1:user', 'conv-u:r1:reply', 'conv-u:r2:user', 'conv-u:r2:reply']));
+    expect(resent.find((e) => e.insert_id === 'conv-u:r2:reply')?.event_properties.$llm_message).toEqual({ text: 'It arrives Thursday.' });
+    expect(JSON.parse(second.watermark).xactId).toBe('2005');
+  });
+
+  it('accepts a plain-date watermark, skipping catch-up until a run records an xactId', async () => {
+    setEnv({ AMPLITUDE_DRY_RUN: '1' });
+    const late = root('r-old', 'conv-old', S - 3600, { input: 'hi', output: 'hello', _xact_id: '3009' });
+    const current = root('r-new', 'conv-new', S, { input: 'hi', output: 'hello', _xact_id: '3001' });
+    const legacy = await dryRun([late, current], '2026-01-16T01:00:00Z', '2026-01-15T11:30:00.000Z');
+    expect(legacy.error).toBeUndefined();
+    expect(legacy.queries.some((q) => q.includes('_xact_id >'))).toBe(false);
+    expect([...legacy.sessions.keys()]).toEqual(['conv-new']);
+    expect(JSON.parse(legacy.watermark)).toEqual({ created: '2026-01-15T23:00:00.000Z', xactId: '3001' });
+
+    // The next run, with the JSON watermark, catches up the root it skipped.
+    const next = await dryRun([late, current], '2026-01-16T02:00:00Z', legacy.watermark);
+    expect([...next.sessions.keys()]).toEqual(['conv-old']);
+    expect(JSON.parse(next.watermark).xactId).toBe('3009');
+
+    const noXact = await dryRun([late, current], '2026-01-16T01:00:00Z', JSON.stringify({ created: '2026-01-15T11:30:00.000Z' }));
+    expect(noXact.queries.some((q) => q.includes('_xact_id >'))).toBe(false);
+    expect(braintrust.parseWatermark('2026-01-15T00:00:00.000Z')).toEqual({ created: '2026-01-15T00:00:00.000Z' });
+    expect(() => braintrust.parseWatermark('{"created":"2026-01-15T00:00:00.000Z","xactId":"1 OR 1=1"}')).toThrow(/xactId/);
+    expect(() => braintrust.parseWatermark('{"xactId":"1"}')).toThrow(/created/);
+  });
+
+  it('caps catch-up at 500 conversations, oldest write first, and carries the rest over', async () => {
+    setEnv({ AMPLITUDE_DRY_RUN: '1' });
+    // _xact_id runs opposite to table (and so page) order: conv-502 was written first, conv-0 last.
+    const table = Array.from({ length: 503 }, (_, i) =>
+      root(`t-${i}`, `conv-${i}`, S + i, { input: `q ${i}`, output: `a ${i}`, _xact_id: String(5000 + 502 - i) }),
+    );
+    const watermark = JSON.stringify({ created: '2026-01-15T23:00:00.000Z', xactId: '4999' });
+    const first = await dryRun(table, '2026-01-16T02:00:00Z', watermark);
+    expect(first.error).toBeUndefined();
+    expect(first.sessions.size).toBe(500);
+    expect(['conv-0', 'conv-1', 'conv-2'].some((id) => first.sessions.has(id))).toBe(false);
+    expect(first.warnings).toEqual(['Catch-up reached 500 conversations; the rest carry over to the next run']);
+    expect(JSON.parse(first.watermark)).toEqual({ created: '2026-01-16T00:00:00.000Z', xactId: '5499' });
+    // Main discovery, then the catch-up query and ceil(500 / 500) lookups, then one span fetch.
+    const extra = first.queries.filter((q) => q.includes('_xact_id >') || q.includes('metadata.session_id IN'));
+    expect(extra).toHaveLength(1 + Math.ceil(500 / 500));
+    expect(first.queries).toHaveLength(4);
+    for (let i = 1; i < first.at.length; i += 1) expect((first.at[i] ?? 0) - (first.at[i - 1] ?? 0)).toBeGreaterThanOrEqual(3100);
+
+    const second = await dryRun(table, '2026-01-16T03:00:00Z', first.watermark);
+    expect([...second.sessions.keys()].sort()).toEqual(['conv-0', 'conv-1', 'conv-2']);
+    expect(second.warnings).toEqual([]);
+    expect(JSON.parse(second.watermark).xactId).toBe('5502');
   });
 
   it('documents the limits the adapter depends on', () => {
