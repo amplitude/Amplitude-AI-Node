@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json",
+  "title": "Amplitude analytics metadata",
+  "description": "Identity an application passes on each request to an inference router or AI gateway, so the router's exported GenAI spans become analyzable Agent Analytics sessions. See routers.md for the span attribute each field becomes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "agent_id"],
+  "anyOf": [{ "required": ["user_id"] }, { "required": ["device_id"] }],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The application's conversation, thread, or ticket ID. The same value on every request in the conversation. Becomes gen_ai.conversation.id."
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A stable name for the agent or feature making the request. Becomes gen_ai.agent.id."
+    },
+    "user_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The logged-in user ID that product analytics uses. Becomes enduser.id."
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The device ID that product analytics uses, for users who are not logged in. Becomes amplitude.device_id."
+    }
+  }
+}

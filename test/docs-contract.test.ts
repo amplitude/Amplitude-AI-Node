@@ -51,6 +51,49 @@ function extractFencedBlockAfter(page: string, heading: string, lang: string): s
   return page.slice(open + lang.length + 4, close);
 }
 
+type MetadataSchema = {
+  required: string[];
+  anyOf: { required: string[] }[];
+  additionalProperties: boolean;
+  properties: Record<string, { type: string; minLength?: number }>;
+};
+
+function metadataSchemaErrors(schema: MetadataSchema, value: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  for (const key of schema.required) if (!(key in value)) errors.push(`required:${key}`);
+  if (!schema.anyOf.some((branch) => branch.required.every((key) => key in value))) errors.push('anyOf');
+  for (const [key, field] of Object.entries(value)) {
+    const property = schema.properties[key];
+    if (!property) {
+      if (!schema.additionalProperties) errors.push(`additional:${key}`);
+      continue;
+    }
+    if (typeof field !== property.type) errors.push(`type:${key}`);
+    else if (typeof field === 'string' && field.length < (property.minLength ?? 0)) errors.push(`minLength:${key}`);
+  }
+  return errors;
+}
+
+type OtlpAttribute = { key: string; value: { stringValue?: string; intValue?: string } };
+type OtlpExport = {
+  resourceSpans: {
+    resource?: { attributes?: OtlpAttribute[] };
+    scopeSpans: { spans: { attributes?: OtlpAttribute[] }[] }[];
+  }[];
+};
+
+function otlpAttributes(exportRequest: OtlpExport): Map<string, string | undefined> {
+  const attrs = new Map<string, string | undefined>();
+  for (const resourceSpans of exportRequest.resourceSpans) {
+    const all = [
+      ...(resourceSpans.resource?.attributes ?? []),
+      ...resourceSpans.scopeSpans.flatMap((scope) => scope.spans.flatMap((span) => span.attributes ?? [])),
+    ];
+    for (const { key, value } of all) attrs.set(key, value.stringValue ?? value.intValue);
+  }
+  return attrs;
+}
+
 function knownAgentNames(): Set<string> {
   const names = new Set<string>();
   for (const value of Object.values(constants)) {
@@ -144,6 +187,88 @@ describe('docs/integrations contract', () => {
     for (const url of [manifest.warehouses.raw_url, ...manifest.tools.map((t) => t.raw_url)]) {
       expect(url.startsWith(prefix)).toBe(true);
       expect(() => readPage(url.slice(prefix.length))).not.toThrow();
+    }
+  });
+
+  it('points the routers page and every schema at a file that exists', () => {
+    const manifest = JSON.parse(readPage('manifest.json')) as {
+      routers: { url: string; raw_url: string };
+      schemas: { raw_url: string }[];
+    };
+    const prefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/';
+    expect(manifest.routers.url.endsWith('/docs/integrations/routers.md')).toBe(true);
+    for (const url of [manifest.routers.raw_url, ...manifest.schemas.map((s) => s.raw_url)]) {
+      expect(url.startsWith(prefix)).toBe(true);
+      expect(() => readPage(url.slice(prefix.length))).not.toThrow();
+    }
+  });
+
+  it('shows router analytics metadata that the schema accepts, and rejects missing identity or unknown keys', () => {
+    const schema = JSON.parse(readPage('analytics-metadata.schema.json')) as MetadataSchema;
+    const example = JSON.parse(
+      extractFencedBlockAfter(readPage('routers.md'), '### Example: analytics metadata', 'json'),
+    ) as Record<string, unknown>;
+    expect(metadataSchemaErrors(schema, example)).toEqual([]);
+    expect(metadataSchemaErrors(schema, { session_id: 'c', agent_id: 'a', device_id: 'd' })).toEqual([]);
+
+    const { user_id: _u, device_id: _d, ...noIdentity } = example;
+    expect(metadataSchemaErrors(schema, noIdentity)).toContain('anyOf');
+    expect(metadataSchemaErrors(schema, { ...example, context: {} })).toContain('additional:context');
+    expect(metadataSchemaErrors(schema, { ...example, session_id: '' })).toContain('minLength:session_id');
+  });
+
+  it('shows a router span that carries every mapped attribute with the example metadata values', () => {
+    const page = readPage('routers.md');
+    const span = JSON.parse(extractFencedBlockAfter(page, '### Example: span', 'json')) as OtlpExport;
+    const metadata = JSON.parse(
+      extractFencedBlockAfter(page, '### Example: analytics metadata', 'json'),
+    ) as Record<string, string>;
+    const attrs = otlpAttributes(span);
+
+    const section = page.slice(page.indexOf('### Span attributes'), page.indexOf('### Endpoint'));
+    const rows = [...section.matchAll(/^\| `([a-z_.]+)`(?:, `[a-z_.]+`)* \| `([a-z_.]+)`/gm)];
+    const mapped = rows.map((row) => [row[1] ?? '', row[2] ?? ''] as const);
+    expect(mapped.length).toBeGreaterThanOrEqual(4);
+    for (const [field, attribute] of mapped) {
+      if (field in metadata) expect(attrs.get(attribute)).toBe(metadata[field]);
+    }
+    for (const key of ['gen_ai.response.id', 'amplitude.source', 'amplitude.content_mode']) {
+      expect(attrs.has(key)).toBe(true);
+    }
+  });
+
+  it('keeps one gateway recipe per smoke-tested gateway, tagged on the Path 1 agents', () => {
+    const page = readPage('routers.md');
+    const recipes = page.slice(page.indexOf('### Gateway recipes'), page.indexOf('## Path 2'));
+    const smoke = readFileSync(resolve(__dirname, 'gateway-smoke.test.ts'), 'utf8');
+    const smoked = new Set([...smoke.matchAll(/gatewayContext\('([a-z]+)'\)/g)].map((m) => m[1]));
+    expect(smoked.size).toBeGreaterThan(0);
+    for (const gateway of smoked) expect(recipes).toContain(`| \`${gateway}\` |`);
+
+    const path1 = page.slice(page.indexOf('## Path 1'), page.indexOf('### Gateway recipes'));
+    expect(path1).toContain('{"ingestion_path": "gateway", "gateway": "fireworks"}');
+    expect(path1).toContain("{ ingestion_path: 'gateway', gateway: 'fireworks' }");
+  });
+
+  it('links the gateway guide from README and amplitude-ai.md, and keeps gateway base URLs out of their code', () => {
+    const root = resolve(__dirname, '..');
+    const others = ['README.md', 'amplitude-ai.md', 'AGENTS.md', 'llms.txt', 'llms-full.txt'].map((f) =>
+      readFileSync(join(root, f), 'utf8'),
+    );
+    expect(others[0]).toContain('(docs/integrations/routers.md)');
+    expect(others[1]).toContain('docs/integrations/routers.md');
+
+    const gatewayUrls = ['openrouter.ai/api/v1', 'router.requesty.ai', 'localhost:4000'];
+    const pages = [
+      ...others,
+      ...readdirSync(DOCS_DIR)
+        .filter((f) => f.endsWith('.md') && f !== 'routers.md')
+        .map(readPage),
+    ];
+    for (const text of pages) {
+      for (const block of text.match(/```[\s\S]*?```/g) ?? []) {
+        for (const url of gatewayUrls) expect(block).not.toContain(url);
+      }
     }
   });
 

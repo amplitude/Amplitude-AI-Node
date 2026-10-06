@@ -708,37 +708,7 @@ OpenAI-compatible gateways and OTEL partners — no special SDK build required:
 
 Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
 
-```typescript
-import { AmplitudeAI, OpenAI } from '@amplitude/ai';
-
-const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
-
-// OpenRouter
-const openrouter = new OpenAI({
-  amplitude: ai,
-  apiKey: process.env.OPENROUTER_API_KEY,
-  baseURL: 'https://openrouter.ai/api/v1',
-});
-const orAgent = ai.agent('openrouter-agent', {
-  userId,
-  context: { ingestion_path: 'gateway', gateway: 'openrouter' },
-});
-
-// LiteLLM proxy
-const litellm = new OpenAI({
-  amplitude: ai,
-  apiKey: process.env.LITELLM_API_KEY,
-  baseURL: 'http://localhost:4000/v1',
-});
-const llAgent = ai.agent('litellm-agent', {
-  userId,
-  context: { ingestion_path: 'gateway', gateway: 'litellm' },
-});
-```
-
-**Model id rule:** pass the **real provider model** the gateway routed to (`gpt-4o-mini`, `claude-sonnet-4-20250514`). Gateway product labels (`openrouter/auto`, router aliases) cannot be priced — the SDK **omits** `[Agent] Cost USD` rather than recording `$0`.
-
-For OTLP partners, emit at least `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Full recipes: [`amplitude-ai.md` Works with](amplitude-ai.md#works-with).
+Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: [routers and gateways guide](docs/integrations/routers.md).
 
 ## Privacy & Content Control
 
@@ -998,7 +968,7 @@ const fireworks = new OpenAI({
 });
 ```
 
-You can set `provider: 'fireworks'` explicitly for a private proxy. Cost calculation uses public Fireworks/genai-prices data; unknown models omit cost, and no private Amplitude contract rates are included.
+You can set `provider: 'fireworks'` explicitly for a private proxy. Cost calculation uses public Fireworks/genai-prices data; unknown models omit cost, and no private Amplitude contract rates are included. How router and FireRouter calls are priced: [routers and gateways guide](docs/integrations/routers.md).
 
 **Feature coverage by provider:**
 

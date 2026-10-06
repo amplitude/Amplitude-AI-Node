@@ -35,6 +35,10 @@ The user ID must match the one used in product analytics. Conversations without 
 
 If your application already emits OpenTelemetry, you can skip the forwarder and add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
 
+## Inference routers and AI gateways
+
+Requests go through a router or gateway that picks the model. Wrap the client with the SDK, have the router export OpenTelemetry GenAI spans with the identity your application passes on each request, or post events over the HTTP API. See [routers.md](./routers.md) and the identity contract in [analytics-metadata.schema.json](./analytics-metadata.schema.json).
+
 ## Data warehouses
 
 Conversations or traces already land in Snowflake, BigQuery, or Databricks; a SQL view turns them into `[Agent]` events that Amplitude's warehouse import reads. Span exports (OpenTelemetry GenAI, OpenInference, MLflow Tracing) are replayed to Amplitude's OTLP endpoint instead. Start at [warehouses/README.md](./warehouses/README.md).
@@ -65,6 +69,7 @@ Fetch the raw page for the source and follow "Part 2: Coding agent procedure":
 - LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md`
 - Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
+- Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
 - Offline eval runs: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/offline-eval.md`
 
 ## Your source is not listed
