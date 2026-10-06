@@ -1389,13 +1389,18 @@ describe('forwarder core and adapters', () => {
       }),
     );
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { ...process.env };
+    process.env.AMPLITUDE_DRY_RUN = '1';
     try {
       await tracing.langfuse.syncLangfuse('2026-01-15T00:00:00.000Z');
       expect(urls).toHaveLength(2);
       expect(urls.every((u) => u.includes('/api/public/v2/observations'))).toBe(true);
-      expect(warn).toHaveBeenCalledWith('Skipped 1 traces without a sessionId and 1 sessions without a user ID');
+      expect(warn).toHaveBeenCalledWith(
+        'Skipped 1 traces without a sessionId, 1 sessions without a user ID, 0 with no messages, and 0 that failed (logged above); 0 still active',
+      );
     } finally {
       warn.mockRestore();
+      process.env = env;
     }
   });
 
