@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,7 +9,7 @@ import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
-const PLATFORM_PAGES = ['sierra.md', 'decagon.md', 'langfuse.md', 'langsmith.md', 'braintrust.md'];
+const PLATFORM_PAGES = ['sierra.md', 'decagon.md', 'fin.md', 'langfuse.md', 'langsmith.md', 'braintrust.md'];
 const TRACING_ADAPTERS = [
   { name: 'langfuse', page: 'langfuse.md', heading: '### Langfuse adapter' },
   { name: 'langsmith', page: 'langsmith.md', heading: '### LangSmith adapter' },
@@ -295,6 +296,8 @@ describe('forwarder core and adapters', () => {
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   let decagon: any;
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
+  let fin: any;
+  // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   const tracing: Record<string, any> = {};
 
   const t0 = Date.UTC(2026, 0, 15, 12, 0, 0);
@@ -327,10 +330,12 @@ describe('forwarder core and adapters', () => {
     const coreSource = extractCore(readPage('sierra.md'));
     const decagonSource = extractFencedBlockAfter(readPage('decagon.md'), '### Decagon adapter', 'ts');
     const sierraSource = extractFencedBlockAfter(readPage('sierra.md'), '### Sierra adapter skeleton', 'ts');
+    const finSource = extractFencedBlockAfter(readPage('fin.md'), '### Fin adapter', 'ts');
 
     writeFileSync(join(dir, 'amplitude-agent-forwarder.ts'), coreSource);
     writeFileSync(join(dir, 'decagon.ts'), decagonSource);
     writeFileSync(join(dir, 'sierra.ts'), sierraSource);
+    writeFileSync(join(dir, 'fin.ts'), finSource);
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     const tracingSources = TRACING_ADAPTERS.map((a) => ({
       name: a.name,
@@ -343,6 +348,7 @@ describe('forwarder core and adapters', () => {
         'amplitude-agent-forwarder.ts',
         'decagon.ts',
         'sierra.ts',
+        'fin.ts',
         ...tracingSources.map((s) => `${s.name}.ts`),
         'env.d.ts',
       ].map((f) => join(dir, f)),
@@ -353,6 +359,7 @@ describe('forwarder core and adapters', () => {
     const decagonPath = transpileTo(dir, 'decagon', decagonSource);
     core = await import(pathToFileURL(corePath).href);
     decagon = await import(pathToFileURL(decagonPath).href);
+    fin = await import(pathToFileURL(transpileTo(dir, 'fin', finSource)).href);
     for (const { name, source } of tracingSources) {
       tracing[name] = await import(pathToFileURL(transpileTo(dir, name, source)).href);
     }
@@ -609,6 +616,224 @@ describe('forwarder core and adapters', () => {
       expect(urls[3]).toContain('cursor=151050148');
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  const finAuthor = { type: 'bot', id: '278', name: 'Fin', from_ai_agent: true, is_ai_answer: true };
+  const contact = { type: 'user', id: '6643ab21c4f1a9a3b1e2f0d7' };
+  const teammate = { type: 'admin', id: '274', name: 'Jamie' };
+  const s0 = Date.UTC(2026, 0, 15, 12, 0, 0) / 1000;
+  const finConversation = (overrides: Record<string, unknown> = {}, parts: unknown[] = []) => ({
+    id: '215472586723018',
+    created_at: s0,
+    updated_at: s0 + 300,
+    state: 'closed',
+    source: { id: '403918330', type: 'conversation', delivered_as: 'customer_initiated', body: '<p>I was charged twice.</p>', author: contact, attachments: [] },
+    contacts: { contacts: [{ id: contact.id, external_id: 'user_12345' }] },
+    ai_agent_participated: true,
+    ai_agent: { source_type: 'workflow', last_answer_type: 'ai_answer', resolution_state: 'confirmed_resolution', rating: 5, rating_remark: 'quick', updated_at: s0 + 120, content_sources: { total_count: 2 } },
+    conversation_parts: { total_count: parts.length, conversation_parts: parts },
+    ...overrides,
+  });
+  const finOptions = {
+    agentId: 'billing-support',
+    resolveUserId: (c: { contacts: { contacts: { external_id?: string }[] } }) => c.contacts.contacts[0]?.external_id,
+  };
+
+  it('normalizes a documented Fin conversation: opener from source, actions as tool calls, no notes', () => {
+    const parts = [
+      { id: '1', part_type: 'comment', body: 'Let me check your charges.', created_at: s0 + 3, author: finAuthor },
+      { id: '2', part_type: 'note', body: 'internal: VIP customer', created_at: s0 + 4, author: teammate },
+      { id: '3', part_type: 'custom_action_started', body: null, created_at: s0 + 5, author: teammate, event_details: { action: { name: 'Look up charges' } } },
+      { id: '4', part_type: 'custom_action_finished', body: null, created_at: s0 + 7, author: teammate, event_details: { action: { name: 'Look up charges', result: 'success' } } },
+      { id: '5', part_type: 'comment', body: 'I refunded the duplicate charge.', created_at: s0 + 9, author: finAuthor },
+      { id: '6', part_type: 'comment', body: 'secret', created_at: s0 + 20, author: contact, redacted: true },
+      { id: '7', part_type: 'comment', body: 'Thanks!', created_at: s0 + 60, author: contact },
+      { id: '8', part_type: 'comment', body: 'Happy to help.', created_at: s0 + 62, author: finAuthor },
+      { id: '9', part_type: 'close', body: null, created_at: s0 + 90, author: finAuthor },
+    ];
+    const { conversation, droppedAfterHandoff } = fin.normalizeFinConversation(finConversation({}, parts), finOptions);
+    expect(droppedAfterHandoff).toBe(0);
+    expect(conversation.context).toEqual({
+      platform: 'fin',
+      handed_off: false,
+      fin_resolution_state: 'confirmed_resolution',
+      fin_last_answer_type: 'ai_answer',
+      fin_source_type: 'workflow',
+      fin_content_source_count: 2,
+      channel: 'conversation',
+    });
+    const events: AgentEvent[] = core.toAgentEvents(conversation, { source: 'fin' });
+    assertForwarderRules(events);
+    expect(events.map((e) => e.event_type)).toEqual([
+      '[Agent] User Message',
+      '[Agent] AI Response',
+      '[Agent] Tool Call',
+      '[Agent] AI Response',
+      '[Agent] User Message',
+      '[Agent] AI Response',
+      '[Agent] Score',
+      '[Agent] Session End',
+    ]);
+    expect(events[0]?.insert_id).toBe('215472586723018:source');
+    expect(events[0]?.event_properties.$llm_message).toEqual({ text: 'I was charged twice.' });
+    expect(events[0]?.time).toBe(s0 * 1000);
+    expect(events[2]?.event_properties).toMatchObject({
+      '[Agent] Tool Name': 'Look up charges',
+      '[Agent] Tool Success': true,
+      '[Agent] Latency Ms': 2000,
+    });
+    expect(events[2]?.event_properties).not.toHaveProperty('[Agent] Tool Input');
+    expect(events[6]?.event_properties).toMatchObject({ '[Agent] Score Name': 'fin_rating', '[Agent] Score Value': 5, '[Agent] Comment': 'quick' });
+    const text = JSON.stringify(events);
+    expect(text).not.toContain('VIP customer');
+    expect(text).not.toContain('secret');
+    expect(events[0]?.event_properties['[Agent] Source']).toBe('fin');
+  });
+
+  it('ends a Fin session at the first teammate reply and flags CSAT that rates the teammate', () => {
+    const parts = [
+      { id: '1', part_type: 'comment', body: 'I can help with billing.', created_at: s0 + 3, author: finAuthor },
+      { id: '2', part_type: 'comment', body: 'I want a human.', created_at: s0 + 10, author: contact },
+      { id: '3', part_type: 'assignment', body: null, created_at: s0 + 11, author: finAuthor },
+      { id: '4', part_type: 'comment', body: 'Hi, Jamie here.', created_at: s0 + 30, author: teammate },
+      { id: '5', part_type: 'comment', body: 'My card is 4111...', created_at: s0 + 40, author: contact },
+      { id: '6', part_type: 'comment', body: 'Fixed it for you.', created_at: s0 + 50, author: teammate },
+    ];
+    const raw = finConversation(
+      {
+        ai_agent: { resolution_state: 'routed_to_team' },
+        conversation_rating: { rating: 2, remark: 'slow', created_at: s0 + 400 },
+      },
+      parts,
+    );
+    const { conversation, droppedAfterHandoff } = fin.normalizeFinConversation(raw, finOptions);
+    expect(droppedAfterHandoff).toBe(2);
+    expect(conversation.context).toMatchObject({ handed_off: true, csat_after_handoff: true, fin_resolution_state: 'routed_to_team' });
+    const events: AgentEvent[] = core.toAgentEvents(conversation);
+    assertForwarderRules(events);
+    const text = JSON.stringify(events);
+    expect(text).not.toContain('Jamie here');
+    expect(text).not.toContain('4111');
+    const score = events.find((e) => e.event_type === '[Agent] Score');
+    expect(score?.event_properties['[Agent] Score Name']).toBe('csat');
+    expect(events[events.length - 1]?.event_type).toBe('[Agent] Session End');
+    expect(events[events.length - 1]?.time).toBe((s0 + 400) * 1000);
+  });
+
+  it('forwards an open Fin conversation without Session End, with quick replies, truncation, and allowed attributes', () => {
+    const parts = [
+      {
+        id: '1',
+        part_type: 'quick_reply',
+        body: null,
+        created_at: s0 + 3,
+        author: finAuthor,
+        metadata: { quick_reply_options: [{ text: 'Refund', uuid: 'a' }, { text: 'Exchange', uuid: 'b' }] },
+      },
+      { id: '2', part_type: 'comment', body: 'Refund', created_at: s0 + 9, author: contact, attachments: [{ type: 'upload' }] },
+      { id: '3', part_type: 'comment', body: '', created_at: s0 + 10, author: finAuthor },
+      { id: '4', part_type: 'comment', body: 'Refund started.', created_at: s0 + 12, author: finAuthor },
+    ];
+    const raw = finConversation(
+      {
+        state: 'open',
+        ai_agent: { resolution_state: 'assumed_resolution' },
+        custom_attributes: { plan: 'pro', email: 'someone@example.com' },
+        contacts: { contacts: [{ id: 'c1', external_id: 'user_12345' }, { id: 'c2' }] },
+        conversation_parts: { total_count: 612, conversation_parts: parts },
+      },
+    );
+    const { conversation } = fin.normalizeFinConversation(raw, { ...finOptions, contextAttributeKeys: ['plan'] });
+    expect(conversation.endedAt).toBeUndefined();
+    expect(conversation.context).toMatchObject({ parts_truncated: true, contact_count: 2, plan: 'pro', has_attachments: true });
+    expect(conversation.context).not.toHaveProperty('email');
+    const events: AgentEvent[] = core.toAgentEvents(conversation);
+    assertForwarderRules(events);
+    expect(events.some((e) => e.event_type === '[Agent] Session End')).toBe(false);
+    const reply = events.find((e) => e.insert_id === '215472586723018:1');
+    expect(reply?.event_properties.$llm_message).toEqual({ text: '[Displayed: quick_reply]' });
+    const span = events.find((e) => e.event_type === '[Agent] Span');
+    expect(JSON.parse(span?.event_properties['[Agent] Input State'] as string)).toEqual(['Refund', 'Exchange']);
+    expect(events.filter((e) => e.event_type === '[Agent] AI Response')).toHaveLength(2);
+  });
+
+  it('strips HTML that survives display_as=plaintext', () => {
+    expect(fin.plainText('<p>Hi&nbsp;there</p><p>See <a href="https://x.test">this &amp; that</a></p>line<br/>two')).toBe(
+      'Hi there\nSee this & that\nline\ntwo',
+    );
+    expect(fin.plainText(null)).toBe('');
+  });
+
+  it('pages Intercom search by starting_after, retries 429, and retrieves transcripts as plain text', async () => {
+    const calls: { url: string; init?: { body?: string; headers?: Record<string, string> } }[] = [];
+    const responses = [
+      new Response('{}', { status: 429 }),
+      new Response(JSON.stringify({ conversations: [{ id: '1' }, { id: '2' }], pages: { next: { starting_after: 'abc' } } })),
+      new Response(JSON.stringify({ conversations: [{ id: '3' }], pages: { next: null } })),
+      new Response(JSON.stringify({ id: '3' })),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string; headers?: Record<string, string> }) => {
+        calls.push({ url, init });
+        return responses.shift() ?? new Response('{}', { status: 500 });
+      }),
+    );
+    const ids = await drain(fin.searchFinConversations({ updatedAfter: 100, updatedBefore: 200 }));
+    expect(ids).toEqual(['1', '2', '3']);
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.url).toBe('https://api.intercom.io/conversations/search');
+    expect(calls[0]?.init?.headers?.['Intercom-Version']).toBe('2.14');
+    const first = JSON.parse(calls[1]?.init?.body ?? '{}');
+    expect(first.query.value).toContainEqual({ field: 'ai_agent_participated', operator: '=', value: true });
+    expect(first.pagination).toEqual({ per_page: 150 });
+    expect(JSON.parse(calls[2]?.init?.body ?? '{}').pagination).toEqual({ per_page: 150, starting_after: 'abc' });
+
+    await fin.retrieveIntercomConversation('3');
+    expect(calls[3]?.url).toBe('https://api.intercom.io/conversations/3?display_as=plaintext');
+  });
+
+  it('verifies Intercom webhook signatures and forwards only closed conversations', async () => {
+    const secret = 'client-secret';
+    const sign = (body: string) => `sha1=${createHmac('sha1', secret).update(body).digest('hex')}`;
+    const body = JSON.stringify({ topic: 'conversation.admin.closed', data: { item: { id: '9', ai_agent_participated: true } } });
+    expect(await fin.verifyIntercomSignature(body, sign(body), secret)).toBe(true);
+    expect(await fin.verifyIntercomSignature(new TextEncoder().encode(body), sign(body), secret)).toBe(true);
+    expect(await fin.verifyIntercomSignature(`${body} `, sign(body), secret)).toBe(false);
+    expect(await fin.verifyIntercomSignature(body, sign(body).replace('sha1=', ''), secret)).toBe(false);
+    expect(await fin.verifyIntercomSignature(body, sign(body), '')).toBe(false);
+
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return new Response(JSON.stringify(finConversation({ id: '9' }, [
+          { id: '1', part_type: 'comment', body: 'Done.', created_at: s0 + 3, author: finAuthor },
+        ])));
+      }),
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const env = { secret: process.env.INTERCOM_CLIENT_SECRET, dry: process.env.AMPLITUDE_DRY_RUN };
+    process.env.INTERCOM_CLIENT_SECRET = secret;
+    process.env.AMPLITUDE_DRY_RUN = '1';
+    try {
+      expect(await fin.handleIntercomWebhook(body, 'sha1=0000000000000000000000000000000000000000')).toBe(401);
+      expect(urls).toHaveLength(0);
+      const other = JSON.stringify({ topic: 'conversation.user.replied', data: { item: { id: '9' } } });
+      expect(await fin.handleIntercomWebhook(other, sign(other))).toBe(200);
+      expect(urls).toHaveLength(0);
+      expect(await fin.handleIntercomWebhook(body, sign(body))).toBe(200);
+      expect(urls).toEqual(['https://api.intercom.io/conversations/9?display_as=plaintext']);
+      const sent = JSON.parse(log.mock.calls[0]?.[0] as string) as AgentEvent[];
+      assertForwarderRules(sent);
+    } finally {
+      log.mockRestore();
+      if (env.secret === undefined) delete process.env.INTERCOM_CLIENT_SECRET;
+      else process.env.INTERCOM_CLIENT_SECRET = env.secret;
+      if (env.dry === undefined) delete process.env.AMPLITUDE_DRY_RUN;
+      else process.env.AMPLITUDE_DRY_RUN = env.dry;
     }
   });
 

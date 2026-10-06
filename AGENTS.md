@@ -63,7 +63,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - LangChain / LangGraph: use `AmplitudeCallbackHandler` (duck-typed; implements `handleChatModelStart` for User Message).
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
-- Agent runs on a hosted platform (Sierra, Decagon): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
+- Agent runs on a hosted platform (Sierra, Decagon, Fin): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty) or a partner exporting GenAI spans (Strands): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
@@ -140,6 +140,7 @@ Prompt:
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
 - `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/fin.md` — Fin conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/langfuse.md` — Langfuse trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
