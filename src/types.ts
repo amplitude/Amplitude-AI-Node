@@ -257,6 +257,7 @@ export interface AnthropicTokenUsage {
 export interface GeminiResponse {
   response?: GeminiResponseObject;
   text?: (() => string) | string;
+  responseId?: string;
   usageMetadata?: GeminiUsageMetadata;
   candidates?: GeminiCandidate[];
 }
@@ -266,6 +267,7 @@ export interface GeminiResponse {
  */
 export interface GeminiResponseObject {
   text?: () => string;
+  responseId?: string;
   usageMetadata?: GeminiUsageMetadata;
   candidates?: GeminiCandidate[];
 }

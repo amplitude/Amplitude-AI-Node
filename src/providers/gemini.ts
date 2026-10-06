@@ -115,6 +115,7 @@ export class Gemini extends BaseAIProvider {
         topP: extractGeminiTopP(params),
         maxOutputTokens: extractGeminiMaxOutputTokens(params),
         isStreaming: false,
+        providerRequestId: extracted.responseId,
       });
 
       return response;
@@ -199,10 +200,12 @@ export class Gemini extends BaseAIProvider {
     ctx: ReturnType<typeof applySessionContext>,
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
+    let responseId: string | undefined;
 
     try {
       for await (const chunk of stream) {
         const extracted = extractGeminiResponse(chunk);
+        responseId ??= extracted.responseId;
         if (extracted.text) accumulator.addContent(extracted.text);
         if (Array.isArray(extracted.functionCalls)) {
           for (const fc of extracted.functionCalls) accumulator.addToolCall(fc);
@@ -227,6 +230,7 @@ export class Gemini extends BaseAIProvider {
       if (finalResponse != null) {
         try {
           const extractedFinal = extractGeminiResponse(await finalResponse);
+          responseId ??= extractedFinal.responseId;
           accumulator.setUsage({
             inputTokens: extractedFinal.inputTokens,
             outputTokens: extractedFinal.outputTokens,
@@ -287,6 +291,7 @@ export class Gemini extends BaseAIProvider {
         isStreaming: true,
         isError: state.isError,
         errorMessage: state.errorMessage,
+        providerRequestId: responseId,
       });
     }
   }
@@ -300,9 +305,14 @@ export function extractGeminiResponse(response: unknown): {
   cacheReadTokens?: number;
   finishReason?: string;
   functionCalls?: Array<Record<string, unknown>>;
+  responseId?: string;
 } {
   const resp = response as GeminiResponse;
   const respObj = resp.response ?? resp;
+  const responseId =
+    typeof respObj.responseId === 'string' && respObj.responseId.trim()
+      ? respObj.responseId.trim()
+      : undefined;
   let text = '';
   if (typeof respObj.text === 'function') {
     try {
@@ -332,6 +342,7 @@ export function extractGeminiResponse(response: unknown): {
     cacheReadTokens: usage?.cachedContentTokenCount,
     finishReason,
     functionCalls: functionCalls?.length ? functionCalls : undefined,
+    responseId,
   };
 }
 
