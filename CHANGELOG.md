@@ -31,6 +31,12 @@
   `[Agent] Cost USD` rather than failing loudly. Pricing data within `0.1.x` is
   unchanged.
 
+### Fixed (AA-152024)
+- **Gemini calls record `[Agent] Provider Request ID`.** The `GoogleGenAI` and
+  `Gemini` wrappers and `patch()` (non-streaming and streaming) dropped the
+  response's `responseId`, so Gemini AI Responses could not be joined back to
+  the provider request. Same fix as `amplitude-ai`.
+
 ## 0.19.0
 
 ### Added (AA-152464)

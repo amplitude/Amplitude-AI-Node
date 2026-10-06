@@ -1257,10 +1257,12 @@ async function* _wrapPatchedGeminiStream(
   let isError = false;
   let errorMessage: string | undefined;
   const streamToolCalls: Array<Record<string, unknown>> = [];
+  let responseId: string | undefined;
   try {
     for await (const chunk of stream) {
       const c = chunk as Record<string, unknown>;
       const respObj = (c.response ?? c) as Record<string, unknown>;
+      responseId ??= _geminiResponseId(respObj);
       // Legacy SDK: text() method. New @google/genai: text string getter.
       const textVal = respObj.text;
       if (typeof textVal === 'function') content += String(textVal());
@@ -1341,6 +1343,7 @@ async function* _wrapPatchedGeminiStream(
         maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
         topP: genConfig?.topP as number | undefined,
         finishReason,
+        providerRequestId: responseId,
         agentId: ctx.agentId,
         env: ctx.env,
         isStreaming: true,
@@ -2053,6 +2056,11 @@ function _trackCompletionError(
   });
 }
 
+function _geminiResponseId(respObj: Record<string, unknown>): string | undefined {
+  const id = respObj.responseId;
+  return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+}
+
 function _trackGeminiResponse(
   ai: AmplitudeAI,
   response: unknown,
@@ -2129,6 +2137,7 @@ function _trackGeminiResponse(
     temperature: genConfig?.temperature as number | undefined,
     maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
     topP: genConfig?.topP as number | undefined,
+    providerRequestId: _geminiResponseId(respObj),
     agentId: ctx.agentId,
     env: ctx.env,
     ..._contextExtras(ctx),

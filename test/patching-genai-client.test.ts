@@ -82,6 +82,7 @@ describe('patchGemini — new @google/genai client (B7)', () => {
     };
     genContent.mockResolvedValueOnce({
       text: 'hello',
+      responseId: 'gem-resp-1',
       usageMetadata: {
         promptTokenCount: 5000,
         candidatesTokenCount: 50,
@@ -102,6 +103,7 @@ describe('patchGemini — new @google/genai client (B7)', () => {
     expect(arg.content).toBe('hello');
     expect(arg.inputTokens).toBe(5000);
     expect(arg.cacheReadTokens).toBe(4500);
+    expect(arg.providerRequestId).toBe('gem-resp-1');
   });
 
   it('wraps a streaming result that resolves directly to an async iterable', async (): Promise<void> => {
@@ -116,9 +118,10 @@ describe('patchGemini — new @google/genai client (B7)', () => {
     };
 
     async function* chunks(): AsyncGenerator<Record<string, unknown>> {
-      yield { text: 'hel' };
+      yield { text: 'hel', responseId: 'gem-stream' };
       yield {
         text: 'lo',
+        responseId: 'gem-stream',
         usageMetadata: {
           promptTokenCount: 10,
           candidatesTokenCount: 2,
@@ -145,5 +148,6 @@ describe('patchGemini — new @google/genai client (B7)', () => {
     expect(arg.provider).toBe('gemini');
     expect(arg.content).toBe('hello');
     expect(arg.isStreaming).toBe(true);
+    expect(arg.providerRequestId).toBe('gem-stream');
   });
 });
