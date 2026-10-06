@@ -62,14 +62,33 @@ function transpileTo(dir: string, name: string, source: string): string {
   return path;
 }
 
-/**
- * Query parameters of GET /conversation/export. `cursor`, `min_timestamp`, `max_timestamp`, and
- * `user_filters` are in Decagon's archived export reference
- * (https://web.archive.org/web/20250209143651/https://docs.decagon.ai/api-reference/exporting-conversations-via-api);
- * `timestamp_filter` is in PostHog's connector, built from Decagon's OpenAPI spec
- * (https://github.com/PostHog/posthog/blob/master/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/settings.py).
- */
-const DECAGON_EXPORT_PARAMS = new Set(['cursor', 'min_timestamp', 'max_timestamp', 'timestamp_filter', 'user_filters']);
+/** Every Decagon endpoint the adapter may call, with the query parameters each accepts. */
+const DECAGON_ENDPOINTS: Record<string, Set<string>> = {
+  /**
+   * `cursor`, `min_timestamp`, `max_timestamp`, and `user_filters` are in Decagon's archived export
+   * reference
+   * (https://web.archive.org/web/20250209143651/https://docs.decagon.ai/api-reference/exporting-conversations-via-api);
+   * `timestamp_filter` is in PostHog's connector, built from Decagon's OpenAPI spec
+   * (https://github.com/PostHog/posthog/blob/master/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/settings.py).
+   */
+  'https://api.decagon.ai/conversation/export': new Set([
+    'cursor',
+    'min_timestamp',
+    'max_timestamp',
+    'timestamp_filter',
+    'user_filters',
+  ]),
+  /**
+   * The unpaginated tag list, `{ tags: [{ id, name, ... }] }`, per PostHog's connector
+   * (https://github.com/PostHog/posthog/blob/4e6968b396ed00eee6170fbdeec6b3fa4a65ed98/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/settings.py#L194-L207
+   * and
+   * https://github.com/PostHog/posthog/blob/4e6968b396ed00eee6170fbdeec6b3fa4a65ed98/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/canonical_descriptions.py#L69-L78).
+   * PostHog also sends `get_counts`; the adapter needs no counts and sends nothing.
+   */
+  'https://api.decagon.ai/tag/all': new Set(),
+};
+const DECAGON_EXPORT_PARAMS = DECAGON_ENDPOINTS['https://api.decagon.ai/conversation/export'] ?? new Set();
+const TAG_LIST_PATH = '/tag/all';
 /** The values PostHog's connector documents for `timestamp_filter`. */
 const DECAGON_TIMESTAMP_FILTERS = new Set(['created_at', 'updated_at', 'last_message_time']);
 
@@ -99,21 +118,26 @@ describe('Decagon guide', () => {
     ...overrides,
   });
 
-  type Call = { url: URL; method: string; headers: Record<string, string>; body?: string };
+  type Call = { url: URL; method: string; headers: Record<string, string>; body?: string; at: number };
   let env: typeof process.env | undefined;
 
-  /** Routes Decagon requests to `pages` (or a response factory) and Amplitude requests to `amplitude`. */
+  /**
+   * Routes Decagon export requests to `decagonResponses`, tag-list requests to `tagList` (an
+   * empty list once exhausted), and Amplitude requests to `amplitude`.
+   */
   function stubFetch(
     decagonResponses: (() => Response)[],
     amplitude: (body: { events: AgentEvent[] }) => Response = () => new Response('{"code":200}'),
+    tagList: (() => Response)[] = [],
   ): Call[] {
     const calls: Call[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
         const url = new URL(input);
-        calls.push({ url, method: init?.method ?? 'GET', headers: init?.headers ?? {}, body: init?.body });
+        calls.push({ url, method: init?.method ?? 'GET', headers: init?.headers ?? {}, body: init?.body, at: Date.now() });
         if (url.hostname.endsWith('amplitude.com')) return amplitude(JSON.parse(init?.body ?? '{}'));
+        if (url.pathname === TAG_LIST_PATH) return (tagList.shift() ?? json({ tags: [] }))();
         const next = decagonResponses.shift();
         return next ? next() : new Response(JSON.stringify({ conversations: [], next_page_cursor: null }));
       }),
@@ -191,7 +215,7 @@ describe('Decagon guide', () => {
     expect(JSON.stringify(events)).not.toContain('someone@example.com');
   });
 
-  it('sends only documented export parameters, windowed on updated_at, and holds the watermark in a dry run', async () => {
+  it('calls only allowlisted endpoints with documented parameters, windowed on updated_at, and holds the watermark in a dry run', async () => {
     useSyncEnv({ AMPLITUDE_DRY_RUN: '1', AMPLITUDE_API_KEY: undefined, DECAGON_API_KEY: 'dk_test' });
     const calls = stubFetch([
       json({ conversations: [conversation('c1')], next_page_cursor: null, next_cursor: 'page-2' }),
@@ -202,20 +226,25 @@ describe('Decagon guide', () => {
     const watermark = maxTimestamp - 3600;
     expect(await drain(() => decagon.syncDecagon(watermark, mapping))).toBe(watermark);
 
-    expect(calls).toHaveLength(2);
+    expect(calls.map((c) => c.url.pathname)).toEqual([TAG_LIST_PATH, '/conversation/export', '/conversation/export']);
     for (const call of calls) {
-      expect(`${call.url.origin}${call.url.pathname}`).toBe('https://api.decagon.ai/conversation/export');
+      const allowed = DECAGON_ENDPOINTS[`${call.url.origin}${call.url.pathname}`];
+      expect(allowed).toBeDefined();
       expect(call.method).toBe('GET');
       expect(call.body).toBeUndefined();
       expect(call.headers.Authorization).toBe('Bearer dk_test');
+      for (const key of call.url.searchParams.keys()) expect(allowed).toContain(key);
+    }
+    const exports = calls.slice(1);
+    for (const call of exports) {
       for (const key of call.url.searchParams.keys()) expect(DECAGON_EXPORT_PARAMS).toContain(key);
       expect(DECAGON_TIMESTAMP_FILTERS).toContain(call.url.searchParams.get('timestamp_filter'));
       expect(call.url.searchParams.get('timestamp_filter')).toBe('updated_at');
       expect(call.url.searchParams.get('min_timestamp')).toBe(String(watermark - 1));
       expect(call.url.searchParams.get('max_timestamp')).toBe(String(maxTimestamp));
     }
-    expect(calls[0]?.url.searchParams.has('cursor')).toBe(false);
-    expect(calls[1]?.url.searchParams.get('cursor')).toBe('page-2');
+    expect(exports[0]?.url.searchParams.has('cursor')).toBe(false);
+    expect(exports[1]?.url.searchParams.get('cursor')).toBe('page-2');
     expect(log).toHaveBeenCalledTimes(2);
   });
 
@@ -354,6 +383,78 @@ describe('Decagon guide', () => {
       'AMPLITUDE_API_KEY',
     );
     expect(calls).toHaveLength(0);
+  });
+
+  const contextsOf = (log: { mock: { calls: unknown[][] } }) =>
+    log.mock.calls.map((call) => {
+      const events = JSON.parse(call[0] as string) as AgentEvent[];
+      return JSON.parse(events[0]?.event_properties['[Agent] Context'] as string);
+    });
+
+  it('resolves tag IDs to names from one paced /tag/all request per run, falling back to tag_id_ for unknown IDs', async () => {
+    useSyncEnv({ AMPLITUDE_DRY_RUN: '1', DECAGON_API_KEY: 'k' });
+    const calls = stubFetch(
+      [
+        json({
+          conversations: [conversation('c1', { tags: [7, { id: 'tag-abc' }, 42, { id: 9 }, { name: 'Named', id: 7 }] })],
+          next_cursor: 'p2',
+        }),
+        json({ conversations: [conversation('c2', { tags: [7] })], next_cursor: null }),
+      ],
+      undefined,
+      [json({ tags: [{ id: 7, name: 'Refund Request!' }, { id: 'tag-abc', name: 'Order Status' }, { id: 9 }] })],
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await drain(() => decagon.syncDecagon(maxTimestamp - 60, mapping));
+    expect(contextsOf(log)).toEqual([
+      { platform: 'decagon', tag_refund_request: true, tag_order_status: true, tag_id_42: true, tag_id_9: true, tag_named: true },
+      { platform: 'decagon', tag_refund_request: true },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+    expect(calls.filter((c) => c.url.pathname === TAG_LIST_PATH)).toHaveLength(1);
+    expect(calls[0]?.url.pathname).toBe(TAG_LIST_PATH);
+    const gaps = calls.slice(1).map((c, i) => c.at - (calls[i]?.at ?? 0));
+    expect(gaps).toEqual([1100, 1100]);
+  });
+
+  it('warns once and sends tag_id_ keys when /tag/all returns 403 or 404, and fails the run on other errors', async () => {
+    useSyncEnv({ AMPLITUDE_DRY_RUN: '1', DECAGON_API_KEY: 'k' });
+    for (const status of [403, 404]) {
+      stubFetch(
+        [json({ conversations: [conversation('c1', { tags: [7] }), conversation('c2', { tags: [{ id: 8 }] })] })],
+        undefined,
+        [() => new Response('forbidden', { status })],
+      );
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const watermark = maxTimestamp - 60;
+      expect(await drain(() => decagon.syncDecagon(watermark, mapping))).toBe(watermark);
+      expect(contextsOf(log)).toEqual([
+        { platform: 'decagon', tag_id_7: true },
+        { platform: 'decagon', tag_id_8: true },
+      ]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(`Decagon tag list returned ${status}`);
+      vi.restoreAllMocks();
+    }
+
+    const calls = stubFetch([json({ conversations: [conversation('c1')] })], undefined, [
+      () => new Response('{}', { status: 503 }),
+      json({ tags: [{ id: 7, name: 'Refund' }] }),
+    ]);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await drain(() => decagon.syncDecagon(maxTimestamp - 60, mapping));
+    expect(calls.map((c) => c.url.pathname)).toEqual([TAG_LIST_PATH, TAG_LIST_PATH, '/conversation/export']);
+
+    const unauthorized = stubFetch([json({ conversations: [conversation('c1')] })], undefined, [
+      () => new Response('bad key', { status: 401 }),
+    ]);
+    const error = await drain(() => decagon.syncDecagon(maxTimestamp - 60, mapping));
+    expect((error as Error).message).toContain('Decagon tag list returned 401');
+    expect(unauthorized).toHaveLength(1);
   });
 
   it('reads Decagon timestamps with or without a zone, and rejects unparseable ones', () => {

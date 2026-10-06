@@ -7,7 +7,7 @@ Last verified: 2026-10-06. This is an Amplitude-authored guide. Decagon is a tra
 **Provenance of Decagon details.** Decagon's current documentation requires a login, and this guide was not checked against a live Decagon API. It rests on two public sources:
 
 - Decagon's export documentation as archived in February 2025 ([Exporting Conversations via API](https://web.archive.org/web/20250209143651/https://docs.decagon.ai/api-reference/exporting-conversations-via-api)): the endpoint, `cursor`, `min_timestamp`, `max_timestamp`, the three pagination field names, the conversation shape, and the 1 request per second limit.
-- PostHog's open-source Decagon connector ([settings.py](https://github.com/PostHog/posthog/blob/master/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/settings.py), [decagon.py](https://github.com/PostHog/posthog/blob/master/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/decagon.py), PRs [#78129](https://github.com/PostHog/posthog/pull/78129) and [#80181](https://github.com/PostHog/posthog/pull/80181), and its [docs page](https://posthog.com/docs/cdp/sources/decagon)), which its authors say was built from Decagon's OpenAPI spec: the `timestamp_filter` parameter, the `updated_at` field, tags as IDs, and the warning that Decagon may IP-ban clients that grossly exceed the rate limit. This is secondary evidence: another vendor's reading of Decagon's spec, also without a live API.
+- PostHog's open-source Decagon connector ([settings.py](https://github.com/PostHog/posthog/blob/master/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/settings.py), [decagon.py](https://github.com/PostHog/posthog/blob/master/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/decagon.py), PRs [#78129](https://github.com/PostHog/posthog/pull/78129) and [#80181](https://github.com/PostHog/posthog/pull/80181), and its [docs page](https://posthog.com/docs/cdp/sources/decagon)), which its authors say was built from Decagon's OpenAPI spec: the `timestamp_filter` parameter, the `updated_at` field, tags as IDs, the tag list at `/tag/all` that resolves those IDs (a `tags` array whose rows carry `id` and `name`; see [settings.py at 4e6968b](https://github.com/PostHog/posthog/blob/4e6968b396ed00eee6170fbdeec6b3fa4a65ed98/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/settings.py#L194-L207) and [canonical_descriptions.py at 4e6968b](https://github.com/PostHog/posthog/blob/4e6968b396ed00eee6170fbdeec6b3fa4a65ed98/products/warehouse_sources/backend/temporal/data_imports/sources/decagon/canonical_descriptions.py#L69-L78)), and the warning that Decagon may IP-ban clients that grossly exceed the rate limit. This is secondary evidence: another vendor's reading of Decagon's spec, also without a live API.
 
 Treat every Decagon field name below as a starting point, and confirm it against a real response in Phase 2.
 
@@ -21,6 +21,7 @@ Decagon runs your customer-facing agent. Amplitude Agent Analytics measures whet
 
 ```text
 scheduled job (for example, hourly)
+  -> GET https://api.decagon.ai/tag/all                once per run: tag ID -> tag name
   -> GET https://api.decagon.ai/conversation/export   conversations updated in a time window (timestamp_filter=updated_at)
   -> normalize(conversation)   Decagon fields -> one neutral conversation shape
   -> toAgentEvents(conv)       neutral shape -> [Agent] events
@@ -82,7 +83,7 @@ Fetch or read one real export response. Compare it to the documented shape below
 - **The pagination field.** Decagon's documentation names it three ways: `next_page_cursor` in the parameter description, `next_page_updated_after` in the example response, and `next_cursor` in the example code. PostHog reports that real responses carry no usable `next_page_cursor`. The adapter accepts all three, sends the value back as `cursor`, and stops with an error if a page returns the cursor it was sent. Confirm which one your response has, and that following it returns the next page rather than the same one.
 - **Message roles.** Documented as `USER` and `AI`. Messages with other roles (for example, a human agent after handoff) are skipped. Ask the user whether to keep them. Messages with empty or missing text are skipped too.
 - **Timestamps.** Documented as `2024-01-01 21:42:10.309970`, with no timezone. The adapter assumes UTC when there is no zone, and also reads `Z`, `+00`, `+00:00`, and `+0000` offsets. Confirm.
-- **Tags.** Documented as `{ "name": ..., "level": ... }` objects; PostHog's connector describes tag IDs. Check which your response has (see Context keys below the adapter).
+- **Tags.** Documented as `{ "name": ..., "level": ... }` objects; PostHog's connector describes tag IDs. Check which your response has (see Context keys below the adapter). If they are IDs, confirm that `GET https://api.decagon.ai/tag/all` returns `{ "tags": [{ "id": ..., "name": ... }] }` and that the IDs match.
 - **Message IDs.** The documented export has none, so the adapter uses each message's position in the conversation. That stays stable as long as Decagon only appends messages. If your response has message IDs, use them.
 - **UI components and internal steps.** The archived export documents only text messages. If your response has structured blocks (cards, forms, quick replies) or routing and handoff steps, map each to `spans` on the reply it belongs to, as confirmed in do-not-guess answer 4. Never emit an assistant message with neither text nor spans.
 - **Context.** Decagon tags become one boolean context key each. Only `metadata` keys the user explicitly allows become context; metadata often contains personal data such as email.
@@ -108,7 +109,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 5: Ship
 
-- Keep to Decagon's documented global limit of 1 request per second; the adapter spaces every request, retries included, at least 1.1 seconds apart. PostHog's connector notes that Decagon may IP-ban clients that grossly exceed it, so do not run two syncs against the same Decagon account at once. `429` and `5xx` responses are retried up to 6 attempts with exponential backoff, honoring a numeric `Retry-After`.
+- Keep to Decagon's documented global limit of 1 request per second; the adapter spaces every request, retries and the one tag-list request per run included, at least 1.1 seconds apart. PostHog's connector notes that Decagon may IP-ban clients that grossly exceed it, so do not run two syncs against the same Decagon account at once. `429` and `5xx` responses are retried up to 6 attempts with exponential backoff, honoring a numeric `Retry-After`.
 - Watch the warning line each run prints: it counts conversations skipped for no user ID and conversations that failed (each logged with its ID).
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
@@ -665,7 +666,7 @@ async function postBatch(
 
 ### Decagon adapter
 
-Field names follow Decagon's archived export documentation, plus `updated_at` and `timestamp_filter` from PostHog's connector (secondary evidence; see Provenance). Confirm each against a real response in Phase 2.
+Field names follow Decagon's archived export documentation, plus `updated_at`, `timestamp_filter`, and the `/tag/all` tag list from PostHog's connector (secondary evidence; see Provenance). Confirm each against a real response in Phase 2.
 
 ```ts
 import {
@@ -705,13 +706,28 @@ type DecagonExportPage = {
 } & Partial<Record<(typeof DECAGON_CURSOR_FIELDS)[number], string | number | null>>;
 
 export const DECAGON_EXPORT_URL = 'https://api.decagon.ai/conversation/export';
+/** The whole tag taxonomy in one unpaginated response: `{ tags: [{ id, name, ... }] }`. */
+export const DECAGON_TAG_LIST_URL = 'https://api.decagon.ai/tag/all';
 /** Decagon's documented global limit is 1 request per second, and it may IP-ban gross violators. */
 const MIN_REQUEST_INTERVAL_MS = 1100;
 const MAX_ATTEMPTS = 6;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Time of the last Decagon request. Share one across a run so every request is paced. */
+export type DecagonPace = { last: number };
+export const newDecagonPace = (): DecagonPace => ({ last: Number.NEGATIVE_INFINITY });
+
+export class DecagonHttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 /** One GET, paced against the previous request and retried on 429, 5xx, and network errors. */
-async function decagonGet(url: string, apiKey: string, pace: { last: number }): Promise<unknown> {
+async function decagonGet(url: string, apiKey: string, pace: DecagonPace, label = 'export'): Promise<unknown> {
   for (let attempt = 1; ; attempt += 1) {
     const wait = pace.last + MIN_REQUEST_INTERVAL_MS - Date.now();
     if (wait > 0) await sleep(wait);
@@ -733,7 +749,7 @@ async function decagonGet(url: string, apiKey: string, pace: { last: number }): 
       continue;
     }
     if (!response.ok) {
-      throw new Error(`Decagon export returned ${response.status}: ${await response.text()}`);
+      throw new DecagonHttpError(response.status, `Decagon ${label} returned ${response.status}: ${await response.text()}`);
     }
     return response.json();
   }
@@ -752,8 +768,9 @@ export async function* exportDecagonConversations(params: {
   apiKey: string;
   minTimestamp: number;
   maxTimestamp: number;
+  pace?: DecagonPace;
 }): AsyncGenerator<DecagonConversation> {
-  const pace = { last: Number.NEGATIVE_INFINITY };
+  const pace = params.pace ?? newDecagonPace();
   let cursor: string | undefined;
   for (;;) {
     const query = new URLSearchParams({
@@ -802,12 +819,40 @@ const slug = (text: string) =>
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 
-/** `tag_<name>` for a named tag, `tag_id_<id>` for a bare tag ID, undefined for anything else. */
-export function tagContextKey(tag: DecagonTag): string | undefined {
-  const named = typeof tag === 'object' && tag !== null && typeof tag.name === 'string' ? slug(tag.name) : '';
-  if (named) return `tag_${named}`;
+/**
+ * Tag ID to name, from the tag list. Read once per run. A `403` or `404` (the key or plan
+ * cannot read tags) warns and returns an empty map, so tags stay `tag_id_<id>`.
+ */
+export async function fetchDecagonTagNames(apiKey: string, pace: DecagonPace): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  let body: { tags?: unknown };
+  try {
+    body = (await decagonGet(DECAGON_TAG_LIST_URL, apiKey, pace, 'tag list')) as { tags?: unknown };
+  } catch (error) {
+    if (error instanceof DecagonHttpError && (error.status === 403 || error.status === 404)) {
+      console.warn(`Decagon tag list returned ${error.status}; tag IDs are sent as tag_id_<id> this run.`);
+      return names;
+    }
+    throw error;
+  }
+  for (const tag of Array.isArray(body?.tags) ? body.tags : []) {
+    const { id, name } = (tag ?? {}) as { id?: unknown; name?: unknown };
+    if ((typeof id === 'string' || typeof id === 'number') && typeof name === 'string') names.set(String(id), name);
+  }
+  return names;
+}
+
+/**
+ * `tag_<name>` for a named tag or an ID found in `tagNames`, `tag_id_<id>` for any other
+ * tag ID, undefined for anything else.
+ */
+export function tagContextKey(tag: DecagonTag, tagNames?: ReadonlyMap<string, string>): string | undefined {
   const id = typeof tag === 'object' && tag !== null ? tag.id : tag;
-  const idSlug = typeof id === 'string' || typeof id === 'number' ? slug(String(id)) : '';
+  const idText = typeof id === 'string' || typeof id === 'number' ? String(id) : '';
+  const name = typeof tag === 'object' && tag !== null && typeof tag.name === 'string' ? tag.name : tagNames?.get(idText);
+  const named = name ? slug(name) : '';
+  if (named) return `tag_${named}`;
+  const idSlug = slug(idText);
   return idSlug ? `tag_id_${idSlug}` : undefined;
 }
 
@@ -824,6 +869,8 @@ export interface DecagonMappingOptions {
 export function normalizeDecagonConversation(
   conversation: DecagonConversation,
   options: DecagonMappingOptions,
+  /** Tag ID to name, from `fetchDecagonTagNames`. */
+  tagNames?: ReadonlyMap<string, string>,
 ): NormalizedConversation {
   const messages: ForwarderMessage[] = [];
   (conversation.messages ?? []).forEach((message, index) => {
@@ -843,7 +890,7 @@ export function normalizeDecagonConversation(
     }
   }
   for (const tag of conversation.tags ?? []) {
-    const key = tagContextKey(tag);
+    const key = tagContextKey(tag, tagNames);
     if (key) context[key] = true;
   }
 
@@ -893,10 +940,14 @@ const amplitude = () => ({
 const isPermanent = (error: unknown) =>
   /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
 
-async function forward(raw: DecagonConversation, mapping: DecagonMappingOptions): Promise<Outcome> {
+async function forward(
+  raw: DecagonConversation,
+  mapping: DecagonMappingOptions,
+  tagNames: ReadonlyMap<string, string>,
+): Promise<Outcome> {
   let events: AgentEvent[];
   try {
-    const conversation = normalizeDecagonConversation(raw, mapping);
+    const conversation = normalizeDecagonConversation(raw, mapping, tagNames);
     if (!conversation.userId && !conversation.deviceId) return 'no_identity';
     events = toAgentEvents(conversation, { redact, source: 'decagon' });
   } catch (error) {
@@ -932,13 +983,16 @@ export async function syncDecagon(watermark: number, mapping: DecagonMappingOpti
   const maxTimestamp = Math.floor(Date.now() / 1000) - SETTLE_SECONDS;
   if (maxTimestamp <= watermark) return watermark;
 
+  const pace = newDecagonPace();
+  const tagNames = await fetchDecagonTagNames(apiKey, pace);
   const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0 };
   for await (const raw of exportDecagonConversations({
     apiKey,
     minTimestamp: Math.max(0, watermark - OVERLAP_SECONDS),
     maxTimestamp,
+    pace,
   })) {
-    counts[await forward(raw, mapping)] += 1;
+    counts[await forward(raw, mapping, tagNames)] += 1;
   }
   if (counts.no_identity || counts.empty || counts.failed) {
     console.warn(
@@ -953,7 +1007,7 @@ export async function syncDecagon(watermark: number, mapping: DecagonMappingOpti
 
 **Why one bad conversation does not stop the run.** A conversation that cannot be mapped (an unparseable timestamp, for example) or that Amplitude rejects with a `4xx` is logged, counted as failed, and skipped; the run continues and the watermark advances past it. Fix the cause and re-run its window. A conversation with no user ID is skipped and counted, not sent under `unknown`. An outage (Amplitude `429` or `5xx` after retries, or a Decagon error) stops the run before the watermark moves, so the next run retries the whole window.
 
-**Context keys.** Each named tag becomes `tag_<name>`: lowercased, with every run of other characters replaced by `_`, so `Order Status` and `order-status` share `tag_order_status`. A tag sent as a bare ID becomes `tag_id_<id>`; to filter by name instead, resolve IDs through Decagon's tag list (PostHog's connector reads it from `/tag/all`). Allowed metadata keys are copied as they are, except `platform` and keys starting with `tag_`, which the adapter reserves.
+**Context keys.** Each named tag becomes `tag_<name>`: lowercased, with every run of other characters replaced by `_`, so `Order Status` and `order-status` share `tag_order_status`. A tag sent as a bare ID (or `{ "id": ... }` without a name) is resolved to its name through Decagon's tag list, `GET /tag/all`, read once at the start of each run and paced like every other request; the field names come from PostHog's connector (see Provenance). An ID missing from the list becomes `tag_id_<id>`. If the tag list returns `403` or `404`, the run prints one warning and sends every ID as `tag_id_<id>`; any other error stops the run like an export error. Tags in different hierarchies that share a name share a key. Allowed metadata keys are copied as they are, except `platform` and keys starting with `tag_`, which the adapter reserves.
 
 **CSAT is sent once.** The score's `insert_id` is fixed per conversation (`<conversation_id>:score-csat`), so a re-sent conversation never duplicates it. The flip side: if a user changes their rating within 7 days of the first send, the new value has the same `insert_id` and is dropped by Amplitude's dedupe, so a changed CSAT does not update the score.
 
@@ -1004,6 +1058,7 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Run stops with `returned the cursor it was sent` | The export repeated a page; check which pagination field your response carries (Phase 2) |
 | Conversations that get new messages after their first export are never re-sent | `timestamp_filter=updated_at` was ignored, so the window bounds `created_at`; check `updated_at` against the window (Phase 2) |
 | Warning counts conversations without a user ID | `user_id` is empty for anonymous visitors; skip them, or map them with `resolveDeviceId` (do-not-guess answer 2) |
+| Context keys are `tag_id_<id>` instead of tag names | The warning `Decagon tag list returned 403` or `404` means the API key cannot read `/tag/all`; otherwise the ID is not in the tag list |
 | A conversation logged as `could not be mapped` | Usually a timestamp `parseDecagonTime` cannot read; the run skips it and continues |
 | `Set AMPLITUDE_API_KEY` | No Amplitude key and no `AMPLITUDE_DRY_RUN`; the sync refuses to run rather than drop events |
 | Times off by hours | Decagon timestamps are not UTC for your account; adjust `parseDecagonTime` |
