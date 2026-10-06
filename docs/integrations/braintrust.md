@@ -18,6 +18,7 @@ Your agent runs in your own code and is logged to Braintrust. Amplitude Agent An
 scheduled job (for example, hourly)
   -> POST /btql   root spans in a time window -> conversation IDs from metadata
   -> POST /btql   root spans of those conversations, up to 500 conversation IDs per query
+  -> POST /btql   catch-up: root spans written late or updated since the last run (by _xact_id)
   -> POST /btql   every span of the settled conversations' traces, up to 500 traces per query
   -> normalize(...)            Braintrust fields -> one neutral conversation shape
   -> toAgentEvents(conv)       neutral shape -> [Agent] events
@@ -104,7 +105,7 @@ Run the adapter's queries for one real conversation and compare the rows to the 
 
 ### Phase 3: Implement
 
-Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Braintrust adapter below it, fill in `MAPPING` and `CONVERSATION_KEY`, then schedule `syncBraintrust` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them. Without it, the job refuses to start unless `AMPLITUDE_API_KEY` is set.
+Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Braintrust adapter below it, fill in `MAPPING` and `CONVERSATION_KEY`, then schedule `syncBraintrust` to run periodically, persisting the watermark it returns between runs. The watermark is a JSON string; store it as is. The first run takes a plain ISO 8601 date. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them. Without it, the job refuses to start unless `AMPLITUDE_API_KEY` is set.
 
 A conversation that cannot be mapped, or that Amplitude rejects with a `4xx` other than `429`, is logged with its conversation ID, counted, and skipped; the run continues. An Amplitude or Braintrust outage (network errors, `429`, or `5xx` after retries) stops the run, and the watermark is not advanced, so the next run retries the same window.
 
@@ -123,7 +124,7 @@ A conversation that cannot be mapped, or that Amplitude rejects with a `4xx` oth
 ### Phase 5: Ship
 
 - Keep to Braintrust's query limit of about 20 per minute on Starter and Pro plans; it applies per organization, so other jobs share it. The adapter waits at least 3.1 seconds before every request, retries included. On `429`, `5xx`, or a network error it retries up to 6 attempts, honoring a numeric `Retry-After` in seconds and otherwise backing off from 10 seconds to at most 60. A persistent failure stops the run without advancing the watermark.
-- A run costs a fixed handful of queries, not a few per conversation: the discovery pages, one lookup per 500 conversations, and one span fetch per 500 traces, plus extra pages when a result overflows. Braintrust blocks a query with more than 4,096 exact-match values, so keep `IN_CHUNK` well below that.
+- A run costs a fixed handful of queries, not a few per conversation: the discovery pages, one lookup per 500 conversations, the catch-up query and one lookup per 500 caught-up conversations (at most 500 per run), and one span fetch per 500 traces, plus extra pages when a result overflows. Braintrust blocks a query with more than 4,096 exact-match values, so keep `IN_CHUNK` well below that.
 - Every `project_logs` query has a `created` range or a `root_span_id` predicate, as Braintrust requires to avoid a full scan, and queries that can span pages sort on `_pagination_key`, which cursor pagination requires.
 - For continuous export at high volume, Braintrust recommends its S3 export over polling SQL; this guide's job is for moderate volumes and backfill.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
@@ -939,6 +940,10 @@ const CONVERSATION_KEY = 'session_id';
 const SETTLE_MS = 2 * 60 * 60 * 1000;
 /** How far back a conversation's earlier traces may start. */
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** How far behind the watermark a late or updated root span is still caught up. Keep it within Amplitude's 7-day dedupe. */
+const LATE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** Most conversations the catch-up pass re-forwards per run; the rest carry over through the watermark's xactId. */
+const MAX_CATCHUP_CONVERSATIONS = 500;
 /** Values per IN list. Braintrust blocks a query with more than 4,096 exact-match values. */
 const IN_CHUNK = 500;
 const PAGE = 'ORDER BY _pagination_key DESC LIMIT 1000';
@@ -1003,13 +1008,38 @@ async function forward(
 interface RootRow {
   root_span_id: string;
   created: string;
+  /** Transaction ID: a decimal string, higher on every later write to the row. */
+  _xact_id?: string;
   conversation_id?: unknown;
 }
 
+/** What syncBraintrust persists between runs, as JSON. `xactId` is the highest `_xact_id` handled. */
+export interface BraintrustWatermark {
+  created: string;
+  xactId?: string;
+}
+
+const isXactId = (value: unknown): value is string => typeof value === 'string' && /^\d+$/.test(value);
+// _xact_id values exceed Number's exact range, and decimal strings of different lengths don't compare as text.
+const compareXact = (a: string, b: string) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
+const maxXact = (a: string | undefined, b: string | undefined) =>
+  a === undefined ? b : b === undefined ? a : compareXact(a, b) >= 0 ? a : b;
+
+/** Reads the JSON watermark syncBraintrust returns, or a plain ISO 8601 date (a first run, or an older version's). */
+export function parseWatermark(watermark: string): BraintrustWatermark {
+  if (!watermark.trimStart().startsWith('{')) return { created: watermark };
+  const parsed = JSON.parse(watermark) as Partial<BraintrustWatermark>;
+  if (typeof parsed.created !== 'string') throw new Error(`Watermark has no created time: ${watermark}`);
+  if (parsed.xactId !== undefined && !isXactId(parsed.xactId)) throw new Error(`Watermark xactId is not a decimal string: ${watermark}`);
+  return parsed.xactId === undefined ? { created: parsed.created } : { created: parsed.created, xactId: parsed.xactId };
+}
+
 /**
- * Forwards conversations active after `watermark` (ISO 8601) that have since settled. Returns the
- * next watermark. Queries per run: the discovery pages, one lookup per IN_CHUNK conversations,
- * and one span fetch per IN_CHUNK traces, plus extra pages for large results.
+ * Forwards conversations active after the watermark that have since settled, plus, once a run has
+ * recorded an xactId, conversations whose root spans were written late or updated since then. Returns
+ * the next watermark, `{"created": ..., "xactId": ...}` as JSON. Queries per run: the discovery pages,
+ * one lookup per IN_CHUNK conversations, the catch-up pages, one lookup per IN_CHUNK caught-up
+ * conversations (at most MAX_CATCHUP_CONVERSATIONS), and one span fetch per IN_CHUNK traces.
  */
 export async function syncBraintrust(
   projectId: string,
@@ -1019,8 +1049,9 @@ export async function syncBraintrust(
   if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
     throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
   }
+  const mark = parseWatermark(watermark);
   const until = new Date(Date.now() - SETTLE_MS).toISOString();
-  const since = new Date(Date.parse(watermark) - LOOKBACK_MS).toISOString();
+  const since = new Date(Date.parse(mark.created) - LOOKBACK_MS).toISOString();
   const logs = `project_logs(${quote(projectId)})`;
   const key = `metadata.${CONVERSATION_KEY}`;
   const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0, active: 0, no_conversation: 0, unquotable: 0 };
@@ -1031,9 +1062,11 @@ export async function syncBraintrust(
     known.set(root.root_span_id, root);
     roots.set(conversationId, known);
   };
+  let seenXact = mark.xactId;
   for await (const root of queryBraintrust<RootRow>(
-    `SELECT root_span_id, created, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(watermark)} AND created < ${quote(until)} ${PAGE}`,
+    `SELECT root_span_id, created, _xact_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(mark.created)} AND created < ${quote(until)} ${PAGE}`,
   )) {
+    if (isXactId(root._xact_id)) seenXact = maxXact(seenXact, root._xact_id);
     const id = root.conversation_id;
     if (typeof id !== 'string' || !id) counts.no_conversation += 1;
     else if (!isQuotable(id)) counts.unquotable += 1;
@@ -1041,12 +1074,50 @@ export async function syncBraintrust(
   }
 
   // One lookup per chunk, not per conversation: metadata keys are filtered after the created-range scan.
-  for (const ids of chunks([...roots.keys()], IN_CHUNK)) {
-    for await (const root of queryBraintrust<RootRow>(
-      `SELECT root_span_id, created, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND ${key} IN (${ids.map(quote).join(', ')}) AND created >= ${quote(since)} ${PAGE}`,
-    )) {
-      if (typeof root.conversation_id === 'string' && roots.has(root.conversation_id)) addRoot(root.conversation_id, root);
+  const lookUp = async (conversationIds: string[], from: string) => {
+    for (const ids of chunks(conversationIds, IN_CHUNK)) {
+      for await (const root of queryBraintrust<RootRow>(
+        `SELECT root_span_id, created, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND ${key} IN (${ids.map(quote).join(', ')}) AND created >= ${quote(from)} ${PAGE}`,
+      )) {
+        if (typeof root.conversation_id === 'string' && roots.has(root.conversation_id)) addRoot(root.conversation_id, root);
+      }
     }
+  };
+  await lookUp([...roots.keys()], since);
+
+  // Catch-up: root spans written since the last run whose created time is behind the watermark (logged
+  // late) or that were updated after forwarding. Without an xactId (a plain-date watermark) there is no
+  // record of what was handled, so this waits for the next run rather than re-sending a week of history.
+  let nextXact = seenXact;
+  if (mark.xactId !== undefined) {
+    const lateSince = new Date(Date.parse(mark.created) - LATE_LOOKBACK_MS).toISOString();
+    const candidates: { conversationId: string; row: RootRow; xact: string }[] = [];
+    for await (const root of queryBraintrust<RootRow>(
+      `SELECT root_span_id, created, _xact_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(lateSince)} AND created < ${quote(until)} AND _xact_id > ${mark.xactId} ${PAGE}`,
+    )) {
+      const id = root.conversation_id;
+      if (!isXactId(root._xact_id)) continue;
+      nextXact = maxXact(nextXact, root._xact_id);
+      if (typeof id === 'string' && id && isQuotable(id) && !roots.has(id)) {
+        candidates.push({ conversationId: id, row: root, xact: root._xact_id });
+      }
+    }
+    // _pagination_key order is not _xact_id order. Take the oldest writes first, so everything at or
+    // below the xactId recorded for a capped run has been handled.
+    candidates.sort((a, b) => compareXact(a.xact, b.xact));
+    const late = new Map<string, RootRow[]>();
+    let handledXact = mark.xactId;
+    for (const { conversationId, row, xact } of candidates) {
+      if (!late.has(conversationId) && late.size >= MAX_CATCHUP_CONVERSATIONS) {
+        nextXact = handledXact;
+        console.warn(`Catch-up reached ${MAX_CATCHUP_CONVERSATIONS} conversations; the rest carry over to the next run`);
+        break;
+      }
+      late.set(conversationId, [...(late.get(conversationId) ?? []), row]);
+      handledXact = xact;
+    }
+    for (const [conversationId, rows] of late) for (const row of rows) addRoot(conversationId, row);
+    await lookUp([...late.keys()], new Date(Date.parse(lateSince) - LOOKBACK_MS).toISOString());
   }
 
   const settled: [string, RootRow[]][] = [];
@@ -1092,13 +1163,20 @@ export async function syncBraintrust(
       `Skipped ${counts.no_conversation} traces without ${key}, ${counts.unquotable} with a conversation ID containing a backslash or line break, ${counts.no_identity} conversations without a user ID, ${counts.empty} with no messages, and ${counts.failed} that failed (logged above); ${counts.active} still active`,
     );
   }
-  return until;
+  const next: BraintrustWatermark = nextXact === undefined ? { created: until } : { created: until, xactId: nextXact };
+  return JSON.stringify(next);
 }
 ```
 
 **Why the settle window.** Braintrust has no "conversation finished" signal. Forwarding only conversations with no root span newer than `SETTLE_MS` means they are finished before Session End is sent. If a conversation resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
 
-**What the `created` watermark misses.** `created` is a row's original timestamp, and Braintrust does not change it when the row is written later or updated ([`_xact_id` KB](https://braintrust.dev/docs/kb/use-xact-id-to-dedupe-exports-and-determine-update-time.md)). Each run reads root spans with `created` in `[watermark, now - SETTLE_MS)`, so a root span that reaches Braintrust more than `SETTLE_MS` after its `created` time is never discovered. Examples are a logger that flushes late, a backfill logged with old timestamps, or a root whose output is written by a later update. The same lag limits what a forwarded trace contains: a child span or root output that lands after the conversation was forwarded is not sent. `SETTLE_MS` must therefore exceed both the conversation's idle gap and your worst-case logging delay. Two hours is generous if your logger flushes promptly; in Phase 2, compare a recent trace's `created` with when it appeared. Braintrust's `_xact_id` increases on every write, and its SQL accepts `_xact_id` range filters, but it is not a time value, so it cannot express "idle for `SETTLE_MS`". This adapter does not watermark on it. If late or updated rows matter, re-run older windows (forwarding is idempotent within Amplitude's 7-day dedupe) or use Braintrust's S3 export.
+**Late and updated root spans.** `created` is a row's original timestamp, and Braintrust does not change it when the row is written later or updated. `_xact_id`, the row's transaction ID, "increases on each write" ([`_xact_id` KB](https://braintrust.dev/docs/kb/use-xact-id-to-dedupe-exports-and-determine-update-time.md)), and Braintrust SQL accepts range filters on it ([best practices](https://www.braintrust.dev/docs/reference/sql/best-practices)). The main pass reads root spans with `created` in `[watermark.created, now - SETTLE_MS)`, so on its own it would never see a root that reaches Braintrust after its window was read (a logger that flushes late, a backfill logged with old timestamps) or a root updated after its conversation was forwarded (for example, its output written by a later update). So the watermark is JSON with two fields: `created`, where the main pass resumes, and `xactId`, the highest `_xact_id` handled. Each run also reads root spans with `created` in `[watermark.created - LATE_LOOKBACK_MS, now - SETTLE_MS)` and `_xact_id` above `xactId`, and sends those conversations through the same batched lookup, settle check, and span fetch. The catch-up pass costs one query plus one lookup per 500 conversations, plus extra pages for large results, paced like every other request. It handles at most `MAX_CATCHUP_CONVERSATIONS` (500) per run, oldest write first. The rest carry over, because a capped run advances `xactId` only to the last write it handled. `_xact_id` is returned as a decimal string; the adapter compares it as a number (`BigInt`), never as text. It is not a time value, so it cannot express "idle for `SETTLE_MS`", and the main pass stays on `created`.
+
+A caught-up conversation is sent whole again. Events already sent are deduplicated by insert ID within Amplitude's 7-day dedupe window, so a changed output on a reply that was already sent does not replace it. Events not sent before, such as a late trace or a reply that had no output when the conversation was first forwarded, are added. As with a resumed conversation, they are stored, but anything after Session End does not reach that session's quality signals. Keep `LATE_LOOKBACK_MS` at 7 days or less so re-sent events stay inside the dedupe window.
+
+Two limits remain. The catch-up pass reads root spans only, so a child span that lands after its conversation was forwarded, with no later write to its root, is not sent; `SETTLE_MS` must still exceed your worst-case logging delay for child spans. In Phase 2, compare a recent trace's `created` with when it appeared. A root more than `LATE_LOOKBACK_MS` behind the watermark is not caught up; for those, re-run the window or use Braintrust's S3 export.
+
+**Plain-date watermarks.** `syncBraintrust` also accepts a plain ISO 8601 date: the first watermark of a new job or a backfill, or one persisted by an earlier version of this adapter. That run skips the catch-up pass, because it has no record of what was already handled, and re-sending a week of conversations could reach past the dedupe window. It records the highest `_xact_id` among the root spans it reads, and catch-up starts on the next run. Persist the returned string as is.
 
 **Quoting.** Braintrust's SQL reference does not document how to escape a quote inside a string literal. `quote` doubles single quotes, as standard SQL does, and refuses values containing a backslash or line break rather than guess. The job skips and counts conversation IDs like that. Confirm in Phase 2 with a conversation ID that contains `'` if yours can.
 
@@ -1128,7 +1206,7 @@ Keep personal data out of `[Agent] Context`; it is a filterable dimension, not a
 
 ### Backfill
 
-Historical `time` values are kept as sent, with no age limit. For a backfill, start with a watermark at the earliest date wanted; one run then reads everything from there up to `now - SETTLE_MS`. For a long range, advance the watermark a day or a week at a time so each run stays small. Each conversation is forwarded whole, in order, with Session End last. Do not trickle old turns in over time: a session closes after 30 idle minutes or 24 hours, a Session End that arrives after an automatic close is ignored, and events that arrive after close are stored but never reach enrichment.
+Historical `time` values are kept as sent, with no age limit. For a backfill, start with a watermark at the earliest date wanted; one run then reads everything from there up to `now - SETTLE_MS`. For a long range, advance the watermark a day or a week at a time so each run stays small, passing each step as a plain date; once you persist the returned watermark instead, the catch-up pass starts. Each conversation is forwarded whole, in order, with Session End last. Do not trickle old turns in over time: a session closes after 30 idle minutes or 24 hours, a Session End that arrives after an automatic close is ignored, and events that arrive after close are stored but never reach enrichment.
 
 How far back you can go depends on the Braintrust plan. On Starter and Pro, SQL queries against logs only see the plan's retention window (14 days on Starter, 30 days on Pro by default). Older rows are silently filtered out, not reported as an error ([rate-limit KB](https://braintrust.dev/docs/kb/btql-rate-limits-on-free-and-pro-plans.md)). A conversation that began before the window is forwarded without its earliest traces. A subfield index only covers the days it was backfilled, so backfill it over the range you forward. Because Amplitude's event-level dedupe covers 7 days, run a backfill once rather than repeating it over the same range.
 
@@ -1159,7 +1237,8 @@ How far back you can go depends on the Braintrust plan. On Starter and Pro, SQL 
 | Token counts about double what Braintrust shows | A port sums every `llm` span; keep `leafLlmSpans` |
 | `Conversation ... was rejected by Amplitude` in the log | A `4xx` such as an ID shorter than 5 characters; fix the field or set `AMPLITUDE_MIN_ID_LENGTH`. Other conversations still went through |
 | Old conversations return nothing | Outside the plan's log retention (14 days on Starter, 30 on Pro) |
-| Late-logged traces never arrive | Their `created` time fell behind the watermark before they were written; see "What the `created` watermark misses" |
+| Late-logged traces never arrive | Their root was more than `LATE_LOOKBACK_MS` behind the watermark, only a child span landed late, or the watermark is still a plain date (catch-up starts on the run after); see "Late and updated root spans" |
+| `Catch-up reached 500 conversations` in the log | More late or updated conversations than one run handles; the rest carry over to the next run |
 
 ### More
 
