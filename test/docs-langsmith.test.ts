@@ -339,10 +339,38 @@ describe('LangSmith guide', () => {
     expect(requests.some((r) => r.path.startsWith('/api/v2/traces/run-root-1-b'))).toBe(false);
   });
 
-  it('strips /api/v1 from a self-hosted LANGSMITH_ENDPOINT', async () => {
-    expect(langsmith.langsmithBaseUrl('http://langsmith.internal/api/v1')).toBe('http://langsmith.internal');
-    expect(langsmith.langsmithBaseUrl('https://langsmith.internal/api/v1/')).toBe('https://langsmith.internal');
-    expect(langsmith.langsmithBaseUrl('https://apac.api.smith.langchain.com')).toBe('https://apac.api.smith.langchain.com');
+  // Expected values follow langsmith-sdk's Client._getOpenAPIBaseUrl and trimQuotes at 2fd05b9b:
+  // https://github.com/langchain-ai/langsmith-sdk/blob/2fd05b9b113987a8c378f26b64492c86a56cbd4e/js/src/client.ts#L1751-L1757
+  it.each([
+    ['https://api.smith.langchain.com', 'https://api.smith.langchain.com'],
+    ['https://api.smith.langchain.com/', 'https://api.smith.langchain.com'],
+    ['https://eu.api.smith.langchain.com', 'https://eu.api.smith.langchain.com'],
+    ['https://eu.api.smith.langchain.com/', 'https://eu.api.smith.langchain.com'],
+    ['http://langsmith.internal', 'http://langsmith.internal'],
+    ['http://langsmith.internal/api', 'http://langsmith.internal'],
+    ['http://langsmith.internal/api/', 'http://langsmith.internal'],
+    ['http://langsmith.internal/api/v1', 'http://langsmith.internal'],
+    ['https://langsmith.internal/api/v1/', 'https://langsmith.internal'],
+    ['https://example.com/langsmith/api/v1', 'https://example.com/langsmith'],
+    ['https://example.com/langsmith/api', 'https://example.com/langsmith'],
+    [' "https://langsmith.internal/api/v1" ', 'https://langsmith.internal'],
+    ["'https://langsmith.internal/api'", 'https://langsmith.internal'],
+    ['https://langsmith.internal/api/v2', 'https://langsmith.internal/api/v2'],
+  ])('normalizes endpoint %j to %j as the LangSmith SDK does', (endpoint, expected) => {
+    expect(langsmith.langsmithBaseUrl(endpoint)).toBe(expected);
+  });
+
+  it('reads LANGSMITH_ENDPOINT, then LANGCHAIN_ENDPOINT, then the US Cloud default', () => {
+    vi.stubEnv('LANGSMITH_ENDPOINT', '');
+    vi.stubEnv('LANGCHAIN_ENDPOINT', '');
+    expect(langsmith.langsmithBaseUrl()).toBe('https://api.smith.langchain.com');
+    vi.stubEnv('LANGCHAIN_ENDPOINT', 'https://langchain.internal/api');
+    expect(langsmith.langsmithBaseUrl()).toBe('https://langchain.internal');
+    vi.stubEnv('LANGSMITH_ENDPOINT', 'https://eu.api.smith.langchain.com/');
+    expect(langsmith.langsmithBaseUrl()).toBe('https://eu.api.smith.langchain.com');
+  });
+
+  it('sends every request to the self-hosted host from LANGSMITH_ENDPOINT', async () => {
     vi.stubEnv('LANGSMITH_ENDPOINT', 'http://langsmith.internal/api/v1');
     const { requests } = await dryRun({ 'thread-1': EXAMPLE_RUNS });
     for (const request of requests) {
