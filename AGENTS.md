@@ -71,6 +71,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
 - Requests go through an inference router or AI gateway (for example Fireworks): follow `docs/integrations/routers.md`; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
+- Offline eval run or model bake-off (Braintrust, LangSmith, Langfuse, MLflow, or any runner): not `[Agent]` events. Build one document, check it with `docs/integrations/check-offline-eval.mjs`, and POST it with `curl` by following `docs/integrations/offline-eval.md`. Ask which values of each detector are issues; never guess. Do not install a package to post.
 
 ## MCP Surface
 
@@ -148,6 +149,7 @@ Prompt:
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
 - `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
+- `docs/integrations/offline-eval.md` — Offline eval run upload from any eval runner (HTTP POST)
 
 ## Event Schema (names)
 

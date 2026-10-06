@@ -20,6 +20,8 @@ your conversation table
   -> Agent Analytics sessions, turns, tool calls, enrichment
 ```
 
+Once the source exists, Amplitude imports on the schedule you set. Hourly is the usual choice. You do not run the query again by hand. `import_cursor` is why a later sync picks up only what is new.
+
 Every query has the same two stages. Stage 1 is the only part that depends on your table. Stage 2 applies the Agent Analytics rules (exchanges, turn order, deterministic IDs, session close) and is identical across formats, so a mapping that passes on one format behaves the same on all of them.
 
 ### Pick your format
@@ -37,6 +39,8 @@ Every query has the same two stages. Stage 1 is the only part that depends on yo
 Span formats don't need SQL: Amplitude's [OTLP endpoint](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) already understands them. Their pages cover moving stored spans from a table to that endpoint.
 
 If conversations are still happening in code you run, instrument live instead with the Amplitude AI SDK ([Node](../../../README.md), [Python](https://pypi.org/project/amplitude-ai/)) or send OpenTelemetry directly. Warehouse import is for data that already lands in the warehouse.
+
+An offline bake-off is the document in [offline-eval.md](../offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`.
 
 ### What you get
 
@@ -125,7 +129,7 @@ Open the format page and copy the query for the user's warehouse. Then:
 
 ### Phase 4: Create the source and verify
 
-1. Follow [Set up the import](#set-up-the-import) for their warehouse. Paste the query and click **Test SQL**; fix any error it reports.
+1. Follow [Set up the import](#set-up-the-import) for their warehouse. Paste the query and click **Test SQL**; fix any error it reports. The sync frequency is the turnkey part. Pick it, and leave the source on. Amplitude keeps importing on that schedule.
 2. After the first sync, ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
    - the Trace tab shows one "Turn" card per exchange
@@ -138,7 +142,7 @@ Open the format page and copy the query for the user's warehouse. Then:
 
 ### Phase 5: Ship
 
-- Remove the sample-conversation filter.
+- After the sample looks right, remove the sample-conversation filter. The same source keeps importing. Widen history only by how far the query looks back, not by running a second job.
 - For history, the first sync imports every settled conversation the query returns. Import a week first and check it before widening.
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 

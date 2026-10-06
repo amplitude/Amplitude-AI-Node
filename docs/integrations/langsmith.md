@@ -34,7 +34,7 @@ scheduled job (for example, hourly)
 - Model, provider, token counts, and cost from `llm` runs. Cost is the value LangSmith calculated; Amplitude does not recompute it.
 - Agent sessions joined to your product analytics through the same user ID.
 
-LangSmith feedback is not forwarded by this adapter. If the user wants it, map thread-level feedback to a `ForwarderScore`.
+LangSmith feedback is not forwarded by this adapter. If the user wants it on a production conversation, map thread-level feedback to a `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`. Follow the harness field map and the CI procedure on that page.
 
 ### What your traces must already contain
 

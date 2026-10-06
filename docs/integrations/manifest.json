@@ -88,11 +88,25 @@
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json"
     }
   ],
+  "offline_evals": {
+    "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/offline-eval.md",
+    "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/offline-eval.md",
+    "schema_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/offline-eval-document.schema.json",
+    "schema_version": 1,
+    "runners": ["Braintrust", "LangSmith", "Langfuse", "MLflow"],
+    "ingestion_path": "offline_eval_upload",
+    "last_verified": "2026-10-03"
+  },
   "tools": [
     {
       "id": "check-agent-events",
       "description": "Checks a CSV, JSON, or NDJSON file of [Agent] events against the shared ingestion rules.",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs"
+    },
+    {
+      "id": "check-offline-eval",
+      "description": "Checks an offline eval document against the upload rules before it is posted.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-offline-eval.mjs"
     },
     {
       "id": "otlp-replay",

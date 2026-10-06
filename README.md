@@ -116,6 +116,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 - [Context Propagation](#context-propagation)
 - [Middleware](#middleware)
 - [Bulk Conversation Import](#bulk-conversation-import)
+- [Offline Eval Runs](#offline-eval-runs)
 - [Event Schema](#event-schema)
 - [Event Property Reference](#event-property-reference)
 - [Event JSON Examples](#event-json-examples)
@@ -2363,6 +2364,19 @@ trackConversation({
 ```
 
 This is useful for backfilling historical conversations or importing data from external systems. The function accepts all the same context fields (`agentId`, `env`, `customerOrgId`, etc.) as the individual tracking methods.
+
+## Offline Eval Runs
+
+An offline eval run (a model bake-off over a fixed dataset, from Braintrust experiments, LangSmith or Langfuse datasets, MLflow, or your own runner) is not a conversation, so it is not sent as `[Agent]` events. `reportOfflineEval()` uploads the whole run as one document, with the project API key and secret key, and Agent Analytics compares each model against the baseline:
+
+```typescript
+import { reportOfflineEval } from '@amplitude/ai';
+
+// Reads AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY when apiKey and secretKey are omitted.
+const result = await reportOfflineEval(document, { serverZone: 'US' });
+```
+
+The secret key is used for this request only and never reaches the analytics client. `braintrustExperimentsToDocument()` builds the document from Braintrust experiments. The document format, a coding-agent procedure, and [`check-offline-eval.mjs`](docs/integrations/check-offline-eval.mjs) are in the [offline eval guide](docs/integrations/offline-eval.md). The Python SDK has the same call as `report_offline_eval`.
 
 ## Event Schema
 

@@ -33,6 +33,7 @@ const platforms = integrations.platforms;
 const hostedPlatforms = platforms.filter((p) => p.category === 'hosted_agent_platform');
 const tracingTools = platforms.filter((p) => p.category === 'tracing_tool');
 const warehouses = integrations.warehouses;
+const offlineEvals = integrations.offline_evals;
 const platformGuideLabel = (p) =>
   p.category === 'tracing_tool'
     ? `${p.name} trace forwarding over the HTTP API (no SDK)`
@@ -133,6 +134,7 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
 - Requests go through an inference router or AI gateway (for example Fireworks): follow \`docs/integrations/routers.md\`; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
+- Offline eval run or model bake-off (${offlineEvals.runners.join(', ')}, or any runner): not \`[Agent]\` events. Build one document, check it with \`docs/integrations/check-offline-eval.mjs\`, and POST it with \`curl\` by following \`docs/integrations/offline-eval.md\`. Ask which values of each detector are issues; never guess. Do not install a package to post.
 
 ## MCP Surface
 
@@ -196,6 +198,7 @@ Prompt:
 ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
 - \`docs/integrations/routers.md\` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
+- \`docs/integrations/offline-eval.md\` — Offline eval run upload from any eval runner (HTTP POST)
 
 ## Event Schema (names)
 
@@ -221,6 +224,8 @@ ${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
 warehouses=${warehouses.raw_url}
 routers=${integrations.routers.raw_url}
 ${integrations.schemas.map((s) => `${s.id}-schema=${s.raw_url}`).join('\n')}
+offline-eval=${offlineEvals.raw_url}
+offline-eval-schema=${offlineEvals.schema_url}
 ${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
 `;
 
