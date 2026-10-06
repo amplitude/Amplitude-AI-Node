@@ -240,7 +240,7 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
     "event_type": "[Agent] Tool Call",
     "user_id": "user_12345",
     "time": 1768478431000,
-    "insert_id": "sess-1:trace-2:obs-tool-2",
+    "insert_id": "sess-1:obs-tool-2",
     "event_properties": {
       "[Agent] Session ID": "sess-1",
       "[Agent] Agent ID": "order-support",
@@ -252,7 +252,7 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-2",
       "[Agent] Turn ID": 4,
-      "[Agent] Invocation ID": "sess-1:trace-2:obs-tool-2",
+      "[Agent] Invocation ID": "sess-1:obs-tool-2",
       "[Agent] Tool Name": "lookup_order",
       "[Agent] Tool Success": true,
       "[Agent] Is Error": false,
@@ -842,11 +842,10 @@ export function normalizeLangfuseSession(
     const userText = textFrom(root.input, 'user');
     if (userText) messages.push({ id: `${traceId}:user`, role: 'user', text: userText, timestamp: start });
 
-    // Observation IDs can be OpenTelemetry span IDs, which are unique only within a trace.
     const toolCalls: ForwarderToolCall[] = items
       .filter((o) => o.type === 'TOOL')
       .map((o) => ({
-        id: `${traceId}:${o.id}`,
+        id: o.id,
         name: o.name ?? 'tool',
         timestamp: time(o.startTime),
         input: o.input ?? undefined,
@@ -857,7 +856,7 @@ export function normalizeLangfuseSession(
     const spans: ForwarderSpan[] = items
       .filter((o) => o !== root && (options.spanTypes ?? []).includes(o.type))
       .map((o) => ({
-        id: `${traceId}:${o.id}`,
+        id: o.id,
         name: o.name ?? o.type.toLowerCase(),
         timestamp: time(o.startTime),
         input: o.input ?? undefined,
@@ -1017,8 +1016,6 @@ export async function syncLangfuse(
 **Why the watermark can stay behind.** A session is found through its traces' root observations. If a session's last trace started before the window's end but is still running, the session is skipped as active, and no later root brings it back. So `syncLangfuse` returns a watermark no later than that trace's start, and the next run reads it again. Sessions after it in the window are read again too; they deduplicate, because every event ID is derived from Langfuse's IDs.
 
 **Bounded reads.** Langfuse recommends bounding every request with `fromStartTime` and `toStartTime`. Discovery reads one window of root observations, 1,000 per page with `fields=core,basic`. Each session is read from `SESSION_LOOKBACK_MS` (7 days) before its first trace in the window up to now, 100 per page because pages with `io` carry full input and output and Langfuse Cloud caps a response at 5 MB. A conversation whose earlier traces started more than 7 days before is forwarded without them; raise `SESSION_LOOKBACK_MS` for longer-lived conversations.
-
-**Why tool and span IDs include the trace ID.** Langfuse observations ingested over OpenTelemetry take their IDs from span IDs, which OpenTelemetry guarantees unique only within a trace. So Tool Call and Span IDs are `<session>:<trace>:<observation>`. An earlier version of this adapter used `<session>:<observation>`; re-sending a conversation it already forwarded, within Amplitude's 7-day `insert_id` window, stores its tool calls and spans a second time. Forward each conversation with one ID format only.
 
 ### Privacy
 
