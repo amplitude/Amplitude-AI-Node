@@ -11,7 +11,7 @@ The platform runs the agent; the forwarder pulls or receives finished conversati
 | Platform | Guide | How conversations are extracted | Last verified |
 |---|---|---|---|
 | Sierra | [sierra.md](./sierra.md) | Post-conversation webhook or scheduled transcript export (format from your Sierra account team) | 2026-09-23 |
-| Decagon | [decagon.md](./decagon.md) | Scheduled pull from the conversation export API | 2026-09-23 |
+| Decagon | [decagon.md](./decagon.md) | Scheduled pull from the conversation export API, windowed on last update | 2026-10-06 |
 | Fin (Intercom) | [fin.md](./fin.md) | Scheduled search and retrieve from the conversations API, plus an optional close webhook | 2026-10-06 |
 | Agentforce (Salesforce) | [agentforce.md](./agentforce.md) | Scheduled SQL over the Session Tracing tables in Data Cloud, once each trace is complete | 2026-10-06 |
 
