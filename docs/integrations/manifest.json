@@ -67,9 +67,9 @@
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/langsmith.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md",
       "extraction_methods": ["query_api"],
-      "vendor_format_source": "vendor_public_openapi_2026_09",
+      "vendor_format_source": "vendor_public_openapi_2026_10",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-24"
+      "last_verified": "2026-10-06"
     },
     {
       "id": "braintrust",

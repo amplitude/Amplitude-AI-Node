@@ -1310,17 +1310,17 @@ describe('forwarder core and adapters', () => {
     const md = { thread_id: 'th1', user_id: 'user_12345' };
     const llm = { ls_model_name: 'gpt-4o-mini', ls_provider: 'openai' };
     const runs = [
-      { id: 'r1', name: 'agent', run_type: 'chain', start_time: '2026-01-15T12:00:00.000000', end_time: '2026-01-15T12:00:02.000000', trace_id: 'r1', inputs: { messages: [{ role: 'user', content: 'Where is my order?' }] }, outputs: { messages: [{ role: 'user', content: 'Where is my order?' }, { role: 'assistant', content: 'Order number?' }] }, extra: { metadata: md } },
-      { id: 'l1', name: 'ChatOpenAI', run_type: 'llm', start_time: '2026-01-15T12:00:00.500000', trace_id: 'r1', parent_run_id: 'r1', prompt_tokens: 120, completion_tokens: 14, total_cost: '0.001', extra: { metadata: { ...md, ...llm } } },
-      { id: 'r2', name: 'agent', run_type: 'chain', start_time: '2026-01-15T12:00:30.000000', end_time: '2026-01-15T12:00:34.000000', trace_id: 'r2', inputs: { messages: [[{ lc: 1, type: 'constructor', id: ['langchain', 'schema', 'messages', 'HumanMessage'], kwargs: { content: 'A1001' } }]] }, outputs: { output: 'It arrives Thursday.' }, extra: { metadata: md } },
-      { id: 't2', name: 'lookup_order', run_type: 'tool', start_time: '2026-01-15T12:00:31.000000', end_time: '2026-01-15T12:00:31.250000', trace_id: 'r2', parent_run_id: 'r2', inputs: { id: 'A1001' }, outputs: { status: 'shipped' }, error: null, extra: { metadata: md } },
-      { id: 'l2', name: 'ChatOpenAI', run_type: 'llm', start_time: '2026-01-15T12:00:32.000000', trace_id: 'r2', parent_run_id: 'r2', prompt_tokens: 160, completion_tokens: 8, total_cost: '0.002', extra: { metadata: { ...md, ...llm } } },
+      { id: 'r1', name: 'agent', run_type: 'CHAIN', start_time: '2026-01-15T12:00:00.000000', end_time: '2026-01-15T12:00:02.000000', trace_id: 'r1', inputs: { messages: [{ role: 'user', content: 'Where is my order?' }] }, outputs: { messages: [{ role: 'user', content: 'Where is my order?' }, { role: 'assistant', content: 'Order number?' }] }, metadata: md },
+      { id: 'l1', name: 'ChatOpenAI', run_type: 'LLM', start_time: '2026-01-15T12:00:00.500000', trace_id: 'r1', is_root: false, prompt_tokens: 120, completion_tokens: 14, total_cost: '0.001', metadata: { ...md, ...llm } },
+      { id: 'r2', name: 'agent', run_type: 'CHAIN', start_time: '2026-01-15T12:00:30.000000', end_time: '2026-01-15T12:00:34.000000', trace_id: 'r2', inputs: { messages: [[{ lc: 1, type: 'constructor', id: ['langchain', 'schema', 'messages', 'HumanMessage'], kwargs: { content: 'A1001' } }]] }, outputs: { output: 'It arrives Thursday.' }, metadata: md },
+      { id: 't2', name: 'lookup_order', run_type: 'TOOL', start_time: '2026-01-15T12:00:31.000000', end_time: '2026-01-15T12:00:31.250000', trace_id: 'r2', is_root: false, inputs: { id: 'A1001' }, outputs: { status: 'shipped' }, error: null, metadata: md },
+      { id: 'l2', name: 'ChatOpenAI', run_type: 'LLM', start_time: '2026-01-15T12:00:32.000000', trace_id: 'r2', is_root: false, prompt_tokens: 160, completion_tokens: 8, total_cost: '0.002', metadata: { ...md, ...llm } },
     ];
     expect(tracing.langsmith.threadIdOf(runs[0])).toBe('th1');
-    expect(tracing.langsmith.threadIdOf({ extra: { metadata: { session_id: 'sx' } } })).toBe('sx');
+    expect(tracing.langsmith.threadIdOf({ metadata: { session_id: 'sx' } })).toBe('sx');
     const conversation = tracing.langsmith.normalizeLangSmithThread('th1', runs, {
       agentId: 'order-support',
-      resolveUserId: (r: { extra: { metadata: { user_id: string } } }) => r.extra.metadata.user_id,
+      resolveUserId: (r: { metadata: { user_id: string } }) => r.metadata.user_id,
     });
     const events: AgentEvent[] = core.toAgentEvents(conversation);
     assertForwarderRules(events);
@@ -1422,13 +1422,13 @@ describe('forwarder core and adapters', () => {
 
     calls.length = 0;
     respond([
-      new Response(JSON.stringify({ runs: [{ id: 'r1' }], cursors: { next: 'c2' } })),
-      new Response(JSON.stringify({ runs: [{ id: 'r2' }], cursors: { next: null } })),
+      new Response(JSON.stringify({ items: [{ id: 'r1' }], next_cursor: 'c2' })),
+      new Response(JSON.stringify({ items: [{ id: 'r2' }], next_cursor: null })),
     ]);
-    const runs = await drain(tracing.langsmith.queryLangSmithRuns({ session: ['p1'], is_root: true }));
+    const runs = await drain(tracing.langsmith.langsmithPages('/api/v2/traces/query', { body: { project_id: 'p1' } }));
     expect(runs.map((r: { id: string }) => r.id)).toEqual(['r1', 'r2']);
-    expect(calls[0]?.url).toContain('/api/v1/runs/query');
-    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({ session: ['p1'], is_root: true });
+    expect(calls[0]?.url).toContain('/api/v2/traces/query');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({ project_id: 'p1' });
     expect(JSON.parse(calls[1]?.body ?? '{}').cursor).toBe('c2');
 
     calls.length = 0;

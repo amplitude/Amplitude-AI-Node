@@ -2,9 +2,11 @@
 
 **Amplitude Agent Analytics can ingest agent conversations traced in LangSmith over the Amplitude HTTP API, with no SDK required.**
 
-Last verified: 2026-09-24. This is an Amplitude-authored guide. LangSmith is a trademark of its owner; this guide is not affiliated with or endorsed by LangChain. Corrections are welcome as a pull request.
+Last verified: 2026-10-06, against LangSmith documentation only. This is an Amplitude-authored guide. LangSmith is a trademark of its owner; this guide is not affiliated with or endorsed by LangChain. Corrections are welcome as a pull request.
 
-**Provenance of LangSmith details.** The runs query API described here comes from LangSmith's public OpenAPI specification (`https://api.smith.langchain.com/openapi.json`) and its documentation on threads, exporting traces, and the trace query syntax, read in September 2026. It was not checked against a live LangSmith account for this guide. Treat every LangSmith field name below as a starting point, and confirm it against a real response in Phase 2.
+**Provenance of LangSmith details.** Every path, request field, `selects` value, and response field comes from LangSmith's public [OpenAPI specification](https://api.smith.langchain.com/openapi.json) and its SmithDB migration guides for [threads](https://docs.langchain.com/langsmith/smithdb-sdk-migration-threads), [traces](https://docs.langchain.com/langsmith/smithdb-sdk-migration-traces), and [querying runs](https://docs.langchain.com/langsmith/smithdb-sdk-migration-query-runs), read in October 2026. It was not checked against a live LangSmith account for this guide. Treat every LangSmith field name below as a starting point, and confirm it against a real response in Phase 2.
+
+**API version.** The adapter uses LangSmith's SmithDB-backed v2 API. The older `POST /api/v1/runs/query` is [deprecated on all Cloud regions since the end of July 2026 and removed on 31 January 2027](https://docs.langchain.com/langsmith/smithdb-sdk-migration); on self-hosted LangSmith it is deprecated in v0.16 and removed in v0.18. The v2 endpoints need **self-hosted LangSmith v0.16 or later**.
 
 ---
 
@@ -16,11 +18,12 @@ Your agent runs in your own code and is traced in LangSmith. Amplitude Agent Ana
 
 ```text
 scheduled job (for example, hourly)
-  -> POST /api/v1/runs/query   root runs in a time window -> thread IDs
-  -> POST /api/v1/runs/query   root runs of each settled thread, then every run in each trace
-  -> normalize(...)            LangSmith fields -> one neutral conversation shape
-  -> toAgentEvents(conv)       neutral shape -> [Agent] events
-  -> send(events)              POST https://api2.amplitude.com/2/httpapi
+  -> POST /api/v2/traces/query               root runs that started in each window (7 days at most) -> thread IDs
+  -> GET  /api/v2/threads/{thread_id}/traces every trace of each thread, oldest first; skip threads still active
+  -> GET  /api/v2/traces/{trace_id}/runs     every run in each finished trace
+  -> normalize(...)                          LangSmith fields -> one neutral conversation shape
+  -> toAgentEvents(conv)                     neutral shape -> [Agent] events
+  -> send(events)                            POST https://api2.amplitude.com/2/httpapi
   -> Agent Analytics sessions, turns, tool calls, enrichment
 ```
 
@@ -31,7 +34,7 @@ scheduled job (for example, hourly)
 - Every conversation as an Agent Analytics session, turn by turn, in the session viewer.
 - Automatic quality signals on every closed session: task completion, response quality, user friction, and more.
 - Tool calls with name, success, latency, and, unless you send metadata only, input and output.
-- Model, provider, token counts, and cost from `llm` runs. Cost is the value LangSmith calculated; Amplitude does not recompute it.
+- Model, provider, token counts, and cost from `LLM` runs. Cost is the value LangSmith calculated; Amplitude does not recompute it.
 - Agent sessions joined to your product analytics through the same user ID.
 
 LangSmith feedback is not forwarded by this adapter. If the user wants it on a production conversation, map thread-level feedback to a `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`. Follow the harness field map and the CI procedure on that page.
@@ -44,12 +47,12 @@ This job forwards what is already in LangSmith; it cannot add what the applicati
 - **User ID:** LangSmith has no built-in user field; it must be in run metadata, under a key you confirm. It must be the same ID your product analytics uses.
 - **Message text:** the root run's inputs and outputs, exactly as logged. If the application hides inputs and outputs from LangSmith, send metadata only.
 
-Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as LangSmith retains them.
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as LangSmith retains them ([14 days on base retention, 180 days on extended](https://docs.langchain.com/langsmith/administration-overview#data-retention)).
 
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A LangSmith API key, the tracing project's ID (a UUID), and the host: `https://api.smith.langchain.com` (US), `https://eu.api.smith.langchain.com` (EU), or your self-hosted URL.
+2. A LangSmith API key, the tracing project's ID (a UUID), and the API URL for your [region](https://docs.langchain.com/langsmith/cloud): `https://api.smith.langchain.com` (US), `https://eu.api.smith.langchain.com` (EU), `https://apac.api.smith.langchain.com` (APAC), or `https://aws.api.smith.langchain.com` (AWS US). For self-hosted LangSmith (v0.16 or later), use the same `LANGSMITH_ENDPOINT` your application uses, `http(s)://<host>/api/v1` [per LangSmith's self-hosting guide](https://docs.langchain.com/langsmith/self-host-usage); the adapter strips the trailing `/api/v1`, because its paths carry their own `/api/v2`.
 3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
@@ -66,42 +69,45 @@ Typically a few days of engineering: the job, the mapping, and verification in A
 
 Stop and ask the user for these. Never infer them from field names:
 
-1. **The user identity field.** Which run metadata key, if any, holds the user ID their product analytics uses. The adapter reads `user_id` from root-run metadata as a placeholder.
+1. **The user identity field.** Which run metadata key, if any, holds the user ID their product analytics uses. The adapter reads `user_id` from the root run's `metadata` as a placeholder.
 2. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the root run name or the project name.
-3. **What the user saw at each kind of agent step.** For each observation or span type in their traces: did the user see text, a UI component (card, form, quick replies), or nothing (routing, retrieval, a guardrail check)? The root's output becomes the AI Response text. A component becomes a span on that reply. A step the user never saw becomes a span only if the user wants it in Agent Analytics, and never an empty AI Response.
-4. **How long a conversation can go quiet and resume.** This sets `SETTLE_MS`, and whether threads can span more than 7 days sets `LOOKBACK_MS`.
+3. **What the user saw at each kind of agent step.** For each run type in their traces (`CHAIN`, `RETRIEVER`, `EMBEDDING`, `PROMPT`, `PARSER`): did the user see text, a UI component (card, form, quick replies), or nothing (routing, retrieval, a guardrail check)? The root's output becomes the AI Response text. `TOOL` runs are always tool calls. A step the user never saw becomes a span only if the user wants it in Agent Analytics, and never an empty AI Response.
+4. **How long a conversation can go quiet and resume.** This sets `SETTLE_MS`.
 
 ### Phase 1: Detect
 
 Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language.
-- Whether Amplitude and LangSmith credentials are available as configuration (never hard-code them).
-- Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
+- Whether Amplitude and LangSmith credentials are available as configuration: `AMPLITUDE_API_KEY`, `LANGSMITH_API_KEY`, and `LANGSMITH_ENDPOINT` unless the project is on the US Cloud region. Never hard-code them.
+- Whether the user is on Amplitude's EU data center. If so, set `AMPLITUDE_ENDPOINT=https://api.eu.amplitude.com/2/httpapi`.
+- Whether any user IDs are shorter than 5 characters. If so, set `AMPLITUDE_MIN_ID_LENGTH`; otherwise Amplitude rejects those threads.
+- For self-hosted LangSmith, the version. Below v0.16 the v2 endpoints do not exist; ask the user to upgrade rather than porting the adapter back to `POST /api/v1/runs/query`, which is removed in v0.18.
 - Whether root runs carry `session_id` or `thread_id` metadata, and which key the application uses.
-- Whether you may call the runs query API once, for one known thread, to get a real response.
+- Whether you may call the v2 API once, for one known thread, to get a real response.
 
 **PAUSE.** Show the findings and ask the user to confirm them, plus the do-not-guess answers.
 
 ### Phase 2: Map
 
-Fetch one real thread (root runs filtered by thread metadata, then `trace` for each) and compare it to the adapter:
+Fetch one real thread (`listThreadTraces`, then `listTraceRuns` for each finished trace) and compare it to the adapter:
 
-- **Exchanges.** The adapter treats each root run in a thread as one exchange: its `inputs` hold the user message and its `outputs` the reply. If the application sends the whole message history as input on every turn, `textFrom` takes the last user message; confirm that is the new one.
-- **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}` (including serialized LangChain messages), and common keys such as `input` and `output`. Check it returns what the user typed and saw.
-- **Tool calls.** Runs with `run_type` `tool` become tool calls, named by the run name.
-- **Usage and cost.** The adapter sums `prompt_tokens`, `completion_tokens`, and `total_cost` over the exchange's `llm` runs, and reads the model and provider from `ls_model_name` and `ls_provider` metadata. Confirm these are populated.
-- **Spans.** Only the run types the user chose in do-not-guess answer 3 go in `spanRunTypes`.
+- **Exchanges.** The adapter treats each finished root trace in a thread as one exchange: its `inputs` hold the user message and its `outputs` the reply. If the application sends the whole message history as input on every turn, `textFrom` takes the last user message; confirm that is the new one. A root run still in progress (no `end_time`, or `status` `PENDING`) is skipped and counted in context as `unfinished_traces`.
+- **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}` (including serialized LangChain messages), and common keys such as `input` and `output`. Check it returns what the user typed and saw. When it finds no text, the adapter sends `[No text input]` or `[No text output]` rather than dropping the message, so each trace stays its own exchange; if these appear, extend `textFrom`.
+- **Errors.** A root run that failed with no readable output is sent as the reply `[Error: <first line of its error>]`, and counted in context as `errored_traces`. Confirm the first line of the user's errors is safe to show.
+- **Tool calls.** Runs with `run_type` `TOOL` become tool calls, named by the run name. Run types are uppercase in v2.
+- **Usage and cost.** The adapter sums `prompt_tokens`, `completion_tokens`, and `total_cost` over the exchange's `LLM` runs, and reads the model and provider from `ls_model_name` and `ls_provider` in the run's `metadata` (v2 returns `metadata` as its own field, not under `extra`). LangSmith reports `0` when it has no count or no price, so zero token totals and zero cost are omitted, not sent as `0`. Confirm these are populated.
+- **Spans.** Only the run types the user chose in do-not-guess answer 3 go in `spanRunTypes`, uppercase, for example `['RETRIEVER']`. `TOOL` is ignored there, because a run sent as both a tool call and a span would share one event ID.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
 
 ### Phase 3: Implement
 
-Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the LangSmith adapter below it, then schedule `syncLangSmith` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
+Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the LangSmith adapter below it, fill in `MAPPING`, then schedule `syncLangSmith(projectId, watermark)` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID, how many conversations had no user ID, and how many failed. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
@@ -113,7 +119,10 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 5: Ship
 
-- LangSmith rate-limits API calls per workspace; the adapter backs off on `429`. The per-trace query is the expensive step; keep the schedule no more frequent than the settle window needs.
+- LangSmith rate-limits API calls. The adapter retries `429` and `5xx` up to 6 times with exponential backoff (1 second doubling, at most 60), honoring a numeric `Retry-After`, then stops the run; the next run starts again from the same watermark.
+- Every time-bounded query sets both `min_start_time` and `max_start_time` and covers at most 7 days. v2 queries without `min_start_time` [silently cover only the last 24 hours](https://docs.langchain.com/langsmith/smithdb-sdk-migration-query-runs), and LangSmith [puts windows over 7 days, or with no start time, in a slower rate-limit tier](https://docs.langchain.com/langsmith/export-traces#rate-limits) on the v1 query (its migration guide says the SmithDB endpoints are not subject to those tiers). The thread listing has no time window; it always returns the whole thread.
+- The job makes one listing call per thread and one runs call per trace. Keep the schedule no more frequent than the settle window needs.
+- One thread that cannot be mapped, or that Amplitude rejects with a `4xx`, is logged and counted as failed, and the job moves on. An outage (LangSmith or Amplitude still failing after retries) stops the run.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 
@@ -149,13 +158,13 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
 | `[Agent] Session End` | Once, last, when the conversation is finished | `[Agent] Trace ID` of the final exchange |
 
-Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, and `[Agent] Context` when you have dimensions.
+Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path`, `[Agent] Source`, `[Agent] Content Mode`, and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
 
 ### Example: one complete session
 
-A two-exchange thread with a tool call, as produced by `toAgentEvents` from `normalizeLangSmithThread`. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
+A two-exchange thread with a tool call, as `syncLangSmith` produces it from the v2 runs of that thread. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
 
 ```json
 [
@@ -169,6 +178,9 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langsmith",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langsmith\"}",
       "[Agent] Trace ID": "thread-1:trace-1",
       "[Agent] Turn ID": 1,
@@ -189,6 +201,9 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langsmith",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langsmith\"}",
       "[Agent] Trace ID": "thread-1:trace-1",
       "[Agent] Turn ID": 2,
@@ -199,7 +214,7 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Provider": "openai",
       "[Agent] Input Tokens": 120,
       "[Agent] Output Tokens": 14,
-      "[Agent] Cost USD": 3e-05,
+      "[Agent] Cost USD": 0.00003,
       "$llm_message": {
         "text": "Let me check. What is the order number?"
       }
@@ -215,6 +230,9 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langsmith",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langsmith\"}",
       "[Agent] Trace ID": "thread-1:trace-2",
       "[Agent] Turn ID": 3,
@@ -235,6 +253,9 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langsmith",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langsmith\"}",
       "[Agent] Trace ID": "thread-1:trace-2",
       "[Agent] Turn ID": 4,
@@ -259,6 +280,9 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langsmith",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langsmith\"}",
       "[Agent] Trace ID": "thread-1:trace-2",
       "[Agent] Turn ID": 5,
@@ -269,7 +293,7 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Provider": "openai",
       "[Agent] Input Tokens": 160,
       "[Agent] Output Tokens": 8,
-      "[Agent] Cost USD": 3e-05,
+      "[Agent] Cost USD": 0.00003,
       "$llm_message": {
         "text": "It arrives Thursday."
       }
@@ -285,6 +309,9 @@ A two-exchange thread with a tool call, as produced by `toAgentEvents` from `nor
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langsmith",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langsmith\"}",
       "[Agent] Trace ID": "thread-1:trace-2"
     }
@@ -635,69 +662,171 @@ async function postBatch(
 
 ### LangSmith adapter
 
-Field names follow LangSmith's public OpenAPI specification and trace query syntax. Confirm each against a real response in Phase 2.
+Paths, request fields, `selects` values, and response fields follow LangSmith's [OpenAPI specification](https://api.smith.langchain.com/openapi.json) and its [SmithDB migration guides](https://docs.langchain.com/langsmith/smithdb-sdk-migration). Confirm each against a real response in Phase 2.
 
 ```ts
 import {
   send,
   toAgentEvents,
+  type AgentEvent,
   type ForwarderMessage,
   type ForwarderSpan,
   type ForwarderToolCall,
   type NormalizedConversation,
 } from './amplitude-agent-forwarder';
 
-/** One run from POST /api/v1/runs/query. */
+/** One run from GET /api/v2/traces/{trace_id}/runs. Only the fields in RUN_SELECTS are populated. */
 export interface LangSmithRun {
   id: string;
-  name: string;
-  run_type: string; // llm, chain, tool, retriever, embedding, prompt, parser
-  start_time: string; // UTC, sometimes without a trailing Z
-  end_time?: string | null;
+  name?: string;
+  run_type?: string; // LLM, CHAIN, TOOL, RETRIEVER, EMBEDDING, PROMPT, PARSER (uppercase in v2)
+  status?: string; // SUCCESS, ERROR, PENDING
+  start_time: string;
+  end_time?: string | null; // null while the run is in progress
   inputs?: Record<string, unknown> | null;
   outputs?: Record<string, unknown> | null;
   error?: string | null;
-  extra?: { metadata?: Record<string, unknown>; invocation_params?: Record<string, unknown> } | null;
+  metadata?: Record<string, unknown> | null;
+  extra?: { invocation_params?: Record<string, unknown> } | null;
   trace_id: string;
-  parent_run_id?: string | null;
   thread_id?: string | null;
+  is_root?: boolean;
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
+  total_tokens?: number | null;
   total_cost?: string | number | null;
 }
 
-interface RunsPage {
-  runs: LangSmithRun[];
-  cursors?: { next?: string | null };
+/** One root trace from GET /api/v2/threads/{thread_id}/traces. */
+export interface LangSmithThreadTrace {
+  trace_id: string;
+  start_time?: string;
+  end_time?: string | null;
 }
 
-/** US: https://api.smith.langchain.com, EU: https://eu.api.smith.langchain.com, or your self-hosted URL. */
-const LANGSMITH_ENDPOINT = process.env.LANGSMITH_ENDPOINT ?? 'https://api.smith.langchain.com';
-const RUN_FIELDS = [
-  'id', 'name', 'run_type', 'start_time', 'end_time', 'inputs', 'outputs', 'error', 'extra',
-  'trace_id', 'parent_run_id', 'thread_id', 'prompt_tokens', 'completion_tokens', 'total_cost',
+interface Page<T> {
+  items?: T[];
+  next_cursor?: string | null;
+}
+
+/**
+ * Cloud API URL for your region: https://api.smith.langchain.com (US), https://eu.api.smith.langchain.com (EU),
+ * https://apac.api.smith.langchain.com (APAC), https://aws.api.smith.langchain.com (AWS US).
+ * Self-hosted (v0.16 or later): the LANGSMITH_ENDPOINT your application uses, http(s)://<host>/api/v1.
+ */
+export function langsmithBaseUrl(
+  endpoint = process.env.LANGSMITH_ENDPOINT || 'https://api.smith.langchain.com',
+): string {
+  // Self-hosted endpoints end in /api/v1, and every path below carries its own /api/v2.
+  return endpoint.replace(/\/+$/, '').replace(/\/api\/v[12]$/, '');
+}
+
+/** RunSelectField values from LangSmith's OpenAPI specification. */
+const RUN_SELECTS = [
+  'ID', 'NAME', 'RUN_TYPE', 'STATUS', 'START_TIME', 'END_TIME', 'ERROR', 'INPUTS', 'OUTPUTS', 'METADATA', 'EXTRA',
+  'TRACE_ID', 'THREAD_ID', 'IS_ROOT', 'PROMPT_TOKENS', 'COMPLETION_TOKENS', 'TOTAL_TOKENS', 'TOTAL_COST',
 ];
 const THREAD_KEYS = ['session_id', 'thread_id'];
+/** Each time-bounded query covers at most this much start time, with both bounds set. */
+const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_RETRIES = 6;
+const PAGE_SIZE = 100;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const iso = (ms: number) => new Date(ms).toISOString();
 
-export async function* queryLangSmithRuns(body: Record<string, unknown>): AsyncGenerator<LangSmithRun> {
-  let cursor: string | undefined;
-  for (;;) {
-    const response = await fetch(`${LANGSMITH_ENDPOINT}/api/v1/runs/query`, {
-      method: 'POST',
-      headers: { 'x-api-key': process.env.LANGSMITH_API_KEY ?? '', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ select: RUN_FIELDS, ...body, ...(cursor ? { cursor } : {}) }),
+type Query = Record<string, string | string[] | undefined>;
+
+async function langsmith(path: string, request: { query?: Query; body?: Record<string, unknown> } = {}): Promise<unknown> {
+  const url = new URL(`${langsmithBaseUrl()}${path}`);
+  for (const [key, value] of Object.entries(request.query ?? {})) {
+    for (const item of value === undefined ? [] : Array.isArray(value) ? value : [value]) {
+      url.searchParams.append(key, item);
+    }
+  }
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(url.toString(), {
+      method: request.body ? 'POST' : 'GET',
+      headers: {
+        'x-api-key': process.env.LANGSMITH_API_KEY ?? '',
+        Accept: 'application/json',
+        ...(request.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: request.body ? JSON.stringify(request.body) : undefined,
     });
-    if (response.status === 429 || response.status >= 500) {
-      await sleep(Number(response.headers.get('retry-after') ?? 5) * 1000);
+    if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+      const retryAfter = Number(response.headers.get('retry-after'));
+      await sleep(retryAfter > 0 ? retryAfter * 1000 : Math.min(60_000, 1000 * 2 ** attempt));
       continue;
     }
     if (!response.ok) throw new Error(`LangSmith returned ${response.status}: ${await response.text()}`);
-    const page = (await response.json()) as RunsPage;
-    for (const run of page.runs) yield run;
-    cursor = page.cursors?.next ?? undefined;
-    if (!cursor || body.trace) return;
+    return response.json();
   }
+}
+
+/** Every item of a cursor-paginated v2 endpoint: GET takes `cursor` as a query parameter, POST in the body. */
+export async function* langsmithPages<T>(
+  path: string,
+  request: { query?: Query; body?: Record<string, unknown> },
+): AsyncGenerator<T> {
+  let cursor: string | undefined;
+  do {
+    const page = (await langsmith(
+      path,
+      request.body
+        ? { body: { ...request.body, ...(cursor ? { cursor } : {}) } }
+        : { query: { ...request.query, cursor } },
+    )) as Page<T>;
+    for (const item of page.items ?? []) yield item;
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+}
+
+/** Root runs that started in [from, to), in windows of at most 7 days. */
+export async function* rootRunsStarted(projectId: string, from: number, to: number): AsyncGenerator<LangSmithRun> {
+  for (let start = from; start < to; start += WINDOW_MS) {
+    for await (const trace of langsmithPages<{ root_run?: LangSmithRun }>('/api/v2/traces/query', {
+      body: {
+        project_id: projectId,
+        min_start_time: iso(start),
+        max_start_time: iso(Math.min(start + WINDOW_MS, to)),
+        page_size: PAGE_SIZE,
+        selects: ['ID', 'TRACE_ID', 'THREAD_ID', 'METADATA', 'START_TIME'],
+      },
+    })) {
+      if (trace.root_run) yield trace.root_run;
+    }
+  }
+}
+
+/** Every root trace in a thread, oldest first. The endpoint has no time window, so this is the whole thread. */
+export async function listThreadTraces(projectId: string, threadId: string): Promise<LangSmithThreadTrace[]> {
+  const traces: LangSmithThreadTrace[] = [];
+  for await (const trace of langsmithPages<LangSmithThreadTrace>(
+    `/api/v2/threads/${encodeURIComponent(threadId)}/traces`,
+    { query: { project_id: projectId, page_size: String(PAGE_SIZE), selects: ['TRACE_ID', 'START_TIME', 'END_TIME'] } },
+  )) {
+    traces.push(trace);
+  }
+  return traces;
+}
+
+/** Every run in one finished trace. Its runs start between the root's start and end, so that is the window. */
+export async function listTraceRuns(
+  projectId: string,
+  traceId: string,
+  startTime: string,
+  endTime: string,
+): Promise<LangSmithRun[]> {
+  const start = time(startTime);
+  const page = (await langsmith(`/api/v2/traces/${encodeURIComponent(traceId)}/runs`, {
+    query: {
+      project_id: projectId,
+      min_start_time: iso(start),
+      max_start_time: iso(Math.min(time(endTime) + 1, start + WINDOW_MS)),
+      selects: RUN_SELECTS,
+    },
+  })) as Page<LangSmithRun>;
+  return page.items ?? [];
 }
 
 /** Best-effort text from a chat payload. Confirm against real runs in Phase 2. */
@@ -750,164 +879,226 @@ export interface LangSmithMappingOptions {
   agentId: string;
   /** Must return the user ID your product analytics uses. Confirm with the user. */
   resolveUserId: (root: LangSmithRun) => string | undefined;
-  /** Run types to send as [Agent] Span, for example ['retriever']. Confirm in Phase 2. */
+  /** Run types to send as [Agent] Span, for example ['RETRIEVER']. TOOL runs are always tool calls instead. */
   spanRunTypes?: string[];
 }
+
+/** Sent when a trace's input or output holds no text `textFrom` can read. */
+export const NO_INPUT_TEXT = '[No text input]';
+export const NO_OUTPUT_TEXT = '[No text output]';
 
 const time = (value: string) => Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`);
 const sum = (values: (number | undefined)[]) =>
   values.some((v) => v !== undefined) ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : undefined;
 const num = (value: unknown) => (value === null || value === undefined || value === '' ? undefined : Number(value));
+const isRoot = (run: LangSmithRun) => run.is_root ?? run.id === run.trace_id;
+const isFinished = (run: LangSmithRun) => Boolean(run.end_time) && run.status !== 'PENDING';
+const errorOf = (run: LangSmithRun) =>
+  run.error?.split('\n')[0]?.trim() || (run.status === 'ERROR' ? 'run failed' : undefined);
 
 export function threadIdOf(run: LangSmithRun): string | undefined {
   if (run.thread_id) return run.thread_id;
   for (const key of THREAD_KEYS) {
-    const value = run.extra?.metadata?.[key];
+    const value = run.metadata?.[key];
     if (typeof value === 'string' && value) return value;
   }
   return undefined;
 }
 
-/** One LangSmith thread (its root runs plus every run in their traces) -> one conversation. Each trace is one exchange. */
+/**
+ * One LangSmith thread (every run in its traces) -> one conversation. Each finished root trace is one
+ * exchange, numbered from the thread's first trace.
+ */
 export function normalizeLangSmithThread(
   threadId: string,
   runs: LangSmithRun[],
   options: LangSmithMappingOptions,
 ): NormalizedConversation {
-  const roots = runs
-    .filter((r) => !r.parent_run_id)
-    .sort((a, b) => time(a.start_time) - time(b.start_time));
+  const allRoots = runs.filter(isRoot);
+  const roots = allRoots.filter(isFinished).sort((a, b) => time(a.start_time) - time(b.start_time));
   const messages: ForwarderMessage[] = [];
+  let erroredTraces = 0;
   for (const root of roots) {
     const inTrace = runs
       .filter((r) => r.trace_id === root.trace_id && r !== root)
       .sort((a, b) => time(a.start_time) - time(b.start_time));
     const start = time(root.start_time);
     const end = time(root.end_time ?? root.start_time);
-    const userText = textFrom(root.inputs, 'user');
-    if (userText) messages.push({ id: `${root.trace_id}:user`, role: 'user', text: userText, timestamp: start });
+    // The core starts an exchange only at a user message, so every trace sends one.
+    messages.push({
+      id: `${root.trace_id}:user`,
+      role: 'user',
+      text: textFrom(root.inputs, 'user') || NO_INPUT_TEXT,
+      timestamp: start,
+    });
 
     const toolCalls: ForwarderToolCall[] = inTrace
-      .filter((r) => r.run_type === 'tool')
+      .filter((r) => r.run_type === 'TOOL')
       .map((r) => ({
         id: r.id,
-        name: r.name,
+        name: r.name ?? 'tool',
         timestamp: time(r.start_time),
         input: r.inputs ?? undefined,
         output: r.outputs ?? undefined,
-        success: !r.error,
+        success: !errorOf(r),
         latencyMs: r.end_time ? time(r.end_time) - time(r.start_time) : undefined,
       }));
     const spans: ForwarderSpan[] = inTrace
-      .filter((r) => (options.spanRunTypes ?? []).includes(r.run_type))
+      .filter((r) => r.run_type !== 'TOOL' && (options.spanRunTypes ?? []).includes(r.run_type ?? ''))
       .map((r) => ({
         id: r.id,
-        name: r.name,
+        name: r.name ?? String(r.run_type),
         timestamp: time(r.start_time),
         input: r.inputs ?? undefined,
         output: r.outputs ?? undefined,
         latencyMs: r.end_time ? time(r.end_time) - time(r.start_time) : undefined,
       }));
-    const llmRuns = inTrace.filter((r) => r.run_type === 'llm');
+    const llmRuns = inTrace.filter((r) => r.run_type === 'LLM');
     const lastLlm = llmRuns[llmRuns.length - 1];
-    const model = lastLlm?.extra?.metadata?.ls_model_name ?? lastLlm?.extra?.invocation_params?.model;
-    const provider = lastLlm?.extra?.metadata?.ls_provider;
+    const model = lastLlm?.metadata?.ls_model_name ?? lastLlm?.extra?.invocation_params?.model;
+    const provider = lastLlm?.metadata?.ls_provider;
+    // LangSmith reports 0 when it has no count or no price for the model: unknown, not zero.
+    const inputTokens = sum(llmRuns.map((r) => num(r.prompt_tokens)));
+    const outputTokens = sum(llmRuns.map((r) => num(r.completion_tokens)));
+    const costUsd = sum(llmRuns.map((r) => num(r.total_cost)));
+    const hasTokens = (inputTokens ?? 0) + (outputTokens ?? 0) > 0;
+    const error = errorOf(root);
+    if (error) erroredTraces += 1;
     messages.push({
       id: `${root.trace_id}:reply`,
       role: 'assistant',
-      text: textFrom(root.outputs, 'assistant'),
+      text: textFrom(root.outputs, 'assistant') || (error ? `[Error: ${error}]` : NO_OUTPUT_TEXT),
       timestamp: Math.max(end, start + 1),
       toolCalls,
       spans,
       model: typeof model === 'string' ? model : undefined,
       provider: typeof provider === 'string' ? provider : undefined,
-      inputTokens: sum(llmRuns.map((r) => num(r.prompt_tokens))),
-      outputTokens: sum(llmRuns.map((r) => num(r.completion_tokens))),
-      costUsd: sum(llmRuns.map((r) => num(r.total_cost))),
+      ...(hasTokens ? { inputTokens, outputTokens } : {}),
+      ...(costUsd ? { costUsd } : {}),
     });
   }
 
+  const context: Record<string, string | number | boolean> = { platform: 'langsmith' };
+  if (erroredTraces) context.errored_traces = erroredTraces;
+  if (allRoots.length > roots.length) context.unfinished_traces = allRoots.length - roots.length;
   const first = roots[0];
   return {
     conversationId: threadId,
     agentId: options.agentId,
     userId: first ? options.resolveUserId(first) : undefined,
-    context: { platform: 'langsmith' },
+    context,
     messages,
     endedAt: messages.length ? Math.max(...messages.map((m) => m.timestamp)) : undefined,
   };
 }
 
-/** Only threads with no new traces for this long are treated as finished. */
+/** Only threads with no trace newer than this are treated as finished. */
 const SETTLE_MS = 2 * 60 * 60 * 1000;
-/** How far back a thread's earlier traces may start. */
-const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const redact = (text: string): string => text; // replace with your PII redaction
 
-/** Forwards threads active after `watermark` (ISO 8601) that have since settled. Returns the next watermark. */
-export async function syncLangSmith(projectId: string, watermark: string): Promise<string> {
-  const until = new Date(Date.now() - SETTLE_MS).toISOString();
+const MAPPING: LangSmithMappingOptions = {
+  agentId: 'TODO-confirmed-agent-id',
+  resolveUserId: (root) => {
+    const value = root.metadata?.user_id; // TODO: confirm this matches product analytics
+    return typeof value === 'string' ? value : undefined;
+  },
+};
+
+type Outcome = 'sent' | 'no_identity' | 'empty' | 'failed';
+
+const amplitude = () => ({
+  apiKey: process.env.AMPLITUDE_API_KEY ?? '',
+  /** EU data residency: https://api.eu.amplitude.com/2/httpapi */
+  endpoint: process.env.AMPLITUDE_ENDPOINT || undefined,
+  /** Set if your user IDs are shorter than 5 characters. */
+  minIdLength: Number(process.env.AMPLITUDE_MIN_ID_LENGTH) || undefined,
+});
+
+/** A rejection that retrying won't fix. Anything else (an outage) stops the run. */
+const isPermanent = (error: unknown) =>
+  /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
+
+async function forward(threadId: string, runs: LangSmithRun[], mapping: LangSmithMappingOptions): Promise<Outcome> {
+  let events: AgentEvent[];
+  try {
+    const conversation = normalizeLangSmithThread(threadId, runs, mapping);
+    if (!conversation.userId) return 'no_identity';
+    events = toAgentEvents(conversation, { redact, source: 'langsmith' });
+  } catch (error) {
+    console.error(`Thread ${threadId} could not be mapped:`, error);
+    return 'failed';
+  }
+  if (events.length === 0) return 'empty';
+  if (process.env.AMPLITUDE_DRY_RUN) {
+    console.log(JSON.stringify(events, null, 2));
+    return 'sent';
+  }
+  try {
+    await send(events, amplitude());
+  } catch (error) {
+    if (!isPermanent(error)) throw error;
+    console.error(`Thread ${threadId} was rejected by Amplitude:`, error);
+    return 'failed';
+  }
+  return 'sent';
+}
+
+/**
+ * Forwards threads with a trace that started at or after `watermark` (ISO 8601) and no trace in the
+ * last SETTLE_MS. Each thread is read and sent whole. Returns the next watermark.
+ */
+export async function syncLangSmith(
+  projectId: string,
+  watermark: string,
+  mapping: LangSmithMappingOptions = MAPPING,
+): Promise<string> {
+  if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
+    throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
+  }
+  const until = Date.now() - SETTLE_MS;
   const threadIds = new Set<string>();
   let tracesWithoutThread = 0;
-  let threadsWithoutUser = 0;
-  for await (const root of queryLangSmithRuns({
-    session: [projectId],
-    is_root: true,
-    start_time: watermark,
-    filter: `lt(start_time, "${until}")`,
-    select: ['id', 'trace_id', 'thread_id', 'extra', 'start_time'],
-  })) {
+  for await (const root of rootRunsStarted(projectId, Date.parse(watermark), until)) {
     const threadId = threadIdOf(root);
     if (threadId) threadIds.add(threadId);
     else tracesWithoutThread += 1;
   }
 
+  const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0, active: 0 };
   for (const threadId of threadIds) {
-    const roots: LangSmithRun[] = [];
-    for await (const root of queryLangSmithRuns({
-      session: [projectId],
-      is_root: true,
-      start_time: new Date(Date.parse(watermark) - LOOKBACK_MS).toISOString(),
-      filter: `and(in(metadata_key, ${JSON.stringify(THREAD_KEYS)}), eq(metadata_value, ${JSON.stringify(threadId)}))`,
-    })) {
-      roots.push(root);
-    }
+    const traces = await listThreadTraces(projectId, threadId);
     // Still active: a later run finds it again through its newer traces.
-    if (roots.some((r) => time(r.start_time) >= Date.parse(until))) continue;
-
+    if (traces.some((t) => t.start_time && time(t.start_time) >= until)) {
+      counts.active += 1;
+      continue;
+    }
     const runs: LangSmithRun[] = [];
-    for (const root of roots) {
-      for await (const run of queryLangSmithRuns({ session: [projectId], trace: root.trace_id })) runs.push(run);
+    for (const trace of traces) {
+      if (!trace.start_time || !trace.end_time) {
+        // Unfinished: normalize skips the trace and counts it in context.
+        runs.push({ id: trace.trace_id, trace_id: trace.trace_id, start_time: trace.start_time ?? '', end_time: null, is_root: true });
+        continue;
+      }
+      runs.push(...(await listTraceRuns(projectId, trace.trace_id, trace.start_time, trace.end_time)));
     }
-    const conversation = normalizeLangSmithThread(threadId, runs, {
-      agentId: 'TODO-confirmed-agent-id',
-      resolveUserId: (root) => {
-        const value = root.extra?.metadata?.user_id; // TODO: confirm this matches product analytics
-        return typeof value === 'string' ? value : undefined;
-      },
-    });
-    if (!conversation.userId) {
-      threadsWithoutUser += 1;
-      continue;
-    }
-    const events = toAgentEvents(conversation, { redact, source: 'langsmith' });
-    if (process.env.AMPLITUDE_DRY_RUN) {
-      console.log(JSON.stringify(events, null, 2));
-      continue;
-    }
-    await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+    counts[await forward(threadId, runs, mapping)] += 1;
   }
-  if (tracesWithoutThread || threadsWithoutUser) {
+  if (tracesWithoutThread || counts.no_identity || counts.empty || counts.failed) {
     console.warn(
-      `Skipped ${tracesWithoutThread} traces without thread metadata and ${threadsWithoutUser} threads without a user ID`,
+      `Skipped ${tracesWithoutThread} traces without thread metadata, ${counts.no_identity} threads without a user ID, ${counts.empty} with no finished traces, and ${counts.failed} that failed (logged above); ${counts.active} still active`,
     );
   }
-  return until;
+  return iso(until);
 }
 ```
 
-**Why the settle window.** LangSmith has no "thread finished" signal. Forwarding only threads with no root run newer than `SETTLE_MS` means they are finished before Session End is sent. If a thread resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
+**Why the settle window.** LangSmith has no "thread finished" signal. Forwarding only threads with no trace newer than `SETTLE_MS` means they are finished before Session End is sent. Raise the window if your conversations often resume after two hours.
+
+**A thread that resumes after it was forwarded.** The next run finds it through its new trace and sends it again, whole. Because the thread listing returns every trace of the thread, oldest first, the exchanges are numbered from the thread's first trace each time, so `[Agent] Trace ID` and `[Agent] Turn ID` on the earlier exchanges match what was sent before, however long the thread was quiet. Events already sent are deduplicated in Agent Analytics and new ones are stored, but anything after the first Session End does not reach that session's quality signals. Two limits remain:
+
+- If earlier traces have aged out of LangSmith's retention, numbering restarts at the oldest remaining trace, and the new exchanges' Trace IDs can collide with ones sent before. Forward threads well within retention, or make `SETTLE_MS` long enough that threads are finished when sent.
+- Amplitude's event-level `insert_id` dedupe covers 7 days. A re-send more than 7 days after the first can make raw-event charts count the earlier events twice; Agent Analytics sessions are not affected.
 
 ### Privacy
 
@@ -920,7 +1111,7 @@ On the HTTP path you own redaction, and it must run before sending. Content trav
 
 The core's `redact` option runs on all of these. `contentMode: 'metadata_only'` sends none of them; sessions, turns, timing, tokens, and user joins still work, but content-based quality signals will be weaker.
 
-If the application hides inputs and outputs from LangSmith, the adapter forwards empty text, and the checker flags empty replies. In that case use `contentMode: 'metadata_only'`. Keep personal data out of `[Agent] Context`; it is a filterable dimension, not a content field.
+If the application hides inputs and outputs from LangSmith, the adapter forwards only the placeholders `[No text input]` and `[No text output]`. In that case use `contentMode: 'metadata_only'`. Root-run error text is content too: the first line of each error becomes the reply of a failed exchange, and `redact` runs on it. Keep personal data out of `[Agent] Context`; it is a filterable dimension, not a content field.
 
 ### HTTP API behavior
 
@@ -935,7 +1126,7 @@ If the application hides inputs and outputs from LangSmith, the adapter forwards
 
 ### Backfill
 
-Historical `time` values are kept as sent, with no age limit. For a backfill, start with a watermark at the earliest date wanted; the job pages forward from there. Each conversation is forwarded whole, in order, with Session End last. Do not trickle old turns in over time: a session closes after 30 idle minutes or 24 hours, a Session End that arrives after an automatic close is ignored, and events that arrive after close are stored but never reach enrichment.
+Historical `time` values are kept as sent, with no age limit. For a backfill, start with a watermark at the earliest date wanted; the job reads root runs forward from there in 7-day windows, up to `SETTLE_MS` ago, and forwards every thread it finds, whole, in order, with Session End last. A thread found in several windows is sent once. How far back you can go is set by LangSmith's retention ([14 days base, 180 days extended](https://docs.langchain.com/langsmith/administration-overview#data-retention)). Because Amplitude's event-level dedupe covers 7 days, run a backfill once rather than repeating it over the same range. Do not trickle old turns in over time: a session closes after 30 idle minutes or 24 hours, a Session End that arrives after an automatic close is ignored, and events that arrive after close are stored but never reach enrichment.
 
 ### Troubleshooting
 
@@ -954,14 +1145,22 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
 | Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_MS` |
 | Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
+| `Set AMPLITUDE_API_KEY` error at start | No Amplitude API key and no `AMPLITUDE_DRY_RUN`; the job refuses to start rather than fail every thread |
 | No threads found | Root runs have no `session_id` or `thread_id` metadata, or the project ID is wrong |
-| A thread is missing earlier exchanges | Those root runs started before `LOOKBACK_MS`; raise it |
-| Tool calls or tokens missing | Child runs were not returned; check the `trace` query and that the API key can read the project |
-| Replies show JSON instead of text | `textFrom` does not recognize the payload shape; extend it |
+| LangSmith returns `404` or `501` on every call (self-hosted) | LangSmith is older than v0.16, or `LANGSMITH_ENDPOINT` points somewhere other than `http(s)://<host>/api/v1` |
+| Every request goes to `/api/v1/api/v2/...` (in a port) | The port did not strip `/api/v1` from the self-hosted endpoint; keep `langsmithBaseUrl` |
+| A thread is missing earlier exchanges | Those traces aged out of LangSmith's retention |
+| A thread never arrives | It keeps getting new traces, or one is newer than `SETTLE_MS`; the warning line counts it as still active |
+| Tool calls or tokens missing | Child runs were not returned, or a port compares `run_type` in lowercase; v2 run types are uppercase. Check the API key can read the project |
+| Tokens show as `0` (in a port) | LangSmith reports `0` when it has no count; omit zero totals, as the adapter does |
+| `Thread ... could not be mapped` or `was rejected by Amplitude` in the log | That one thread failed and was skipped; the rest were sent. Fix the mapping or payload and run the window again |
+| Replies show JSON, `[No text input]`, or `[No text output]` | `textFrom` does not recognize the payload shape; extend it |
+| Replies show `[Error: ...]` | The root run failed in LangSmith; the reply carries the first line of its error |
 
 ### More
 
 - [Configure threads](https://docs.langchain.com/langsmith/threads) and [trace query syntax](https://docs.langchain.com/langsmith/trace-query-syntax) (LangSmith docs)
+- [Migrate to SmithDB-backed SDK methods](https://docs.langchain.com/langsmith/smithdb-sdk-migration) and the [LangSmith OpenAPI specification](https://api.smith.langchain.com/openapi.json)
 - [Send agent events without the AI SDK](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) (Amplitude docs)
 - [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) (Amplitude docs)
 - [Agent Analytics taxonomy](https://amplitude.com/docs/amplitude-ai/agent-analytics/taxonomy)
