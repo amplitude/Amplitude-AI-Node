@@ -864,8 +864,8 @@ describe('forwarder core and adapters', () => {
   const afBundle = () => ({
     session: sf({ Id: AF_SESSION, StartTimestamp: afAt('00:00'), EndTimestamp: afAt('01:30'), AiAgentChannelType: 'SCRT2 - EmbeddedMessaging', AiAgentSessionEndType: 'Completed', PreviousSessionId: 'NOT_SET', VariableText: '{&quot;plan_tier&quot;:&quot;pro&quot;,&quot;email&quot;:&quot;someone@example.com&quot;}', IndividualId: 'NOT_SET' }),
     participants: [
-      sf({ Id: 'p-user', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'USER', ParticipantObject: 'MessagingEndUser', ParticipantId: '0PAxx0000004CzQ', ParticipantUserId: 'NOT_SET', IndividualId: 'NOT_SET', AiAgentApiName: 'NOT_SET', AiAgentVersionApiName: 'NOT_SET', AiAgentType: 'NOT_SET' }),
-      sf({ Id: 'p-agent', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'AGENT', ParticipantObject: 'GenAiPlannerDefinition', ParticipantId: '16jxx0000004D1A', ParticipantUserId: 'NOT_SET', IndividualId: 'NOT_SET', AiAgentApiName: 'Order_Assistant', AiAgentVersionApiName: 'v3', AiAgentType: 'AgentforceServiceAgent' }),
+      sf({ Id: 'p-user', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'USER', ParticipantObject: 'MessagingEndUser', ParticipantId: '0PAxx0000004CzQ', IndividualId: 'NOT_SET', AiAgentApiName: 'NOT_SET', AiAgentVersionApiName: 'NOT_SET', AiAgentType: 'NOT_SET' }),
+      sf({ Id: 'p-agent', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'AGENT', ParticipantObject: 'GenAiPlannerDefinition', ParticipantId: '16jxx0000004D1A', IndividualId: 'NOT_SET', AiAgentApiName: 'Order_Assistant', AiAgentVersionApiName: 'v3', AiAgentType: 'AgentforceServiceAgent' }),
     ],
     interactions: [
       afTurn('turn-0', '00:00', '00:01'),
@@ -1126,6 +1126,85 @@ describe('forwarder core and adapters', () => {
       process.env = env;
       agentforce.resetSalesforceToken();
     }
+  });
+
+  // Field names as published in Salesforce's Session Tracing, Generative AI Audit and Feedback, and
+  // Data 360 DMO mapping references. A query naming any other column fails in a real org.
+  const ssot = (...names: string[]) => names.map((n) => `ssot__${n}__c`);
+  const plain = (...names: string[]) => names.map((n) => `${n}__c`);
+  const AF_DOCUMENTED_FIELDS: Record<string, string[]> = {
+    ssot__AIAgentSession__dlm: ssot('Id', 'StartTimestamp', 'EndTimestamp', 'AiAgentSessionEndType', 'AiAgentChannelType', 'RelatedMessagingSessionId', 'RelatedVoiceCallId', 'InternalOrganizationId', 'SessionOwnerId', 'SessionOwnerObject', 'IndividualId', 'PreviousSessionId', 'VariableText'),
+    ssot__AiAgentSessionParticipant__dlm: ssot('Id', 'AiAgentSessionId', 'ParticipantId', 'AiAgentApiName', 'AiAgentType', 'AiAgentTemplateApiName', 'AiAgentVersionApiName', 'AiAgentSessionParticipantRole', 'ParticipantObject', 'StartTimestamp', 'EndTimestamp', 'IndividualId', 'InternalOrganizationId', 'ParticipantAttributeText'),
+    ssot__AIAgentInteraction__dlm: ssot('Id', 'AiAgentSessionId', 'AiAgentInteractionType', 'TopicApiName', 'StartTimestamp', 'EndTimestamp', 'PrevInteractionId', 'SessionOwnerId', 'IndividualId', 'InternalOrganizationId', 'TelemetryTraceId', 'TelemetryTraceSpanId', 'AttributeText'),
+    ssot__AiAgentInteractionMessage__dlm: [
+      ...ssot('Id', 'AiAgentSessionId', 'AiAgentInteractionId', 'AiAgentSessionParticipantId', 'ParentMessageId', 'ContentText', 'AiAgentInteractionMessageType', 'AiAgentInteractionMsgContentType', 'MessageSentTimestamp', 'InternalOrganizationId'),
+      ...plain('Modality', 'MessageStartTimestamp', 'MessageEndTimestamp'),
+    ],
+    ssot__AIAgentInteractionStep__dlm: ssot('Id', 'AiAgentInteractionId', 'AiAgentInteractionStepType', 'Name', 'InputValueText', 'OutputValueText', 'PreStepVariableText', 'PostStepVariableText', 'GenerationId', 'ErrorMessageText', 'StartTimestamp', 'EndTimestamp', 'PrevStepId', 'InternalOrganizationId', 'TelemetryTraceSpanId', 'AttributeText', 'GenAiGatewayRequestId', 'GenAiGatewayResponseId'),
+    AiAgentGenerativeAiUsage_std__dlm: plain('AgentDeveloperName', 'AgentIdentifier', 'AgentTypeCode', 'AiAgentInteractionId', 'AiAgentSessionId', 'AiAgentToolIdentifier', 'AiAgentToolName', 'FeatureDescriptorName', 'GenAiGatewayFeatureName', 'GenAiGatewayModelName', 'IsBillableIndicator', 'IsMeteredIndicator', 'ModelClassType', 'ModelProviderModelName', 'ModelProviderName', 'PromptCompletionTokenCount', 'PromptInputTokenCount', 'PromptTemplateDeveloperName', 'PromptTotalTokenCount', 'RequestIdentifier', 'TelemetryTraceIdentifier', 'TelemetryTraceSpanId', 'Timestamp', 'UsageQuantity', 'UsageTypeCode', 'UserId'),
+    GenAIGatewayRequest__dlm: plain('gatewayRequestId', 'generationGroupId', 'sessionId', 'userId', 'botVersionId', 'plannerId', 'feature', 'appType', 'model', 'provider', 'promptTemplateDevName', 'promptTemplateVersionNo', 'prompt', 'maskedPrompt', 'parameters', 'promptTokens', 'completionTokens', 'totalTokens', 'timestamp', 'orgId', 'cloud'),
+    GenAIFeedback__dlm: plain('feedbackId', 'generationId', 'generationUpdateId', 'generationGroupId', 'userId', 'feedback', 'action', 'source', 'feature', 'appType', 'timestamp', 'orgId', 'cloud'),
+  };
+
+  /** Each SELECT in a statement, subqueries included, with the table it reads and the columns it names. */
+  const afQueryScopes = (sql: string) => {
+    let rest = sql.replace(/'(?:[^']|'')*'/g, "''");
+    let flattened = '';
+    while (flattened !== rest) {
+      flattened = rest;
+      rest = rest.replace(/\((?!\s*SELECT )([^()]*)\)/g, ' $1 ');
+    }
+    const scopes: { table: string; columns: string[] }[] = [];
+    const scope = (query: string) =>
+      scopes.push({ table: query.match(/ FROM (\S+)/)?.[1] ?? '', columns: query.match(/\b\w+__c\b/g) ?? [] });
+    for (let inner = rest.match(/\((SELECT [^()]*)\)/); inner; inner = rest.match(/\((SELECT [^()]*)\)/)) {
+      scope(inner[1] ?? '');
+      rest = rest.replace(inner[0], ' SUBQUERY ');
+    }
+    scope(rest);
+    return scopes;
+  };
+
+  it('queries only tables and columns that Salesforce documents', async () => {
+    const sqls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/services/oauth2/token')) {
+          return new Response(JSON.stringify({ access_token: 't', instance_url: 'https://acme.my.salesforce.com' }));
+        }
+        const sql = JSON.parse(init?.body ?? '{}').sql as string;
+        sqls.push(sql);
+        const columns = sql.match(/^SELECT (.*?) FROM /)?.[1]?.split(', ') ?? [];
+        return new Response(JSON.stringify({ metadata: columns.map((name) => ({ name })), data: [columns.map(() => 'x')], status: { completionStatus: 'Finished', rowCount: 1 } }));
+      }),
+    );
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    agentforce.resetSalesforceToken();
+    try {
+      const schema = await agentforce.probeAgentforceSchema();
+      expect(schema).toMatchObject({ missing: [], tokens: 'usage', feedback: true });
+      const window = { endedAfter: '2026-10-06T00:00:00.000Z', endedBefore: '2026-10-06T06:00:00.000Z' };
+      await agentforce.fetchAgentforceBundles(window, schema, { includeFeedback: true });
+      await agentforce.fetchAgentforceBundles(window, { ...schema, tokens: 'gateway' }, { includeFeedback: true });
+    } finally {
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+
+    const undocumented: string[] = [];
+    const tables = new Set<string>();
+    for (const sql of sqls) {
+      for (const { table, columns } of afQueryScopes(sql)) {
+        tables.add(table);
+        const documented = AF_DOCUMENTED_FIELDS[table];
+        if (!documented) undocumented.push(`table ${table}`);
+        else for (const column of columns) if (!documented.includes(column)) undocumented.push(`${table}.${column}`);
+      }
+    }
+    expect(undocumented).toEqual([]);
+    expect([...tables].sort()).toEqual(Object.keys(AF_DOCUMENTED_FIELDS).sort());
   });
 
   const EXPECTED_EXCHANGES = [

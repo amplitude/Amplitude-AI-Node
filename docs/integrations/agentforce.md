@@ -68,7 +68,7 @@ Stop and ask the user for these. Never infer them from field names:
 1. **The org and dataspace.** Which Salesforce org (My Domain URL) and which Data Cloud dataspace hold the agent's sessions. Usually `default`.
 2. **The user identity mapping.** Session Tracing identifies the user by a Salesforce record, not by your product's user ID:
    - **Service agents** (customers on messaging or voice channels): the USER participant is a `MessagingEndUser`. Its `ParticipantId` is that record's ID. Ask how it maps to the product's user ID. Usually: look up the `MessagingEndUser`'s Contact with SOQL, then read the field that stores the product user ID. Ask which field.
-   - **Employee agents** (Salesforce users): the USER participant's `ParticipantUserId` is a Salesforce User ID. Ask whether the product analytics user ID is the User's `FederationIdentifier`, email, or another field.
+   - **Employee agents** (Salesforce users): the user is a Salesforce User. Confirm in Phase 1 where its ID appears: the USER participant's `ParticipantObject` and `ParticipantId`, or the session's `SessionOwnerObject` and `SessionOwnerId`. Then ask whether the product analytics user ID is the User's `FederationIdentifier`, email, or another field.
    - Ask whether sessions with no resolvable user should be skipped (the default), or sent under a device ID, knowing they will not join to product analytics.
 3. **The agent ID.** The name to report as `[Agent] Agent ID`. Default: the agent's API name (`AiAgentApiName`).
 4. **Feedback and context.** Whether to send thumbs-up and thumbs-down feedback as a score. Which keys of the session's `VariableText` JSON are safe, non-personal filter dimensions. None are copied by default.
@@ -970,11 +970,11 @@ export interface AgentforceFetchOptions {
 
 const SESSION_COLUMNS = [
   'Id', 'StartTimestamp', 'EndTimestamp', 'AiAgentChannelType', 'AiAgentSessionEndType',
-  'PreviousSessionId', 'VariableText', 'IndividualId',
+  'PreviousSessionId', 'VariableText', 'IndividualId', 'SessionOwnerId', 'SessionOwnerObject',
 ].map(c);
 const PARTICIPANT_COLUMNS = [
   'Id', 'AiAgentSessionId', 'AiAgentSessionParticipantRole', 'ParticipantObject', 'ParticipantId',
-  'ParticipantUserId', 'IndividualId', 'AiAgentApiName', 'AiAgentVersionApiName', 'AiAgentType',
+  'IndividualId', 'AiAgentApiName', 'AiAgentVersionApiName', 'AiAgentType',
 ].map(c);
 const INTERACTION_COLUMNS = [
   'Id', 'AiAgentSessionId', 'AiAgentInteractionType', 'TopicApiName', 'StartTimestamp', 'EndTimestamp',
@@ -1176,7 +1176,7 @@ export interface AgentforceMappingOptions {
   agentId?: string;
   /**
    * Must return the user ID your product analytics uses, from the USER participant row
-   * (ParticipantObject, ParticipantId, ParticipantUserId, IndividualId) or the session row.
+   * (ParticipantObject, ParticipantId, IndividualId) or the session row (SessionOwnerObject, SessionOwnerId).
    */
   resolveUserId: (user: Row | undefined, session: Row) => string | undefined;
   resolveDeviceId?: (user: Row | undefined, session: Row) => string | undefined;
