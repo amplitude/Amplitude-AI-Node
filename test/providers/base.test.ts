@@ -66,7 +66,9 @@ describe('applySessionContext', () => {
 
   it('returns empty overrides when no session and no overrides', (): void => {
     const result = applySessionContext({});
-    expect(result).toEqual({});
+    const { takeTurnId, ...rest } = result;
+    expect(rest).toEqual({});
+    expect(takeTurnId?.()).toBeUndefined();
   });
 
   it('merges with explicit overrides taking precedence over session context', (): void => {

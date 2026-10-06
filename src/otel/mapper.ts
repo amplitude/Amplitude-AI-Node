@@ -438,13 +438,20 @@ export class SpanEventMapper {
     const ep = Object.keys(extraProps).length > 0 ? extraProps : undefined;
 
     if (operation === OP_CHAT || operation === OP_TEXT_COMPLETION || operation === OP_GENERATE_CONTENT) {
-      if (fields.userContent && !fields.skipAutoUser) {
-        trackUserMessage({ ...shared, messageContent: fields.userContent, turnId: fields.turnId ?? 1, eventProperties: ep } as never);
+      const emittedUser = Boolean(fields.userContent && !fields.skipAutoUser);
+      const userTurn = fields.turnId ?? 1;
+      let aiTurn = fields.turnId ?? 2;
+      if (emittedUser && fields.turnId != null) {
+        const nxt = getActiveContext()?.nextTurnId();
+        aiTurn = nxt ?? fields.turnId + 1;
+      }
+      if (emittedUser) {
+        trackUserMessage({ ...shared, messageContent: fields.userContent, turnId: userTurn, eventProperties: ep } as never);
       }
       trackAiMessage({
         ...shared, modelName: fields.model, provider: fields.provider,
         responseContent: fields.aiContent ?? '', latencyMs: fields.latencyMs,
-        turnId: fields.turnId ?? 2, inputTokens: fields.inputTokens,
+        turnId: aiTurn, inputTokens: fields.inputTokens,
         outputTokens: fields.outputTokens, totalTokens: fields.totalTokens,
         cacheReadInputTokens: fields.cacheReadInputTokens,
         cacheCreationInputTokens: fields.cacheCreationInputTokens,
