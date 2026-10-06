@@ -175,14 +175,19 @@ export function hexId(value, bytes) {
 export function unixNanos(value) {
   if (value === undefined || value === null || value === '') return undefined;
   const text = String(value).trim();
-  if (/^-?\d+(\.\d+)?$/.test(text)) {
-    const [whole] = text.split('.');
-    let n = BigInt(whole);
-    const magnitude = n < 0n ? -n : n;
-    if (magnitude < 100_000_000_000n) n = BigInt(Math.round(Number(text) * 1e6)) * 1000n;
-    else if (magnitude < 100_000_000_000_000n) n *= 1_000_000n;
-    else if (magnitude < 100_000_000_000_000_000n) n *= 1000n;
-    return n.toString();
+  // Exact decimal math: older `bq --format=json` prints TIMESTAMP as float seconds like 1.727000000123456E9.
+  const numeric = text.match(/^(-?)(\d+)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/);
+  if (numeric) {
+    const [, sign, int, frac = '', exp = '0'] = numeric;
+    const digits = BigInt(int + frac);
+    const scale = Number(exp) - frac.length;
+    const pow = (k) => 10n ** BigInt(k);
+    const whole = scale >= 0 ? digits * pow(scale) : digits / pow(-scale);
+    const unitExp =
+      whole < 100_000_000_000n ? 9 : whole < 100_000_000_000_000n ? 6 : whole < 100_000_000_000_000_000n ? 3 : 0;
+    const shift = scale + unitExp;
+    const nanos = shift >= 0 ? digits * pow(shift) : (digits * 2n + pow(-shift)) / (2n * pow(-shift));
+    return (sign === '-' ? -nanos : nanos).toString();
   }
   const match = text.match(/^(.*?[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$/);
   if (!match) throw new Error(`not a timestamp: ${text}`);
@@ -482,7 +487,7 @@ export function toOtlpRequests(rows, options = {}) {
         continue;
       }
       span.endTimeUnixNano ??= span.startTimeUnixNano;
-      if (!span.parentSpanId) delete span.parentSpanId;
+      if (!span.parentSpanId) Reflect.deleteProperty(span, 'parentSpanId');
       if (opts.metadataOnly) span.attributes = stripContent(span.attributes);
       items.push(item);
     }
@@ -639,6 +644,7 @@ async function main(argv) {
   });
   for (const warning of warnings) console.error(`WARNING ${warning}`);
   if (args.includes('--dry-run')) {
+    // biome-ignore lint/suspicious/noConsoleLog: the dry-run request body is this CLI's stdout
     console.log(JSON.stringify(requests.length === 1 ? requests[0] : requests, null, 2));
     console.error(`Dry run: ${spans} spans in ${requests.length} requests.`);
     return 0;

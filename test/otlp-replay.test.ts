@@ -104,6 +104,17 @@ describe('otlp-replay conversion', () => {
     expect(unixNanos('2026-01-15T13:00:00.123456+01:00')).toBe(ns);
   });
 
+  it('reads scientific-notation and full-precision float-second timestamps exactly', () => {
+    expect(unixNanos('1.768478400123456E9')).toBe('1768478400123456000');
+    expect(unixNanos('1.768478400123456789e9')).toBe('1768478400123456789');
+    expect(unixNanos('1768478400.123456789')).toBe('1768478400123456789');
+    expect(unixNanos('1.768478400123E12')).toBe('1768478400123000000');
+    expect(unixNanos('1.768478400123456789e+18')).toBe('1768478400123456789');
+    expect(unixNanos('1768478400.0000000005')).toBe('1768478400000000001');
+    expect(() => unixNanos('1.2.3')).toThrow('not a timestamp');
+    expect(() => unixNanos('soon')).toThrow('not a timestamp');
+  });
+
   it('folds legacy prompt attributes and applies session, user, and agent columns', () => {
     const { requests, spans, warnings } = toOtlpRequests(otelRows);
     expect(spans).toBe(2);

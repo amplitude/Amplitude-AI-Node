@@ -214,8 +214,8 @@ describe('Sierra guide', () => {
   });
 
   it('needs an API key to send, and checks for it before reading anything', async () => {
-    delete process.env.AMPLITUDE_DRY_RUN;
-    delete process.env.AMPLITUDE_API_KEY;
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_API_KEY');
     const fetchFinished = vi.fn(async () => [documentedConversation]);
     expect(() => mapped.checkAmplitudeConfig()).toThrow('AMPLITUDE_API_KEY');
     await expect(mapped.forwardSierraConversation(documentedConversation)).rejects.toThrow('AMPLITUDE_API_KEY');
@@ -227,7 +227,7 @@ describe('Sierra guide', () => {
   });
 
   it('prints events in dry run without sending', async () => {
-    delete process.env.AMPLITUDE_API_KEY;
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_API_KEY');
     process.env.AMPLITUDE_DRY_RUN = '1';
     const fetchImpl = vi.fn();
     vi.stubGlobal('fetch', fetchImpl);
@@ -240,7 +240,7 @@ describe('Sierra guide', () => {
   });
 
   it('sends to AMPLITUDE_ENDPOINT with AMPLITUDE_MIN_ID_LENGTH, and to the US endpoint by default', async () => {
-    delete process.env.AMPLITUDE_DRY_RUN;
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
     process.env.AMPLITUDE_API_KEY = 'key';
     const posts: { url: string; body: { api_key: string; options?: unknown } }[] = [];
     vi.stubGlobal(
@@ -265,7 +265,7 @@ describe('Sierra guide', () => {
   });
 
   it('isolates per-conversation failures and advances the watermark to the latest end time in the data', async () => {
-    delete process.env.AMPLITUDE_DRY_RUN;
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
     process.env.AMPLITUDE_API_KEY = 'key';
     const sent: string[] = [];
     vi.stubGlobal(
@@ -302,7 +302,7 @@ describe('Sierra guide', () => {
   });
 
   it('stops the run on an outage without returning a watermark', async () => {
-    delete process.env.AMPLITUDE_DRY_RUN;
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
     process.env.AMPLITUDE_API_KEY = 'key';
     vi.stubGlobal(
       'fetch',

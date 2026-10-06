@@ -67,6 +67,25 @@ type MetadataSchema = {
   properties: Record<string, { type: string; minLength?: number }>;
 };
 
+function matchesJsonType(type: string, field: unknown): boolean {
+  switch (type) {
+    case 'string':
+      return typeof field === 'string';
+    case 'number':
+      return typeof field === 'number';
+    case 'integer':
+      return Number.isInteger(field);
+    case 'boolean':
+      return typeof field === 'boolean';
+    case 'object':
+      return typeof field === 'object' && field !== null && !Array.isArray(field);
+    case 'array':
+      return Array.isArray(field);
+    default:
+      throw new Error(`unsupported JSON schema type: ${type}`);
+  }
+}
+
 function metadataSchemaErrors(schema: MetadataSchema, value: Record<string, unknown>): string[] {
   const errors: string[] = [];
   for (const key of schema.required) if (!(key in value)) errors.push(`required:${key}`);
@@ -77,7 +96,7 @@ function metadataSchemaErrors(schema: MetadataSchema, value: Record<string, unkn
       if (!schema.additionalProperties) errors.push(`additional:${key}`);
       continue;
     }
-    if (typeof field !== property.type) errors.push(`type:${key}`);
+    if (!matchesJsonType(property.type, field)) errors.push(`type:${key}`);
     else if (typeof field === 'string' && field.length < (property.minLength ?? 0)) errors.push(`minLength:${key}`);
   }
   return errors;
@@ -850,9 +869,9 @@ describe('forwarder core and adapters', () => {
       assertForwarderRules(sent);
     } finally {
       log.mockRestore();
-      if (env.secret === undefined) delete process.env.INTERCOM_CLIENT_SECRET;
+      if (env.secret === undefined) Reflect.deleteProperty(process.env, 'INTERCOM_CLIENT_SECRET');
       else process.env.INTERCOM_CLIENT_SECRET = env.secret;
-      if (env.dry === undefined) delete process.env.AMPLITUDE_DRY_RUN;
+      if (env.dry === undefined) Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
       else process.env.AMPLITUDE_DRY_RUN = env.dry;
     }
   });
@@ -1167,8 +1186,8 @@ describe('forwarder core and adapters', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const env = { ...process.env };
     process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
-    delete process.env.AMPLITUDE_DRY_RUN;
-    delete process.env.AMPLITUDE_API_KEY;
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_API_KEY');
     agentforce.resetSalesforceToken();
     try {
       await expect(agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions)).rejects.toThrow('AMPLITUDE_API_KEY');
