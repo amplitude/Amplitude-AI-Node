@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 14,
-    "generated_at": "2026-06-16T06:59:48.396844+00:00",
+    "schema_version": 15,
+    "generated_at": "2026-10-06T18:28:24.645+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -65,6 +65,21 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
         },
         {
           "name": "[Agent] SDK Version",
@@ -229,6 +244,21 @@
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -288,6 +318,11 @@
           "type": "string",
           "description": "LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock').",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Provider Request ID",
+          "type": "string",
+          "description": "Provider-owned inference identifier. On AI Response this is captured from the provider response; on Score it is present only when explicitly supplied."
         },
         {
           "name": "[Agent] Latency Ms",
@@ -550,6 +585,21 @@
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] Stack Trace",
           "type": "string",
           "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
@@ -735,6 +785,21 @@
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -867,6 +932,21 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
         },
         {
           "name": "[Agent] Stack Trace",
@@ -1017,6 +1097,21 @@
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -1121,6 +1216,21 @@
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -1216,6 +1326,21 @@
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
         },
         {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
@@ -1271,6 +1396,11 @@
           "type": "string",
           "description": "Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert).",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Provider Request ID",
+          "type": "string",
+          "description": "Provider-owned inference identifier. On AI Response this is captured from the provider response; on Score it is present only when explicitly supplied."
         },
         {
           "name": "[Agent] Comment",
@@ -1431,11 +1561,6 @@
           "name": "[Agent] Session Cost USD",
           "type": "number",
           "description": "Total LLM cost in USD for this AI session (aggregated from per-message costs)."
-        },
-        {
-          "name": "[Agent] Enrichment Cost USD",
-          "type": "number",
-          "description": "Cost in USD of running the enrichment pipeline's LLM inference for this session. Distinct from the session's own LLM cost."
         },
         {
           "name": "[Agent] Quality Score",
@@ -1768,6 +1893,11 @@
           "name": "[Agent] Evaluator Model",
           "type": "string",
           "description": "LLM model identifier used to produce this evaluator output."
+        },
+        {
+          "name": "[Agent] Evaluator Enrichment Cost USD",
+          "type": "number",
+          "description": "Cost in USD of running this specific evaluator's LLM inference. Customer-attributable enrichment cost for this evaluator; distinct from the session's own LLM cost ([Agent] Session Cost USD)."
         }
       ]
     }
