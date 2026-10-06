@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -43,6 +43,7 @@
     "./exceptions": "./dist/exceptions.js",
     "./integrations/anthropic-managed": "./dist/integrations/anthropic-managed.js",
     "./integrations/anthropic-tools": "./dist/integrations/anthropic-tools.js",
+    "./integrations/braintrust-experiment": "./dist/integrations/braintrust-experiment.js",
     "./integrations/claude-agent-sdk": "./dist/integrations/claude-agent-sdk.js",
     "./integrations/crewai": "./dist/integrations/crewai.js",
     "./integrations/langchain": "./dist/integrations/langchain.js",
@@ -59,6 +60,7 @@
     "./mcp/server": "./dist/mcp/server.js",
     "./mcp/validate-file": "./dist/mcp/validate-file.js",
     "./middleware": "./dist/middleware.js",
+    "./offline-eval": "./dist/offline-eval.js",
     "./otel": "./dist/otel/index.js",
     "./otel/conventions": "./dist/otel/conventions.js",
     "./otel/mapper": "./dist/otel/mapper.js",
@@ -85,7 +87,9 @@
     "./utils/git_metadata": "./dist/utils/git_metadata.js",
     "./utils/logger": "./dist/utils/logger.js",
     "./utils/model-tiers": "./dist/utils/model-tiers.js",
+    "./utils/openai-provider": "./dist/utils/openai-provider.js",
     "./utils/provider-detect": "./dist/utils/provider-detect.js",
+    "./utils/provider-request-id": "./dist/utils/provider-request-id.js",
     "./utils/providers": "./dist/utils/providers.js",
     "./utils/resolve-module": "./dist/utils/resolve-module.js",
     "./utils/streaming": "./dist/utils/streaming.js",
