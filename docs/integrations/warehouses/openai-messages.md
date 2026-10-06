@@ -12,13 +12,14 @@ The sample query uses these columns. Your table will differ; map yours in Stage 
 | `user_id` | The same user ID your product analytics uses |
 | `agent_id` | The agent that answered |
 | `created_at` | When the conversation started, UTC |
+| `updated_at` | When the row last changed, UTC, such as when a new message was appended |
 | `model` | The model that produced the replies |
 | `usage` | The response `usage` object (`prompt_tokens`, `completion_tokens`) |
 | `messages` | The [Chat Completions](https://platform.openai.com/docs/api-reference/chat/create) `messages` array: `system`, `developer`, `user`, `assistant`, and `tool` messages, with `content` as a string or an array of text parts, and `tool_calls` on assistant messages |
 
-Stage 1b unnests the array. User and assistant messages with text become messages. Each entry in `tool_calls` becomes a tool call, with its output joined from the `tool` message that has the same `tool_call_id`. System and developer messages are dropped. Assistant messages that only request tools produce tool calls, not an empty reply.
+Stage 1b unnests the array. User and assistant messages with text become messages; when `content` is an array, every `text` part is joined with a newline and other parts are skipped. Each entry in `tool_calls` becomes a tool call, with its output taken from the first `tool` message with the same `tool_call_id` that comes after it and before the next call with that ID. A call ID that appears once keeps its ID as the Invocation ID; one reused within the conversation becomes `m<position>-<call_id>` so each call stays distinct. System and developer messages are dropped. Assistant messages that only request tools produce tool calls, not an empty reply.
 
-The array has no per-message timestamps, so messages are spaced one second apart from `created_at`. If you store a timestamp per message, use it for `event_time` instead. Token usage goes on the last assistant reply, because `usage` covers the whole request.
+The array has no per-message timestamps, so messages are spaced one second apart from `created_at`. If you store a timestamp per message, use it for `event_time` instead. Because those times are derived, a conversation still being appended to could look idle; set `updated_at` so the session settles `settle_hours` after the row last changed. Token usage goes on the last assistant message with text, because `usage` covers the whole request.
 
 ## What the sample shows
 
@@ -38,22 +39,34 @@ WITH
 -- Stage 1a: source rows. This sample makes the query run as-is.
 -- Replace the body with: SELECT * FROM <your table>
 source AS (
-  SELECT 'chat_1' AS conversation_id, 'user_12345' AS user_id, 'travel-assistant' AS agent_id, '2026-01-15 12:00:00'::TIMESTAMP_NTZ AS created_at, 'gpt-4o-mini' AS model, PARSE_JSON('{"prompt_tokens":210,"completion_tokens":9}') AS usage, PARSE_JSON('[{"role":"system","content":"You are a helpful travel assistant."},{"role":"user","content":"Is my flight on time?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY12\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"on_time\\"}"},{"role":"assistant","content":[{"type":"text","text":"Yes, XY12 is on time."}]},{"role":"user","content":"Great, thanks."},{"role":"assistant","content":"Safe travels!"}]') AS messages
+  SELECT 'chat_1' AS conversation_id, 'user_12345' AS user_id, 'travel-assistant' AS agent_id, '2026-01-15 12:00:00'::TIMESTAMP_NTZ AS created_at, '2026-01-15 12:01:30'::TIMESTAMP_NTZ AS updated_at, 'gpt-4o-mini' AS model, PARSE_JSON('{"prompt_tokens":210,"completion_tokens":9}') AS usage, PARSE_JSON('[{"role":"system","content":"You are a helpful travel assistant."},{"role":"user","content":"Is my flight on time?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY12\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"on_time\\"}"},{"role":"assistant","content":[{"type":"text","text":"Yes, XY12 is on time."},{"type":"text","text":"Boarding starts at 9:40."}]},{"role":"user","content":"And my return flight?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY34\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"delayed\\"}"},{"role":"assistant","content":"XY34 is delayed by 40 minutes."},{"role":"user","content":"Great, thanks."},{"role":"assistant","content":"Safe travels!"}]') AS messages
 ),
 -- Stage 1b (openai-messages): normalize into canonical message rows.
-messages AS (
+unnested AS (
   SELECT
-    s.conversation_id, s.user_id, s.agent_id, s.created_at, s.model, s.usage,
+    s.conversation_id, s.user_id, s.agent_id, s.created_at, s.updated_at, s.model, s.usage,
     m.index AS position,
     m.value AS message,
-    MAX(CASE WHEN m.value:role::STRING = 'assistant' THEN m.index END)
-      OVER (PARTITION BY s.conversation_id) AS last_assistant_position
+    m.value:role::STRING AS message_role,
+    m.value:tool_call_id::STRING AS tool_call_id,
+    CASE
+      WHEN IS_ARRAY(m.value:content) THEN NULLIF(ARRAY_TO_STRING(TRANSFORM(
+        FILTER(m.value:content::ARRAY, p -> p:type::STRING = 'text'), p -> p:text::STRING), '\n'), '')
+      ELSE m.value:content::STRING
+    END AS message_text
   FROM source s,
   LATERAL FLATTEN(input => s.messages) m
 ),
-tool_calls AS (
+messages AS (
   SELECT
-    msg.conversation_id, msg.user_id, msg.agent_id, msg.created_at, msg.position,
+    u.*,
+    MAX(CASE WHEN u.message_role = 'assistant' AND u.message_text <> '' THEN u.position END)
+      OVER (PARTITION BY u.conversation_id) AS last_assistant_position
+  FROM unnested u
+),
+call_rows AS (
+  SELECT
+    msg.conversation_id, msg.user_id, msg.agent_id, msg.created_at, msg.updated_at, msg.position,
     tc.index AS call_position,
     tc.value:id::STRING AS call_id,
     tc.value:function:name::STRING AS tool_name,
@@ -61,44 +74,54 @@ tool_calls AS (
   FROM messages msg,
   LATERAL FLATTEN(input => msg.message:tool_calls) tc
 ),
-tool_results AS (
+tool_calls AS (
   SELECT
-    conversation_id,
-    message:tool_call_id::STRING AS call_id,
-    COALESCE(message:content[0]:text::STRING, message:content::STRING) AS tool_output
+    r.*,
+    COUNT(*) OVER (PARTITION BY r.conversation_id, r.call_id) AS call_id_uses,
+    LEAD(r.position) OVER (PARTITION BY r.conversation_id, r.call_id ORDER BY r.position, r.call_position)
+      AS next_call_position
+  FROM call_rows r
+),
+tool_results AS (
+  SELECT conversation_id, position, tool_call_id AS call_id, message_text AS tool_output
   FROM messages
-  WHERE message:role::STRING = 'tool'
+  WHERE message_role = 'tool'
 ),
 canonical AS (
   SELECT
     conversation_id AS session_id,
     'm' || CAST(position AS STRING) AS message_id,
-    message:role::STRING AS role,
+    message_role AS role,
     DATEADD(second, position, created_at) AS event_time,
     agent_id,
     user_id,
     CAST(NULL AS STRING) AS device_id,
-    COALESCE(message:content[0]:text::STRING, message:content::STRING) AS content,
+    message_text AS content,
     CAST(NULL AS STRING) AS tool_name,
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
     CAST(NULL AS BIGINT) AS latency_ms,
-    CASE WHEN message:role::STRING = 'assistant' THEN model END AS model,
+    CASE WHEN message_role = 'assistant' THEN model END AS model,
     CAST(NULL AS STRING) AS provider,
-    CASE WHEN message:role::STRING = 'assistant' AND position = last_assistant_position THEN usage:prompt_tokens::INT END AS input_tokens,
-    CASE WHEN message:role::STRING = 'assistant' AND position = last_assistant_position THEN usage:completion_tokens::INT END AS output_tokens,
+    CASE WHEN message_role = 'assistant' AND position = last_assistant_position THEN usage:prompt_tokens::INT END AS input_tokens,
+    CASE WHEN message_role = 'assistant' AND position = last_assistant_position THEN usage:completion_tokens::INT END AS output_tokens,
     CAST(NULL AS DOUBLE) AS cost_usd,
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    CAST(NULL AS STRING) AS context
+    CAST(NULL AS STRING) AS context,
+    updated_at
   FROM messages
-  WHERE message:role::STRING IN ('user', 'assistant') AND COALESCE(message:content[0]:text::STRING, message:content::STRING) IS NOT NULL AND COALESCE(message:content[0]:text::STRING, message:content::STRING) <> ''
+  WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
   SELECT
     c.conversation_id AS session_id,
-    COALESCE(c.call_id, 'm' || CAST(c.position AS STRING) || '-call-' || CAST(c.call_position AS STRING)) AS message_id,
+    CASE
+      WHEN c.call_id IS NULL THEN 'm' || CAST(c.position AS STRING) || '-call-' || CAST(c.call_position AS STRING)
+      WHEN c.call_id_uses > 1 THEN 'm' || CAST(c.position AS STRING) || '-' || c.call_id
+      ELSE c.call_id
+    END AS message_id,
     'tool' AS role,
     DATEADD(millisecond, c.call_position + 1, DATEADD(second, c.position, c.created_at)) AS event_time,
     c.agent_id,
@@ -118,10 +141,14 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    CAST(NULL AS STRING) AS context
+    CAST(NULL AS STRING) AS context,
+    c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r
-    ON r.conversation_id = c.conversation_id AND r.call_id = c.call_id
+    ON r.conversation_id = c.conversation_id
+    AND r.call_id = c.call_id
+    AND r.position > c.position
+    AND (c.next_call_position IS NULL OR r.position < c.next_call_position)
 ),
 -- Stage 2 (shared, generated): canonical rows -> [Agent] events. Edit only settings.
 settings AS (
@@ -148,7 +175,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -166,7 +195,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END) IGNORE NULLS
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    DATEADD(hour, settings.settle_hours, s.last_activity) AS import_cursor
+    DATEADD(hour, settings.settle_hours, s.last_change) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),
@@ -257,22 +286,37 @@ WITH
 -- Stage 1a: source rows. This sample makes the query run as-is.
 -- Replace the body with: SELECT * FROM <your table>
 source AS (
-  SELECT 'chat_1' AS conversation_id, 'user_12345' AS user_id, 'travel-assistant' AS agent_id, TIMESTAMP '2026-01-15 12:00:00+00' AS created_at, 'gpt-4o-mini' AS model, JSON '{"prompt_tokens":210,"completion_tokens":9}' AS usage, JSON '[{"role":"system","content":"You are a helpful travel assistant."},{"role":"user","content":"Is my flight on time?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY12\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"on_time\\"}"},{"role":"assistant","content":[{"type":"text","text":"Yes, XY12 is on time."}]},{"role":"user","content":"Great, thanks."},{"role":"assistant","content":"Safe travels!"}]' AS messages
+  SELECT 'chat_1' AS conversation_id, 'user_12345' AS user_id, 'travel-assistant' AS agent_id, TIMESTAMP '2026-01-15 12:00:00+00' AS created_at, TIMESTAMP '2026-01-15 12:01:30+00' AS updated_at, 'gpt-4o-mini' AS model, JSON '{"prompt_tokens":210,"completion_tokens":9}' AS usage, JSON '[{"role":"system","content":"You are a helpful travel assistant."},{"role":"user","content":"Is my flight on time?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY12\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"on_time\\"}"},{"role":"assistant","content":[{"type":"text","text":"Yes, XY12 is on time."},{"type":"text","text":"Boarding starts at 9:40."}]},{"role":"user","content":"And my return flight?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY34\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"delayed\\"}"},{"role":"assistant","content":"XY34 is delayed by 40 minutes."},{"role":"user","content":"Great, thanks."},{"role":"assistant","content":"Safe travels!"}]' AS messages
 ),
 -- Stage 1b (openai-messages): normalize into canonical message rows.
-messages AS (
+unnested AS (
   SELECT
-    s.conversation_id, s.user_id, s.agent_id, s.created_at, s.model, s.usage,
+    s.conversation_id, s.user_id, s.agent_id, s.created_at, s.updated_at, s.model, s.usage,
     position,
     message,
-    MAX(CASE WHEN JSON_VALUE(message, '$.role') = 'assistant' THEN position END)
-      OVER (PARTITION BY s.conversation_id) AS last_assistant_position
+    JSON_VALUE(message, '$.role') AS message_role,
+    JSON_VALUE(message, '$.tool_call_id') AS tool_call_id,
+    COALESCE(
+      (
+        SELECT NULLIF(STRING_AGG(JSON_VALUE(part, '$.text'), '\n' ORDER BY part_position), '')
+        FROM UNNEST(JSON_QUERY_ARRAY(message, '$.content')) AS part WITH OFFSET AS part_position
+        WHERE JSON_VALUE(part, '$.type') = 'text'
+      ),
+      JSON_VALUE(message, '$.content')
+    ) AS message_text
   FROM source s,
   UNNEST(JSON_QUERY_ARRAY(s.messages)) AS message WITH OFFSET AS position
 ),
-tool_calls AS (
+messages AS (
   SELECT
-    msg.conversation_id, msg.user_id, msg.agent_id, msg.created_at, msg.position,
+    u.*,
+    MAX(CASE WHEN u.message_role = 'assistant' AND u.message_text <> '' THEN u.position END)
+      OVER (PARTITION BY u.conversation_id) AS last_assistant_position
+  FROM unnested u
+),
+call_rows AS (
+  SELECT
+    msg.conversation_id, msg.user_id, msg.agent_id, msg.created_at, msg.updated_at, msg.position,
     call_position,
     JSON_VALUE(call, '$.id') AS call_id,
     JSON_VALUE(call, '$.function.name') AS tool_name,
@@ -280,44 +324,54 @@ tool_calls AS (
   FROM messages msg,
   UNNEST(JSON_QUERY_ARRAY(msg.message, '$.tool_calls')) AS call WITH OFFSET AS call_position
 ),
-tool_results AS (
+tool_calls AS (
   SELECT
-    conversation_id,
-    JSON_VALUE(message, '$.tool_call_id') AS call_id,
-    COALESCE(JSON_VALUE(message, '$.content[0].text'), JSON_VALUE(message, '$.content')) AS tool_output
+    r.*,
+    COUNT(*) OVER (PARTITION BY r.conversation_id, r.call_id) AS call_id_uses,
+    LEAD(r.position) OVER (PARTITION BY r.conversation_id, r.call_id ORDER BY r.position, r.call_position)
+      AS next_call_position
+  FROM call_rows r
+),
+tool_results AS (
+  SELECT conversation_id, position, tool_call_id AS call_id, message_text AS tool_output
   FROM messages
-  WHERE JSON_VALUE(message, '$.role') = 'tool'
+  WHERE message_role = 'tool'
 ),
 canonical AS (
   SELECT
     conversation_id AS session_id,
     'm' || CAST(position AS STRING) AS message_id,
-    JSON_VALUE(message, '$.role') AS role,
+    message_role AS role,
     TIMESTAMP_ADD(created_at, INTERVAL position SECOND) AS event_time,
     agent_id,
     user_id,
     CAST(NULL AS STRING) AS device_id,
-    COALESCE(JSON_VALUE(message, '$.content[0].text'), JSON_VALUE(message, '$.content')) AS content,
+    message_text AS content,
     CAST(NULL AS STRING) AS tool_name,
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOL) AS tool_success,
     CAST(NULL AS INT64) AS latency_ms,
-    CASE WHEN JSON_VALUE(message, '$.role') = 'assistant' THEN model END AS model,
+    CASE WHEN message_role = 'assistant' THEN model END AS model,
     CAST(NULL AS STRING) AS provider,
-    CASE WHEN JSON_VALUE(message, '$.role') = 'assistant' AND position = last_assistant_position THEN CAST(JSON_VALUE(usage, '$.prompt_tokens') AS INT64) END AS input_tokens,
-    CASE WHEN JSON_VALUE(message, '$.role') = 'assistant' AND position = last_assistant_position THEN CAST(JSON_VALUE(usage, '$.completion_tokens') AS INT64) END AS output_tokens,
+    CASE WHEN message_role = 'assistant' AND position = last_assistant_position THEN CAST(JSON_VALUE(usage, '$.prompt_tokens') AS INT64) END AS input_tokens,
+    CASE WHEN message_role = 'assistant' AND position = last_assistant_position THEN CAST(JSON_VALUE(usage, '$.completion_tokens') AS INT64) END AS output_tokens,
     CAST(NULL AS FLOAT64) AS cost_usd,
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    CAST(NULL AS STRING) AS context
+    CAST(NULL AS STRING) AS context,
+    updated_at
   FROM messages
-  WHERE JSON_VALUE(message, '$.role') IN ('user', 'assistant') AND COALESCE(JSON_VALUE(message, '$.content[0].text'), JSON_VALUE(message, '$.content')) IS NOT NULL AND COALESCE(JSON_VALUE(message, '$.content[0].text'), JSON_VALUE(message, '$.content')) <> ''
+  WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
   SELECT
     c.conversation_id AS session_id,
-    COALESCE(c.call_id, 'm' || CAST(c.position AS STRING) || '-call-' || CAST(c.call_position AS STRING)) AS message_id,
+    CASE
+      WHEN c.call_id IS NULL THEN 'm' || CAST(c.position AS STRING) || '-call-' || CAST(c.call_position AS STRING)
+      WHEN c.call_id_uses > 1 THEN 'm' || CAST(c.position AS STRING) || '-' || c.call_id
+      ELSE c.call_id
+    END AS message_id,
     'tool' AS role,
     TIMESTAMP_ADD(TIMESTAMP_ADD(c.created_at, INTERVAL c.position SECOND), INTERVAL c.call_position + 1 MILLISECOND) AS event_time,
     c.agent_id,
@@ -337,10 +391,14 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    CAST(NULL AS STRING) AS context
+    CAST(NULL AS STRING) AS context,
+    c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r
-    ON r.conversation_id = c.conversation_id AND r.call_id = c.call_id
+    ON r.conversation_id = c.conversation_id
+    AND r.call_id = c.call_id
+    AND r.position > c.position
+    AND (c.next_call_position IS NULL OR r.position < c.next_call_position)
 ),
 -- Stage 2 (shared, generated): canonical rows -> [Agent] events. Edit only settings.
 settings AS (
@@ -367,7 +425,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -385,7 +445,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END IGNORE NULLS)
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    TIMESTAMP_ADD(s.last_activity, INTERVAL settings.settle_hours HOUR) AS import_cursor
+    TIMESTAMP_ADD(s.last_change, INTERVAL settings.settle_hours HOUR) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),
@@ -477,22 +537,34 @@ WITH
 -- Stage 1a: source rows. This sample makes the query run as-is.
 -- Replace the body with: SELECT * FROM <your table>
 source AS (
-  SELECT 'chat_1' AS conversation_id, 'user_12345' AS user_id, 'travel-assistant' AS agent_id, TIMESTAMP '2026-01-15 12:00:00' AS created_at, 'gpt-4o-mini' AS model, '{"prompt_tokens":210,"completion_tokens":9}' AS usage, '[{"role":"system","content":"You are a helpful travel assistant."},{"role":"user","content":"Is my flight on time?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY12\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"on_time\\"}"},{"role":"assistant","content":[{"type":"text","text":"Yes, XY12 is on time."}]},{"role":"user","content":"Great, thanks."},{"role":"assistant","content":"Safe travels!"}]' AS messages
+  SELECT 'chat_1' AS conversation_id, 'user_12345' AS user_id, 'travel-assistant' AS agent_id, TIMESTAMP '2026-01-15 12:00:00' AS created_at, TIMESTAMP '2026-01-15 12:01:30' AS updated_at, 'gpt-4o-mini' AS model, '{"prompt_tokens":210,"completion_tokens":9}' AS usage, '[{"role":"system","content":"You are a helpful travel assistant."},{"role":"user","content":"Is my flight on time?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY12\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"on_time\\"}"},{"role":"assistant","content":[{"type":"text","text":"Yes, XY12 is on time."},{"type":"text","text":"Boarding starts at 9:40."}]},{"role":"user","content":"And my return flight?"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"flight_status","arguments":"{\\"flight\\":\\"XY34\\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\\"status\\":\\"delayed\\"}"},{"role":"assistant","content":"XY34 is delayed by 40 minutes."},{"role":"user","content":"Great, thanks."},{"role":"assistant","content":"Safe travels!"}]' AS messages
 ),
 -- Stage 1b (openai-messages): normalize into canonical message rows.
-messages AS (
+unnested AS (
   SELECT
-    s.conversation_id, s.user_id, s.agent_id, s.created_at, s.model, s.usage,
+    s.conversation_id, s.user_id, s.agent_id, s.created_at, s.updated_at, s.model, s.usage,
     position,
     message,
-    MAX(CASE WHEN message.role = 'assistant' THEN position END)
-      OVER (PARTITION BY s.conversation_id) AS last_assistant_position
+    message.role AS message_role,
+    message.tool_call_id AS tool_call_id,
+    CASE
+      WHEN from_json(message.content, 'array<struct<type: string, text: string>>') IS NOT NULL THEN NULLIF(array_join(transform(
+        filter(from_json(message.content, 'array<struct<type: string, text: string>>'), p -> p.type = 'text'), p -> p.text), '\n'), '')
+      ELSE message.content
+    END AS message_text
   FROM source s
   LATERAL VIEW posexplode(from_json(s.messages, 'array<struct<role: string, content: string, tool_call_id: string, tool_calls: array<struct<id: string, function: struct<name: string, arguments: string>>>>>')) exploded AS position, message
 ),
-tool_calls AS (
+messages AS (
   SELECT
-    msg.conversation_id, msg.user_id, msg.agent_id, msg.created_at, msg.position,
+    u.*,
+    MAX(CASE WHEN u.message_role = 'assistant' AND u.message_text <> '' THEN u.position END)
+      OVER (PARTITION BY u.conversation_id) AS last_assistant_position
+  FROM unnested u
+),
+call_rows AS (
+  SELECT
+    msg.conversation_id, msg.user_id, msg.agent_id, msg.created_at, msg.updated_at, msg.position,
     call_position,
     call.id AS call_id,
     call.function.name AS tool_name,
@@ -500,44 +572,54 @@ tool_calls AS (
   FROM messages msg
   LATERAL VIEW posexplode(msg.message.tool_calls) calls AS call_position, call
 ),
-tool_results AS (
+tool_calls AS (
   SELECT
-    conversation_id,
-    message.tool_call_id AS call_id,
-    COALESCE(get_json_object(message.content, '$[0].text'), message.content) AS tool_output
+    r.*,
+    COUNT(*) OVER (PARTITION BY r.conversation_id, r.call_id) AS call_id_uses,
+    LEAD(r.position) OVER (PARTITION BY r.conversation_id, r.call_id ORDER BY r.position, r.call_position)
+      AS next_call_position
+  FROM call_rows r
+),
+tool_results AS (
+  SELECT conversation_id, position, tool_call_id AS call_id, message_text AS tool_output
   FROM messages
-  WHERE message.role = 'tool'
+  WHERE message_role = 'tool'
 ),
 canonical AS (
   SELECT
     conversation_id AS session_id,
     'm' || CAST(position AS STRING) AS message_id,
-    message.role AS role,
+    message_role AS role,
     timestampadd(SECOND, position, created_at) AS event_time,
     agent_id,
     user_id,
     CAST(NULL AS STRING) AS device_id,
-    COALESCE(get_json_object(message.content, '$[0].text'), message.content) AS content,
+    message_text AS content,
     CAST(NULL AS STRING) AS tool_name,
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
     CAST(NULL AS BIGINT) AS latency_ms,
-    CASE WHEN message.role = 'assistant' THEN model END AS model,
+    CASE WHEN message_role = 'assistant' THEN model END AS model,
     CAST(NULL AS STRING) AS provider,
-    CASE WHEN message.role = 'assistant' AND position = last_assistant_position THEN CAST(get_json_object(usage, '$.prompt_tokens') AS BIGINT) END AS input_tokens,
-    CASE WHEN message.role = 'assistant' AND position = last_assistant_position THEN CAST(get_json_object(usage, '$.completion_tokens') AS BIGINT) END AS output_tokens,
+    CASE WHEN message_role = 'assistant' AND position = last_assistant_position THEN CAST(get_json_object(usage, '$.prompt_tokens') AS BIGINT) END AS input_tokens,
+    CASE WHEN message_role = 'assistant' AND position = last_assistant_position THEN CAST(get_json_object(usage, '$.completion_tokens') AS BIGINT) END AS output_tokens,
     CAST(NULL AS DOUBLE) AS cost_usd,
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    CAST(NULL AS STRING) AS context
+    CAST(NULL AS STRING) AS context,
+    updated_at
   FROM messages
-  WHERE message.role IN ('user', 'assistant') AND COALESCE(get_json_object(message.content, '$[0].text'), message.content) IS NOT NULL AND COALESCE(get_json_object(message.content, '$[0].text'), message.content) <> ''
+  WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
   SELECT
     c.conversation_id AS session_id,
-    COALESCE(c.call_id, 'm' || CAST(c.position AS STRING) || '-call-' || CAST(c.call_position AS STRING)) AS message_id,
+    CASE
+      WHEN c.call_id IS NULL THEN 'm' || CAST(c.position AS STRING) || '-call-' || CAST(c.call_position AS STRING)
+      WHEN c.call_id_uses > 1 THEN 'm' || CAST(c.position AS STRING) || '-' || c.call_id
+      ELSE c.call_id
+    END AS message_id,
     'tool' AS role,
     timestampadd(MILLISECOND, c.call_position + 1, timestampadd(SECOND, c.position, c.created_at)) AS event_time,
     c.agent_id,
@@ -557,10 +639,14 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    CAST(NULL AS STRING) AS context
+    CAST(NULL AS STRING) AS context,
+    c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r
-    ON r.conversation_id = c.conversation_id AND r.call_id = c.call_id
+    ON r.conversation_id = c.conversation_id
+    AND r.call_id = c.call_id
+    AND r.position > c.position
+    AND (c.next_call_position IS NULL OR r.position < c.next_call_position)
 ),
 -- Stage 2 (shared, generated): canonical rows -> [Agent] events. Edit only settings.
 settings AS (
@@ -587,7 +673,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -605,7 +693,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END, TRUE)
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    timestampadd(HOUR, settings.settle_hours, s.last_activity) AS import_cursor
+    timestampadd(HOUR, settings.settle_hours, s.last_change) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),

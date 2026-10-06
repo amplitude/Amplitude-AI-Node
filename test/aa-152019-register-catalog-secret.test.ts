@@ -92,5 +92,7 @@ describe('AA-152019: register-catalog must not embed credentials', () => {
     }
     // The header still reaches curl — via stdin — and decodes correctly.
     expect(stdinLines.some((l) => l.includes(`Authorization: Basic ${LEAKED_BASIC}`))).toBe(true);
-  });
+    // Spawns node, bash, and one curl shim per catalog request synchronously; in a full parallel run
+    // that exceeds vitest's 5s default.
+  }, 30_000);
 });

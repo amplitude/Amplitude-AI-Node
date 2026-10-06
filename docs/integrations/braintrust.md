@@ -2,9 +2,9 @@
 
 **Amplitude Agent Analytics can ingest agent conversations traced in Braintrust over the Amplitude HTTP API, with no SDK required.**
 
-Last verified: 2026-09-24. This is an Amplitude-authored guide. Braintrust is a trademark of its owner; this guide is not affiliated with or endorsed by Braintrust. Corrections are welcome as a pull request.
+Last verified: 2026-10-06, against Braintrust documentation only. This is an Amplitude-authored guide. Braintrust is a trademark of its owner; this guide is not affiliated with or endorsed by Braintrust. Corrections are welcome as a pull request.
 
-**Provenance of Braintrust details.** The query API described here comes from Braintrust's public API reference ("Query by SQL"), its SQL reference, and its knowledge-base articles on pagination and rate limits, read in September 2026. It was not checked against a live Braintrust account for this guide. Treat every Braintrust field name below as a starting point, and confirm it against a real response in Phase 2.
+**Provenance of Braintrust details.** The query API described here comes from Braintrust's [Query by SQL](https://www.braintrust.dev/docs/api-reference/query) reference, its SQL [query structure](https://www.braintrust.dev/docs/reference/sql/query-structure) and [best practices](https://www.braintrust.dev/docs/reference/sql/best-practices) pages, the project log row schema in its [API reference](https://www.braintrust.dev/docs/api-reference/logs/fetch-project-logs-get-form), and its knowledge-base articles on [rate limits](https://braintrust.dev/docs/kb/btql-rate-limits-on-free-and-pro-plans.md), [polling](https://braintrust.dev/docs/kb/use-s3-export-instead-of-polling-btql-for-pipelines.md), and [`_xact_id`](https://braintrust.dev/docs/kb/use-xact-id-to-dedupe-exports-and-determine-update-time.md), re-read in October 2026. It was not checked against a live Braintrust account for this guide. Treat every Braintrust field name below as a starting point, and confirm it against a real response in Phase 2.
 
 ---
 
@@ -17,7 +17,9 @@ Your agent runs in your own code and is logged to Braintrust. Amplitude Agent An
 ```text
 scheduled job (for example, hourly)
   -> POST /btql   root spans in a time window -> conversation IDs from metadata
-  -> POST /btql   root spans of each settled conversation, then every span in those traces
+  -> POST /btql   root spans of those conversations, up to 500 conversation IDs per query
+  -> POST /btql   catch-up: root spans written late or updated since the last run (by _xact_id)
+  -> POST /btql   every span of the settled conversations' traces, up to 500 traces per query
   -> normalize(...)            Braintrust fields -> one neutral conversation shape
   -> toAgentEvents(conv)       neutral shape -> [Agent] events
   -> send(events)              POST https://api2.amplitude.com/2/httpapi
@@ -31,7 +33,7 @@ scheduled job (for example, hourly)
 - Every conversation as an Agent Analytics session, turn by turn, in the session viewer.
 - Automatic quality signals on every closed session: task completion, response quality, user friction, and more.
 - Tool calls with name, success, latency, and, unless you send metadata only, input and output.
-- Model and token counts from `llm` spans.
+- Model and token counts from `llm` spans (leaf calls only, so nested `llm` spans are not counted twice).
 - Agent sessions joined to your product analytics through the same user ID.
 
 Cost stays empty: the logged fields this adapter reads carry tokens, not cost, and Amplitude does not estimate it. Braintrust scores are not forwarded; if the user wants them on a production conversation, map them to `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`. Follow the harness field map and the CI procedure on that page.
@@ -44,12 +46,12 @@ This job forwards what is already in Braintrust; it cannot add what the applicat
 - **User ID:** also metadata only, under a key you confirm. It must be the same ID your product analytics uses.
 - **Message text:** the root span's input and output, exactly as logged.
 
-Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as Braintrust retains them.
+Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as Braintrust retains them (on Starter and Pro plans, SQL queries only see your plan's log retention window; see Backfill).
 
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A Braintrust API key and the project ID. Self-hosted data planes use their own API URL (`BRAINTRUST_API_URL`).
+2. A Braintrust API key and the project ID. The adapter calls the US data plane, `https://api.braintrust.dev`, by default. If your organization is on Braintrust's EU data plane, set `BRAINTRUST_API_URL=https://api-eu.braintrust.dev`; a self-hosted data plane uses its own URL.
 3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
@@ -77,10 +79,13 @@ Stop and ask the user for these. Never infer them from field names:
 Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language.
-- Whether Amplitude and Braintrust credentials are available as configuration (never hard-code them).
-- Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
+- Whether Amplitude and Braintrust credentials are available as configuration: `AMPLITUDE_API_KEY` and `BRAINTRUST_API_KEY`. Never hard-code them.
+- Whether the user is on Amplitude's EU data center. If so, set `AMPLITUDE_ENDPOINT=https://api.eu.amplitude.com/2/httpapi`.
+- Whether any user IDs are shorter than 5 characters. If so, set `AMPLITUDE_MIN_ID_LENGTH`; otherwise Amplitude rejects those conversations.
+- Which Braintrust data plane the organization uses: US (`https://api.braintrust.dev`, the default), EU (set `BRAINTRUST_API_URL=https://api-eu.braintrust.dev`), or a self-hosted URL.
 - Whether root spans carry a conversation ID in metadata, and under which key.
-- The Braintrust plan: Starter and Pro allow about 20 queries per minute.
+- Whether that key has a **subfield index** (Braintrust **Settings > Advanced > Subfield indexing**, for example `metadata.session_id`). The job filters on it once per run for every conversation it forwards. Without an index, that filter runs after a scan of `LOOKBACK_MS` plus the run's window, and Braintrust times queries out at 30 seconds. Ask the user to add the index and backfill it at least `LOOKBACK_MS` (7 days) back.
+- The Braintrust plan. Starter and Pro allow about 20 queries per minute, and SQL queries there only see the plan's log retention (14 days on Starter, 30 days on Pro by default).
 - Whether you may run one query for one known conversation to get a real response.
 
 **PAUSE.** Show the findings and ask the user to confirm them, plus the do-not-guess answers.
@@ -90,20 +95,23 @@ Find out and print:
 Run the adapter's queries for one real conversation and compare the rows to the adapter:
 
 - **Exchanges.** The adapter treats each trace (root span) in a conversation as one exchange: the root's `input` holds the user message and its `output` the reply. If the application logs a whole conversation in one trace, change the grouping.
-- **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, OpenAI-style `choices`, and common keys. Check it returns what the user typed and saw.
+- **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, OpenAI-style `choices`, and common keys. Check it returns what the user typed and saw. A trace after the first whose input yields no user text is skipped and counted as `traces_without_user_text` in context, because sending its reply alone would merge it into the previous exchange. If that count shows up, extend `textFrom`.
+- **Errors and empty replies.** A root with an `error` and no output is sent as the reply `[Error: <message>]`. A root with neither output nor error is skipped and counted as `traces_without_reply`, never sent as an empty AI Response. Check both counts on a real conversation.
 - **Tool calls.** Spans with `span_attributes.type` `tool` become tool calls, named by `span_attributes.name`.
-- **Timing and usage.** Times come from `metrics.start` and `metrics.end` (Unix seconds), falling back to `created`. Tokens come from `metrics.prompt_tokens` and `metrics.completion_tokens` on `llm` spans; the model from `metadata.model`. Confirm these are populated.
-- **Spans.** Only the span types the user chose in do-not-guess answer 4 go in `spanTypes`.
+- **Timing and usage.** Times come from `metrics.start` and `metrics.end` (Unix seconds with a fractional part, rounded to whole milliseconds), falling back to `created`. Tokens come from `metrics.prompt_tokens` and `metrics.completion_tokens` on leaf `llm` spans, those with no `llm` span beneath them, because a wrapper `llm` span can report its children's tokens; the model comes from `metadata.model` on the last leaf call. Confirm these are populated, and that the reply's token totals match what Braintrust shows for the trace.
+- **Spans.** Only the span types the user chose in do-not-guess answer 4 go in `spanTypes`. `tool` spans are always tool calls and are ignored in `spanTypes`.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
 
 ### Phase 3: Implement
 
-Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Braintrust adapter below it, then schedule `syncBraintrust` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
+Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Braintrust adapter below it, fill in `MAPPING` and `CONVERSATION_KEY`, then schedule `syncBraintrust` to run periodically, persisting the watermark it returns between runs. The watermark is a JSON string; store it as is. The first run takes a plain ISO 8601 date. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them. Without it, the job refuses to start unless `AMPLITUDE_API_KEY` is set.
+
+A conversation that cannot be mapped, or that Amplitude rejects with a `4xx` other than `429`, is logged with its conversation ID, counted, and skipped; the run continues. An Amplitude or Braintrust outage (network errors, `429`, or `5xx` after retries) stops the run, and the watermark is not advanced, so the next run retries the same window.
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID, how many conversations had no user ID, and how many failed to map (each logged with its conversation ID). Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
@@ -115,8 +123,10 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 5: Ship
 
-- Keep to Braintrust's query limit of about 20 per minute on Starter and Pro plans; the adapter waits 3.1 seconds between pages and backs off on `429`. Each conversation costs at least two queries, so size the schedule to your conversation volume.
-- Every discovery query has a `created` range, as Braintrust recommends to avoid timeouts.
+- Keep to Braintrust's query limit of about 20 per minute on Starter and Pro plans; it applies per organization, so other jobs share it. The adapter waits at least 3.1 seconds before every request, retries included. On `429`, `5xx`, or a network error it retries up to 6 attempts, honoring a numeric `Retry-After` in seconds and otherwise backing off from 10 seconds to at most 60. A persistent failure stops the run without advancing the watermark.
+- A run costs a fixed handful of queries, not a few per conversation: the discovery pages, one lookup per 500 conversations, the catch-up query and one lookup per 500 caught-up conversations (at most 500 per run), and one span fetch per 500 traces, plus extra pages when a result overflows. Braintrust blocks a query with more than 4,096 exact-match values, so keep `IN_CHUNK` well below that.
+- Every `project_logs` query has a `created` range or a `root_span_id` predicate, as Braintrust requires to avoid a full scan, and queries that can span pages sort on `_pagination_key`, which cursor pagination requires.
+- For continuous export at high volume, Braintrust recommends its S3 export over polling SQL; this guide's job is for moderate volumes and backfill.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 
@@ -152,26 +162,29 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
 | `[Agent] Session End` | Once, last, when the conversation is finished | `[Agent] Trace ID` of the final exchange |
 
-Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, and `[Agent] Context` when you have dimensions.
+Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` (here `braintrust`), `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
 
 ### Example: one complete session
 
-A two-exchange conversation with a tool call, as produced by `toAgentEvents` from `normalizeBraintrustConversation`. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
+A two-exchange conversation with a tool call, as produced by `toAgentEvents(conversation, { source: 'braintrust' })` from `normalizeBraintrustConversation`. The second trace has a wrapper `llm` span around two model calls, so its tokens are the two leaf calls' totals, counted once. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
 
 ```json
 [
   {
     "event_type": "[Agent] User Message",
     "user_id": "user_12345",
-    "time": 1768478400000,
+    "time": 1768478400012,
     "insert_id": "conv-1:span-root-1:user",
     "event_properties": {
       "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "braintrust",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"braintrust\"}",
       "[Agent] Trace ID": "conv-1:trace-1",
       "[Agent] Turn ID": 1,
@@ -185,13 +198,16 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
   {
     "event_type": "[Agent] AI Response",
     "user_id": "user_12345",
-    "time": 1768478402000,
+    "time": 1768478402346,
     "insert_id": "conv-1:span-root-1:reply",
     "event_properties": {
       "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "braintrust",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"braintrust\"}",
       "[Agent] Trace ID": "conv-1:trace-1",
       "[Agent] Turn ID": 2,
@@ -209,13 +225,16 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
   {
     "event_type": "[Agent] User Message",
     "user_id": "user_12345",
-    "time": 1768478430000,
+    "time": 1768478430004,
     "insert_id": "conv-1:span-root-2:user",
     "event_properties": {
       "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "braintrust",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"braintrust\"}",
       "[Agent] Trace ID": "conv-1:trace-2",
       "[Agent] Turn ID": 3,
@@ -236,6 +255,9 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "braintrust",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"braintrust\"}",
       "[Agent] Trace ID": "conv-1:trace-2",
       "[Agent] Turn ID": 4,
@@ -244,7 +266,7 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
       "[Agent] Tool Success": true,
       "[Agent] Is Error": false,
       "[Agent] Component Type": "tool",
-      "[Agent] Latency Ms": 250,
+      "[Agent] Latency Ms": 251,
       "[Agent] Parent Message ID": "conv-1:span-root-2:user",
       "[Agent] Tool Input": "{\"order_id\":\"A1001\"}",
       "[Agent] Tool Output": "{\"status\":\"shipped\"}"
@@ -253,13 +275,16 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
   {
     "event_type": "[Agent] AI Response",
     "user_id": "user_12345",
-    "time": 1768478434000,
+    "time": 1768478434188,
     "insert_id": "conv-1:span-root-2:reply",
     "event_properties": {
       "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "braintrust",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"braintrust\"}",
       "[Agent] Trace ID": "conv-1:trace-2",
       "[Agent] Turn ID": 5,
@@ -267,8 +292,8 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
       "[Agent] Component Type": "llm",
       "[Agent] Is Error": false,
       "[Agent] Model Name": "gpt-4o-mini",
-      "[Agent] Input Tokens": 160,
-      "[Agent] Output Tokens": 8,
+      "[Agent] Input Tokens": 330,
+      "[Agent] Output Tokens": 30,
       "$llm_message": {
         "text": "It arrives Thursday."
       }
@@ -277,13 +302,16 @@ A two-exchange conversation with a tool call, as produced by `toAgentEvents` fro
   {
     "event_type": "[Agent] Session End",
     "user_id": "user_12345",
-    "time": 1768478434000,
+    "time": 1768478434188,
     "insert_id": "conv-1:session-end",
     "event_properties": {
       "[Agent] Session ID": "conv-1",
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "braintrust",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"braintrust\"}",
       "[Agent] Trace ID": "conv-1:trace-2"
     }
@@ -640,6 +668,7 @@ Field names follow Braintrust's public API and SQL references. Confirm each agai
 import {
   send,
   toAgentEvents,
+  type AgentEvent,
   type ForwarderMessage,
   type ForwarderSpan,
   type ForwarderToolCall,
@@ -662,32 +691,79 @@ export interface BraintrustSpan {
   span_attributes?: { name?: string | null; type?: string | null } | null; // type: llm, tool, function, task, ...
 }
 
-const BRAINTRUST_API_URL = process.env.BRAINTRUST_API_URL ?? 'https://api.braintrust.dev';
+/** US data plane by default. EU: https://api-eu.braintrust.dev. Self-hosted: your data plane URL. */
+const braintrustApiUrl = () => process.env.BRAINTRUST_API_URL || 'https://api.braintrust.dev';
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
 
-/** Runs a SQL query against /btql and yields every row, following the x-bt-cursor header. */
-export async function* queryBraintrust(sql: string): AsyncGenerator<BraintrustSpan> {
+/**
+ * Braintrust's SQL reference does not document escaping inside string literals. Single quotes
+ * are doubled (standard SQL); a backslash or line break is refused rather than guessed at.
+ */
+const isQuotable = (value: string) => !/[\\\r\n]/.test(value);
+export const quote = (value: string) => {
+  if (!isQuotable(value)) throw new Error(`Cannot quote ${JSON.stringify(value)} for Braintrust SQL`);
+  return `'${value.replace(/'/g, "''")}'`;
+};
+
+/** Starter and Pro plans allow about 20 queries per minute, per organization. */
+const MIN_REQUEST_GAP_MS = 3100;
+const MAX_ATTEMPTS = 6;
+let lastRequestAt = 0;
+
+/** Spaces every request, retries included, at least MIN_REQUEST_GAP_MS apart. */
+async function paced(): Promise<void> {
+  const wait = Math.min(MIN_REQUEST_GAP_MS, lastRequestAt + MIN_REQUEST_GAP_MS - Date.now());
+  if (wait > 0) await sleep(wait);
+  lastRequestAt = Date.now();
+}
+
+/** A numeric Retry-After in seconds; anything else (absent, `0`, an HTTP date) backs off exponentially from 10 seconds. */
+const retryDelayMs = (response: Response | undefined, attempt: number) => {
+  const seconds = Number(response?.headers.get('retry-after'));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : Math.min(60_000, 10_000 * 2 ** attempt);
+};
+
+/** POST /btql with retries on network errors, 429, and 5xx, up to MAX_ATTEMPTS. Other statuses throw at once. */
+async function btql(query: string): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    await paced();
+    let response: Response | undefined;
+    try {
+      response = await fetch(`${braintrustApiUrl()}/btql`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.BRAINTRUST_API_KEY ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query, fmt: 'jsonl' }),
+      });
+    } catch (error) {
+      if (attempt + 1 >= MAX_ATTEMPTS) throw error;
+    }
+    if (response?.ok) return response;
+    if (response && response.status !== 429 && response.status < 500) {
+      throw new Error(`Braintrust returned ${response.status}: ${await response.text()}`);
+    }
+    if (attempt + 1 >= MAX_ATTEMPTS) {
+      throw new Error(`Braintrust returned ${response?.status} after ${MAX_ATTEMPTS} attempts: ${await response?.text()}`);
+    }
+    await sleep(retryDelayMs(response, attempt));
+  }
+}
+
+/**
+ * Runs a SQL query against /btql and yields every row. A query that can span pages must sort on
+ * `_pagination_key`: the x-bt-cursor token is sent back as `OFFSET '<cursor>'`, until a page is
+ * empty or carries no cursor.
+ */
+export async function* queryBraintrust<T = BraintrustSpan>(sql: string): AsyncGenerator<T> {
   let cursor: string | null = null;
   for (;;) {
-    const response = await fetch(`${BRAINTRUST_API_URL}/btql`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.BRAINTRUST_API_KEY ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query: cursor ? `${sql} OFFSET ${quote(cursor)}` : sql, fmt: 'jsonl' }),
-    });
-    if (response.status === 429 || response.status >= 500) {
-      await sleep(Number(response.headers.get('retry-after') ?? 10) * 1000);
-      continue;
-    }
-    if (!response.ok) throw new Error(`Braintrust returned ${response.status}: ${await response.text()}`);
-    const text = await response.text();
-    for (const line of text.split('\n')) if (line.trim()) yield JSON.parse(line) as BraintrustSpan;
+    const response = await btql(cursor ? `${sql} OFFSET ${quote(cursor)}` : sql);
+    const rows = (await response.text()).split('\n').filter((line) => line.trim());
+    for (const line of rows) yield JSON.parse(line) as T;
     cursor = response.headers.get('x-bt-cursor') ?? response.headers.get('x-amz-meta-bt_cursor');
-    if (!cursor) return;
-    await sleep(3100); // Starter and Pro plans allow about 20 queries per minute
+    if (!cursor || rows.length === 0) return;
   }
 }
 
@@ -738,33 +814,85 @@ export interface BraintrustMappingOptions {
   agentId: string;
   /** Must return the user ID your product analytics uses. Confirm with the user. */
   resolveUserId: (root: BraintrustSpan) => string | undefined;
-  /** Span types to send as [Agent] Span, for example ['function']. Confirm in Phase 2. */
+  /** Span types to send as [Agent] Span, for example ['function']. `tool` spans are always tool calls. Confirm in Phase 2. */
   spanTypes?: string[];
 }
 
-const startOf = (s: BraintrustSpan) => (s.metrics?.start ? s.metrics.start * 1000 : Date.parse(s.created));
-const endOf = (s: BraintrustSpan) => (s.metrics?.end ? s.metrics.end * 1000 : startOf(s));
+// metrics.start and metrics.end are Unix seconds with a fractional part; Amplitude needs integer milliseconds.
+const startOf = (s: BraintrustSpan) =>
+  typeof s.metrics?.start === 'number' ? Math.round(s.metrics.start * 1000) : Date.parse(s.created);
+const endOf = (s: BraintrustSpan) => (typeof s.metrics?.end === 'number' ? Math.round(s.metrics.end * 1000) : startOf(s));
+const byStart = (a: BraintrustSpan, b: BraintrustSpan) => startOf(a) - startOf(b);
 const sum = (values: (number | null | undefined)[]) =>
   values.some((v) => typeof v === 'number') ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : undefined;
 
-/** One conversation (the traces that share a conversation ID) -> one NormalizedConversation. Each trace is one exchange. */
+/**
+ * LLM spans with no LLM span beneath them. A wrapper llm span can report the tokens of the llm
+ * calls it contains, so summing every llm span would count those tokens twice.
+ */
+export function leafLlmSpans(trace: BraintrustSpan[]): BraintrustSpan[] {
+  const llm = trace.filter((s) => s.span_attributes?.type === 'llm');
+  const parentsOf = new Map(trace.map((s) => [s.span_id, s.span_parents ?? []]));
+  const hasLlmBelow = new Set<string>();
+  for (const span of llm) {
+    const stack = [...(span.span_parents ?? [])];
+    for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+      if (hasLlmBelow.has(id)) continue;
+      hasLlmBelow.add(id);
+      stack.push(...(parentsOf.get(id) ?? []));
+    }
+  }
+  return llm.filter((s) => !hasLlmBelow.has(s.span_id)).sort(byStart);
+}
+
+const errorText = (error: unknown): string => {
+  if (typeof error === 'string') return error;
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' ? message : JSON.stringify(error);
+};
+
+/**
+ * One conversation (the traces that share a conversation ID) -> one NormalizedConversation. Each
+ * trace is one exchange. A trace whose input has no user text (other than an opening one), or whose
+ * root has neither output nor error, would merge into a neighbouring exchange or send an empty
+ * reply; it is skipped and counted in context instead.
+ */
 export function normalizeBraintrustConversation(
   conversationId: string,
   spans: BraintrustSpan[],
   options: BraintrustMappingOptions,
 ): NormalizedConversation {
-  const roots = spans
-    .filter((s) => s.is_root || !s.span_parents?.length)
-    .sort((a, b) => startOf(a) - startOf(b));
+  const roots = spans.filter((s) => s.is_root || !s.span_parents?.length).sort(byStart);
+  const spanTypes = (options.spanTypes ?? []).filter((type) => type !== 'tool');
   const messages: ForwarderMessage[] = [];
+  let withoutUserText = 0;
+  let withoutReply = 0;
   for (const root of roots) {
-    const inTrace = spans
-      .filter((s) => s.root_span_id === root.root_span_id && s !== root)
-      .sort((a, b) => startOf(a) - startOf(b));
+    const trace = spans.filter((s) => s.root_span_id === root.root_span_id);
+    const inTrace = trace.filter((s) => s !== root).sort(byStart);
     const start = startOf(root);
     const userText = textFrom(root.input, 'user');
-    if (userText) messages.push({ id: `${root.root_span_id}:user`, role: 'user', text: userText, timestamp: start });
+    if (!userText && messages.length > 0) {
+      withoutUserText += 1;
+      continue;
+    }
+    const extraSpans: ForwarderSpan[] = inTrace
+      .filter((s) => spanTypes.includes(s.span_attributes?.type ?? ''))
+      .map((s) => ({
+        id: `${s.span_id}:span`,
+        name: s.span_attributes?.name ?? 'span',
+        timestamp: startOf(s),
+        input: s.input,
+        output: s.output,
+        latencyMs: endOf(s) - startOf(s),
+      }));
+    const replyText = textFrom(root.output, 'assistant') || (root.error ? `[Error: ${errorText(root.error)}]` : '');
+    if (!replyText && extraSpans.length === 0) {
+      withoutReply += 1;
+      continue;
+    }
 
+    if (userText) messages.push({ id: `${root.root_span_id}:user`, role: 'user', text: userText, timestamp: start });
     const toolCalls: ForwarderToolCall[] = inTrace
       .filter((s) => s.span_attributes?.type === 'tool')
       .map((s) => ({
@@ -776,22 +904,12 @@ export function normalizeBraintrustConversation(
         success: !s.error,
         latencyMs: endOf(s) - startOf(s),
       }));
-    const extraSpans: ForwarderSpan[] = inTrace
-      .filter((s) => (options.spanTypes ?? []).includes(s.span_attributes?.type ?? ''))
-      .map((s) => ({
-        id: s.span_id,
-        name: s.span_attributes?.name ?? 'span',
-        timestamp: startOf(s),
-        input: s.input,
-        output: s.output,
-        latencyMs: endOf(s) - startOf(s),
-      }));
-    const llmSpans = inTrace.filter((s) => s.span_attributes?.type === 'llm');
+    const llmSpans = leafLlmSpans(trace);
     const model = llmSpans[llmSpans.length - 1]?.metadata?.model;
     messages.push({
       id: `${root.root_span_id}:reply`,
       role: 'assistant',
-      text: textFrom(root.output, 'assistant'),
+      text: replyText,
       timestamp: Math.max(endOf(root), start + 1),
       toolCalls,
       spans: extraSpans,
@@ -806,82 +924,261 @@ export function normalizeBraintrustConversation(
     conversationId,
     agentId: options.agentId,
     userId: first ? options.resolveUserId(first) : undefined,
-    context: { platform: 'braintrust' },
+    context: {
+      platform: 'braintrust',
+      ...(withoutUserText ? { traces_without_user_text: withoutUserText } : {}),
+      ...(withoutReply ? { traces_without_reply: withoutReply } : {}),
+    },
     messages,
     endedAt: messages.length ? Math.max(...messages.map((m) => m.timestamp)) : undefined,
   };
 }
 
-/** The metadata key your app logs the conversation ID under. Confirm with the user. */
+/** The metadata key your app logs the conversation ID under. Confirm with the user, and index it (Phase 1). */
 const CONVERSATION_KEY = 'session_id';
 /** Only conversations with no new traces for this long are treated as finished. */
 const SETTLE_MS = 2 * 60 * 60 * 1000;
 /** How far back a conversation's earlier traces may start. */
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** How far behind the watermark a late or updated root span is still caught up. Keep it within Amplitude's 7-day dedupe. */
+const LATE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** Most conversations the catch-up pass re-forwards per run; the rest carry over through the watermark's xactId. */
+const MAX_CATCHUP_CONVERSATIONS = 500;
+/** Values per IN list. Braintrust blocks a query with more than 4,096 exact-match values. */
+const IN_CHUNK = 500;
+const PAGE = 'ORDER BY _pagination_key DESC LIMIT 1000';
+const SPAN_FIELDS = 'id, span_id, root_span_id, span_parents, is_root, created, input, output, error, metadata, metrics, span_attributes';
+
+export const MAPPING: BraintrustMappingOptions = {
+  agentId: 'TODO-confirmed-agent-id',
+  resolveUserId: (root) => {
+    const value = root.metadata?.user_id; // TODO: confirm this matches product analytics
+    return typeof value === 'string' ? value : undefined;
+  },
+};
 
 const redact = (text: string): string => text; // replace with your PII redaction
 
-/** Forwards conversations active after `watermark` (ISO 8601) that have since settled. Returns the next watermark. */
-export async function syncBraintrust(projectId: string, watermark: string): Promise<string> {
+type Outcome = 'sent' | 'no_identity' | 'empty' | 'failed';
+
+const amplitude = () => ({
+  apiKey: process.env.AMPLITUDE_API_KEY ?? '',
+  /** EU data residency: https://api.eu.amplitude.com/2/httpapi */
+  endpoint: process.env.AMPLITUDE_ENDPOINT || undefined,
+  /** Set if your user IDs are shorter than 5 characters. */
+  minIdLength: Number(process.env.AMPLITUDE_MIN_ID_LENGTH) || undefined,
+});
+
+/** A rejection that retrying won't fix. Anything else (an outage) stops the run. */
+const isPermanent = (error: unknown) =>
+  /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
+
+const chunks = <T>(items: T[], size: number): T[][] =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
+
+async function forward(
+  conversationId: string,
+  spans: BraintrustSpan[],
+  mapping: BraintrustMappingOptions,
+): Promise<Outcome> {
+  let events: AgentEvent[];
+  try {
+    const conversation = normalizeBraintrustConversation(conversationId, spans, mapping);
+    if (!conversation.userId && !conversation.deviceId) return 'no_identity';
+    events = toAgentEvents(conversation, { redact, source: 'braintrust' });
+  } catch (error) {
+    console.error(`Conversation ${conversationId} could not be mapped:`, error);
+    return 'failed';
+  }
+  if (events.length === 0) return 'empty';
+  if (process.env.AMPLITUDE_DRY_RUN) {
+    console.log(JSON.stringify(events, null, 2));
+    return 'sent';
+  }
+  try {
+    await send(events, amplitude());
+  } catch (error) {
+    if (!isPermanent(error)) throw error;
+    console.error(`Conversation ${conversationId} was rejected by Amplitude:`, error);
+    return 'failed';
+  }
+  return 'sent';
+}
+
+interface RootRow {
+  root_span_id: string;
+  created: string;
+  /** Transaction ID: a decimal string, higher on every later write to the row. */
+  _xact_id?: string;
+  conversation_id?: unknown;
+}
+
+/** What syncBraintrust persists between runs, as JSON. `xactId` is the highest `_xact_id` handled. */
+export interface BraintrustWatermark {
+  created: string;
+  xactId?: string;
+}
+
+const isXactId = (value: unknown): value is string => typeof value === 'string' && /^\d+$/.test(value);
+// _xact_id values exceed Number's exact range, and decimal strings of different lengths don't compare as text.
+const compareXact = (a: string, b: string) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
+const maxXact = (a: string | undefined, b: string | undefined) =>
+  a === undefined ? b : b === undefined ? a : compareXact(a, b) >= 0 ? a : b;
+
+/** Reads the JSON watermark syncBraintrust returns, or a plain ISO 8601 date (a first run, or an older version's). */
+export function parseWatermark(watermark: string): BraintrustWatermark {
+  if (!watermark.trimStart().startsWith('{')) return { created: watermark };
+  const parsed = JSON.parse(watermark) as Partial<BraintrustWatermark>;
+  if (typeof parsed.created !== 'string') throw new Error(`Watermark has no created time: ${watermark}`);
+  if (parsed.xactId !== undefined && !isXactId(parsed.xactId)) throw new Error(`Watermark xactId is not a decimal string: ${watermark}`);
+  return parsed.xactId === undefined ? { created: parsed.created } : { created: parsed.created, xactId: parsed.xactId };
+}
+
+/**
+ * Forwards conversations active after the watermark that have since settled, plus, once a run has
+ * recorded an xactId, conversations whose root spans were written late or updated since then. Returns
+ * the next watermark, `{"created": ..., "xactId": ...}` as JSON. Queries per run: the discovery pages,
+ * one lookup per IN_CHUNK conversations, the catch-up pages, one lookup per IN_CHUNK caught-up
+ * conversations (at most MAX_CATCHUP_CONVERSATIONS), and one span fetch per IN_CHUNK traces.
+ */
+export async function syncBraintrust(
+  projectId: string,
+  watermark: string,
+  mapping: BraintrustMappingOptions = MAPPING,
+): Promise<string> {
+  if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
+    throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
+  }
+  const mark = parseWatermark(watermark);
   const until = new Date(Date.now() - SETTLE_MS).toISOString();
+  const since = new Date(Date.parse(mark.created) - LOOKBACK_MS).toISOString();
   const logs = `project_logs(${quote(projectId)})`;
   const key = `metadata.${CONVERSATION_KEY}`;
-  const conversationIds = new Set<string>();
-  let tracesWithoutConversation = 0;
-  let conversationsWithoutUser = 0;
-  for await (const root of queryBraintrust(
-    `SELECT root_span_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(watermark)} AND created < ${quote(until)} LIMIT 1000`,
+  const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0, active: 0, no_conversation: 0, unquotable: 0 };
+
+  const roots = new Map<string, Map<string, RootRow>>();
+  const addRoot = (conversationId: string, root: RootRow) => {
+    const known = roots.get(conversationId) ?? new Map<string, RootRow>();
+    known.set(root.root_span_id, root);
+    roots.set(conversationId, known);
+  };
+  let seenXact = mark.xactId;
+  for await (const root of queryBraintrust<RootRow>(
+    `SELECT root_span_id, created, _xact_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(mark.created)} AND created < ${quote(until)} ${PAGE}`,
   )) {
-    const id = (root as unknown as { conversation_id?: unknown }).conversation_id;
-    if (typeof id === 'string' && id) conversationIds.add(id);
-    else tracesWithoutConversation += 1;
+    if (isXactId(root._xact_id)) seenXact = maxXact(seenXact, root._xact_id);
+    const id = root.conversation_id;
+    if (typeof id !== 'string' || !id) counts.no_conversation += 1;
+    else if (!isQuotable(id)) counts.unquotable += 1;
+    else addRoot(id, root);
   }
 
-  const since = new Date(Date.parse(watermark) - LOOKBACK_MS).toISOString();
-  for (const conversationId of conversationIds) {
-    const roots: BraintrustSpan[] = [];
-    for await (const root of queryBraintrust(
-      `SELECT root_span_id, created FROM ${logs} WHERE is_root = true AND ${key} = ${quote(conversationId)} AND created >= ${quote(since)} LIMIT 1000`,
+  // One lookup per chunk, not per conversation: metadata keys are filtered after the created-range scan.
+  const lookUp = async (conversationIds: string[], from: string) => {
+    for (const ids of chunks(conversationIds, IN_CHUNK)) {
+      for await (const root of queryBraintrust<RootRow>(
+        `SELECT root_span_id, created, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND ${key} IN (${ids.map(quote).join(', ')}) AND created >= ${quote(from)} ${PAGE}`,
+      )) {
+        if (typeof root.conversation_id === 'string' && roots.has(root.conversation_id)) addRoot(root.conversation_id, root);
+      }
+    }
+  };
+  await lookUp([...roots.keys()], since);
+
+  // Catch-up: root spans written since the last run whose created time is behind the watermark (logged
+  // late) or that were updated after forwarding. Without an xactId (a plain-date watermark) there is no
+  // record of what was handled, so this waits for the next run rather than re-sending a week of history.
+  let nextXact = seenXact;
+  if (mark.xactId !== undefined) {
+    const lateSince = new Date(Date.parse(mark.created) - LATE_LOOKBACK_MS).toISOString();
+    const candidates: { conversationId: string; row: RootRow; xact: string }[] = [];
+    for await (const root of queryBraintrust<RootRow>(
+      `SELECT root_span_id, created, _xact_id, ${key} AS conversation_id FROM ${logs} WHERE is_root = true AND created >= ${quote(lateSince)} AND created < ${quote(until)} AND _xact_id > ${mark.xactId} ${PAGE}`,
     )) {
-      roots.push(root);
+      const id = root.conversation_id;
+      if (!isXactId(root._xact_id)) continue;
+      nextXact = maxXact(nextXact, root._xact_id);
+      if (typeof id === 'string' && id && isQuotable(id) && !roots.has(id)) {
+        candidates.push({ conversationId: id, row: root, xact: root._xact_id });
+      }
     }
-    // Still active: a later run finds it again through its newer traces.
-    if (roots.some((r) => Date.parse(r.created) >= Date.parse(until))) continue;
-
-    // No created range here: an ID predicate already bounds the scan, and a range can drop earlier spans.
-    const ids = roots.map((r) => quote(r.root_span_id)).join(', ');
-    const spans: BraintrustSpan[] = [];
-    for await (const span of queryBraintrust(`SELECT * FROM ${logs} WHERE root_span_id IN (${ids}) LIMIT 1000`)) {
-      spans.push(span);
+    // _pagination_key order is not _xact_id order. Take the oldest writes first, so everything at or
+    // below the xactId recorded for a capped run has been handled.
+    candidates.sort((a, b) => compareXact(a.xact, b.xact));
+    const late = new Map<string, RootRow[]>();
+    let handledXact = mark.xactId;
+    for (const { conversationId, row, xact } of candidates) {
+      if (!late.has(conversationId) && late.size >= MAX_CATCHUP_CONVERSATIONS) {
+        nextXact = handledXact;
+        console.warn(`Catch-up reached ${MAX_CATCHUP_CONVERSATIONS} conversations; the rest carry over to the next run`);
+        break;
+      }
+      late.set(conversationId, [...(late.get(conversationId) ?? []), row]);
+      handledXact = xact;
     }
-    const conversation = normalizeBraintrustConversation(conversationId, spans, {
-      agentId: 'TODO-confirmed-agent-id',
-      resolveUserId: (root) => {
-        const value = root.metadata?.user_id; // TODO: confirm this matches product analytics
-        return typeof value === 'string' ? value : undefined;
-      },
-    });
-    if (!conversation.userId) {
-      conversationsWithoutUser += 1;
-      continue;
-    }
-    const events = toAgentEvents(conversation, { redact, source: 'braintrust' });
-    if (process.env.AMPLITUDE_DRY_RUN) {
-      console.log(JSON.stringify(events, null, 2));
-      continue;
-    }
-    await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+    for (const [conversationId, rows] of late) for (const row of rows) addRoot(conversationId, row);
+    await lookUp([...late.keys()], new Date(Date.parse(lateSince) - LOOKBACK_MS).toISOString());
   }
-  if (tracesWithoutConversation || conversationsWithoutUser) {
+
+  const settled: [string, RootRow[]][] = [];
+  for (const [conversationId, known] of roots) {
+    const list = [...known.values()];
+    // Still active: a later run finds it again through its newer traces.
+    if (list.some((r) => Date.parse(r.created) >= Date.parse(until))) counts.active += 1;
+    else settled.push([conversationId, list]);
+  }
+
+  // No created range here: a root_span_id predicate already bounds the scan, and a range can drop earlier spans.
+  const forwardBatch = async (batch: [string, RootRow[]][]) => {
+    const spansByRoot = new Map<string, BraintrustSpan[]>();
+    for (const ids of chunks(batch.flatMap(([, list]) => list.map((r) => r.root_span_id)), IN_CHUNK)) {
+      for await (const span of queryBraintrust(
+        `SELECT ${SPAN_FIELDS} FROM ${logs} WHERE root_span_id IN (${ids.map(quote).join(', ')}) ${PAGE}`,
+      )) {
+        const trace = spansByRoot.get(span.root_span_id);
+        if (trace) trace.push(span);
+        else spansByRoot.set(span.root_span_id, [span]);
+      }
+    }
+    for (const [conversationId, list] of batch) {
+      const spans = list.flatMap((r) => spansByRoot.get(r.root_span_id) ?? []);
+      counts[await forward(conversationId, spans, mapping)] += 1;
+    }
+  };
+  let batch: [string, RootRow[]][] = [];
+  let batchTraces = 0;
+  for (const entry of settled) {
+    if (batch.length && batchTraces + entry[1].length > IN_CHUNK) {
+      await forwardBatch(batch);
+      batch = [];
+      batchTraces = 0;
+    }
+    batch.push(entry);
+    batchTraces += entry[1].length;
+  }
+  if (batch.length) await forwardBatch(batch);
+
+  if (counts.no_conversation || counts.unquotable || counts.no_identity || counts.empty || counts.failed) {
     console.warn(
-      `Skipped ${tracesWithoutConversation} traces without ${key} and ${conversationsWithoutUser} conversations without a user ID`,
+      `Skipped ${counts.no_conversation} traces without ${key}, ${counts.unquotable} with a conversation ID containing a backslash or line break, ${counts.no_identity} conversations without a user ID, ${counts.empty} with no messages, and ${counts.failed} that failed (logged above); ${counts.active} still active`,
     );
   }
-  return until;
+  const next: BraintrustWatermark = nextXact === undefined ? { created: until } : { created: until, xactId: nextXact };
+  return JSON.stringify(next);
 }
 ```
 
 **Why the settle window.** Braintrust has no "conversation finished" signal. Forwarding only conversations with no root span newer than `SETTLE_MS` means they are finished before Session End is sent. If a conversation resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
+
+**Late and updated root spans.** `created` is a row's original timestamp, and Braintrust does not change it when the row is written later or updated. `_xact_id`, the row's transaction ID, "increases on each write" ([`_xact_id` KB](https://braintrust.dev/docs/kb/use-xact-id-to-dedupe-exports-and-determine-update-time.md)), and Braintrust SQL accepts range filters on it ([best practices](https://www.braintrust.dev/docs/reference/sql/best-practices)). The main pass reads root spans with `created` in `[watermark.created, now - SETTLE_MS)`, so on its own it would never see a root that reaches Braintrust after its window was read (a logger that flushes late, a backfill logged with old timestamps) or a root updated after its conversation was forwarded (for example, its output written by a later update). So the watermark is JSON with two fields: `created`, where the main pass resumes, and `xactId`, the highest `_xact_id` handled. Each run also reads root spans with `created` in `[watermark.created - LATE_LOOKBACK_MS, now - SETTLE_MS)` and `_xact_id` above `xactId`, and sends those conversations through the same batched lookup, settle check, and span fetch. The catch-up pass costs one query plus one lookup per 500 conversations, plus extra pages for large results, paced like every other request. It handles at most `MAX_CATCHUP_CONVERSATIONS` (500) per run, oldest write first. The rest carry over, because a capped run advances `xactId` only to the last write it handled. `_xact_id` is returned as a decimal string; the adapter compares it as a number (`BigInt`), never as text. It is not a time value, so it cannot express "idle for `SETTLE_MS`", and the main pass stays on `created`.
+
+A caught-up conversation is sent whole again. Events already sent are deduplicated by insert ID within Amplitude's 7-day dedupe window, so a changed output on a reply that was already sent does not replace it. Events not sent before, such as a late trace or a reply that had no output when the conversation was first forwarded, are added. As with a resumed conversation, they are stored, but anything after Session End does not reach that session's quality signals. Keep `LATE_LOOKBACK_MS` at 7 days or less so re-sent events stay inside the dedupe window.
+
+Two limits remain. The catch-up pass reads root spans only, so a child span that lands after its conversation was forwarded, with no later write to its root, is not sent; `SETTLE_MS` must still exceed your worst-case logging delay for child spans. In Phase 2, compare a recent trace's `created` with when it appeared. A root more than `LATE_LOOKBACK_MS` behind the watermark is not caught up; for those, re-run the window or use Braintrust's S3 export.
+
+**Plain-date watermarks.** `syncBraintrust` also accepts a plain ISO 8601 date: the first watermark of a new job or a backfill, or one persisted by an earlier version of this adapter. That run skips the catch-up pass, because it has no record of what was already handled, and re-sending a week of conversations could reach past the dedupe window. It records the highest `_xact_id` among the root spans it reads, and catch-up starts on the next run. Persist the returned string as is.
+
+**Quoting.** Braintrust's SQL reference does not document how to escape a quote inside a string literal. `quote` doubles single quotes, as standard SQL does, and refuses values containing a backslash or line break rather than guess. The job skips and counts conversation IDs like that. Confirm in Phase 2 with a conversation ID that contains `'` if yours can.
 
 ### Privacy
 
@@ -909,7 +1206,9 @@ Keep personal data out of `[Agent] Context`; it is a filterable dimension, not a
 
 ### Backfill
 
-Historical `time` values are kept as sent, with no age limit. For a backfill, start with a watermark at the earliest date wanted; the job pages forward from there. Each conversation is forwarded whole, in order, with Session End last. Do not trickle old turns in over time: a session closes after 30 idle minutes or 24 hours, a Session End that arrives after an automatic close is ignored, and events that arrive after close are stored but never reach enrichment.
+Historical `time` values are kept as sent, with no age limit. For a backfill, start with a watermark at the earliest date wanted; one run then reads everything from there up to `now - SETTLE_MS`. For a long range, advance the watermark a day or a week at a time so each run stays small, passing each step as a plain date; once you persist the returned watermark instead, the catch-up pass starts. Each conversation is forwarded whole, in order, with Session End last. Do not trickle old turns in over time: a session closes after 30 idle minutes or 24 hours, a Session End that arrives after an automatic close is ignored, and events that arrive after close are stored but never reach enrichment.
+
+How far back you can go depends on the Braintrust plan. On Starter and Pro, SQL queries against logs only see the plan's retention window (14 days on Starter, 30 days on Pro by default). Older rows are silently filtered out, not reported as an error ([rate-limit KB](https://braintrust.dev/docs/kb/btql-rate-limits-on-free-and-pro-plans.md)). A conversation that began before the window is forwarded without its earliest traces. A subfield index only covers the days it was backfilled, so backfill it over the range you forward. Because Amplitude's event-level dedupe covers 7 days, run a backfill once rather than repeating it over the same range.
 
 ### Troubleshooting
 
@@ -929,13 +1228,22 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_MS` |
 | Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
 | No conversations found | `CONVERSATION_KEY` does not match the metadata field, or it is logged on child spans instead of root spans |
-| Queries time out | A discovery query lost its `created` range; keep it |
-| `429` responses | Over the plan's query limit; run less often or narrow the window |
+| Queries time out, run stops with `Braintrust returned 5xx after 6 attempts` | The conversation lookup filters `metadata.<key>` without a subfield index; add one (Phase 1). Or a discovery query lost its `created` range; keep it |
+| `429` responses | Over the plan's query limit, which other jobs on the organization share; run less often or narrow the window |
+| `/btql` rejects the API key or finds no project, on an EU organization | `BRAINTRUST_API_URL` still points at the US data plane; set `https://api-eu.braintrust.dev` |
 | Replies show JSON instead of text | `textFrom` does not recognize the payload shape; extend it |
+| `traces_without_user_text` or `traces_without_reply` in context | `textFrom` found no user text, or the root had no output and no error; extend `textFrom` or log the output |
+| Replies read `[Error: ...]` | The root span logged an error; it is shown instead of an empty reply |
+| Token counts about double what Braintrust shows | A port sums every `llm` span; keep `leafLlmSpans` |
+| `Conversation ... was rejected by Amplitude` in the log | A `4xx` such as an ID shorter than 5 characters; fix the field or set `AMPLITUDE_MIN_ID_LENGTH`. Other conversations still went through |
+| Old conversations return nothing | Outside the plan's log retention (14 days on Starter, 30 on Pro) |
+| Late-logged traces never arrive | Their root was more than `LATE_LOOKBACK_MS` behind the watermark, only a child span landed late, or the watermark is still a plain date (catch-up starts on the run after); see "Late and updated root spans" |
+| `Catch-up reached 500 conversations` in the log | More late or updated conversations than one run handles; the rest carry over to the next run |
 
 ### More
 
-- [Query by SQL](https://www.braintrust.dev/docs/api-reference/query) and [SQL reference](https://www.braintrust.dev/docs/reference/sql) (Braintrust docs)
+- [Query by SQL](https://www.braintrust.dev/docs/api-reference/query), [SQL query structure](https://www.braintrust.dev/docs/reference/sql/query-structure), and [SQL best practices](https://www.braintrust.dev/docs/reference/sql/best-practices) (Braintrust docs)
+- [BTQL rate limits on Starter and Pro plans](https://braintrust.dev/docs/kb/btql-rate-limits-on-free-and-pro-plans.md) and [Use S3 export instead of polling SQL](https://braintrust.dev/docs/kb/use-s3-export-instead-of-polling-btql-for-pipelines.md) (Braintrust knowledge base)
 - [Send agent events without the AI SDK](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup) (Amplitude docs)
 - [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) (Amplitude docs)
 - [Agent Analytics taxonomy](https://amplitude.com/docs/amplitude-ai/agent-analytics/taxonomy)

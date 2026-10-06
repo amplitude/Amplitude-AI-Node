@@ -148,5 +148,72 @@
       }
     },
     "import_cursor": "2026-01-15 14:00:45"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_67890",
+    "time": 1768478450000,
+    "insert_id": "sess_2:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "sess_2",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"locale\":\"en-CA\"}",
+      "[Agent] Trace ID": "sess_2:trace-1"
+    },
+    "import_cursor": "2026-01-15 14:00:50"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_67890",
+    "time": 1768478450000,
+    "insert_id": "sess_2:turn-1-response",
+    "event_properties": {
+      "[Agent] Session ID": "sess_2",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"locale\":\"en-CA\"}",
+      "[Agent] Trace ID": "sess_2:trace-1",
+      "[Agent] Turn ID": 2,
+      "[Agent] Message ID": "sess_2:turn-1-response",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "$llm_message": {
+        "text": "Yes, to every province."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:50"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_67890",
+    "time": 1768478450000,
+    "insert_id": "sess_2:turn-1-user",
+    "event_properties": {
+      "[Agent] Session ID": "sess_2",
+      "[Agent] Agent ID": "sales-assistant",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"locale\":\"en-CA\"}",
+      "[Agent] Trace ID": "sess_2:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "sess_2:turn-1-user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Do you ship to Canada?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:50"
   }
 ]

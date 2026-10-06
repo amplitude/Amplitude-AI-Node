@@ -4,7 +4,7 @@
 
 Give this page to your coding agent. The schema is [`offline-eval-document.schema.json`](./offline-eval-document.schema.json) and the checker is [`check-offline-eval.mjs`](./check-offline-eval.mjs). From those three, the agent can finish in the repository that already runs the eval. No package install.
 
-Last verified: 2026-10-03. This is an Amplitude-authored guide. Braintrust, LangSmith, Langfuse, and MLflow are trademarks of their owners; this guide is not affiliated with or endorsed by them. Corrections are welcome as a pull request.
+Last verified: 2026-10-06. This is an Amplitude-authored guide. Braintrust, LangSmith, Langfuse, and MLflow are trademarks of their owners; this guide is not affiliated with or endorsed by them. Corrections are welcome as a pull request.
 
 ---
 
@@ -59,8 +59,8 @@ Usually a few hours: map the runner's output once, check it, and add the post to
 
 | Harness | Where one finished run lives | CI hook, when they already have one |
 |---|---|---|
-| Braintrust experiments | One experiment per arm. The job that just ran the eval has the rows. | `braintrustdata/eval-action` stays the pull-request gate |
-| LangSmith experiments | One experiment per arm. Example id is the row. | The workflow that already calls `evaluate` |
+| Braintrust experiments | One experiment per arm. Dataset record id (`origin.id`) is the row. | `braintrustdata/eval-action` stays the pull-request gate |
+| LangSmith experiments | One experiment per arm. Example id (the run's `reference_example_id`) is the row. | The workflow that already calls `evaluate` |
 | Langfuse dataset runs | One dataset run per arm. Dataset item id is the row. | `langfuse/experiment-action` stays the pull-request gate |
 | A results file or a bespoke runner | One real results file or table extract | `promptfoo eval -o`, `deepeval test run`, or their own script |
 
@@ -84,21 +84,25 @@ Field names below come from public docs and were not checked against a live acco
 
 The mapping becomes a script committed in the repository, in whatever language that repository already uses. The confirmed answers are constants in that script. The script writes `run.json.tmp` and renames it to `run.json` only when the document is complete. `ran_at` is the experiment's created time. `git_sha` is the commit being evaluated. `idempotency_key` is the experiment id, that git sha, the slice (`smoke` or `full`, or the dataset version), and the chunk index. A GitHub run id changes on every re-run, so it stays out of the key. A sample file produced once in chat is not the integration.
 
-**Braintrust.** One experiment is one arm. Dataset row id is `row_id`. Score names are evaluators. Null scores are omitted. `metrics.start` and `metrics.end` are Unix seconds and become `latency_ms`. Experiment created time is `ran_at`. Once the rows are in hand, `braintrustExperimentsToDocument` does this mapping. The function does not call Braintrust. The agent still obtains the rows.
+**Braintrust.** One experiment is one arm. The dataset record the event ran on is `row_id`: `origin.id` when `origin.object_type` is `dataset`, or the legacy `dataset_record_id`. The event's own `id` is unique per experiment event, so it never matches across arms and is not the row id. When rows came from inline data with no dataset, ask the user which input field identifies the row. Score names are evaluators. Null scores are omitted. `metrics.start` and `metrics.end` are Unix seconds and become `latency_ms`. Experiment created time is `ran_at`. Once the rows are in hand, `braintrustExperimentsToDocument` does this mapping. The function does not call Braintrust. The agent still obtains the rows.
 
 ```json
-{ "id": "row-1", "input": "Can I get a refund?", "scores": { "refund-error": 1 }, "metrics": { "start": 1727913600, "end": 1727913601.84 } }
+{ "id": "evt-7d1c", "origin": { "object_type": "dataset", "object_id": "ds-refunds", "id": "row-1" }, "input": "Can I get a refund?", "scores": { "refund-error": 1 }, "metrics": { "start": 1727913600, "end": 1727913601.84 } }
 ```
 
-becomes a label `{ "row_id": "row-1", "evaluator_id": "refund-error", "value": 1, "latency_ms": 1840 }` on the arm named by that experiment. `issueLabels` for `refund-error` makes that evaluator a detector. Any other score becomes a rubric.
+becomes a label `{ "row_id": "row-1", "evaluator_id": "refund-error", "value": 1, "latency_ms": 1840 }` on the arm named by that experiment. `issueLabels` for `refund-error` makes that evaluator a detector. Any other score becomes a rubric. With more than one trial per row, keep one event per row and arm; the document allows one label per arm, row, and evaluator.
 
-**LangSmith.** One experiment is one arm. Example id is `row_id`. Feedback keys are evaluators. Example inputs and reference outputs are the row body.
+**LangSmith.** One experiment is one arm. A run's `reference_example_id` is the example, and the example `id` is `row_id`. The example's `inputs` and `outputs` (the reference outputs) are the row body. Feedback is a separate list of records, each with a `run_id`, a `key`, and a `score`: the key is the evaluator and the score is the value. A sample example and one feedback record on the run that used it:
 
 ```json
-{ "id": "ex-1", "inputs": { "question": "Can I get a refund?" }, "reference_outputs": { "answer": "Yes, within 30 days." }, "feedback": { "refund-error": 1 } }
+{ "id": "ex-1", "inputs": { "question": "Can I get a refund?" }, "outputs": { "answer": "Yes, within 30 days." } }
 ```
 
-becomes row `ex-1` with that body, and a label `{ "row_id": "ex-1", "evaluator_id": "refund-error", "value": 1 }`.
+```json
+{ "run_id": "run-1", "key": "refund-error", "score": 1 }
+```
+
+become row `ex-1` with that body, and a label `{ "row_id": "ex-1", "evaluator_id": "refund-error", "value": 1 }` on the experiment's arm.
 
 **Langfuse.** One dataset run is one arm. Dataset item id is `row_id`. Scores on the linked trace are evaluators. The dataset version goes into the idempotency key's slice.
 
@@ -214,39 +218,49 @@ if command -v node >/dev/null 2>&1; then
 fi
 attempt=0
 delay=2
-while [ "$attempt" -lt 3 ]; do
+while :; do
   attempt=$((attempt + 1))
   body=$(mktemp)
-  status=$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+  headers=$(mktemp)
+  # A network error makes curl exit non-zero; record it as 000 instead of letting set -e stop here.
+  status=$(curl --silent --show-error --output "$body" --dump-header "$headers" --write-out '%{http_code}' \
     --max-redirs 0 \
     --header 'Content-Type: application/json' \
     --user "${AMPLITUDE_API_KEY}:${AMPLITUDE_SECRET_KEY}" \
     --data-binary @"$file" \
-    "$AMPLITUDE_OFFLINE_EVAL_URL")
+    "$AMPLITUDE_OFFLINE_EVAL_URL") || status=000
   if [ "$status" = "200" ]; then
     if command -v node >/dev/null 2>&1; then
       node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log(r.result_id, r.replayed, (r.warnings||[]).length)' "$body"
     else
       echo "posted HTTP 200"
     fi
-    rm -f "$body"
+    rm -f "$body" "$headers"
     exit 0
   fi
-  if [ "$status" = "429" ] || [ "$status" = "503" ]; then
-    rm -f "$body"
-    sleep "$delay"
-    delay=$((delay * 2))
-    continue
+  case "$status" in
+    429 | 503 | 000) ;;
+    *)
+      echo "upload failed HTTP $status" >&2
+      rm -f "$body" "$headers"
+      exit 1
+      ;;
+  esac
+  pause=$(tr -d '\r' < "$headers" | awk 'tolower($1) == "retry-after:" { value = $2 } END { print value }')
+  rm -f "$body" "$headers"
+  if [ "$attempt" -gt 3 ]; then
+    echo "upload failed after 3 retries (last status $status)" >&2
+    exit 1
   fi
-  echo "upload failed HTTP $status" >&2
-  rm -f "$body"
-  exit 1
+  case "$pause" in
+    '' | *[!0-9]*) pause=$delay ;;
+  esac
+  sleep "$pause"
+  delay=$((delay * 2))
 done
-echo "upload failed after retries" >&2
-exit 1
 ```
 
-Plain `curl` exits 0 on a 409. This script treats only HTTP 200 as success, retries 429 and 503, and fails on 400, 401, 403, 409, and 413. `replayed: true` is success. A redeploy of the same commit replays when the document is identical, including `ran_at` and row order.
+Plain `curl` exits 0 on a 409. This script treats only HTTP 200 as success. It retries a 429, a 503, or a network error (status `000`) at most three times, waiting the `Retry-After` seconds when the response sends them and 2, 4, then 8 seconds otherwise. It fails on 400, 401, 403, 409, and 413. `replayed: true` is success. A redeploy of the same commit replays when the document is identical, including `ran_at` and row order.
 
 ### Phase 5: Verify and ship
 
@@ -335,20 +349,20 @@ import { braintrustExperimentsToDocument, reportOfflineEval } from '@amplitude/a
 const document = braintrustExperimentsToDocument({
   datasetName: 'refunds',
   gitSha: process.env.GITHUB_SHA,
+  slice: 'full',
   ranAt: experimentCreatedAt,
-  idempotencyKey: `${experimentId}+${process.env.GITHUB_SHA}`,
   issueLabels: { 'refund-error': [1] },
   experiments: [
-    { id: 'exp-a', name: 'gpt-4.1', model: 'gpt-4.1', baseline: true, rows },
-    { id: 'exp-b', name: 'claude', model: 'claude-sonnet', rows: otherRows },
+    { id: 'exp-a', name: 'gpt-4.1', model: 'gpt-4.1', provider: 'openai', baseline: true, rows },
+    { id: 'exp-b', name: 'claude', model: 'claude-sonnet', provider: 'anthropic', rows: otherRows },
   ],
 });
 await reportOfflineEval(document);
 ```
 
-Pass a stable `ranAt`, such as the experiment's created time. The adapter otherwise sets `ran_at` to the current time, and `ran_at` is part of the document the idempotency hash covers, so a retry would not replay. A retry replays only when the rest of the document is identical too, including row order. The function does not call Braintrust. The CI post in Part 2 uses `curl` and does not install this package. Use the adapter only when the job already imports `@amplitude/ai`.
+Pass a stable `ranAt`, such as the experiment's created time. The adapter otherwise sets `ran_at` to the current time, and `ran_at` is part of the document the idempotency hash covers, so a retry would not replay. A retry replays only when the rest of the document is identical too, including row order. The default `idempotency_key` is a hash of the experiment ids, `gitSha`, `slice` (default `full`), and chunk index 0; the adapter writes one unchunked document. Pass `idempotencyKey` to use your own. The function does not call Braintrust. The CI post in Part 2 uses `curl` and does not install this package. Use the adapter only when the job already imports `@amplitude/ai`.
 
-`rows` are the experiment's rows: `id`, `input`, `expected`, `scores`, and `metrics.start` and `metrics.end` (Unix seconds, used for `latency_ms`). The Braintrust log-forwarding guide ([braintrust.md](./braintrust.md)) stays the path for production conversations.
+`rows` are the experiment's events: `origin` (or the legacy `dataset_record_id`), `input`, `expected`, `scores`, and `metrics.start` and `metrics.end` (Unix seconds, used for `latency_ms`). The row id is `origin.id` when `origin.object_type` is `dataset`, else `dataset_record_id`. An event with neither throws, because its own `id` never matches across arms; pass `rowKey: (row) => ...` to name the row from the event, for example from an input field. `provider` on an experiment is the model provider and is left out when you don't pass it. The Braintrust log-forwarding guide ([braintrust.md](./braintrust.md)) stays the path for production conversations.
 
 LangSmith, Langfuse, MLflow, and a results file use the same document. The harness field maps in Part 2 are the shapes to copy. `report_offline_eval` in the Python SDK takes the same document when that job already installed `amplitude-ai`.
 
@@ -379,7 +393,7 @@ The response to a POST:
 
 The same key with the same document returns the existing `result_id` and `replayed: true`. A different document under that key returns 409. The run commits whole or not at all, and a rejected request does not use up the key. The idempotency hash covers the document as sent, so changing only the prompt text is still a conflict.
 
-DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that one request, including a key that contains `/`. For a chunked run that is one chunk. `deleteOfflineEvalRun` removes every chunk of the run. A 409 `result_in_use` leaves the targeted row in place.
+DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that one request, including a key that contains `/`. For a chunked run that is one chunk, so to remove the whole run, send one DELETE per chunk's `idempotency_key`. Neither SDK has a delete function. Deleting a key also frees it, so a changed document can be posted under it. A result is in use once an Amplitude offline-eval report has read one of its arms: the report keeps a reference to each arm it scored, and the database refuses to delete an arm a report still references. That DELETE returns 409 `result_in_use` and leaves the whole request in place, so the key stays taken. Post the changed document under a new key instead. A key that holds nothing returns 404 `not_found`.
 
 | Status | Meaning | Retry |
 |---|---|---|
@@ -387,15 +401,17 @@ DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that 
 | 401 | Missing or wrong API key or secret key | No |
 | 403 | `operation_not_enabled`: Amplitude has turned off uploads for the organization | No |
 | 409 | The idempotency key already holds a different document (`idempotency_conflict`), is already used by an Amplitude-written result (`idempotency_key_in_use`), or a chunk disagrees with its group or the group is already full (`group_conflict`) | No |
+| 404 (DELETE) | `not_found`: no result holds that key | No |
+| 409 (DELETE) | `result_in_use`: a saved report read this result, so it was not deleted | No |
 | 411 | No `Content-Length` | No |
-| 413 | The body is over 8 MB; split it into chunks | No |
+| 413 | The body is over 8 MB; split it into chunks. `group_too_large`: the group would pass 50 chunks or 500,000 labels | No |
 | 415 | The body was compressed | No |
 | 429 | Rate limited; honor `Retry-After` | Yes, at most three times |
 | 503 | Temporarily unavailable; honor `Retry-After` | Yes, at most three times |
 
 ### Large runs
 
-A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk. A `metadata` chunk still sends the same `prompt_text`: the text is dropped after the prompt hash is taken, and a missing prompt is a different hash. A `chunk_index` greater than or equal to `chunk_count` is 400 `chunk_out_of_range`, including on the first request. 409 `group_conflict` is the group already holding `chunk_count` chunks, or a later chunk that repeats a row id, a session id, or a chunk index, or that disagrees with the chunks already stored.
+A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk. A `metadata` chunk still sends the same `prompt_text`: the text is dropped after the prompt hash is taken, and a missing prompt is a different hash. A `chunk_index` greater than or equal to `chunk_count` is 400 `chunk_out_of_range`, including on the first request. A group holds at most 50 chunks and 500,000 labels; a chunk past either is 413 `group_too_large`. 409 `group_conflict` is the group already holding `chunk_count` chunks, or a later chunk that repeats a row id, a session id, or a chunk index, or that disagrees with the chunks already stored.
 
 ### Rate limits
 

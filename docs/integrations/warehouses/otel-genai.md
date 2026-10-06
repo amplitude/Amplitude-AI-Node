@@ -29,7 +29,7 @@ Ask the user before running:
 1. **Which column or attribute is the conversation ID.** An Agent Analytics session is a whole conversation. Without `gen_ai.conversation.id`, `session.id`, or a `session_id` column, each trace becomes its own session and quality scores read as noise. The script warns when this happens.
 2. **Which column or attribute is the user ID** that product analytics uses.
 3. **The agent ID**, if neither `gen_ai.agent.id` nor `service.name` names the agent. Pass it with `--agent-id`.
-4. **Whether message text may leave the warehouse.** If not, use `--metadata-only`.
+4. **Whether message text may leave the warehouse.** If not, use `--metadata-only`. It drops message and prompt attributes (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.prompt.*`, `gen_ai.completion.*`, `llm.*_messages`, `llm.prompt_template.*`, `input.value`, `output.value`, `traceloop.entity.input`, `traceloop.entity.output`, `ai.prompt*`, `ai.response.*`), tool arguments and results, retrieved documents and queries (`gen_ai.retrieval.*`, `retrieval.documents`), `gen_ai.memory.*`, and error messages. Check the dry run for any other attribute your instrumentation uses for text.
 
 ## Run it
 
@@ -68,4 +68,4 @@ Follow the verify steps on the [OTLP setup page](https://amplitude.com/docs/ampl
 
 ## Keep it running
 
-Schedule the export and replay, for example hourly, selecting spans that started since the last run. Overlapping windows are safe because event IDs come from trace and span IDs. Export a whole conversation's spans together where you can, so each chat span carries its full input history.
+Schedule the export and replay, for example hourly, selecting spans that started since the last run. Event `insert_id`s come from trace and span IDs, and Amplitude's HTTP API [drops a repeated `insert_id`](https://amplitude.com/docs/apis/analytics/http-v2#event-deduplication) for the same user or device within 7 days, so windows that overlap by hours are safe. A span re-sent more than 7 days after it was first sent is a duplicate, so don't re-run old windows. Export a whole conversation's spans together where you can, so each chat span carries its full input history.

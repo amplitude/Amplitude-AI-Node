@@ -11,10 +11,10 @@
       "category": "hosted_agent_platform",
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/sierra.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md",
-      "extraction_methods": ["webhook", "scheduled_export"],
+      "extraction_methods": ["webhook", "export_api"],
       "vendor_format_source": "customer_provided_sample",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-23"
+      "last_verified": "2026-10-06"
     },
     {
       "id": "decagon",
@@ -23,9 +23,9 @@
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/decagon.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md",
       "extraction_methods": ["export_api"],
-      "vendor_format_source": "vendor_public_docs_archived_2025_02",
+      "vendor_format_source": "vendor_public_docs_archived_2025_02_and_posthog_connector_2026_08",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-23"
+      "last_verified": "2026-10-06"
     },
     {
       "id": "fin",
@@ -39,15 +39,26 @@
       "last_verified": "2026-10-06"
     },
     {
+      "id": "agentforce",
+      "name": "Agentforce",
+      "category": "hosted_agent_platform",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/agentforce.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md",
+      "extraction_methods": ["query_api"],
+      "vendor_format_source": "vendor_public_dmo_docs_2026_10",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-10-06"
+    },
+    {
       "id": "langfuse",
       "name": "Langfuse",
       "category": "tracing_tool",
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/langfuse.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md",
       "extraction_methods": ["query_api"],
-      "vendor_format_source": "vendor_public_openapi_2026_09",
+      "vendor_format_source": "vendor_public_openapi_2026_10",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-24"
+      "last_verified": "2026-10-06"
     },
     {
       "id": "langsmith",
@@ -56,9 +67,9 @@
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/langsmith.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md",
       "extraction_methods": ["query_api"],
-      "vendor_format_source": "vendor_public_openapi_2026_09",
+      "vendor_format_source": "vendor_public_openapi_2026_10",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-24"
+      "last_verified": "2026-10-06"
     },
     {
       "id": "braintrust",
@@ -69,7 +80,7 @@
       "extraction_methods": ["query_api"],
       "vendor_format_source": "vendor_public_docs_2026_09",
       "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
-      "last_verified": "2026-09-24"
+      "last_verified": "2026-10-06"
     }
   ],
   "warehouses": {
@@ -84,13 +95,13 @@
       { "id": "openinference", "ingestion_path": "otlp_replay" },
       { "id": "mlflow-tracing", "ingestion_path": "otlp_replay" }
     ],
-    "last_verified": "2026-09-24"
+    "last_verified": "2026-10-06"
   },
   "routers": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/routers.md",
     "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md",
     "ingestion_paths": ["sdk_wrap", "otlp", "http_v2"],
-    "last_verified": "2026-10-05"
+    "last_verified": "2026-10-06"
   },
   "schemas": [
     {
@@ -106,7 +117,7 @@
     "schema_version": 1,
     "runners": ["Braintrust", "LangSmith", "Langfuse", "MLflow"],
     "ingestion_path": "offline_eval_upload",
-    "last_verified": "2026-10-03"
+    "last_verified": "2026-10-06"
   },
   "tools": [
     {

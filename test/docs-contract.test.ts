@@ -9,7 +9,15 @@ import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
-const PLATFORM_PAGES = ['sierra.md', 'decagon.md', 'fin.md', 'langfuse.md', 'langsmith.md', 'braintrust.md'];
+const PLATFORM_PAGES = [
+  'sierra.md',
+  'decagon.md',
+  'fin.md',
+  'agentforce.md',
+  'langfuse.md',
+  'langsmith.md',
+  'braintrust.md',
+];
 const TRACING_ADAPTERS = [
   { name: 'langfuse', page: 'langfuse.md', heading: '### Langfuse adapter' },
   { name: 'langsmith', page: 'langsmith.md', heading: '### LangSmith adapter' },
@@ -59,6 +67,25 @@ type MetadataSchema = {
   properties: Record<string, { type: string; minLength?: number }>;
 };
 
+function matchesJsonType(type: string, field: unknown): boolean {
+  switch (type) {
+    case 'string':
+      return typeof field === 'string';
+    case 'number':
+      return typeof field === 'number';
+    case 'integer':
+      return Number.isInteger(field);
+    case 'boolean':
+      return typeof field === 'boolean';
+    case 'object':
+      return typeof field === 'object' && field !== null && !Array.isArray(field);
+    case 'array':
+      return Array.isArray(field);
+    default:
+      throw new Error(`unsupported JSON schema type: ${type}`);
+  }
+}
+
 function metadataSchemaErrors(schema: MetadataSchema, value: Record<string, unknown>): string[] {
   const errors: string[] = [];
   for (const key of schema.required) if (!(key in value)) errors.push(`required:${key}`);
@@ -69,7 +96,7 @@ function metadataSchemaErrors(schema: MetadataSchema, value: Record<string, unkn
       if (!schema.additionalProperties) errors.push(`additional:${key}`);
       continue;
     }
-    if (typeof field !== property.type) errors.push(`type:${key}`);
+    if (!matchesJsonType(property.type, field)) errors.push(`type:${key}`);
     else if (typeof field === 'string' && field.length < (property.minLength ?? 0)) errors.push(`minLength:${key}`);
   }
   return errors;
@@ -298,6 +325,8 @@ describe('forwarder core and adapters', () => {
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   let fin: any;
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
+  let agentforce: any;
+  // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   const tracing: Record<string, any> = {};
 
   const t0 = Date.UTC(2026, 0, 15, 12, 0, 0);
@@ -331,11 +360,13 @@ describe('forwarder core and adapters', () => {
     const decagonSource = extractFencedBlockAfter(readPage('decagon.md'), '### Decagon adapter', 'ts');
     const sierraSource = extractFencedBlockAfter(readPage('sierra.md'), '### Sierra adapter skeleton', 'ts');
     const finSource = extractFencedBlockAfter(readPage('fin.md'), '### Fin adapter', 'ts');
+    const agentforceSource = extractFencedBlockAfter(readPage('agentforce.md'), '### Agentforce adapter', 'ts');
 
     writeFileSync(join(dir, 'amplitude-agent-forwarder.ts'), coreSource);
     writeFileSync(join(dir, 'decagon.ts'), decagonSource);
     writeFileSync(join(dir, 'sierra.ts'), sierraSource);
     writeFileSync(join(dir, 'fin.ts'), finSource);
+    writeFileSync(join(dir, 'agentforce.ts'), agentforceSource);
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     const tracingSources = TRACING_ADAPTERS.map((a) => ({
       name: a.name,
@@ -349,6 +380,7 @@ describe('forwarder core and adapters', () => {
         'decagon.ts',
         'sierra.ts',
         'fin.ts',
+        'agentforce.ts',
         ...tracingSources.map((s) => `${s.name}.ts`),
         'env.d.ts',
       ].map((f) => join(dir, f)),
@@ -360,6 +392,7 @@ describe('forwarder core and adapters', () => {
     core = await import(pathToFileURL(corePath).href);
     decagon = await import(pathToFileURL(decagonPath).href);
     fin = await import(pathToFileURL(transpileTo(dir, 'fin', finSource)).href);
+    agentforce = await import(pathToFileURL(transpileTo(dir, 'agentforce', agentforceSource)).href);
     for (const { name, source } of tracingSources) {
       tracing[name] = await import(pathToFileURL(transpileTo(dir, name, source)).href);
     }
@@ -644,8 +677,8 @@ describe('forwarder core and adapters', () => {
     const parts = [
       { id: '1', part_type: 'comment', body: 'Let me check your charges.', created_at: s0 + 3, author: finAuthor },
       { id: '2', part_type: 'note', body: 'internal: VIP customer', created_at: s0 + 4, author: teammate },
-      { id: '3', part_type: 'custom_action_started', body: null, created_at: s0 + 5, author: teammate, event_details: { action: { name: 'Look up charges' } } },
-      { id: '4', part_type: 'custom_action_finished', body: null, created_at: s0 + 7, author: teammate, event_details: { action: { name: 'Look up charges', result: 'success' } } },
+      { id: '3', part_type: 'custom_action_started', body: null, created_at: s0 + 5, author: finAuthor, event_details: { action: { name: 'Look up charges' } } },
+      { id: '4', part_type: 'custom_action_finished', body: null, created_at: s0 + 7, author: finAuthor, event_details: { action: { name: 'Look up charges', result: 'success' } } },
       { id: '5', part_type: 'comment', body: 'I refunded the duplicate charge.', created_at: s0 + 9, author: finAuthor },
       { id: '6', part_type: 'comment', body: 'secret', created_at: s0 + 20, author: contact, redacted: true },
       { id: '7', part_type: 'comment', body: 'Thanks!', created_at: s0 + 60, author: contact },
@@ -819,22 +852,440 @@ describe('forwarder core and adapters', () => {
     process.env.INTERCOM_CLIENT_SECRET = secret;
     process.env.AMPLITUDE_DRY_RUN = '1';
     try {
-      expect(await fin.handleIntercomWebhook(body, 'sha1=0000000000000000000000000000000000000000')).toBe(401);
-      expect(urls).toHaveLength(0);
+      const jobs: { conversationId: string }[] = [];
+      const store = {
+        put: async (job: { conversationId: string }) => {
+          jobs.push(job);
+        },
+        takeDue: async () => [],
+      };
+      expect(await fin.handleIntercomWebhook(store, body, 'sha1=0000000000000000000000000000000000000000')).toBe(401);
       const other = JSON.stringify({ topic: 'conversation.user.replied', data: { item: { id: '9' } } });
-      expect(await fin.handleIntercomWebhook(other, sign(other))).toBe(200);
+      expect(await fin.handleIntercomWebhook(store, other, sign(other))).toBe(200);
+      expect(jobs).toHaveLength(0);
+      expect(await fin.handleIntercomWebhook(store, body, sign(body))).toBe(200);
       expect(urls).toHaveLength(0);
-      expect(await fin.handleIntercomWebhook(body, sign(body))).toBe(200);
+      expect(jobs.map((j) => j.conversationId)).toEqual(['9']);
+      await fin.forwardFinConversation('9');
       expect(urls).toEqual(['https://api.intercom.io/conversations/9?display_as=plaintext']);
       const sent = JSON.parse(log.mock.calls[0]?.[0] as string) as AgentEvent[];
       assertForwarderRules(sent);
     } finally {
       log.mockRestore();
-      if (env.secret === undefined) delete process.env.INTERCOM_CLIENT_SECRET;
+      if (env.secret === undefined) Reflect.deleteProperty(process.env, 'INTERCOM_CLIENT_SECRET');
       else process.env.INTERCOM_CLIENT_SECRET = env.secret;
-      if (env.dry === undefined) delete process.env.AMPLITUDE_DRY_RUN;
+      if (env.dry === undefined) Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
       else process.env.AMPLITUDE_DRY_RUN = env.dry;
     }
+  });
+
+  const sf = (fields: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(fields).map(([k, v]) => [k.endsWith('__c') ? k : `ssot__${k}__c`, v]));
+  const AF_SESSION = '3f2c9a1e-7b4d-4e8a-9c61-2d5f0b8e4a17';
+  const afAt = (s: string) => `2026-10-06T19:${s}.000Z`;
+  const afTurn = (id: string, start: string, end: string, topic = 'NOT_SET', type = 'TURN') =>
+    sf({ Id: id, AiAgentSessionId: AF_SESSION, AiAgentInteractionType: type, TopicApiName: topic, StartTimestamp: afAt(start), EndTimestamp: afAt(end) });
+  const afMessage = (id: string, turn: string, type: 'Input' | 'Output', text: string, sent: string, modality = 'Text', contentType = 'NOT_SET') =>
+    sf({ Id: id, AiAgentSessionId: AF_SESSION, AiAgentInteractionId: turn, AiAgentSessionParticipantId: type === 'Input' ? 'p-user' : 'p-agent', AiAgentInteractionMessageType: type, AiAgentInteractionMsgContentType: contentType, ContentText: text, MessageSentTimestamp: afAt(sent), Modality__c: modality, MessageStartTimestamp__c: null });
+  const afStep = (id: string, turn: string, type: string, name: string, start: string, end: string, extra: Record<string, unknown> = {}) =>
+    sf({ Id: id, AiAgentInteractionId: turn, AiAgentInteractionStepType: type, Name: name, InputValueText: 'NOT_SET', OutputValueText: 'NOT_SET', ErrorMessageText: 'NOT_SET', GenerationId: 'NOT_SET', StartTimestamp: afAt(start), EndTimestamp: afAt(end), ...extra });
+  const afBundle = () => ({
+    session: sf({ Id: AF_SESSION, StartTimestamp: afAt('00:00'), EndTimestamp: afAt('01:30'), AiAgentChannelType: 'SCRT2 - EmbeddedMessaging', AiAgentSessionEndType: 'Completed', PreviousSessionId: 'NOT_SET', VariableText: '{&quot;plan_tier&quot;:&quot;pro&quot;,&quot;email&quot;:&quot;someone@example.com&quot;}', IndividualId: 'NOT_SET' }),
+    participants: [
+      sf({ Id: 'p-user', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'USER', ParticipantObject: 'MessagingEndUser', ParticipantId: '0PAxx0000004CzQ', IndividualId: 'NOT_SET', AiAgentApiName: 'NOT_SET', AiAgentVersionApiName: 'NOT_SET', AiAgentType: 'NOT_SET' }),
+      sf({ Id: 'p-agent', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'AGENT', ParticipantObject: 'GenAiPlannerDefinition', ParticipantId: '16jxx0000004D1A', IndividualId: 'NOT_SET', AiAgentApiName: 'Order_Assistant', AiAgentVersionApiName: 'v3', AiAgentType: 'AgentforceServiceAgent' }),
+    ],
+    interactions: [
+      afTurn('turn-0', '00:00', '00:01'),
+      afTurn('turn-1', '00:10', '00:15', 'Order_Management'),
+      afTurn('turn-2', '01:00', '01:02', 'Order_Management'),
+      afTurn('turn-end', '01:30', '01:30', 'NOT_SET', 'SESSION_END'),
+    ],
+    messages: [
+      afMessage('msg-0', 'turn-0', 'Output', "Hi, I'm the Acme order assistant. How can I help?", '00:01'),
+      afMessage('msg-1', 'turn-1', 'Input', 'Where is order 10482?', '00:10'),
+      afMessage('msg-2', 'turn-1', 'Output', 'Order 10482 has shipped and should arrive Friday, October 9.', '00:15'),
+      afMessage('msg-3', 'turn-2', 'Input', 'Great, thanks!', '01:00'),
+      afMessage('msg-4', 'turn-2', 'Output', "You're welcome. Anything else?", '01:02'),
+    ],
+    steps: [
+      afStep('step-1a', 'turn-1', 'TOPIC_STEP', 'Order_Management', '00:11', '00:11'),
+      afStep('step-1b', 'turn-1', 'LLM_STEP', 'AiCopilot__ReactTopicPrompt', '00:11', '00:12', { GenerationId: 'gen-1' }),
+      afStep('step-1c', 'turn-1', 'ACTION_STEP', 'Get_Order_Status', '00:12', '00:14', {
+        InputValueText: '{&quot;orderNumber&quot;:&quot;10482&quot;}',
+        OutputValueText: '{&quot;status&quot;:&quot;Shipped&quot;,&quot;eta&quot;:&quot;2026-10-09&quot;}',
+      }),
+      afStep('step-2a', 'turn-2', 'LLM_STEP', 'AiCopilot__ReactTopicPrompt', '01:00', '01:01', { GenerationId: 'gen-2' }),
+    ],
+    tokens: [
+      { sessionId: AF_SESSION, interactionId: 'turn-1', timestamp: Date.parse(afAt('00:11')), model: 'gpt-4o-mini', provider: 'OpenAI', inputTokens: 1820, outputTokens: 96 },
+      { sessionId: AF_SESSION, interactionId: 'turn-1', timestamp: Date.parse(afAt('00:14')), model: 'gpt-4o-mini', provider: 'OpenAI', inputTokens: 2410, outputTokens: 42 },
+      { sessionId: AF_SESSION, interactionId: 'turn-2', timestamp: Date.parse(afAt('01:01')), model: 'gpt-4o-mini', provider: 'OpenAI', inputTokens: 2600, outputTokens: 18 },
+    ],
+    feedback: [{ feedbackId__c: 'fb-1', generationId__c: 'gen-2', feedback__c: 'UP', timestamp__c: afAt('01:10') }],
+  });
+  const afOptions = { agentId: 'order-assistant', resolveUserId: () => 'user_48213', contextVariableKeys: ['plan_tier'] };
+
+  it('produces the documented Agentforce example from Session Tracing rows', () => {
+    const bundle = afBundle();
+    expect(agentforce.isTraceComplete(bundle)).toBe(true);
+    const conversation = agentforce.normalizeAgentforceSession(bundle, afOptions);
+    expect(conversation.context).toEqual({
+      platform: 'agentforce',
+      handed_off: false,
+      channel: 'SCRT2 - EmbeddedMessaging',
+      end_type: 'completed',
+      topics: 'Order_Management',
+      agent_type: 'AgentforceServiceAgent',
+      agent_version: 'v3',
+      plan_tier: 'pro',
+    });
+    const events: AgentEvent[] = core.toAgentEvents(conversation, { source: 'agentforce' });
+    assertForwarderRules(events);
+    const example = JSON.parse(
+      extractFencedBlockAfter(readPage('agentforce.md'), '### Example: one complete session', 'json'),
+    ) as AgentEvent[];
+    expect(events).toEqual(example);
+
+    const tool = events.find((e) => e.event_type === '[Agent] Tool Call');
+    expect(tool?.event_properties).toMatchObject({
+      '[Agent] Tool Name': 'Get_Order_Status',
+      '[Agent] Tool Success': true,
+      '[Agent] Latency Ms': 2000,
+      '[Agent] Tool Input': '{"orderNumber":"10482"}',
+    });
+    const reply = events.find((e) => e.insert_id === `${AF_SESSION}:msg-2`);
+    expect(reply?.event_properties).toMatchObject({
+      '[Agent] Model Name': 'gpt-4o-mini',
+      '[Agent] Provider': 'OpenAI',
+      '[Agent] Input Tokens': 4230,
+      '[Agent] Output Tokens': 138,
+    });
+    expect(events.find((e) => e.event_type === '[Agent] Span')?.event_properties['[Agent] Span Name']).toBe('topic_selection');
+    expect(events.find((e) => e.event_type === '[Agent] Score')?.event_properties).toMatchObject({
+      '[Agent] Score Name': 'user_feedback',
+      '[Agent] Score Value': 1,
+    });
+    expect(JSON.stringify(events)).not.toContain('someone@example.com');
+    expect(agentforce.normalizeAgentforceSession(bundle, { resolveUserId: () => 'user_48213' }).agentId).toBe('Order_Assistant');
+  });
+
+  it('maps escalation, failed actions, rich replies, guardrails, voice, and gateway tokens bound by time', () => {
+    const bundle = afBundle();
+    bundle.session = { ...bundle.session, ssot__AiAgentSessionEndType__c: 'Escalated' };
+    bundle.messages = [
+      bundle.messages[0],
+      bundle.messages[1],
+      afMessage('msg-2', 'turn-1', 'Output', '', '00:15', 'Text', 'OrderStatusCard'),
+      afMessage('msg-3', 'turn-2', 'Input', 'I need a person.', '01:00', 'Voice'),
+      afMessage('msg-4', 'turn-2', 'Output', 'Connecting you with an agent now.', '01:02'),
+    ];
+    bundle.steps = [
+      afStep('step-1c', 'turn-1', 'FunctionStep', 'Get_Order_Status', '00:12', '00:14', { ErrorMessageText: 'Order service timed out' }),
+      afStep('step-2a', 'turn-2', 'TRUST_GUARDRAILS_STEP', 'Guardrails', '01:00', '01:01'),
+    ];
+    bundle.tokens = [
+      { sessionId: AF_SESSION, timestamp: Date.parse(afAt('00:12')), model: 'gpt-4o', provider: 'OpenAI', inputTokens: 100, outputTokens: 10 },
+      { sessionId: AF_SESSION, timestamp: Date.parse(afAt('01:01')), model: 'gpt-4o', provider: 'OpenAI', inputTokens: 200, outputTokens: 20 },
+    ];
+    bundle.feedback = [];
+    const conversation = agentforce.normalizeAgentforceSession(bundle, afOptions);
+    expect(conversation.context).toMatchObject({ handed_off: true, end_type: 'escalated', modality: 'voice', steps_with_errors: 1 });
+    expect(conversation.scores).toBeUndefined();
+    const events: AgentEvent[] = core.toAgentEvents(conversation, { source: 'agentforce' });
+    assertForwarderRules(events);
+    const card = events.find((e) => e.insert_id === `${AF_SESSION}:msg-2`);
+    expect(card?.event_properties.$llm_message).toEqual({ text: '[Displayed: OrderStatusCard]' });
+    expect(card?.event_properties['[Agent] Input Tokens']).toBe(100);
+    const tool = events.find((e) => e.event_type === '[Agent] Tool Call');
+    expect(tool?.event_properties).toMatchObject({ '[Agent] Tool Success': false, '[Agent] Is Error': true, '[Agent] Tool Output': 'Order service timed out' });
+    expect(tool?.event_properties['[Agent] Trace ID']).toBe(card?.event_properties['[Agent] Trace ID']);
+    const spanNames = events.filter((e) => e.event_type === '[Agent] Span').map((e) => e.event_properties['[Agent] Span Name']);
+    expect(spanNames).toEqual(['OrderStatusCard', 'trust_guardrails']);
+    expect(events.find((e) => e.insert_id === `${AF_SESSION}:msg-4`)?.event_properties['[Agent] Input Tokens']).toBe(200);
+
+    // A turn that ends with no agent message keeps its actions out of later turns.
+    const unanswered = agentforce.normalizeAgentforceSession(
+      { ...bundle, messages: bundle.messages.filter((m: Record<string, unknown>) => m.ssot__Id__c !== 'msg-2') },
+      afOptions,
+    );
+    expect(unanswered.context.actions_without_reply).toBe(1);
+    const unansweredEvents: AgentEvent[] = core.toAgentEvents(unanswered, { source: 'agentforce' });
+    assertForwarderRules(unansweredEvents);
+    expect(unansweredEvents.some((e) => e.event_type === '[Agent] Tool Call')).toBe(false);
+
+    const { tokens: _tokens, ...withoutTokens } = bundle;
+    expect(agentforce.normalizeAgentforceSession(withoutTokens, afOptions).context.tokens_unavailable).toBe(true);
+  });
+
+  it('holds traces until Data Cloud has written every turn', () => {
+    const bundle = afBundle();
+    expect(agentforce.isTraceComplete({ ...bundle, interactions: [] })).toBe(false);
+    expect(agentforce.isTraceComplete({ ...bundle, messages: bundle.messages.filter((m: Record<string, unknown>) => m.ssot__Id__c !== 'msg-4') })).toBe(true);
+    expect(agentforce.isTraceComplete({ ...bundle, messages: bundle.messages.filter((m: Record<string, unknown>) => !String(m.ssot__Id__c).match(/msg-[34]/)) })).toBe(false);
+    expect(agentforce.isTraceComplete({ ...bundle, steps: bundle.steps.filter((s: Record<string, unknown>) => s.ssot__AiAgentInteractionId__c !== 'turn-2') })).toBe(false);
+    // The greeting turn has no user message, so it needs no steps.
+    expect(agentforce.isTraceComplete({ ...bundle, steps: bundle.steps.filter((s: Record<string, unknown>) => s.ssot__AiAgentInteractionId__c !== 'turn-0') })).toBe(true);
+    const partial = agentforce.normalizeAgentforceSession({ ...bundle, steps: [] }, afOptions);
+    expect(partial.context.trace_incomplete).toBe(true);
+    expect(agentforce.value({ a: 'NOT_SET', b: '', c: 0 }, 'a')).toBeUndefined();
+    expect(agentforce.value({ a: 'NOT_SET', b: '', c: 0 }, 'b')).toBeUndefined();
+    expect(agentforce.value({ a: 'NOT_SET', b: '', c: 0 }, 'c')).toBe('0');
+    expect(agentforce.unescapeHtml('{&quot;a&quot;:&quot;x &amp;lt; y&quot;}')).toBe('{"a":"x &lt; y"}');
+  });
+
+  it('authenticates once, polls and pages Query Connect results, and refreshes on 401', async () => {
+    const calls: { url: string; init?: { method?: string; body?: string; headers?: Record<string, string> } }[] = [];
+    const responses = [
+      new Response(JSON.stringify({ access_token: 't1', instance_url: 'https://acme.my.salesforce.com' })),
+      new Response('expired', { status: 401 }),
+      new Response(JSON.stringify({ access_token: 't2', instance_url: 'https://acme.my.salesforce.com' })),
+      new Response(JSON.stringify({
+        metadata: [{ name: 'ssot__Id__c' }, { name: 'n__c' }],
+        data: [['a', 1]],
+        status: { queryId: 'q%2F1', completionStatus: 'Running', rowCount: 3, progress: 0.2 },
+      })),
+      new Response('{}', { status: 429, headers: { 'retry-after': '0' } }),
+      new Response(JSON.stringify({ queryId: 'q%2F1', completionStatus: 'Finished', rowCount: 3, progress: 1 })),
+      new Response(JSON.stringify({ data: [['b', 2], ['c', 3]] })),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => {
+        calls.push({ url, init });
+        return responses.shift() ?? new Response('{}', { status: 500 });
+      }),
+    );
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    process.env.SALESFORCE_CLIENT_ID = 'id';
+    process.env.SALESFORCE_CLIENT_SECRET = 'secret';
+    agentforce.resetSalesforceToken();
+    try {
+      const rows = await agentforce.queryDataCloud('SELECT 1');
+      expect(rows).toEqual([
+        { ssot__Id__c: 'a', n__c: 1 },
+        { ssot__Id__c: 'b', n__c: 2 },
+        { ssot__Id__c: 'c', n__c: 3 },
+      ]);
+      expect(calls[0]?.url).toBe('https://acme.my.salesforce.com/services/oauth2/token');
+      expect(calls[0]?.init?.body).toContain('grant_type=client_credentials');
+      expect(calls[3]?.url).toBe(
+        'https://acme.my.salesforce.com/services/data/v64.0/ssot/query-sql?dataspace=default&workloadName=amplitude-agent-forwarder',
+      );
+      expect(calls[3]?.init?.headers?.Authorization).toBe('Bearer t2');
+      expect(JSON.parse(calls[3]?.init?.body ?? '{}')).toEqual({ sql: 'SELECT 1' });
+      expect(calls[5]?.url).toContain('/ssot/query-sql/q%2F1?');
+      expect(calls[5]?.url).toContain('waitTimeMs=10000');
+      expect(calls[6]?.url).toContain('/ssot/query-sql/q%2F1/rows?');
+      expect(calls[6]?.url).toContain('offset=1&rowLimit=2000&omitSchema=true');
+      expect(calls).toHaveLength(7);
+    } finally {
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+  });
+
+  it('syncs only complete traces, skips Builder previews, and holds the watermark for the rest', async () => {
+    const complete = afBundle();
+    const waitingId = 'aaaaaaaa-0000-4000-8000-000000000002';
+    const sqls: string[] = [];
+    const table = (sql: string) => sql.match(/^SELECT .*? FROM (\S+)/)?.[1] ?? '';
+    const reply = (columns: string[], rows: Record<string, unknown>[]) =>
+      new Response(JSON.stringify({ metadata: columns.map((name) => ({ name })), data: rows.map((r) => columns.map((col) => r[col] ?? null)), status: { completionStatus: 'Finished', rowCount: rows.length } }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/services/oauth2/token')) {
+          return new Response(JSON.stringify({ access_token: 't', instance_url: 'https://acme.my.salesforce.com' }));
+        }
+        const sql = JSON.parse(init?.body ?? '{}').sql as string;
+        sqls.push(sql);
+        if (sql.endsWith('LIMIT 1')) {
+          return table(sql) === 'AiAgentGenerativeAiUsage_std__dlm' ? new Response('no such table', { status: 400 }) : reply([], []);
+        }
+        const columns = sql.match(/^SELECT (.*?) FROM /)?.[1]?.split(', ') ?? [];
+        switch (table(sql)) {
+          case 'ssot__AIAgentSession__dlm':
+            return reply(columns, [complete.session, { ...complete.session, ssot__Id__c: waitingId, ssot__EndTimestamp__c: afAt('05:00') }]);
+          case 'ssot__AiAgentSessionParticipant__dlm':
+            return reply(columns, complete.participants);
+          case 'ssot__AIAgentInteraction__dlm':
+            return reply(columns, [...complete.interactions, sf({ Id: 'w-1', AiAgentSessionId: waitingId, AiAgentInteractionType: 'TURN', StartTimestamp: afAt('04:00'), EndTimestamp: afAt('04:10') })]);
+          case 'ssot__AiAgentInteractionMessage__dlm':
+            return reply(columns, complete.messages);
+          case 'ssot__AIAgentInteractionStep__dlm':
+            return reply(columns, complete.steps);
+          case 'GenAIGatewayRequest__dlm':
+            return reply(columns, [{ sessionId__c: `"${AF_SESSION}"`, timestamp__c: afAt('00:12'), model__c: 'gpt-4o-mini', provider__c: 'OpenAI', promptTokens__c: 50, completionTokens__c: 5 }]);
+          case 'GenAIFeedback__dlm':
+            return reply(columns, complete.feedback);
+          default:
+            return new Response(`unexpected ${sql}`, { status: 500 });
+        }
+      }),
+    );
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-06T21:00:00.000Z'));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    process.env.AMPLITUDE_DRY_RUN = '1';
+    agentforce.resetSalesforceToken();
+    try {
+      const next = await agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions);
+      expect(next).toBe(afAt('05:00'));
+      const sessionQuery = sqls.find((s) => s.startsWith('SELECT ssot__Id__c, ssot__StartTimestamp__c'));
+      expect(sessionQuery).toContain("ssot__EndTimestamp__c >= '2026-10-06T18:00:00.000Z'");
+      expect(sessionQuery).toContain("ssot__EndTimestamp__c < '2026-10-06T20:45:00.000Z'");
+      expect(sessionQuery).toContain("NOT IN ('Builder')");
+      expect(sqls.find((s) => table(s) === 'GenAIGatewayRequest__dlm' && !s.endsWith('LIMIT 1'))).toContain(`'"' || ssot__Id__c || '"'`);
+      expect(log).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(log.mock.calls[0]?.[0] as string) as AgentEvent[];
+      assertForwarderRules(sent);
+      expect(new Set(sent.map((e) => e.event_properties['[Agent] Session ID']))).toEqual(new Set([AF_SESSION]));
+      expect(sent.find((e) => e.insert_id === `${AF_SESSION}:msg-2`)?.event_properties['[Agent] Input Tokens']).toBe(50);
+      expect(warn.mock.calls[0]?.[0]).toContain('1 still waiting');
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+      vi.useRealTimers();
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+  });
+
+  it('skips a session Amplitude rejects without stopping the run, and needs an API key to send', async () => {
+    const complete = afBundle();
+    const posted: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/services/oauth2/token')) {
+          return new Response(JSON.stringify({ access_token: 't', instance_url: 'https://acme.my.salesforce.com' }));
+        }
+        if (url.includes('amplitude.com')) {
+          posted.push(url);
+          return new Response('{"code":400,"error":"Invalid id length for user_id"}', { status: 400 });
+        }
+        const sql = JSON.parse(init?.body ?? '{}').sql as string;
+        const columns = sql.match(/^SELECT (.*?) FROM /)?.[1]?.split(', ') ?? [];
+        const rows: Record<string, Record<string, unknown>[]> = {
+          ssot__AIAgentSession__dlm: [complete.session],
+          ssot__AiAgentSessionParticipant__dlm: complete.participants,
+          ssot__AIAgentInteraction__dlm: complete.interactions,
+          ssot__AiAgentInteractionMessage__dlm: complete.messages,
+          ssot__AIAgentInteractionStep__dlm: complete.steps,
+        };
+        const table = sql.match(/^SELECT .*? FROM (\S+)/)?.[1] ?? '';
+        const data = sql.endsWith('LIMIT 1') ? [] : (rows[table] ?? []);
+        return new Response(JSON.stringify({ metadata: columns.map((name) => ({ name })), data: data.map((r) => columns.map((col) => r[col] ?? null)), status: { completionStatus: 'Finished', rowCount: data.length } }));
+      }),
+    );
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-06T21:00:00.000Z'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_DRY_RUN');
+    Reflect.deleteProperty(process.env, 'AMPLITUDE_API_KEY');
+    agentforce.resetSalesforceToken();
+    try {
+      await expect(agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions)).rejects.toThrow('AMPLITUDE_API_KEY');
+      process.env.AMPLITUDE_API_KEY = 'key';
+      process.env.AMPLITUDE_ENDPOINT = 'https://api.eu.amplitude.com/2/httpapi';
+      await expect(agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions)).resolves.toBe('2026-10-06T20:45:00.000Z');
+      expect(posted).toEqual(['https://api.eu.amplitude.com/2/httpapi']);
+      expect(String(error.mock.calls[0]?.[0])).toContain(`Session ${AF_SESSION} was rejected`);
+      expect(warn.mock.calls[0]?.[0]).toContain('1 that failed');
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+      vi.useRealTimers();
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+  });
+
+  // Field names as published in Salesforce's Session Tracing, Generative AI Audit and Feedback, and
+  // Data 360 DMO mapping references. A query naming any other column fails in a real org.
+  const ssot = (...names: string[]) => names.map((n) => `ssot__${n}__c`);
+  const plain = (...names: string[]) => names.map((n) => `${n}__c`);
+  const AF_DOCUMENTED_FIELDS: Record<string, string[]> = {
+    ssot__AIAgentSession__dlm: ssot('Id', 'StartTimestamp', 'EndTimestamp', 'AiAgentSessionEndType', 'AiAgentChannelType', 'RelatedMessagingSessionId', 'RelatedVoiceCallId', 'InternalOrganizationId', 'SessionOwnerId', 'SessionOwnerObject', 'IndividualId', 'PreviousSessionId', 'VariableText'),
+    ssot__AiAgentSessionParticipant__dlm: ssot('Id', 'AiAgentSessionId', 'ParticipantId', 'AiAgentApiName', 'AiAgentType', 'AiAgentTemplateApiName', 'AiAgentVersionApiName', 'AiAgentSessionParticipantRole', 'ParticipantObject', 'StartTimestamp', 'EndTimestamp', 'IndividualId', 'InternalOrganizationId', 'ParticipantAttributeText'),
+    ssot__AIAgentInteraction__dlm: ssot('Id', 'AiAgentSessionId', 'AiAgentInteractionType', 'TopicApiName', 'StartTimestamp', 'EndTimestamp', 'PrevInteractionId', 'SessionOwnerId', 'IndividualId', 'InternalOrganizationId', 'TelemetryTraceId', 'TelemetryTraceSpanId', 'AttributeText'),
+    ssot__AiAgentInteractionMessage__dlm: [
+      ...ssot('Id', 'AiAgentSessionId', 'AiAgentInteractionId', 'AiAgentSessionParticipantId', 'ParentMessageId', 'ContentText', 'AiAgentInteractionMessageType', 'AiAgentInteractionMsgContentType', 'MessageSentTimestamp', 'InternalOrganizationId'),
+      ...plain('Modality', 'MessageStartTimestamp', 'MessageEndTimestamp'),
+    ],
+    ssot__AIAgentInteractionStep__dlm: ssot('Id', 'AiAgentInteractionId', 'AiAgentInteractionStepType', 'Name', 'InputValueText', 'OutputValueText', 'PreStepVariableText', 'PostStepVariableText', 'GenerationId', 'ErrorMessageText', 'StartTimestamp', 'EndTimestamp', 'PrevStepId', 'InternalOrganizationId', 'TelemetryTraceSpanId', 'AttributeText', 'GenAiGatewayRequestId', 'GenAiGatewayResponseId'),
+    AiAgentGenerativeAiUsage_std__dlm: plain('AgentDeveloperName', 'AgentIdentifier', 'AgentTypeCode', 'AiAgentInteractionId', 'AiAgentSessionId', 'AiAgentToolIdentifier', 'AiAgentToolName', 'FeatureDescriptorName', 'GenAiGatewayFeatureName', 'GenAiGatewayModelName', 'IsBillableIndicator', 'IsMeteredIndicator', 'ModelClassType', 'ModelProviderModelName', 'ModelProviderName', 'PromptCompletionTokenCount', 'PromptInputTokenCount', 'PromptTemplateDeveloperName', 'PromptTotalTokenCount', 'RequestIdentifier', 'TelemetryTraceIdentifier', 'TelemetryTraceSpanId', 'Timestamp', 'UsageQuantity', 'UsageTypeCode', 'UserId'),
+    GenAIGatewayRequest__dlm: plain('gatewayRequestId', 'generationGroupId', 'sessionId', 'userId', 'botVersionId', 'plannerId', 'feature', 'appType', 'model', 'provider', 'promptTemplateDevName', 'promptTemplateVersionNo', 'prompt', 'maskedPrompt', 'parameters', 'promptTokens', 'completionTokens', 'totalTokens', 'timestamp', 'orgId', 'cloud'),
+    GenAIFeedback__dlm: plain('feedbackId', 'generationId', 'generationUpdateId', 'generationGroupId', 'userId', 'feedback', 'action', 'source', 'feature', 'appType', 'timestamp', 'orgId', 'cloud'),
+  };
+
+  /** Each SELECT in a statement, subqueries included, with the table it reads and the columns it names. */
+  const afQueryScopes = (sql: string) => {
+    let rest = sql.replace(/'(?:[^']|'')*'/g, "''");
+    let flattened = '';
+    while (flattened !== rest) {
+      flattened = rest;
+      rest = rest.replace(/\((?!\s*SELECT )([^()]*)\)/g, ' $1 ');
+    }
+    const scopes: { table: string; columns: string[] }[] = [];
+    const scope = (query: string) =>
+      scopes.push({ table: query.match(/ FROM (\S+)/)?.[1] ?? '', columns: query.match(/\b\w+__c\b/g) ?? [] });
+    for (let inner = rest.match(/\((SELECT [^()]*)\)/); inner; inner = rest.match(/\((SELECT [^()]*)\)/)) {
+      scope(inner[1] ?? '');
+      rest = rest.replace(inner[0], ' SUBQUERY ');
+    }
+    scope(rest);
+    return scopes;
+  };
+
+  it('queries only tables and columns that Salesforce documents', async () => {
+    const sqls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/services/oauth2/token')) {
+          return new Response(JSON.stringify({ access_token: 't', instance_url: 'https://acme.my.salesforce.com' }));
+        }
+        const sql = JSON.parse(init?.body ?? '{}').sql as string;
+        sqls.push(sql);
+        const columns = sql.match(/^SELECT (.*?) FROM /)?.[1]?.split(', ') ?? [];
+        return new Response(JSON.stringify({ metadata: columns.map((name) => ({ name })), data: [columns.map(() => 'x')], status: { completionStatus: 'Finished', rowCount: 1 } }));
+      }),
+    );
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    agentforce.resetSalesforceToken();
+    try {
+      const schema = await agentforce.probeAgentforceSchema();
+      expect(schema).toMatchObject({ missing: [], tokens: 'usage', feedback: true });
+      const window = { endedAfter: '2026-10-06T00:00:00.000Z', endedBefore: '2026-10-06T06:00:00.000Z' };
+      await agentforce.fetchAgentforceBundles(window, schema, { includeFeedback: true });
+      await agentforce.fetchAgentforceBundles(window, { ...schema, tokens: 'gateway' }, { includeFeedback: true });
+    } finally {
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+
+    const undocumented: string[] = [];
+    const tables = new Set<string>();
+    for (const sql of sqls) {
+      for (const { table, columns } of afQueryScopes(sql)) {
+        tables.add(table);
+        const documented = AF_DOCUMENTED_FIELDS[table];
+        if (!documented) undocumented.push(`table ${table}`);
+        else for (const column of columns) if (!documented.includes(column)) undocumented.push(`${table}.${column}`);
+      }
+    }
+    expect(undocumented).toEqual([]);
+    expect([...tables].sort()).toEqual(Object.keys(AF_DOCUMENTED_FIELDS).sort());
   });
 
   const EXPECTED_EXCHANGES = [
@@ -887,17 +1338,17 @@ describe('forwarder core and adapters', () => {
     const md = { thread_id: 'th1', user_id: 'user_12345' };
     const llm = { ls_model_name: 'gpt-4o-mini', ls_provider: 'openai' };
     const runs = [
-      { id: 'r1', name: 'agent', run_type: 'chain', start_time: '2026-01-15T12:00:00.000000', end_time: '2026-01-15T12:00:02.000000', trace_id: 'r1', inputs: { messages: [{ role: 'user', content: 'Where is my order?' }] }, outputs: { messages: [{ role: 'user', content: 'Where is my order?' }, { role: 'assistant', content: 'Order number?' }] }, extra: { metadata: md } },
-      { id: 'l1', name: 'ChatOpenAI', run_type: 'llm', start_time: '2026-01-15T12:00:00.500000', trace_id: 'r1', parent_run_id: 'r1', prompt_tokens: 120, completion_tokens: 14, total_cost: '0.001', extra: { metadata: { ...md, ...llm } } },
-      { id: 'r2', name: 'agent', run_type: 'chain', start_time: '2026-01-15T12:00:30.000000', end_time: '2026-01-15T12:00:34.000000', trace_id: 'r2', inputs: { messages: [[{ lc: 1, type: 'constructor', id: ['langchain', 'schema', 'messages', 'HumanMessage'], kwargs: { content: 'A1001' } }]] }, outputs: { output: 'It arrives Thursday.' }, extra: { metadata: md } },
-      { id: 't2', name: 'lookup_order', run_type: 'tool', start_time: '2026-01-15T12:00:31.000000', end_time: '2026-01-15T12:00:31.250000', trace_id: 'r2', parent_run_id: 'r2', inputs: { id: 'A1001' }, outputs: { status: 'shipped' }, error: null, extra: { metadata: md } },
-      { id: 'l2', name: 'ChatOpenAI', run_type: 'llm', start_time: '2026-01-15T12:00:32.000000', trace_id: 'r2', parent_run_id: 'r2', prompt_tokens: 160, completion_tokens: 8, total_cost: '0.002', extra: { metadata: { ...md, ...llm } } },
+      { id: 'r1', name: 'agent', run_type: 'CHAIN', start_time: '2026-01-15T12:00:00.000000', end_time: '2026-01-15T12:00:02.000000', trace_id: 'r1', inputs: { messages: [{ role: 'user', content: 'Where is my order?' }] }, outputs: { messages: [{ role: 'user', content: 'Where is my order?' }, { role: 'assistant', content: 'Order number?' }] }, metadata: md },
+      { id: 'l1', name: 'ChatOpenAI', run_type: 'LLM', start_time: '2026-01-15T12:00:00.500000', trace_id: 'r1', is_root: false, prompt_tokens: 120, completion_tokens: 14, total_cost: '0.001', metadata: { ...md, ...llm } },
+      { id: 'r2', name: 'agent', run_type: 'CHAIN', start_time: '2026-01-15T12:00:30.000000', end_time: '2026-01-15T12:00:34.000000', trace_id: 'r2', inputs: { messages: [[{ lc: 1, type: 'constructor', id: ['langchain', 'schema', 'messages', 'HumanMessage'], kwargs: { content: 'A1001' } }]] }, outputs: { output: 'It arrives Thursday.' }, metadata: md },
+      { id: 't2', name: 'lookup_order', run_type: 'TOOL', start_time: '2026-01-15T12:00:31.000000', end_time: '2026-01-15T12:00:31.250000', trace_id: 'r2', is_root: false, inputs: { id: 'A1001' }, outputs: { status: 'shipped' }, error: null, metadata: md },
+      { id: 'l2', name: 'ChatOpenAI', run_type: 'LLM', start_time: '2026-01-15T12:00:32.000000', trace_id: 'r2', is_root: false, prompt_tokens: 160, completion_tokens: 8, total_cost: '0.002', metadata: { ...md, ...llm } },
     ];
     expect(tracing.langsmith.threadIdOf(runs[0])).toBe('th1');
-    expect(tracing.langsmith.threadIdOf({ extra: { metadata: { session_id: 'sx' } } })).toBe('sx');
+    expect(tracing.langsmith.threadIdOf({ metadata: { session_id: 'sx' } })).toBe('sx');
     const conversation = tracing.langsmith.normalizeLangSmithThread('th1', runs, {
       agentId: 'order-support',
-      resolveUserId: (r: { extra: { metadata: { user_id: string } } }) => r.extra.metadata.user_id,
+      resolveUserId: (r: { metadata: { user_id: string } }) => r.metadata.user_id,
     });
     const events: AgentEvent[] = core.toAgentEvents(conversation);
     assertForwarderRules(events);
@@ -966,13 +1417,18 @@ describe('forwarder core and adapters', () => {
       }),
     );
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { ...process.env };
+    process.env.AMPLITUDE_DRY_RUN = '1';
     try {
       await tracing.langfuse.syncLangfuse('2026-01-15T00:00:00.000Z');
       expect(urls).toHaveLength(2);
       expect(urls.every((u) => u.includes('/api/public/v2/observations'))).toBe(true);
-      expect(warn).toHaveBeenCalledWith('Skipped 1 traces without a sessionId and 1 sessions without a user ID');
+      expect(warn).toHaveBeenCalledWith(
+        'Skipped 1 traces without a sessionId, 1 sessions without a user ID, 0 with no messages, and 0 that failed (logged above); 0 still active',
+      );
     } finally {
       warn.mockRestore();
+      process.env = env;
     }
   });
 
@@ -999,13 +1455,13 @@ describe('forwarder core and adapters', () => {
 
     calls.length = 0;
     respond([
-      new Response(JSON.stringify({ runs: [{ id: 'r1' }], cursors: { next: 'c2' } })),
-      new Response(JSON.stringify({ runs: [{ id: 'r2' }], cursors: { next: null } })),
+      new Response(JSON.stringify({ items: [{ id: 'r1' }], next_cursor: 'c2' })),
+      new Response(JSON.stringify({ items: [{ id: 'r2' }], next_cursor: null })),
     ]);
-    const runs = await drain(tracing.langsmith.queryLangSmithRuns({ session: ['p1'], is_root: true }));
+    const runs = await drain(tracing.langsmith.langsmithPages('/api/v2/traces/query', { body: { project_id: 'p1' } }));
     expect(runs.map((r: { id: string }) => r.id)).toEqual(['r1', 'r2']);
-    expect(calls[0]?.url).toContain('/api/v1/runs/query');
-    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({ session: ['p1'], is_root: true });
+    expect(calls[0]?.url).toContain('/api/v2/traces/query');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({ project_id: 'p1' });
     expect(JSON.parse(calls[1]?.body ?? '{}').cursor).toBe('c2');
 
     calls.length = 0;

@@ -121,7 +121,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 - [Event Property Reference](#event-property-reference)
 - [Event JSON Examples](#event-json-examples)
 - [Sending Events Without the SDK](#sending-events-without-the-sdk)
-  - [Hosted agent platforms (Sierra, Decagon, Fin)](#hosted-agent-platforms-sierra-decagon-fin)
+  - [Hosted agent platforms (Sierra, Decagon, Fin, Agentforce)](#hosted-agent-platforms-sierra-decagon-fin-agentforce)
   - [LLM tracing tools (Langfuse, LangSmith, Braintrust)](#llm-tracing-tools-langfuse-langsmith-braintrust)
   - [Data warehouses (Snowflake, BigQuery, Databricks)](#data-warehouses-snowflake-bigquery-databricks)
 - [Register Event Schema in Your Data Catalog](#register-event-schema-in-your-data-catalog)
@@ -2760,13 +2760,14 @@ A realistic example of what gets sent to Amplitude for an AI response:
 
 The `[Agent]` event schema is not tied to this SDK. If your stack doesn't have an Amplitude AI SDK, you can send the same events directly via Amplitude's ingestion APIs.
 
-### Hosted agent platforms (Sierra, Decagon, Fin)
+### Hosted agent platforms (Sierra, Decagon, Fin, Agentforce)
 
 If your agent runs on a hosted platform, the platform makes the LLM calls, so there is nothing for the SDK to wrap. Forward each finished conversation to Amplitude over HTTP instead. Step-by-step guides, written for engineers and coding agents alike, are in [`docs/integrations/`](docs/integrations/README.md):
 
 - [Sierra](docs/integrations/sierra.md)
 - [Decagon](docs/integrations/decagon.md)
 - [Fin (Intercom)](docs/integrations/fin.md)
+- [Agentforce (Salesforce)](docs/integrations/agentforce.md)
 
 ### LLM tracing tools (Langfuse, LangSmith, Braintrust)
 

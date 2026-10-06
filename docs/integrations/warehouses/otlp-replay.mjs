@@ -3,8 +3,9 @@
 // OTLP endpoint, which turns them into [Agent] events.
 //
 // Zero dependencies (Node 18+). Input is an export of span rows (NDJSON,
-// JSON array, or CSV) or of MLflow traces. Re-sending the same spans is safe:
-// Amplitude derives event IDs from trace and span IDs.
+// JSON array, or CSV) or of MLflow traces. Amplitude derives each event's
+// insert_id from the trace and span IDs, so re-sending the same spans within
+// the HTTP API's 7-day deduplication window does not duplicate events.
 //
 //   AMPLITUDE_API_KEY=... node otlp-replay.mjs spans.ndjson --format otel
 //   node otlp-replay.mjs traces.json --format mlflow --dry-run > payload.json
@@ -12,7 +13,7 @@
 // Options:
 //   --format otel|openinference|mlflow   input shape (default otel)
 //   --region us|eu                       Amplitude data center (default us)
-//   --metadata-only                      drop message text, tool input/output, span input/output
+//   --metadata-only                      drop message text, prompts, tool input/output, retrieved documents, span input/output
 //   --dry-run                            print the OTLP/JSON requests instead of sending
 //   --agent-id <id>                      [Agent] Agent ID for rows without an agent_id column
 //   --batch-spans <n>                    spans per request (default 500)
@@ -39,8 +40,38 @@ const JSON_TEXT_KEYS = new Set([
   'output.value',
   'tool.parameters',
 ]);
-const CONTENT_KEY =
-  /^(gen_ai\.(input|output)\.messages|gen_ai\.system_instructions|gen_ai\.tool\.call\.(arguments|result)|gen_ai\.(prompt|completion)(\.|$)|llm\.(input|output)_messages|llm\.prompts|input\.value|output\.value|retrieval\.documents|mlflow\.span(Inputs|Outputs)|tool\.parameters)/;
+const isJsonText = (name) => JSON_TEXT_KEYS.has(name) || name.endsWith('tool_call.function.arguments');
+// OpenInference "list of objects" attributes travel flattened with indexed
+// prefixes (llm.input_messages.0.message.role); Amplitude only reads that form.
+// https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md
+const INDEXED_LIST_KEY =
+  /^(llm\.(input|output)_messages|llm\.tools|retrieval\.documents|reranker\.(input|output)_documents|embedding\.embeddings)$|\.message\.(tool_calls|contents)$/;
+const CONTENT_KEY = new RegExp(
+  [
+    'gen_ai\\.(input|output)\\.messages',
+    'gen_ai\\.system_instructions',
+    'gen_ai\\.tool\\.call\\.(arguments|result)',
+    'gen_ai\\.(prompt|completion)(\\.|$)',
+    'gen_ai\\.retrieval\\.(documents|query\\.text)',
+    'gen_ai\\.memory\\.',
+    'llm\\.(input|output)_messages',
+    'llm\\.prompts',
+    'llm\\.prompt_template\\.',
+    'input\\.value',
+    'output\\.value',
+    'retrieval\\.documents',
+    'reranker\\.(query|input_documents|output_documents)',
+    'embedding\\.embeddings',
+    'mlflow\\.span(Inputs|Outputs)',
+    'tool\\.parameters',
+    'traceloop\\.entity\\.(input|output)',
+    'ai\\.prompt',
+    'ai\\.response\\.',
+    'ai\\.toolCall\\.(args|result)',
+  ]
+    .map((pattern) => `^${pattern}`)
+    .join('|'),
+);
 const SESSION_KEYS = [
   'gen_ai.conversation.id',
   'session.id',
@@ -144,14 +175,19 @@ export function hexId(value, bytes) {
 export function unixNanos(value) {
   if (value === undefined || value === null || value === '') return undefined;
   const text = String(value).trim();
-  if (/^-?\d+(\.\d+)?$/.test(text)) {
-    const [whole] = text.split('.');
-    let n = BigInt(whole);
-    const magnitude = n < 0n ? -n : n;
-    if (magnitude < 100_000_000_000n) n = BigInt(Math.round(Number(text) * 1e6)) * 1000n;
-    else if (magnitude < 100_000_000_000_000n) n *= 1_000_000n;
-    else if (magnitude < 100_000_000_000_000_000n) n *= 1000n;
-    return n.toString();
+  // Exact decimal math: older `bq --format=json` prints TIMESTAMP as float seconds like 1.727000000123456E9.
+  const numeric = text.match(/^(-?)(\d+)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/);
+  if (numeric) {
+    const [, sign, int, frac = '', exp = '0'] = numeric;
+    const digits = BigInt(int + frac);
+    const scale = Number(exp) - frac.length;
+    const pow = (k) => 10n ** BigInt(k);
+    const whole = scale >= 0 ? digits * pow(scale) : digits / pow(-scale);
+    const unitExp =
+      whole < 100_000_000_000n ? 9 : whole < 100_000_000_000_000n ? 6 : whole < 100_000_000_000_000_000n ? 3 : 0;
+    const shift = scale + unitExp;
+    const nanos = shift >= 0 ? digits * pow(shift) : (digits * 2n + pow(-shift)) / (2n * pow(-shift));
+    return (sign === '-' ? -nanos : nanos).toString();
   }
   const match = text.match(/^(.*?[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$/);
   if (!match) throw new Error(`not a timestamp: ${text}`);
@@ -185,8 +221,11 @@ function flatten(attributes, prefix = '', out = {}) {
   for (const [key, value] of entries) {
     if (value === undefined || value === null) continue;
     const name = prefix ? `${prefix}.${key}` : key;
-    if (isPlainObject(value) && !JSON_TEXT_KEYS.has(name)) flatten(value, name, out);
-    else out[name] = JSON_TEXT_KEYS.has(name) && typeof value !== 'string' ? JSON.stringify(value) : value;
+    const list = INDEXED_LIST_KEY.test(name) ? parseJsonValue(value) : undefined;
+    if (Array.isArray(list) && list.every(isPlainObject)) {
+      list.forEach((item, index) => flatten(item, `${name}.${index}`, out));
+    } else if (isPlainObject(value) && !isJsonText(name)) flatten(value, name, out);
+    else out[name] = isJsonText(name) && typeof value !== 'string' ? JSON.stringify(value) : value;
   }
   return out;
 }
@@ -297,15 +336,65 @@ function spanFromRow(row, options) {
   };
 }
 
-const MLFLOW_OPERATIONS = { LLM: 'chat', CHAT: 'chat', CHAT_MODEL: 'chat', TOOL: 'execute_tool', FUNCTION: 'execute_tool' };
+// MLflow SpanType values that map to a GenAI operation; every other type
+// (AGENT, CHAIN, RETRIEVER, EMBEDDING, ...) is sent as a generic span.
+// https://github.com/mlflow/mlflow/blob/master/mlflow/entities/span.py (class SpanType)
+const MLFLOW_OPERATIONS = { LLM: 'chat', CHAT_MODEL: 'chat', TOOL: 'execute_tool' };
+
+// Reserved MLflow span attribute keys (SpanAttributeKey, TokenUsageKey, CostKey).
+// https://github.com/mlflow/mlflow/blob/master/mlflow/tracing/constant.py
+const MLFLOW_MODEL = 'mlflow.llm.model';
+const MLFLOW_PROVIDER = 'mlflow.llm.provider';
+const MLFLOW_TOKEN_USAGE = 'mlflow.chat.tokenUsage';
+const MLFLOW_COST = 'mlflow.llm.cost';
+const MLFLOW_USAGE_TO_GENAI = {
+  input_tokens: 'gen_ai.usage.input_tokens',
+  output_tokens: 'gen_ai.usage.output_tokens',
+  cache_read_input_tokens: 'gen_ai.usage.cache_read.input_tokens',
+  cache_creation_input_tokens: 'gen_ai.usage.cache_creation.input_tokens',
+};
+
+/** Text of an OpenAI Responses API content list (output_text / input_text parts). */
+function responsesText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((part) => (typeof part === 'string' ? part : part?.text))
+    .filter((t) => typeof t === 'string' && t !== '')
+    .join('\n');
+  return text || undefined;
+}
+
+/** Messages from an OpenAI Responses API `input` or `output` item list. */
+function responsesMessages(items, role) {
+  return items
+    .filter((item) => isPlainObject(item) && (item.type === undefined || item.type === 'message'))
+    .map((item) => ({ role: item.role ?? role, content: responsesText(item.content) }))
+    .filter((m) => m.content !== undefined);
+}
 
 function mlflowMessages(value, role) {
   const parsed = parseJsonValue(value);
   if (Array.isArray(parsed?.messages)) return parsed.messages;
   if (Array.isArray(parsed?.choices)) return parsed.choices.map((c) => c.message).filter(Boolean);
+  if (Array.isArray(parsed?.output)) return responsesMessages(parsed.output, role);
+  if (Array.isArray(parsed?.input)) return responsesMessages(parsed.input, role);
+  if (isPlainObject(parsed) && typeof parsed.input === 'string') return [{ role, content: parsed.input }];
   if (isPlainObject(parsed) && 'content' in parsed) return [{ role: parsed.role ?? role, content: parsed.content }];
   if (typeof parsed === 'string') return [{ role, content: parsed }];
   return [{ role, content: JSON.stringify(parsed) }];
+}
+
+function mlflowUsage(attrs, out) {
+  const usage = attrs[MLFLOW_TOKEN_USAGE];
+  if (isPlainObject(usage)) {
+    for (const [field, key] of Object.entries(MLFLOW_USAGE_TO_GENAI)) {
+      if (typeof usage[field] === 'number') out[key] = usage[field];
+    }
+  }
+  const cost = attrs[MLFLOW_COST];
+  // gen_ai.usage.cost is an Amplitude receiver extension, not an OpenTelemetry attribute.
+  if (isPlainObject(cost) && typeof cost.total_cost === 'number') out['gen_ai.usage.cost'] = cost.total_cost;
 }
 
 /** One MLflow trace: {trace_id, spans, trace_metadata, tags} or MLflow's {info, data: {spans}}. */
@@ -339,22 +428,32 @@ function spansFromMlflowTrace(row, options) {
       if (inputs !== undefined) out['gen_ai.input.messages'] = mlflowMessages(inputs, 'user');
       if (outputs !== undefined) out['gen_ai.output.messages'] = mlflowMessages(outputs, 'assistant');
     }
-    const model = attrs['mlflow.chat.model'] ?? attrs.model ?? attrs['llm.model_name'];
+    const model = attrs[MLFLOW_MODEL] ?? attrs['llm.model_name'];
     if (model !== undefined) out['gen_ai.request.model'] = String(model);
+    if (attrs[MLFLOW_PROVIDER] !== undefined) out['gen_ai.provider.name'] = String(attrs[MLFLOW_PROVIDER]);
+    if (operation === 'chat') mlflowUsage(attrs, out);
     applyIdentity(out, identity);
     const context = raw.context ?? {};
+    // OTel GenAI span names are "{operation} {model}" and "execute_tool {tool}".
+    const name =
+      operation === 'chat' && out['gen_ai.request.model']
+        ? `chat ${out['gen_ai.request.model']}`
+        : operation === 'execute_tool'
+          ? `execute_tool ${out['gen_ai.tool.name']}`
+          : String(raw.name ?? 'span');
+    const statusMessage = pick(raw, 'status_message') ?? pick(raw.status, 'message', 'description');
     return {
       resource: { 'service.name': String(serviceName) },
       span: {
         traceId: hexId(pick(context, 'trace_id') ?? pick(raw, 'trace_id') ?? traceId, 16),
         spanId: hexId(pick(context, 'span_id') ?? pick(raw, 'span_id'), 8),
         parentSpanId: hexId(pick(raw, 'parent_id', 'parent_span_id'), 8),
-        name: String(raw.name ?? 'span'),
+        name,
         kind: 1,
         startTimeUnixNano: unixNanos(pick(raw, 'start_time_unix_nano', 'start_time', 'start_time_ns')),
         endTimeUnixNano: unixNanos(pick(raw, 'end_time_unix_nano', 'end_time', 'end_time_ns')),
         attributes: out,
-        status: statusOf(pick(raw, 'status_code') ?? raw.status?.status_code ?? raw.status?.code, pick(raw, 'status_message') ?? raw.status?.description, options.metadataOnly),
+        status: statusOf(pick(raw, 'status_code') ?? raw.status?.status_code ?? raw.status?.code, statusMessage, options.metadataOnly),
       },
     };
   });
@@ -388,7 +487,7 @@ export function toOtlpRequests(rows, options = {}) {
         continue;
       }
       span.endTimeUnixNano ??= span.startTimeUnixNano;
-      if (!span.parentSpanId) delete span.parentSpanId;
+      if (!span.parentSpanId) Reflect.deleteProperty(span, 'parentSpanId');
       if (opts.metadataOnly) span.attributes = stripContent(span.attributes);
       items.push(item);
     }
@@ -545,6 +644,7 @@ async function main(argv) {
   });
   for (const warning of warnings) console.error(`WARNING ${warning}`);
   if (args.includes('--dry-run')) {
+    // biome-ignore lint/suspicious/noConsoleLog: the dry-run request body is this CLI's stdout
     console.log(JSON.stringify(requests.length === 1 ? requests[0] : requests, null, 2));
     console.error(`Dry run: ${spans} spans in ${requests.length} requests.`);
     return 0;

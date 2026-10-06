@@ -10,9 +10,10 @@ The platform runs the agent; the forwarder pulls or receives finished conversati
 
 | Platform | Guide | How conversations are extracted | Last verified |
 |---|---|---|---|
-| Sierra | [sierra.md](./sierra.md) | Post-conversation webhook or scheduled transcript export (format from your Sierra account team) | 2026-09-23 |
-| Decagon | [decagon.md](./decagon.md) | Scheduled pull from the conversation export API | 2026-09-23 |
+| Sierra | [sierra.md](./sierra.md) | Push delivery such as a webhook, EventBridge, or Pub/Sub, or the export API (format from your Sierra account team) | 2026-10-06 |
+| Decagon | [decagon.md](./decagon.md) | Scheduled pull from the conversation export API, windowed on last update | 2026-10-06 |
 | Fin (Intercom) | [fin.md](./fin.md) | Scheduled search and retrieve from the conversations API, plus an optional close webhook | 2026-10-06 |
+| Agentforce (Salesforce) | [agentforce.md](./agentforce.md) | Scheduled SQL over the Session Tracing tables in Data Cloud, once each trace is complete | 2026-10-06 |
 
 ## LLM tracing tools
 
@@ -21,8 +22,8 @@ Your agent runs in your own code and is already traced; the forwarder reads sess
 | Tool | Guide | How conversations are extracted | Last verified |
 |---|---|---|---|
 | Langfuse | [langfuse.md](./langfuse.md) | Scheduled pull of sessions from the v2 observations API | 2026-09-24 |
-| LangSmith | [langsmith.md](./langsmith.md) | Scheduled pull of threads from the runs query API | 2026-09-24 |
-| Braintrust | [braintrust.md](./braintrust.md) | Scheduled SQL queries against project logs | 2026-09-24 |
+| LangSmith | [langsmith.md](./langsmith.md) | Scheduled pull of threads from the SmithDB v2 traces and threads API | 2026-10-06 |
+| Braintrust | [braintrust.md](./braintrust.md) | Scheduled SQL queries against project logs | 2026-10-06 |
 
 These guides forward what the application already logged, including past conversations. Set expectations with the customer up front:
 
@@ -67,6 +68,7 @@ Fetch the raw page for the source and follow "Part 2: Coding agent procedure":
 - Sierra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md`
 - Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md`
 - Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md`
+- Agentforce: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md`
 - Langfuse: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md`
 - LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md`
 - Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`

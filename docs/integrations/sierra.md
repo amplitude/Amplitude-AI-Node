@@ -2,7 +2,7 @@
 
 **Amplitude Agent Analytics can ingest conversations from Sierra agents over the Amplitude HTTP API, with no SDK required.**
 
-Last verified: 2026-09-23. This is an Amplitude-authored guide. Sierra is a trademark of its owner; this guide is not affiliated with or endorsed by Sierra. Corrections are welcome as a pull request.
+Last verified: 2026-10-06, against Sierra's public blog only. This is an Amplitude-authored guide. Sierra is a trademark of its owner; this guide is not affiliated with or endorsed by Sierra. Corrections are welcome as a pull request.
 
 ---
 
@@ -14,7 +14,7 @@ Sierra runs your customer-facing agent. Amplitude Agent Analytics measures wheth
 
 ```text
 Sierra conversation ends
-  -> your forwarder (webhook receiver or scheduled export job)
+  -> your forwarder (push delivery receiver or scheduled export job)
   -> normalize(payload)       Sierra fields -> one neutral conversation shape
   -> toAgentEvents(conv)      neutral shape -> [Agent] events
   -> send(events)             POST https://api2.amplitude.com/2/httpapi
@@ -33,7 +33,7 @@ Model, token, and cost data are generally not available from a hosted agent plat
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A way to get conversations out of Sierra: a post-conversation webhook or a scheduled transcript export. Sierra's documentation is available to Sierra customers; request access through your Sierra account team. Ask for a feed that includes:
+2. A way to get conversations out of Sierra: push delivery such as a webhook, EventBridge, or Pub/Sub, or the export API. Sierra's public blog ([Your agent, laid bare](https://sierra.ai/blog/your-agent-laid-bare-and-why-it-matters)) names OpenTelemetry, Amazon EventBridge, Google Cloud Pub/Sub, and Sierra's export API as ways to send agent data out; this guide does not cover OpenTelemetry. Payload formats are in Sierra's documentation, which is available to Sierra customers; request access through your Sierra account team. Ask for a feed that includes:
    - a stable conversation ID
    - for each message: role, text, timestamp, and message ID
    - tool or action calls, with inputs and outputs
@@ -43,7 +43,7 @@ Model, token, and cost data are generally not available from a hosted agent plat
 
 ### Effort
 
-Typically a few days of engineering once a sample payload is in hand: a mapping function, a webhook handler or scheduled job, and verification in Amplitude. The coding agent procedure below does most of the work.
+Typically a few days of engineering once a sample payload is in hand: a mapping function, a push delivery handler or scheduled export job, and verification in Amplitude. The coding agent procedure below does most of the work.
 
 ---
 
@@ -63,10 +63,11 @@ Stop and ask the user for these. Never infer them from field names:
 
 Find out and print:
 
-- How Sierra conversations reach this codebase today: a webhook endpoint, a scheduled export, or nothing yet.
+- How Sierra conversations reach this codebase today: push delivery (a webhook, EventBridge, or Pub/Sub), a scheduled job on the export API, or nothing yet.
 - The runtime and language of the service that will host the forwarder.
-- Whether an Amplitude API key is available as configuration (never hard-code it).
-- Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
+- Whether the Amplitude API key is available as configuration: `AMPLITUDE_API_KEY`. Never hard-code it.
+- Whether the user is on Amplitude's EU data center. If so, set `AMPLITUDE_ENDPOINT=https://api.eu.amplitude.com/2/httpapi`.
+- Whether any user IDs are shorter than 5 characters. If so, set `AMPLITUDE_MIN_ID_LENGTH`; otherwise Amplitude rejects those conversations.
 - Whether a real sample Sierra payload is available.
 
 **PAUSE.** Show the findings and ask the user to confirm them, plus the three do-not-guess answers. If no sample payload exists, stop here and give the user the list under "What you need before starting". Do not proceed on an assumed schema.
@@ -88,22 +89,22 @@ Read the actual sample payload. Fill in `normalizeSierraConversation` (below) so
 | `messages[].toolCalls` | Tool or action calls made before that assistant reply, with the vendor's call ID |
 | `messages[].spans` | UI components shown with that reply (name, what was rendered, what the user did) and steps the user never saw, such as routing. Never emit an assistant message with neither text nor spans |
 | `scores` | Post-conversation ratings such as CSAT, if present |
-| `endedAt` | When the conversation ended. Leave unset if it may still be open |
+| `endedAt` | When the conversation ended, in epoch milliseconds. Leave it undefined if the conversation may still be open |
 
 **PAUSE.** Show the user the mapping and the normalized output for the sample payload.
 
 ### Phase 3: Implement
 
-Locate or create the forwarder:
+Copy the forwarder core below verbatim into a file named `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Sierra adapter skeleton below it, with `normalizeSierraConversation` filled in from Phase 2. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them. Call `checkAmplitudeConfig()` when the service or job starts, so a missing `AMPLITUDE_API_KEY` fails at startup rather than on the first conversation.
 
-- **Webhook:** a handler that verifies the request came from Sierra (per the Sierra account's webhook documentation), then calls normalize, `toAgentEvents`, and `send`.
-- **Scheduled export:** a job that fetches conversations that finished since its last run, forwards each one, and stores a watermark.
+Then locate or create the forwarder:
 
-Copy the forwarder core below verbatim into a file named `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add a dry-run flag that prints the events instead of sending them.
+- **Push delivery (a webhook, EventBridge, or Pub/Sub):** a handler that verifies the delivery came from Sierra (per the Sierra account's documentation for that channel), then calls `forwardSierraConversation` with one conversation. It returns `'failed'` when the conversation cannot be mapped or Amplitude rejects it, which retrying won't fix: log it and acknowledge the delivery. It throws on an outage or a missing mapping: return an error so the delivery can be retried, if the channel retries.
+- **Scheduled export:** implement `fetchSierraConversations` from the export API, schedule `syncSierraExport`, and persist the watermark it returns between runs. Each run reads from `OVERLAP_MS` before the watermark, so a conversation the export lists late is not missed; re-sending a conversation already forwarded is safe, because every `insert_id` is deterministic and Amplitude deduplicates on it. The returned watermark is the latest `endedAt` among the conversations read, taken from the data, never the job's run time. A conversation that fails is logged and skipped; the run continues with the rest. An outage stops the run without advancing the watermark.
 
 ### Phase 4: Verify
 
-1. Run the dry-run on the sample payload and show the user the exact events.
+1. Run the dry-run on the sample payload and show the user the exact events. Optionally save the events as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send one real conversation. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - all events share one session
@@ -153,13 +154,13 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | `[Agent] Score` | Post-conversation rating, such as CSAT | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
 | `[Agent] Session End` | Once, last, when the conversation is finished | `[Agent] Trace ID` of the final exchange |
 
-Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, and `[Agent] Context` when you have dimensions.
+Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `sierra`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
 
 ### Example: one complete session
 
-A two-exchange conversation with one tool call, as produced by `toAgentEvents`. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
+A two-exchange conversation with one tool call, as produced by `toAgentEvents(conversation, { source: 'sierra' })` from a normalized Sierra conversation. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
 
 ```json
 [
@@ -173,6 +174,9 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents`. 
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "sierra",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"sierra\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
       "[Agent] Trace ID": "conv_8f2c1a:trace-1",
       "[Agent] Turn ID": 1,
@@ -193,6 +197,9 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents`. 
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "sierra",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"sierra\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
       "[Agent] Trace ID": "conv_8f2c1a:trace-1",
       "[Agent] Turn ID": 2,
@@ -217,6 +224,9 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents`. 
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "sierra",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"sierra\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
       "[Agent] Trace ID": "conv_8f2c1a:trace-1",
       "[Agent] Turn ID": 3,
@@ -238,6 +248,9 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents`. 
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "sierra",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"sierra\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
       "[Agent] Trace ID": "conv_8f2c1a:trace-2",
       "[Agent] Turn ID": 4,
@@ -258,6 +271,9 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents`. 
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "sierra",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"sierra\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
       "[Agent] Trace ID": "conv_8f2c1a:trace-2",
       "[Agent] Turn ID": 5,
@@ -279,6 +295,9 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents`. 
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "sierra",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"sierra\",\"channel\":\"web_chat\",\"locale\":\"en-US\"}",
       "[Agent] Trace ID": "conv_8f2c1a:trace-2"
     }
@@ -629,15 +648,22 @@ async function postBatch(
 
 ### Sierra adapter skeleton
 
-Fill every `todo()` from the customer's real payload in Phase 2. The `todo()` helper throws, so an unfinished mapping fails loudly instead of sending wrong data.
+Fill every `todo()` from the customer's real payload in Phase 2. The `todo()` helper throws, so an unfinished mapping fails loudly instead of sending wrong data: its error stops the handler or the whole run, rather than being skipped as one failed conversation.
 
 ```ts
-import { send, toAgentEvents, type NormalizedConversation } from './amplitude-agent-forwarder';
+import {
+  send,
+  toAgentEvents,
+  type AgentEvent,
+  type NormalizedConversation,
+} from './amplitude-agent-forwarder';
 
 type SierraPayload = Record<string, unknown>;
 
+class NotMapped extends Error {}
+
 function todo(what: string): never {
-  throw new Error(`Map ${what} from your Sierra payload before running this forwarder`);
+  throw new NotMapped(`Map ${what} from your Sierra payload before running this forwarder`);
 }
 
 export function normalizeSierraConversation(payload: SierraPayload): NormalizedConversation {
@@ -646,21 +672,100 @@ export function normalizeSierraConversation(payload: SierraPayload): NormalizedC
     agentId: todo('the confirmed agent ID'),
     userId: todo('the end-user ID your product analytics already uses'),
     context: { platform: 'sierra' }, // add one key per dimension to filter on
-    messages: todo('messages: id, role, text, timestamp (epoch ms), toolCalls'),
+    messages: todo(
+      'messages: id, role, text, timestamp (epoch ms), toolCalls, and spans (UI components shown with a reply, and steps the user never saw, such as routing)',
+    ),
     scores: undefined, // map CSAT or other ratings here if the payload has them
-    endedAt: todo('when the conversation ended (epoch ms)'),
+    endedAt: todo('when the conversation ended: epoch ms, or undefined if the conversation may still be open'),
   };
+}
+
+/** Conversations that finished at or after `since` (epoch ms), from the Sierra export API. */
+async function fetchSierraConversations(_since: number): Promise<SierraPayload[]> {
+  return todo('a fetch of finished conversations from the Sierra export API, honoring its rate limits');
 }
 
 const redact = (text: string): string => text; // replace with your PII redaction
 
-export async function forwardSierraConversation(payload: SierraPayload): Promise<void> {
-  const events = toAgentEvents(normalizeSierraConversation(payload), { redact, source: 'sierra' });
+const amplitude = () => ({
+  apiKey: process.env.AMPLITUDE_API_KEY ?? '',
+  /** EU data residency: https://api.eu.amplitude.com/2/httpapi */
+  endpoint: process.env.AMPLITUDE_ENDPOINT || undefined,
+  /** Set if your user IDs are shorter than 5 characters. */
+  minIdLength: Number(process.env.AMPLITUDE_MIN_ID_LENGTH) || undefined,
+});
+
+/** Call when the service or job starts. */
+export function checkAmplitudeConfig(): void {
+  if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
+    throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
+  }
+}
+
+/** A rejection that retrying won't fix. Anything else (an outage) stops the run. */
+const isPermanent = (error: unknown) =>
+  /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
+
+export type Outcome = 'sent' | 'empty' | 'failed';
+
+async function forward(payload: SierraPayload): Promise<{ outcome: Outcome; endedAt?: number }> {
+  let conversation: NormalizedConversation;
+  let events: AgentEvent[];
+  try {
+    conversation = normalizeSierraConversation(payload);
+    events = toAgentEvents(conversation, { redact, source: 'sierra' });
+  } catch (error) {
+    if (error instanceof NotMapped) throw error;
+    console.error('A Sierra conversation could not be mapped:', error);
+    return { outcome: 'failed' };
+  }
+  const { conversationId, endedAt } = conversation;
+  if (events.length === 0) return { outcome: 'empty', endedAt };
   if (process.env.AMPLITUDE_DRY_RUN) {
     console.log(JSON.stringify(events, null, 2));
-    return;
+    return { outcome: 'sent', endedAt };
   }
-  await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+  try {
+    await send(events, amplitude());
+  } catch (error) {
+    if (!isPermanent(error)) throw error;
+    console.error(`Conversation ${conversationId} was rejected by Amplitude:`, error);
+    return { outcome: 'failed', endedAt };
+  }
+  return { outcome: 'sent', endedAt };
+}
+
+/** Push delivery: forward the one conversation a webhook, EventBridge, or Pub/Sub delivery carries. */
+export async function forwardSierraConversation(payload: SierraPayload): Promise<Outcome> {
+  checkAmplitudeConfig();
+  return (await forward(payload)).outcome;
+}
+
+/** How far before the watermark each run starts reading. Keep it well under 7 days, Amplitude's dedupe window. */
+export const OVERLAP_MS = 60 * 60 * 1000;
+
+/**
+ * Scheduled export: forwards conversations that finished at or after `watermark - OVERLAP_MS`
+ * (epoch ms). Returns the next watermark: the latest end time among the conversations read.
+ */
+export async function syncSierraExport(
+  watermark: number,
+  fetchFinished: (since: number) => Promise<SierraPayload[]> = fetchSierraConversations,
+): Promise<number> {
+  checkAmplitudeConfig();
+  let next = watermark;
+  const counts = { sent: 0, empty: 0, failed: 0 };
+  for (const payload of await fetchFinished(watermark - OVERLAP_MS)) {
+    const { outcome, endedAt } = await forward(payload);
+    counts[outcome] += 1;
+    if (endedAt !== undefined) next = Math.max(next, endedAt);
+  }
+  if (counts.empty || counts.failed) {
+    console.warn(
+      `Skipped ${counts.empty} conversations with no messages and ${counts.failed} that failed (logged above)`,
+    );
+  }
+  return next;
 }
 ```
 

@@ -2,7 +2,7 @@
 
 **Conversations that pass through an inference router or AI gateway can reach Amplitude Agent Analytics in one of three ways: wrap the client with the Amplitude AI SDK, have the router or gateway export OpenTelemetry GenAI spans, or post `[Agent]` events over the HTTP API.**
 
-Last verified: 2026-10-05. Part of [Agent platforms, tracing tools, and warehouses](./README.md).
+Last verified: 2026-10-06. Part of [Agent platforms, tracing tools, and warehouses](./README.md).
 
 A router picks which model answers each request. Agent Analytics measures whether the answer worked for the user and what it did for your business. Both need the same three facts on every request: who the user is, which conversation the request belongs to, and which agent made it. This page says where each fact goes on each path.
 
@@ -14,7 +14,7 @@ A router picks which model answers each request. Agent Analytics measures whethe
 
 ## Path 1: wrap the client
 
-Point the Amplitude-wrapped OpenAI client at the router's OpenAI-compatible URL, tag the agent with the gateway, and run each request inside an agent session. Fireworks is detected from a `*.fireworks.ai` URL. Other gateways use the same code with the base URL and tag from [Gateway recipes](#gateway-recipes).
+Point the Amplitude-wrapped OpenAI client at the router's OpenAI-compatible URL, tag the agent with the gateway, and run each request inside an agent session. The wrapped client sends an `[Agent] User Message` for each new user message in `messages`, so don't also track it by hand. Fireworks is detected from a `*.fireworks.ai` URL. Other gateways use the same code with the base URL and tag from [Gateway recipes](#gateway-recipes).
 
 Python:
 
@@ -31,8 +31,7 @@ client = wrap(
 agent = ai.agent("support-bot", context={"ingestion_path": "gateway", "gateway": "fireworks"})
 
 def handle_chat(user_id: str, session_id: str, messages: list):
-    with agent.session(user_id=user_id, session_id=session_id).run() as s:
-        s.track_user_message(messages[-1]["content"])
+    with agent.session(user_id=user_id, session_id=session_id):
         response = client.chat.completions.create(model="<router or model ID>", messages=messages)
         return response.choices[0].message.content
 ```
@@ -73,9 +72,16 @@ If Fireworks sits behind your own proxy URL, set `provider: 'fireworks'` on the 
 | Gateway | OpenAI-compatible base URL | `gateway` tag | OTLP export | Notes |
 |---|---|---|---|---|
 | Fireworks | `https://api.fireworks.ai/inference/v1` | `fireworks` | See Path 2 | Provider is detected from the URL and the request ID is captured |
-| OpenRouter | `https://openrouter.ai/api/v1` | `openrouter` | No | Match Amplitude `contentMode` to OpenRouter Privacy Mode, so you do not expect text the gateway stripped |
-| LiteLLM | Your proxy, for example `http://localhost:4000/v1` | `litellm` | Yes | Set `CAPTURE_MESSAGE_CONTENT=true` on the proxy if spans should carry message text |
+| OpenRouter | `https://openrouter.ai/api/v1` | `openrouter` | Partial, see [below](#openrouter-and-litellm-exports) | Match Amplitude `contentMode` to OpenRouter Privacy Mode, so you do not expect text the gateway stripped |
+| LiteLLM | Your proxy, for example `http://localhost:4000/v1` | `litellm` | Partial, see [below](#openrouter-and-litellm-exports) | Wrap the client for conversation IDs; the proxy's spans carry none |
 | Requesty | `https://router.requesty.ai/v1` | `requesty` | No | Wrap the client; there is no exporter |
+
+### OpenRouter and LiteLLM exports
+
+Both can send OpenTelemetry spans to Amplitude's OTLP endpoint, but neither carries all three identity facts from Path 2, so wrapping the client (Path 1) is the complete path for both.
+
+- **OpenRouter** [Broadcast to an OpenTelemetry Collector](https://openrouter.ai/docs/guides/features/broadcast/otel-collector) posts OTLP/HTTP JSON to any URL. Set the endpoint to Amplitude's OTLP URL and the headers to `{"Authorization": "Bearer <Amplitude project API key>"}`. The request's `user` field becomes `user.id` and its `session_id` field becomes `session.id`, and Amplitude reads both as the user and the conversation. Broadcast has no field for the agent ID: custom `trace` keys arrive as `trace.metadata.<key>`, which Amplitude does not read, so the agent is the exporter's `service.name`. Prompt and completion text arrive as `gen_ai.prompt` and `gen_ai.completion` (or `span.input` and `span.output`), which Amplitude does not read as message text. OpenRouter does not document a `gen_ai.operation.name` attribute, and Amplitude classifies a span without one as an `[Agent] Span` named after the span, carrying model, tokens, and cost, not as an `[Agent] AI Response`. Cache-write tokens arrive as `gen_ai.usage.input_tokens.cache_write`, which Amplitude does not read. To get AI Responses, point Broadcast at your own collector and add a [transform processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/transformprocessor) statement `set(span.attributes["gen_ai.operation.name"], "chat") where span.attributes["gen_ai.request.model"] != nil and span.attributes["gen_ai.operation.name"] == nil` before exporting to Amplitude. Send one test request and confirm which event the generation arrives as before relying on it.
+- **LiteLLM** proxy's [OpenTelemetry callback](https://github.com/BerriAI/litellm/blob/main/litellm/integrations/opentelemetry.py) writes request metadata as `metadata.<key>` and has no conversation ID attribute, so every trace becomes its own one-turn session. The end user from the request's `user` field arrives as `metadata.user_api_key_end_user_id`, which Amplitude reads as the user. For message text on the spans, set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` (or `SPAN_AND_EVENT`) on the proxy. `true` means `EVENT_ONLY`, which puts the text only in span events, and Amplitude does not read span events.
 
 Pass the model the gateway actually routes to (`gpt-4o-mini`, `claude-sonnet-4-20250514`) when you choose it. A gateway alias such as `openrouter/auto` has no price, so the SDK omits `[Agent] Cost USD` rather than recording `$0`.
 
@@ -131,7 +137,7 @@ These come from the inference itself, with no change in your application:
 | `gen_ai.response.id` | `[Agent] Provider Request ID`, the router's request ID |
 | `gen_ai.provider.name` | `[Agent] Provider` |
 | `gen_ai.request.model`, `gen_ai.response.model` | `[Agent] Model Name` (the response model wins) |
-| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cost` | Tokens and cost on `[Agent] AI Response` |
+| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cost` | Tokens and cost on `[Agent] AI Response`. `gen_ai.usage.cost` (USD) is an Amplitude receiver extension, not an OpenTelemetry attribute; without it, cost is computed from the model and tokens |
 | `gen_ai.input.messages`, `gen_ai.output.messages` | `[Agent] User Message` and `[Agent] AI Response` text |
 | `gen_ai.tool.name`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` | `[Agent] Tool Call` |
 
@@ -154,7 +160,7 @@ See [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai
 
 ### Example: span
 
-One chat span in OTLP/JSON, as the router would export it:
+One chat span in OTLP/JSON, as the router would export it. The span name follows the [GenAI convention](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md) `{gen_ai.operation.name} {gen_ai.request.model}`:
 
 ```json
 {
@@ -173,7 +179,7 @@ One chat span in OTLP/JSON, as the router would export it:
             {
               "traceId": "5b8efff798038103d269b633813fc60c",
               "spanId": "eee19b7ec3c1b174",
-              "name": "chat glm-5p3",
+              "name": "chat accounts/fireworks/routers/default",
               "kind": 3,
               "startTimeUnixNano": "1759700000000000000",
               "endTimeUnixNano": "1759700001200000000",

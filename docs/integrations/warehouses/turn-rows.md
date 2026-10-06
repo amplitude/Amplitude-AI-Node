@@ -17,11 +17,11 @@ The sample query uses these columns. Your table will differ; map yours in Stage 
 | `model`, `input_tokens`, `output_tokens`, `cost_usd`, `latency_ms` | Response metadata, when recorded |
 | `locale` | A filterable dimension, sent in `[Agent] Context` |
 
-Stage 1b splits each row into a user message (`turn-<n>-user`) and an agent reply (`turn-<n>-response`). A turn with no response, such as the user's last message, produces only the user message.
+Stage 1b splits each row into a user message (`turn-<n>-user`) and an agent reply (`turn-<n>-response`). A turn with no response, such as the user's last message, produces only the user message. If only one of `user_time` and `response_time` is set, both messages use it, so the turn still imports with the user message first.
 
 ## What the sample shows
 
-`sess_1` has two answered turns and a final user message with no reply. Each answered turn is one exchange; tokens, cost, and latency land only on the AI Response.
+`sess_1` has two answered turns and a final user message with no reply. Each answered turn is one exchange; tokens, cost, and latency land only on the AI Response. `sess_2` has an answer with no `response_time`, so the reply takes the user's time.
 
 If your table records tool calls or UI components per turn, add them as extra `UNION ALL` branches in Stage 1b with role `tool` or `span` and an `event_time` between the user and response times.
 
@@ -42,6 +42,8 @@ source AS (
   SELECT 'sess_1' AS session_id, 2 AS turn_index, 'How much is Pro?' AS user_text, '2026-01-15 12:00:30'::TIMESTAMP_NTZ AS user_time, 'Pro is $20 per month.' AS response_text, '2026-01-15 12:00:31'::TIMESTAMP_NTZ AS response_time, 'user_12345' AS end_user_id, 'sales-assistant' AS agent_id, 'claude-sonnet-4' AS model, 160 AS input_tokens, 14 AS output_tokens, 0.0011 AS cost_usd, 1100 AS latency_ms, 'en-US' AS locale
   UNION ALL
   SELECT 'sess_1' AS session_id, 3 AS turn_index, 'Thanks, bye' AS user_text, '2026-01-15 12:00:45'::TIMESTAMP_NTZ AS user_time, CAST(NULL AS STRING) AS response_text, CAST(NULL AS TIMESTAMP_NTZ) AS response_time, 'user_12345' AS end_user_id, 'sales-assistant' AS agent_id, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS input_tokens, CAST(NULL AS BIGINT) AS output_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS BIGINT) AS latency_ms, 'en-US' AS locale
+  UNION ALL
+  SELECT 'sess_2' AS session_id, 1 AS turn_index, 'Do you ship to Canada?' AS user_text, '2026-01-15 12:00:50'::TIMESTAMP_NTZ AS user_time, 'Yes, to every province.' AS response_text, CAST(NULL AS TIMESTAMP_NTZ) AS response_time, 'user_67890' AS end_user_id, 'sales-assistant' AS agent_id, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS input_tokens, CAST(NULL AS BIGINT) AS output_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS BIGINT) AS latency_ms, 'en-CA' AS locale
 ),
 -- Stage 1b (turn-rows): normalize into canonical message rows.
 canonical AS (
@@ -49,7 +51,7 @@ canonical AS (
     session_id,
     'turn-' || CAST(turn_index AS STRING) || '-user' AS message_id,
     'user' AS role,
-    user_time AS event_time,
+    COALESCE(user_time, response_time) AS event_time,
     agent_id,
     end_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
@@ -67,7 +69,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    TO_JSON(OBJECT_CONSTRUCT('locale', locale)) AS context
+    TO_JSON(OBJECT_CONSTRUCT('locale', locale)) AS context,
+    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
   UNION ALL
@@ -75,7 +78,7 @@ canonical AS (
     session_id,
     'turn-' || CAST(turn_index AS STRING) || '-response' AS message_id,
     'assistant' AS role,
-    response_time AS event_time,
+    COALESCE(response_time, user_time) AS event_time,
     agent_id,
     end_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
@@ -93,7 +96,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    TO_JSON(OBJECT_CONSTRUCT('locale', locale)) AS context
+    TO_JSON(OBJECT_CONSTRUCT('locale', locale)) AS context,
+    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
   WHERE response_text IS NOT NULL
 ),
@@ -122,7 +126,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -140,7 +146,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END) IGNORE NULLS
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    DATEADD(hour, settings.settle_hours, s.last_activity) AS import_cursor
+    DATEADD(hour, settings.settle_hours, s.last_change) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),
@@ -234,6 +240,8 @@ source AS (
   SELECT 'sess_1' AS session_id, 2 AS turn_index, 'How much is Pro?' AS user_text, TIMESTAMP '2026-01-15 12:00:30+00' AS user_time, 'Pro is $20 per month.' AS response_text, TIMESTAMP '2026-01-15 12:00:31+00' AS response_time, 'user_12345' AS end_user_id, 'sales-assistant' AS agent_id, 'claude-sonnet-4' AS model, 160 AS input_tokens, 14 AS output_tokens, 0.0011 AS cost_usd, 1100 AS latency_ms, 'en-US' AS locale
   UNION ALL
   SELECT 'sess_1' AS session_id, 3 AS turn_index, 'Thanks, bye' AS user_text, TIMESTAMP '2026-01-15 12:00:45+00' AS user_time, CAST(NULL AS STRING) AS response_text, CAST(NULL AS TIMESTAMP) AS response_time, 'user_12345' AS end_user_id, 'sales-assistant' AS agent_id, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS input_tokens, CAST(NULL AS INT64) AS output_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS INT64) AS latency_ms, 'en-US' AS locale
+  UNION ALL
+  SELECT 'sess_2' AS session_id, 1 AS turn_index, 'Do you ship to Canada?' AS user_text, TIMESTAMP '2026-01-15 12:00:50+00' AS user_time, 'Yes, to every province.' AS response_text, CAST(NULL AS TIMESTAMP) AS response_time, 'user_67890' AS end_user_id, 'sales-assistant' AS agent_id, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS input_tokens, CAST(NULL AS INT64) AS output_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS INT64) AS latency_ms, 'en-CA' AS locale
 ),
 -- Stage 1b (turn-rows): normalize into canonical message rows.
 canonical AS (
@@ -241,7 +249,7 @@ canonical AS (
     session_id,
     'turn-' || CAST(turn_index AS STRING) || '-user' AS message_id,
     'user' AS role,
-    user_time AS event_time,
+    COALESCE(user_time, response_time) AS event_time,
     agent_id,
     end_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
@@ -259,7 +267,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('locale', locale))) AS context
+    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('locale', locale))) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
   UNION ALL
@@ -267,7 +276,7 @@ canonical AS (
     session_id,
     'turn-' || CAST(turn_index AS STRING) || '-response' AS message_id,
     'assistant' AS role,
-    response_time AS event_time,
+    COALESCE(response_time, user_time) AS event_time,
     agent_id,
     end_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
@@ -285,7 +294,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('locale', locale))) AS context
+    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('locale', locale))) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE response_text IS NOT NULL
 ),
@@ -314,7 +324,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -332,7 +344,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END IGNORE NULLS)
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    TIMESTAMP_ADD(s.last_activity, INTERVAL settings.settle_hours HOUR) AS import_cursor
+    TIMESTAMP_ADD(s.last_change, INTERVAL settings.settle_hours HOUR) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),
@@ -429,6 +441,8 @@ source AS (
   SELECT 'sess_1' AS session_id, 2 AS turn_index, 'How much is Pro?' AS user_text, TIMESTAMP '2026-01-15 12:00:30' AS user_time, 'Pro is $20 per month.' AS response_text, TIMESTAMP '2026-01-15 12:00:31' AS response_time, 'user_12345' AS end_user_id, 'sales-assistant' AS agent_id, 'claude-sonnet-4' AS model, 160 AS input_tokens, 14 AS output_tokens, 0.0011 AS cost_usd, 1100 AS latency_ms, 'en-US' AS locale
   UNION ALL
   SELECT 'sess_1' AS session_id, 3 AS turn_index, 'Thanks, bye' AS user_text, TIMESTAMP '2026-01-15 12:00:45' AS user_time, CAST(NULL AS STRING) AS response_text, CAST(NULL AS TIMESTAMP) AS response_time, 'user_12345' AS end_user_id, 'sales-assistant' AS agent_id, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS input_tokens, CAST(NULL AS BIGINT) AS output_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS BIGINT) AS latency_ms, 'en-US' AS locale
+  UNION ALL
+  SELECT 'sess_2' AS session_id, 1 AS turn_index, 'Do you ship to Canada?' AS user_text, TIMESTAMP '2026-01-15 12:00:50' AS user_time, 'Yes, to every province.' AS response_text, CAST(NULL AS TIMESTAMP) AS response_time, 'user_67890' AS end_user_id, 'sales-assistant' AS agent_id, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS input_tokens, CAST(NULL AS BIGINT) AS output_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS BIGINT) AS latency_ms, 'en-CA' AS locale
 ),
 -- Stage 1b (turn-rows): normalize into canonical message rows.
 canonical AS (
@@ -436,7 +450,7 @@ canonical AS (
     session_id,
     'turn-' || CAST(turn_index AS STRING) || '-user' AS message_id,
     'user' AS role,
-    user_time AS event_time,
+    COALESCE(user_time, response_time) AS event_time,
     agent_id,
     end_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
@@ -454,7 +468,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    to_json(named_struct('locale', locale)) AS context
+    to_json(named_struct('locale', locale)) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
   UNION ALL
@@ -462,7 +477,7 @@ canonical AS (
     session_id,
     'turn-' || CAST(turn_index AS STRING) || '-response' AS message_id,
     'assistant' AS role,
-    response_time AS event_time,
+    COALESCE(response_time, user_time) AS event_time,
     agent_id,
     end_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
@@ -480,7 +495,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_name,
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
-    to_json(named_struct('locale', locale)) AS context
+    to_json(named_struct('locale', locale)) AS context,
+    CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE response_text IS NOT NULL
 ),
@@ -509,7 +525,9 @@ sequenced AS (
     LAG(o.role) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (PARTITION BY session_id ORDER BY event_time, role_rank, message_id) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -527,7 +545,7 @@ exchanges AS (
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS exchange_number,
     LAST_VALUE(CASE WHEN s.role = 'user' THEN s.message_id END, TRUE)
       OVER (PARTITION BY session_id ORDER BY row_position ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS parent_message_id,
-    timestampadd(HOUR, settings.settle_hours, s.last_activity) AS import_cursor
+    timestampadd(HOUR, settings.settle_hours, s.last_change) AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),

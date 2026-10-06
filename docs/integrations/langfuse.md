@@ -2,9 +2,9 @@
 
 **Amplitude Agent Analytics can ingest agent conversations traced in Langfuse over the Amplitude HTTP API, with no SDK required.**
 
-Last verified: 2026-09-24. This is an Amplitude-authored guide. Langfuse is a trademark of its owner; this guide is not affiliated with or endorsed by Langfuse. Corrections are welcome as a pull request.
+Last verified: 2026-10-06, against Langfuse documentation only. This is an Amplitude-authored guide. Langfuse is a trademark of its owner; this guide is not affiliated with or endorsed by Langfuse. Corrections are welcome as a pull request.
 
-**Provenance of Langfuse details.** The observations API described here comes from Langfuse's public OpenAPI specification (`https://cloud.langfuse.com/generated/api/openapi.yml`) and API documentation, read in September 2026. It was not checked against a live Langfuse account for this guide. Treat every Langfuse field name below as a starting point, and confirm it against a real response in Phase 2.
+**Provenance of Langfuse details.** The observations API described here comes from Langfuse's public OpenAPI specification (`https://cloud.langfuse.com/generated/api/openapi.yml`) and API documentation, last read in October 2026. It was not checked against a live Langfuse account for this guide. Treat every Langfuse field name below as a starting point, and confirm it against a real response in Phase 2.
 
 ---
 
@@ -31,10 +31,10 @@ scheduled job (for example, hourly)
 - Every conversation as an Agent Analytics session, turn by turn, in the session viewer.
 - Automatic quality signals on every closed session: task completion, response quality, user friction, and more.
 - Tool calls with name, success, latency, and, unless you send metadata only, input and output.
-- Model, token counts, and cost from `GENERATION` observations. Cost is the value Langfuse calculated or ingested; Amplitude does not recompute it.
+- Model, token counts, and cost from the observations that report them (in Langfuse, `GENERATION` and `EMBEDDING`). Cost is the value Langfuse calculated or ingested; Amplitude does not recompute it.
 - Agent sessions joined to your product analytics through the same user ID.
 
-Langfuse scores (`GET /api/public/v2/scores`) are not forwarded by this adapter. If the user wants them on a production conversation, map each session-level score to a `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`. Follow the harness field map and the CI procedure on that page.
+Langfuse scores (`GET /api/public/v3/scores`) are not forwarded by this adapter. If the user wants them on a production conversation, map each session-level score to a `ForwarderScore`. An offline bake-off is the document in [offline-eval.md](./offline-eval.md), posted with the project API key and secret key. It is not `[Agent]` events and not a `ForwarderScore`. Follow the harness field map and the CI procedure on that page.
 
 ### What your traces must already contain
 
@@ -42,14 +42,14 @@ This job forwards what is already in Langfuse; it cannot add what the applicatio
 
 - **Conversation ID:** Langfuse's built-in `sessionId`, if the application sets it on its traces.
 - **User ID:** Langfuse's built-in `userId`, if set. It must be the same ID your product analytics uses.
-- **Message text:** the root trace's input and output, exactly as logged. If that is a full prompt rather than what the user typed and saw, Phase 2 adjusts the extraction. Content Langfuse masked stays masked.
+- **Message text:** each trace's root observation input and output, exactly as logged. If that is a full prompt rather than what the user typed and saw, Phase 2 adjusts the extraction. Content Langfuse masked stays masked.
 
 Conversations missing a conversation ID or a user ID are skipped, and the job reports how many. Past conversations can be forwarded too, as far back as Langfuse retains them.
 
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A Langfuse public key and secret key for the project, and the host: `https://cloud.langfuse.com` (EU), `https://us.cloud.langfuse.com` (US), or your self-hosted URL.
+2. A Langfuse public key and secret key for the project, and the host: `https://cloud.langfuse.com` (EU), `https://us.cloud.langfuse.com` (US), `https://jp.cloud.langfuse.com` (Japan), `https://hipaa.cloud.langfuse.com` (HIPAA), or your self-hosted URL.
 3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
@@ -76,9 +76,11 @@ Stop and ask the user for these. Never infer them from field names:
 Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language.
-- Whether Amplitude and Langfuse credentials are available as configuration (never hard-code them).
-- Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`).
-- Whether the project sets `sessionId` on its traces, and whether its Langfuse version serves `/api/public/v2/observations`. Self-hosted versions that predate it need an upgrade; the v3 `/api/public/traces` and `/api/public/observations` endpoints are deprecated and scheduled for removal on Langfuse Cloud on November 16, 2026.
+- Whether Amplitude and Langfuse credentials are available as configuration: `AMPLITUDE_API_KEY`, `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Never hard-code them.
+- Whether the user is on Amplitude's EU data center. If so, set `AMPLITUDE_ENDPOINT=https://api.eu.amplitude.com/2/httpapi`.
+- Whether any user IDs are shorter than 5 characters. If so, set `AMPLITUDE_MIN_ID_LENGTH`; otherwise Amplitude rejects those sessions.
+- Whether the project sets `sessionId` on its traces, and whether its Langfuse deployment serves `/api/public/v2/observations`. Langfuse Cloud does. Self-hosted Langfuse v3 does not; Langfuse points it to the older `/api/public/observations` read endpoint, so upgrade to Langfuse v4 or port `listLangfuseObservations`. On Langfuse Cloud the deprecated read endpoints (`/api/public/traces`, `/api/public/observations`, `/api/public/sessions`) are served only until November 16, 2026.
+- Which Langfuse SDK or exporter sends the traces. Langfuse documents that data from Python SDK before 4.7.0, JS/TS SDK before 5.4.0, or OpenTelemetry exporters without the `x-langfuse-ingestion-version: 4` header can reach the v2 observations API up to 15 minutes late. The adapter never settles a session in less than 20 minutes (`MIN_SETTLE_MS`) for this reason.
 - Whether you may call the observations API once, for one known session, to get a real response.
 
 **PAUSE.** Show the findings and ask the user to confirm them, plus the do-not-guess answers.
@@ -90,7 +92,7 @@ Fetch the observations for one real session with `fields=core,basic,io,model,usa
 - **Exchanges.** The adapter treats each trace in a session as one exchange: the root observation's `input` is the user message and its `output` is the reply. If the application logs a whole conversation in one trace, or several traces per user message, change the grouping.
 - **Text.** `input` and `output` arrive as raw strings, often JSON. `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, and OpenAI-style `choices`. Check it returns the text the user actually typed and saw, not a prompt template or a system message.
 - **Tool calls.** `TOOL` observations become tool calls. If the application logs tools as `SPAN` observations with a naming convention, adjust the filter.
-- **Usage and cost.** The adapter sums `usageDetails.input`, `usageDetails.output`, and `costDetails.total` over the exchange's `GENERATION` observations. Confirm these keys in the response; some integrations use other usage keys.
+- **Usage and cost.** Langfuse stores usage as mutually exclusive buckets: `input` excludes every `input_*` key (for example `input_cached_tokens`), `output` excludes every `output_*` key (for example `output_reasoning_tokens`), and `total` is their sum. So the adapter reports input tokens as `input` plus every `input_*` key, and output tokens likewise, never adding `total`. Cost is `costDetails.total`, or `totalCost` when there is no cost breakdown; a zero `totalCost` with no breakdown counts as unknown. Both are summed over every observation in the exchange that reports usage or cost, whatever its type, except an observation whose descendant also reports usage, which is treated as a rollup so tokens are not counted twice. Confirm the keys in the response: usage ingested as flat keys is stored unchanged, so a key such as `cache_read_input_tokens` that does not start with `input_` is not counted.
 - **Spans.** Only the observation types the user chose in do-not-guess answer 3 go in `spanTypes`.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
@@ -113,7 +115,8 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 5: Ship
 
-- Langfuse rate-limits its public API per plan; the adapter backs off on `429`. Keep the schedule no more frequent than the settle window needs.
+- Langfuse rate-limits its public API per organization and plan, and returns `429` with a `Retry-After` header. The adapter waits that many seconds (or backs off exponentially, up to 60 seconds) and retries a `429` or `5xx` up to 6 times; after that the run stops without returning a watermark, so the next run reads the same window again. Keep the schedule no more frequent than the settle window needs.
+- One session that cannot be mapped, or that Amplitude rejects with a `4xx` other than `429`, is logged and counted as failed; the run continues. An Amplitude outage stops the run.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 
@@ -149,13 +152,13 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
 | `[Agent] Session End` | Once, last, when the conversation is finished | `[Agent] Trace ID` of the final exchange |
 
-Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, and `[Agent] Context` when you have dimensions.
+Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `langfuse`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
 
 ### Example: one complete session
 
-A two-exchange session with a tool call, as produced by `toAgentEvents` from `normalizeLangfuseSession`. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
+A two-exchange session with a tool call, as produced by `toAgentEvents` from `normalizeLangfuseSession`. In Langfuse, the first exchange's generation reports `input: 20` and `input_cached_tokens: 100`, and the second's reports `output: 5` and `output_reasoning_tokens: 3`, so the replies carry 120 input and 8 output tokens. This is the body's `events` array; the request is `{ "api_key": "...", "events": [...] }`.
 
 ```json
 [
@@ -169,6 +172,9 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langfuse",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-1",
       "[Agent] Turn ID": 1,
@@ -189,6 +195,9 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langfuse",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-1",
       "[Agent] Turn ID": 2,
@@ -198,7 +207,7 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Model Name": "gpt-4o-mini",
       "[Agent] Input Tokens": 120,
       "[Agent] Output Tokens": 14,
-      "[Agent] Cost USD": 3e-05,
+      "[Agent] Cost USD": 0.00003,
       "$llm_message": {
         "text": "Let me check. What is the order number?"
       }
@@ -214,6 +223,9 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langfuse",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-2",
       "[Agent] Turn ID": 3,
@@ -234,6 +246,9 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langfuse",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-2",
       "[Agent] Turn ID": 4,
@@ -258,6 +273,9 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langfuse",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-2",
       "[Agent] Turn ID": 5,
@@ -267,7 +285,7 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Model Name": "gpt-4o-mini",
       "[Agent] Input Tokens": 160,
       "[Agent] Output Tokens": 8,
-      "[Agent] Cost USD": 3e-05,
+      "[Agent] Cost USD": 0.00003,
       "$llm_message": {
         "text": "It arrives Thursday."
       }
@@ -283,6 +301,9 @@ A two-exchange session with a tool call, as produced by `toAgentEvents` from `no
       "[Agent] Agent ID": "order-support",
       "[Agent] Runtime": "custom",
       "[Agent] SDK Version": "http-forwarder/1.0",
+      "[Agent] Ingestion Path": "http_forwarder",
+      "[Agent] Source": "langfuse",
+      "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"platform\":\"langfuse\",\"environment\":\"production\"}",
       "[Agent] Trace ID": "sess-1:trace-2"
     }
@@ -639,6 +660,7 @@ Field names follow Langfuse's public OpenAPI specification. Confirm each against
 import {
   send,
   toAgentEvents,
+  type AgentEvent,
   type ForwarderMessage,
   type ForwarderSpan,
   type ForwarderToolCall,
@@ -664,6 +686,7 @@ export interface LangfuseObservation {
   model?: string | null;
   usageDetails?: Record<string, number> | null;
   costDetails?: Record<string, number> | null;
+  totalCost?: number | null;
 }
 
 interface ObservationsPage {
@@ -671,28 +694,38 @@ interface ObservationsPage {
   meta?: { cursor?: string | null };
 }
 
-/** EU: https://cloud.langfuse.com, US: https://us.cloud.langfuse.com, or your self-hosted URL. */
+/**
+ * EU: https://cloud.langfuse.com, US: https://us.cloud.langfuse.com, Japan: https://jp.cloud.langfuse.com,
+ * HIPAA: https://hipaa.cloud.langfuse.com, or your self-hosted URL.
+ */
 const LANGFUSE_HOST = process.env.LANGFUSE_HOST ?? 'https://cloud.langfuse.com';
+const MAX_RETRIES = 6;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Langfuse Cloud caps a response at 5 MB, so pages that carry input and output stay small. */
+const pageLimit = (fields: string | undefined) => ((fields ?? '').split(',').includes('io') ? '100' : '1000');
 
 export async function* listLangfuseObservations(
   params: Record<string, string>,
 ): AsyncGenerator<LangfuseObservation> {
   const auth = btoa(`${process.env.LANGFUSE_PUBLIC_KEY ?? ''}:${process.env.LANGFUSE_SECRET_KEY ?? ''}`);
   let cursor: string | undefined;
-  for (;;) {
-    const query = new URLSearchParams({ limit: '1000', ...params });
+  for (let attempt = 0; ; ) {
+    const query = new URLSearchParams({ limit: pageLimit(params.fields), ...params });
     if (cursor) query.set('cursor', cursor);
     const response = await fetch(`${LANGFUSE_HOST}/api/public/v2/observations?${query}`, {
       headers: { Authorization: `Basic ${auth}` },
     });
-    if (response.status === 429 || response.status >= 500) {
-      await sleep(Number(response.headers.get('retry-after') ?? 5) * 1000);
+    if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+      const retryAfter = Number(response.headers.get('retry-after'));
+      await sleep(retryAfter > 0 ? retryAfter * 1000 : Math.min(60_000, 1000 * 2 ** attempt));
+      attempt += 1;
       continue;
     }
     if (!response.ok) {
       throw new Error(`Langfuse returned ${response.status}: ${await response.text()}`);
     }
+    attempt = 0;
     const page = (await response.json()) as ObservationsPage;
     for (const observation of page.data) yield observation;
     cursor = page.meta?.cursor ?? undefined;
@@ -753,6 +786,33 @@ export interface LangfuseMappingOptions {
 const time = (value: string) => Date.parse(value);
 const sum = (values: (number | undefined)[]) =>
   values.some((v) => v !== undefined) ? values.reduce<number>((a, v) => a + (v ?? 0), 0) : undefined;
+const isRoot = (o: LangfuseObservation) => !!o.isRootObservation || !o.parentObservationId;
+
+/** Langfuse usage keys are exclusive buckets: `input` excludes `input_*` (cached, audio, ...); `total` is their sum. */
+const tokens = (usage: Record<string, number> | null | undefined, bucket: 'input' | 'output') =>
+  sum(
+    Object.entries(usage ?? {})
+      .filter(([key]) => key === bucket || key.startsWith(`${bucket}_`))
+      .map(([, count]) => count),
+  );
+const filled = (record: Record<string, number> | null | undefined) => !!record && Object.keys(record).length > 0;
+const reportsUsage = (o: LangfuseObservation) =>
+  filled(o.usageDetails) || filled(o.costDetails) || (o.totalCost ?? 0) > 0;
+const costOf = (o: LangfuseObservation) => {
+  const total = o.totalCost ?? 0;
+  return o.costDetails?.total ?? (total > 0 ? total : undefined);
+};
+
+/** Observations that report usage or cost, minus any ancestor of another one: that ancestor is a rollup. */
+function usageOwners(items: LangfuseObservation[]): LangfuseObservation[] {
+  const reporting = items.filter(reportsUsage);
+  const parentOf = new Map(items.map((o) => [o.id, o.parentObservationId ?? undefined]));
+  const rollups = new Set<string>();
+  for (const o of reporting) {
+    for (let p = parentOf.get(o.id); p && !rollups.has(p); p = parentOf.get(p)) rollups.add(p);
+  }
+  return reporting.filter((o) => !rollups.has(o.id));
+}
 
 /** One Langfuse session (every observation that has its sessionId) -> one conversation. Each trace is one exchange. */
 export function normalizeLangfuseSession(
@@ -768,7 +828,7 @@ export function normalizeLangfuseSession(
   const traces = [...byTrace.entries()]
     .map(([traceId, items]) => {
       const sorted = items.sort((a, b) => time(a.startTime) - time(b.startTime));
-      const root = sorted.find((o) => o.isRootObservation || !o.parentObservationId) ?? sorted[0];
+      const root = sorted.find(isRoot) ?? sorted[0];
       return { traceId, items: sorted, root };
     })
     .filter((t): t is { traceId: string; items: LangfuseObservation[]; root: LangfuseObservation } => !!t.root)
@@ -777,7 +837,8 @@ export function normalizeLangfuseSession(
   const messages: ForwarderMessage[] = [];
   for (const { traceId, items, root } of traces) {
     const start = time(root.startTime);
-    const end = time(root.endTime ?? items[items.length - 1]?.endTime ?? root.startTime);
+    const ends = items.flatMap((o) => (o.endTime ? [time(o.endTime)] : []));
+    const end = root.endTime ? time(root.endTime) : ends.length ? Math.max(...ends) : start;
     const userText = textFrom(root.input, 'user');
     if (userText) messages.push({ id: `${traceId}:user`, role: 'user', text: userText, timestamp: start });
 
@@ -803,6 +864,7 @@ export function normalizeLangfuseSession(
         latencyMs: o.endTime ? time(o.endTime) - time(o.startTime) : undefined,
       }));
     const generations = items.filter((o) => o.type === 'GENERATION');
+    const owners = usageOwners(items);
     messages.push({
       id: `${traceId}:reply`,
       role: 'assistant',
@@ -811,9 +873,9 @@ export function normalizeLangfuseSession(
       toolCalls,
       spans,
       model: generations[generations.length - 1]?.model ?? undefined,
-      inputTokens: sum(generations.map((g) => g.usageDetails?.input)),
-      outputTokens: sum(generations.map((g) => g.usageDetails?.output)),
-      costUsd: sum(generations.map((g) => g.costDetails?.total)),
+      inputTokens: sum(owners.map((o) => tokens(o.usageDetails, 'input'))),
+      outputTokens: sum(owners.map((o) => tokens(o.usageDetails, 'output'))),
+      costUsd: sum(owners.map(costOf)),
     });
   }
 
@@ -828,59 +890,132 @@ export function normalizeLangfuseSession(
   };
 }
 
-/** Only sessions with no new observations for this long are treated as finished. */
+/** Langfuse can serve observations from older SDKs and OpenTelemetry exporters up to 15 minutes late. */
+export const MIN_SETTLE_MS = 20 * 60 * 1000;
+/** Only sessions with no new observations for this long are treated as finished. Never below MIN_SETTLE_MS. */
 const SETTLE_MS = 2 * 60 * 60 * 1000;
+/** A session's earlier traces are read back this far before its first trace in the window. */
+const SESSION_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const FIELDS = 'core,basic,io,model,usage';
 
 const redact = (text: string): string => text; // replace with your PII redaction
 
-/** Forwards sessions active after `watermark` (ISO 8601) that have since settled. Returns the next watermark. */
-export async function syncLangfuse(watermark: string): Promise<string> {
-  const until = new Date(Date.now() - SETTLE_MS).toISOString();
-  const sessionIds = new Set<string>();
+const MAPPING: LangfuseMappingOptions = {
+  agentId: 'TODO-confirmed-agent-id',
+  resolveUserId: (root) => root.userId ?? undefined, // TODO: confirm this matches product analytics
+};
+
+type Outcome = 'sent' | 'no_identity' | 'empty' | 'failed';
+
+const amplitude = () => ({
+  apiKey: process.env.AMPLITUDE_API_KEY ?? '',
+  /** EU data residency: https://api.eu.amplitude.com/2/httpapi */
+  endpoint: process.env.AMPLITUDE_ENDPOINT || undefined,
+  /** Set if your user IDs are shorter than 5 characters. */
+  minIdLength: Number(process.env.AMPLITUDE_MIN_ID_LENGTH) || undefined,
+});
+
+/** A rejection that retrying won't fix. Anything else (an outage) stops the run. */
+const isPermanent = (error: unknown) =>
+  /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
+
+async function forward(
+  sessionId: string,
+  observations: LangfuseObservation[],
+  mapping: LangfuseMappingOptions,
+): Promise<Outcome> {
+  let events: AgentEvent[];
+  try {
+    const conversation = normalizeLangfuseSession(sessionId, observations, mapping);
+    if (!conversation.userId && !conversation.deviceId) return 'no_identity';
+    events = toAgentEvents(conversation, { redact, source: 'langfuse' });
+  } catch (error) {
+    console.error(`Session ${sessionId} could not be mapped:`, error);
+    return 'failed';
+  }
+  if (events.length === 0) return 'empty';
+  if (process.env.AMPLITUDE_DRY_RUN) {
+    console.log(JSON.stringify(events, null, 2));
+    return 'sent';
+  }
+  try {
+    await send(events, amplitude());
+  } catch (error) {
+    if (!isPermanent(error)) throw error;
+    console.error(`Session ${sessionId} was rejected by Amplitude:`, error);
+    return 'failed';
+  }
+  return 'sent';
+}
+
+const iso = (ms: number) => new Date(ms).toISOString();
+
+/**
+ * Forwards sessions with a trace that started at or after `watermark` (ISO 8601) and that have since
+ * settled. Returns the next watermark: no later than the last trace start of any session that was still
+ * active with no newer trace, so the next run reads that session again.
+ */
+export async function syncLangfuse(
+  watermark: string,
+  mapping: LangfuseMappingOptions = MAPPING,
+): Promise<string> {
+  if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
+    throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
+  }
+  const now = Date.now();
+  const until = now - Math.max(SETTLE_MS, MIN_SETTLE_MS);
+  const traceStarts = new Map<string, { first: number; last: number }>();
   let tracesWithoutSession = 0;
-  let sessionsWithoutUser = 0;
   for await (const o of listLangfuseObservations({
     fields: 'core,basic',
     isRootObservation: 'true',
     fromStartTime: watermark,
-    toStartTime: until,
+    toStartTime: iso(until),
   })) {
-    if (o.sessionId) sessionIds.add(o.sessionId);
-    else tracesWithoutSession += 1;
+    if (!o.sessionId) {
+      tracesWithoutSession += 1;
+      continue;
+    }
+    const at = time(o.startTime);
+    const seen = traceStarts.get(o.sessionId);
+    traceStarts.set(o.sessionId, { first: Math.min(seen?.first ?? at, at), last: Math.max(seen?.last ?? at, at) });
   }
 
-  for (const sessionId of sessionIds) {
+  let next = until;
+  const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0, active: 0 };
+  for (const [sessionId, { first, last }] of traceStarts) {
     const observations: LangfuseObservation[] = [];
-    for await (const o of listLangfuseObservations({ fields: FIELDS, sessionId })) observations.push(o);
-    // Still active: a later run finds it again through its newer observations.
-    if (observations.some((o) => time(o.startTime) >= Date.parse(until))) continue;
-
-    const conversation = normalizeLangfuseSession(sessionId, observations, {
-      agentId: 'TODO-confirmed-agent-id',
-      resolveUserId: (root) => root.userId ?? undefined, // TODO: confirm this matches product analytics
-    });
-    if (!conversation.userId) {
-      sessionsWithoutUser += 1;
+    for await (const o of listLangfuseObservations({
+      fields: FIELDS,
+      sessionId,
+      fromStartTime: iso(first - SESSION_LOOKBACK_MS),
+      toStartTime: iso(now),
+    })) {
+      observations.push(o);
+    }
+    const newer = observations.filter((o) => time(o.startTime) >= until);
+    if (newer.length) {
+      counts.active += 1;
+      // A newer trace brings the session back in a later window. Without one, hold the watermark.
+      if (!newer.some(isRoot)) next = Math.min(next, last);
       continue;
     }
-    const events = toAgentEvents(conversation, { redact, source: 'langfuse' });
-    if (process.env.AMPLITUDE_DRY_RUN) {
-      console.log(JSON.stringify(events, null, 2));
-      continue;
-    }
-    await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
+    counts[await forward(sessionId, observations, mapping)] += 1;
   }
-  if (tracesWithoutSession || sessionsWithoutUser) {
+  if (tracesWithoutSession || counts.no_identity || counts.empty || counts.failed || counts.active) {
     console.warn(
-      `Skipped ${tracesWithoutSession} traces without a sessionId and ${sessionsWithoutUser} sessions without a user ID`,
+      `Skipped ${tracesWithoutSession} traces without a sessionId, ${counts.no_identity} sessions without a user ID, ${counts.empty} with no messages, and ${counts.failed} that failed (logged above); ${counts.active} still active`,
     );
   }
-  return until;
+  return iso(next);
 }
 ```
 
-**Why the settle window.** Langfuse has no "conversation finished" signal. Forwarding only sessions with no observations newer than `SETTLE_MS` means they are finished before Session End is sent. If a session resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
+**Why the settle window.** Langfuse has no "conversation finished" signal. Forwarding only sessions with no observations newer than `SETTLE_MS` means they are finished before Session End is sent. If a session resumes after it was forwarded, the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours. Never lower it below `MIN_SETTLE_MS` (20 minutes): Langfuse documents that observations from older SDKs and from OpenTelemetry exporters without `x-langfuse-ingestion-version: 4` can appear in the v2 observations API up to 15 minutes late, and a session settled before they appear would be forwarded without them.
+
+**Why the watermark can stay behind.** A session is found through its traces' root observations. If a session's last trace started before the window's end but is still running, the session is skipped as active, and no later root brings it back. So `syncLangfuse` returns a watermark no later than that trace's start, and the next run reads it again. Sessions after it in the window are read again too; they deduplicate, because every event ID is derived from Langfuse's IDs.
+
+**Bounded reads.** Langfuse recommends bounding every request with `fromStartTime` and `toStartTime`. Discovery reads one window of root observations, 1,000 per page with `fields=core,basic`. Each session is read from `SESSION_LOOKBACK_MS` (7 days) before its first trace in the window up to now, 100 per page because pages with `io` carry full input and output and Langfuse Cloud caps a response at 5 MB. A conversation whose earlier traces started more than 7 days before is forwarded without them; raise `SESSION_LOOKBACK_MS` for longer-lived conversations.
 
 ### Privacy
 
@@ -929,6 +1064,9 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | Conversations missing from Amplitude, and a "Skipped" warning in the job log | They had no conversation ID or no user ID in the source; log the field in the application |
 | No sessions found | Traces have no `sessionId`, or the watermark window has no root observations |
 | `404` from `/api/public/v2/observations` | Self-hosted Langfuse predates the v2 API; upgrade |
+| Run stops with `Langfuse returned 429` | Retries ran out on the organization's rate limit; run less often, or ask Langfuse for a higher limit |
+| Token counts lower than Langfuse shows | Usage is stored under flat keys that do not start with `input_` or `output_`; map them in `tokens` |
+| Sessions missing their latest messages | The settle window is shorter than ingestion delay plus quiet time; raise `SETTLE_MS` |
 | Tool calls missing | Tools are logged as another observation type; adjust the filter in `normalizeLangfuseSession` |
 | Replies show JSON instead of text | `textFrom` does not recognize the payload shape; extend it |
 
