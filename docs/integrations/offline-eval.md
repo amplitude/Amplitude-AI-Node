@@ -393,7 +393,7 @@ The response to a POST:
 
 The same key with the same document returns the existing `result_id` and `replayed: true`. A different document under that key returns 409. The run commits whole or not at all, and a rejected request does not use up the key. The idempotency hash covers the document as sent, so changing only the prompt text is still a conflict.
 
-DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that one request, including a key that contains `/`. For a chunked run that is one chunk, so to remove the whole run, send one DELETE per chunk's `idempotency_key`. Neither SDK has a delete function. Deleting a key also frees it, so a changed document can be posted under it. A DELETE that returns 409 `result_in_use` leaves the targeted result in place.
+DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that one request, including a key that contains `/`. For a chunked run that is one chunk, so to remove the whole run, send one DELETE per chunk's `idempotency_key`. Neither SDK has a delete function. Deleting a key also frees it, so a changed document can be posted under it. A result is in use once an Amplitude offline-eval report has read one of its arms: the report keeps a reference to each arm it scored, and the database refuses to delete an arm a report still references. That DELETE returns 409 `result_in_use` and leaves the whole request in place, so the key stays taken. Post the changed document under a new key instead. A key that holds nothing returns 404 `not_found`.
 
 | Status | Meaning | Retry |
 |---|---|---|
@@ -401,16 +401,17 @@ DELETE `/v1/agent-analytics/offline-eval-results?idempotency_key=` removes that 
 | 401 | Missing or wrong API key or secret key | No |
 | 403 | `operation_not_enabled`: Amplitude has turned off uploads for the organization | No |
 | 409 | The idempotency key already holds a different document (`idempotency_conflict`), is already used by an Amplitude-written result (`idempotency_key_in_use`), or a chunk disagrees with its group or the group is already full (`group_conflict`) | No |
-| 409 (DELETE) | `result_in_use`: the result is in use, so it was not deleted | No |
+| 404 (DELETE) | `not_found`: no result holds that key | No |
+| 409 (DELETE) | `result_in_use`: a saved report read this result, so it was not deleted | No |
 | 411 | No `Content-Length` | No |
-| 413 | The body is over 8 MB; split it into chunks | No |
+| 413 | The body is over 8 MB; split it into chunks. `group_too_large`: the group would pass 50 chunks or 500,000 labels | No |
 | 415 | The body was compressed | No |
 | 429 | Rate limited; honor `Retry-After` | Yes, at most three times |
 | 503 | Temporarily unavailable; honor `Retry-After` | Yes, at most three times |
 
 ### Large runs
 
-A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk. A `metadata` chunk still sends the same `prompt_text`: the text is dropped after the prompt hash is taken, and a missing prompt is a different hash. A `chunk_index` greater than or equal to `chunk_count` is 400 `chunk_out_of_range`, including on the first request. 409 `group_conflict` is the group already holding `chunk_count` chunks, or a later chunk that repeats a row id, a session id, or a chunk index, or that disagrees with the chunks already stored.
+A typical bake-off is about 1 MB. For a larger run, send several uncompressed requests, each under 8 MB, that share a `group_id`, with `chunk_index` and `chunk_count` set. Each chunk carries every arm for its slice of rows, and each chunk has its own `idempotency_key` (for example `experiment+sha+chunkIndex`). Repeat the same arms, baseline, evaluators, `chunk_count`, dataset name, and source on every chunk. A `metadata` chunk still sends the same `prompt_text`: the text is dropped after the prompt hash is taken, and a missing prompt is a different hash. A `chunk_index` greater than or equal to `chunk_count` is 400 `chunk_out_of_range`, including on the first request. A group holds at most 50 chunks and 500,000 labels; a chunk past either is 413 `group_too_large`. 409 `group_conflict` is the group already holding `chunk_count` chunks, or a later chunk that repeats a row id, a session id, or a chunk index, or that disagrees with the chunks already stored.
 
 ### Rate limits
 
