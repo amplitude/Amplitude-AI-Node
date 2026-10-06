@@ -14,10 +14,10 @@ Last verified: 2026-10-06. This is an Amplitude-authored guide. Fin and Intercom
 
 ### What this is
 
-Fin answers your customers. Amplitude Agent Analytics measures whether those conversations worked for the user and what they did for your business. This guide is the recipe for getting Fin conversations into Agent Analytics: a scheduled job, running in your infrastructure, that finds conversations Fin took part in, retrieves each transcript from the Intercom API, turns it into `[Agent]` events, and posts them to the Amplitude HTTP API. An optional webhook forwards each conversation as soon as it closes.
+Fin answers your customers. Amplitude Agent Analytics measures whether those conversations worked for the user and what they did for your business. This guide is the recipe for getting Fin conversations into Agent Analytics: a scheduled job, running in your infrastructure, that finds conversations Fin took part in, retrieves each transcript from the Intercom API, turns it into `[Agent]` events, and posts them to the Amplitude HTTP API. An optional webhook queues each conversation when it closes and forwards it once it has settled; the scheduled job remains the source of truth.
 
 ```text
-scheduled job (for example, hourly)          optional: conversation.admin.closed webhook
+scheduled job (for example, hourly)          optional: conversation.admin.closed webhook (deferred)
   -> POST /conversations/search   conversations Fin took part in, updated in a time window
   -> GET  /conversations/{id}     the full transcript, as plain text
   -> normalize(conversation)      Intercom fields -> one neutral conversation shape
@@ -36,7 +36,7 @@ scheduled job (for example, hourly)          optional: conversation.admin.closed
 
 Model, token, and cost data are not in the Intercom API, so those fields stay empty rather than estimated. Fin's actions arrive without their inputs and outputs, which Intercom does not expose.
 
-**The session ends at the handoff.** When a human teammate replies, the rest of the conversation is the teammate's work, not Fin's. The adapter forwards everything up to the first teammate reply, sets `handed_off: true` in context, and counts what it dropped. A CSAT rating on a handed-off conversation rates the teammate, so the adapter also sets `csat_after_handoff: true`.
+**The session ends at the handoff.** When a human teammate replies, the rest of the conversation is the teammate's work, not Fin's. The adapter forwards everything up to the first teammate reply (any part with a body from an admin who is neither Fin nor a workflow bot or Operator), sets `handed_off: true` in context, and counts what it dropped. A CSAT rating on a handed-off conversation rates the teammate, so the adapter also sets `csat_after_handoff: true`.
 
 ### What you need before starting
 
@@ -71,7 +71,9 @@ Find out and print:
 
 - Whether a scheduler exists in this codebase (cron, a job queue, a workflow engine) and its runtime and language. For the webhook, whether an HTTPS endpoint can receive Intercom's requests with the raw body intact.
 - Whether Amplitude and Intercom credentials are available as configuration (never hard-code them).
-- Whether the user is on Amplitude's EU data center (use `https://api.eu.amplitude.com/2/httpapi`), and which Intercom region the workspace is in (set `INTERCOM_API`).
+- Whether the user is on Amplitude's EU data center. If so, set `AMPLITUDE_ENDPOINT=https://api.eu.amplitude.com/2/httpapi`.
+- Whether any user IDs are shorter than 5 characters. If so, set `AMPLITUDE_MIN_ID_LENGTH`; otherwise Amplitude rejects those conversations.
+- Which Intercom region the workspace is in (set `INTERCOM_API`).
 - Whether a real retrieved conversation that Fin took part in is available, or whether you may search and retrieve one.
 
 **PAUSE.** Show the findings and ask the user to confirm them, plus the four do-not-guess answers.
@@ -82,8 +84,12 @@ Retrieve one real conversation Fin took part in, with `display_as=plaintext`. Co
 
 - **Fin's parts.** The adapter treats a part as Fin's when its author has `from_ai_agent: true` or `is_ai_answer: true`. Do not use `author.type == "bot"` alone: workflow bots use it too. Confirm Fin's replies carry one of the two flags.
 - **The opening message.** It is in `source`, not in `conversation_parts`. The adapter classifies it with the same author rules as parts. Confirm the first user message appears.
-- **Actions.** Fin's actions arrive as `custom_action_started` and `custom_action_finished` parts with `event_details.action.name` and `result`. The adapter pairs them by name and attaches them to Fin's next reply. If the workspace's actions appear as other part types, map them the same way.
-- **Handoff.** The first `comment` part from an `admin` author without the Fin flags is a teammate reply. Confirm that teammate replies, not Fin's, look like that in this workspace.
+- **Messages of any part type.** A part with a body from a contact (`user` or `lead`) or from Fin is a message, whatever its `part_type`. Intercom's examples show a contact replying to a closed conversation as `part_type: open` and a teammate replying and closing as `part_type: close`, both with a body. Confirm that no contact message or Fin reply is missing.
+- **Actions.** Actions arrive as `custom_action_started` and `custom_action_finished` parts with `event_details.action.name` and `result`. The adapter pairs them by name and attaches them to Fin's next reply in the same exchange. If no Fin reply follows before the contact's next message, the handoff, or the end, they stay on the exchange's last Fin reply when that reply is not earlier than them; otherwise they are counted in context as `actions_without_reply`. Only actions authored by Fin, a workflow bot, or Operator count as Fin's (`isFinAction`); Intercom's only documented example is authored by an `admin`, which the adapter reads as a teammate's action and skips. Check who authors Fin's actions in this workspace, and widen `isFinAction` if they are attributed to an admin. If the workspace's actions appear as other part types, map them the same way.
+- **Handoff.** The first part with a body, of any `part_type` except `note`, from an `admin` who is not Fin, not a workflow bot, and not Operator is a teammate reply. Confirm that teammate replies, not Fin's, look like that in this workspace.
+- **Operator and workflow messages.** Workflows post as `type: bot`, and Intercom's Operator posts as `type: admin` with the name `Operator` and an `operator+...@intercom.io` email. Neither is a handoff, and neither is sent as Fin's reply (`isAutomated`). Confirm the workflow messages in this workspace match one of the two; if a workflow posts as another admin, add that admin to `isAutomated`, or every conversation it touches is cut short as handed off.
+- **Long conversations.** Retrieve returns at most 500 parts, the most recent ones, so the oldest are missing from longer conversations. The adapter still forwards them, flagged `parts_truncated: true` (when 500 parts came back, or `conversation_parts.total_count` or `statistics.count_conversation_parts` is above 500), and counts them in the job's warning line. A handoff inside the missing range cannot be detected; exclude flagged sessions from Fin-only analysis, or skip them if that matters more than coverage.
+- **Ratings.** `conversation_rating.created_at` is when the rating was requested; the adapter times CSAT at `updated_at`, falling back to `created_at`.
 - **Closing.** Check whether Fin-resolved and abandoned conversations end up `closed`, or stay `open` or `snoozed`. Closed conversations get a Session End; others are forwarded without one once they settle, and Agent Analytics closes them after 30 idle minutes. Also check whether Fin closing a conversation fires the `conversation.admin.closed` webhook; if not, the scheduled job is what forwards those conversations.
 - **Context.** Only `custom_attributes` keys the user explicitly allows become context; attributes often contain personal data.
 
@@ -91,13 +97,13 @@ Retrieve one real conversation Fin took part in, with `display_as=plaintext`. Co
 
 ### Phase 3: Implement
 
-Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Fin adapter below it, then schedule `syncFin` to run periodically, persisting the watermark it returns between runs. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
+Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or port it faithfully to the host language). Add the Fin adapter below it, then schedule `syncFin` to run periodically, persisting the watermark it returns between runs. `syncFin` throws at the start if `AMPLITUDE_API_KEY` is unset and `AMPLITUDE_DRY_RUN` is not. A conversation that cannot be mapped, was deleted between search and retrieve, or that Amplitude rejects with a `4xx` other than `429` is logged and skipped. An outage throws after capped retries, so the watermark is not advanced and the next run retries. Keep the dry-run flag (`AMPLITUDE_DRY_RUN`), which prints events instead of sending them.
 
-For the optional webhook, subscribe the app to `conversation.admin.closed` in the Developer Hub (Intercom does not support subscribing by API), and route requests to `handleIntercomWebhook` with the raw request body, for example `express.raw({ type: 'application/json' })`. Keep the scheduled job running too: it forwards whatever the webhook missed.
+For the optional webhook, subscribe the app to `conversation.admin.closed` in the Developer Hub (Intercom does not support subscribing by API), and route requests to `handleIntercomWebhook` with the raw request body (for example `express.raw({ type: 'application/json' })`) and the `X-Hub-Signature` header. Intercom allows 5 seconds for a reply and retries a failed delivery once, after a minute, so the handler only verifies the signature and enqueues the conversation, then replies. The conversation is retrieved and forwarded `SETTLE_SECONDS` later, so a rating given after close arrives before Session End. The default queue, `deferInProcess`, is an in-process timer that is lost on restart; pass your durable queue as `enqueue`. The scheduled job is the source of truth: keep it running, since it forwards whatever the webhook missed.
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many conversations had no user ID and how many had no Fin messages. Those are skipped, not sent. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning lines: how many conversations had no user ID, how many had no messages to send, and how many failed (each logged with its error). Those are skipped, not sent. A second line counts conversations sent with `parts_truncated`. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session, and the opening message is its first turn
@@ -110,7 +116,7 @@ For the optional webhook, subscribe the app to `conversation.admin.closed` in th
 
 ### Phase 5: Ship
 
-- Intercom allows 10,000 API calls per minute per app and 25,000 per workspace, shared by every private app in the workspace and spread over 10-second windows. The adapter makes one search call per 150 conversations plus one retrieve per conversation, and backs off on `429` until `X-RateLimit-Reset`.
+- Intercom allows 10,000 API calls per minute per app and 25,000 per workspace, shared by every private app in the workspace and spread over 10-second windows. The adapter makes one search call per 150 conversations plus one retrieve per conversation. It waits for `X-RateLimit-Reset` on `429` (at most a minute per wait) and backs off exponentially on `5xx`, up to 6 retries per request, then throws.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
 - Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
 
@@ -248,7 +254,7 @@ A conversation in which Fin runs one action, with a Fin rating, as produced by `
       "[Agent] Component Type": "llm",
       "[Agent] Is Error": false,
       "$llm_message": {
-        "text": "I found a duplicate charge of $12.00 on October 1 and refunded it. It will show on your statement in 3 to 5 business days."
+        "text": "I found a duplicate charge of $12.00 on September 1 and refunded it. It will show on your statement in 3 to 5 business days."
       }
     }
   },
@@ -690,6 +696,7 @@ Field names follow Intercom's REST API reference, version 2.14. Confirm each aga
 import {
   send,
   toAgentEvents,
+  type AgentEvent,
   type ForwarderMessage,
   type ForwarderScore,
   type ForwarderToolCall,
@@ -700,6 +707,7 @@ interface IntercomAuthor {
   type: string; // 'user' | 'lead' | 'admin' | 'bot' | 'team'
   id: string;
   name?: string | null;
+  email?: string | null;
   from_ai_agent?: boolean;
   is_ai_answer?: boolean;
 }
@@ -719,7 +727,9 @@ interface IntercomPart {
 interface IntercomRating {
   rating?: number | null;
   remark?: string | null;
+  /** When the rating was requested, not when the contact rated. */
   created_at?: number | null;
+  updated_at?: number | null;
 }
 
 export interface IntercomConversation {
@@ -739,6 +749,7 @@ export interface IntercomConversation {
   contacts?: { contacts: { id: string; external_id?: string | null }[] };
   custom_attributes?: Record<string, unknown>;
   conversation_rating?: IntercomRating | null;
+  statistics?: { count_conversation_parts?: number | null } | null;
   ai_agent_participated?: boolean;
   ai_agent?: {
     source_type?: string | null;
@@ -760,11 +771,13 @@ interface IntercomSearchPage {
 /** US default. EU: https://api.eu.intercom.io, Australia: https://api.au.intercom.io */
 const INTERCOM_API = process.env.INTERCOM_API ?? 'https://api.intercom.io';
 const INTERCOM_VERSION = '2.14';
+/** Retrieve returns at most this many parts: the most recent ones. */
 const MAX_PARTS = 500;
+const MAX_RETRIES = 6;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function intercom(path: string, init: { method?: string; body?: string } = {}): Promise<unknown> {
-  for (;;) {
+  for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(`${INTERCOM_API}${path}`, {
       method: init.method ?? 'GET',
       headers: {
@@ -775,10 +788,16 @@ async function intercom(path: string, init: { method?: string; body?: string } =
       },
       body: init.body,
     });
-    if (response.status === 429 || response.status >= 500) {
+    if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
       // X-RateLimit-Reset is epoch seconds; the limit refills in 10-second windows.
       const reset = Number(response.headers.get('x-ratelimit-reset'));
-      await sleep(reset ? Math.max(1000, reset * 1000 - Date.now()) : 10_000);
+      await sleep(
+        response.status === 429
+          ? reset
+            ? Math.min(60_000, Math.max(1000, reset * 1000 - Date.now()))
+            : 10_000
+          : Math.min(30_000, 1000 * 2 ** attempt),
+      );
       continue;
     }
     if (!response.ok) {
@@ -825,6 +844,14 @@ export async function retrieveIntercomConversation(id: string): Promise<Intercom
 
 const isFin = (author: IntercomAuthor) => author.from_ai_agent === true || author.is_ai_answer === true;
 const isContact = (author: IntercomAuthor) => author.type === 'user' || author.type === 'lead';
+/** Workflow bots, and Intercom's Operator, which posts as an admin from an operator+...@intercom.io address. */
+const isAutomated = (author: IntercomAuthor) =>
+  author.type === 'bot' || /^operator\+[^@]*@intercom\.io$/i.test(author.email ?? '');
+/** A human teammate. Only these end Fin's session. */
+const isTeammate = (author: IntercomAuthor) =>
+  author.type === 'admin' && !isFin(author) && !isAutomated(author);
+/** Whose custom actions count as Fin's. Teammates run custom actions too; theirs are not Fin's. */
+const isFinAction = (author: IntercomAuthor) => isFin(author) || isAutomated(author);
 const ms = (seconds: number) => seconds * 1000;
 
 /** Fallback for bodies that still carry HTML. display_as=plaintext normally returns plain text. */
@@ -854,14 +881,18 @@ export interface FinMappingOptions {
 
 export interface FinNormalizeResult {
   conversation: NormalizedConversation;
-  /** Contact and teammate parts dropped after the first human teammate reply. */
+  /** Parts with a body (notes excluded) dropped after the first human teammate reply. */
   droppedAfterHandoff: number;
+  /** Intercom returned only the 500 most recent parts; the oldest are missing. */
+  partsTruncated: boolean;
 }
 
 /**
  * One Intercom conversation -> one Agent Analytics session covering Fin's part of it:
  * the opening message, contact messages, Fin replies, and Fin's actions, up to the first
- * reply from a human teammate. Internal notes, redacted parts, and system parts are never sent.
+ * reply from a human teammate. Any part type counts as a message when it has a body: a
+ * contact reopening a closed conversation sends `open`, a teammate replying and closing
+ * sends `close`. Internal notes, redacted parts, and system parts are never sent.
  */
 export function normalizeFinConversation(
   raw: IntercomConversation,
@@ -870,10 +901,25 @@ export function normalizeFinConversation(
   const parts = raw.conversation_parts?.conversation_parts ?? [];
   const messages: ForwarderMessage[] = [];
   let pendingTools: ForwarderToolCall[] = [];
+  let lastFinReply: ForwarderMessage | undefined;
   const startedActions = new Map<string, number>();
   let handedOff = false;
   let droppedAfterHandoff = 0;
+  let actionsWithoutReply = 0;
   let hasAttachments = false;
+
+  // Actions with no Fin reply after them in their exchange stay in it: on its last Fin reply when
+  // that is not earlier than the action, otherwise counted, since moving them would misorder turns.
+  const flushTools = () => {
+    for (const tool of pendingTools) {
+      if (lastFinReply && tool.timestamp <= lastFinReply.timestamp) {
+        lastFinReply.toolCalls = [...(lastFinReply.toolCalls ?? []), tool];
+      } else {
+        actionsWithoutReply += 1;
+      }
+    }
+    pendingTools = [];
+  };
 
   const add = (
     id: string,
@@ -881,73 +927,80 @@ export function normalizeFinConversation(
     body: string | null | undefined,
     createdAt: number,
     extra: Partial<ForwarderMessage> = {},
-  ) => {
+  ): boolean => {
     const role = isFin(author) ? 'assistant' : isContact(author) ? 'user' : null;
-    if (!role) return;
+    if (!role) return false;
     const text = plainText(body);
-    if (role === 'user' && !text) return;
-    if (role === 'assistant') {
-      // A Fin part with no text and nothing displayed is not a reply; its actions carry to the next one.
-      if (!text && !extra.spans?.length) return;
-      messages.push({ id, role, text, timestamp: ms(createdAt), toolCalls: pendingTools, ...extra });
-      pendingTools = [];
-      return;
+    if (role === 'user') {
+      if (!text) return false;
+      flushTools();
+      lastFinReply = undefined;
+      messages.push({ id, role, text, timestamp: ms(createdAt) });
+      return true;
     }
-    messages.push({ id, role, text, timestamp: ms(createdAt) });
+    // A Fin part with no text and nothing displayed is not a reply; its actions carry to the next one.
+    if (!text && !extra.spans?.length) return false;
+    lastFinReply = { id, role, text, timestamp: ms(createdAt), toolCalls: pendingTools, ...extra };
+    messages.push(lastFinReply);
+    pendingTools = [];
+    return true;
   };
 
-  if (!raw.source.redacted) {
+  if (!raw.source.redacted && add('source', raw.source.author, raw.source.body, raw.created_at)) {
     hasAttachments ||= (raw.source.attachments?.length ?? 0) > 0;
-    add('source', raw.source.author, raw.source.body, raw.created_at);
   }
 
   for (const part of [...parts].sort((a, b) => a.created_at - b.created_at)) {
     const id = String(part.id);
+    if (part.part_type === 'note') continue;
+    const hasBody = plainText(part.body) !== '';
     if (handedOff) {
-      if (part.part_type === 'comment') droppedAfterHandoff += 1;
+      if (hasBody) droppedAfterHandoff += 1;
       continue;
     }
-    if (part.redacted || part.part_type === 'note') continue;
+    if (hasBody && isTeammate(part.author)) {
+      flushTools();
+      handedOff = true;
+      continue;
+    }
+    if (part.redacted) continue;
 
-    if (part.part_type === 'custom_action_started' && part.event_details?.action?.name) {
-      startedActions.set(part.event_details.action.name, part.created_at);
+    const action = part.event_details?.action;
+    if (part.part_type === 'custom_action_started' && action?.name) {
+      if (isFinAction(part.author)) startedActions.set(action.name, part.created_at);
       continue;
     }
-    if (part.part_type === 'custom_action_finished' && part.event_details?.action?.name) {
-      const name = part.event_details.action.name;
-      const started = startedActions.get(name) ?? part.created_at;
-      startedActions.delete(name);
+    if (part.part_type === 'custom_action_finished' && action?.name) {
+      if (!isFinAction(part.author)) continue;
+      const started = startedActions.get(action.name) ?? part.created_at;
+      startedActions.delete(action.name);
       pendingTools.push({
         id,
-        name,
+        name: action.name,
         timestamp: ms(started),
-        success: part.event_details.action.result === 'success',
+        success: action.result === 'success',
         latencyMs: ms(part.created_at - started),
       });
       continue;
     }
 
-    if (part.part_type === 'comment' && part.author.type === 'admin' && !isFin(part.author)) {
-      handedOff = true;
-      continue;
-    }
-
-    if (part.part_type === 'quick_reply' && isFin(part.author)) {
-      const options = part.metadata?.quick_reply_options ?? [];
-      add(id, part.author, part.body, part.created_at, {
-        spans: [{ id: `${id}:quick-reply`, name: 'quick_reply', timestamp: ms(part.created_at), input: options.map((o) => o.text) }],
-      });
-      continue;
-    }
-
-    if (part.part_type === 'comment') {
+    const quickReplies = isFin(part.author) ? (part.metadata?.quick_reply_options ?? []) : [];
+    const spans = quickReplies.length
+      ? [{ id: `${id}:quick-reply`, name: 'quick_reply', timestamp: ms(part.created_at), input: quickReplies.map((o) => o.text) }]
+      : undefined;
+    if (add(id, part.author, part.body, part.created_at, spans ? { spans } : {})) {
       hasAttachments ||= (part.attachments?.length ?? 0) > 0;
-      add(id, part.author, part.body, part.created_at);
     }
   }
+  flushTools();
 
   const ai = raw.ai_agent ?? undefined;
-  const totalParts = raw.conversation_parts?.total_count ?? parts.length;
+  // Whether total_count counts every part or only those returned is not documented, so a full page also counts.
+  const reportedParts = Math.max(
+    raw.conversation_parts?.total_count ?? 0,
+    raw.statistics?.count_conversation_parts ?? 0,
+  );
+  const partsTruncated = parts.length >= MAX_PARTS || reportedParts > MAX_PARTS;
   const contactCount = raw.contacts?.contacts.length ?? 0;
   const context: Record<string, string | number | boolean> = { platform: 'fin', handed_off: handedOff };
   if (ai?.resolution_state) context.fin_resolution_state = ai.resolution_state;
@@ -958,7 +1011,8 @@ export function normalizeFinConversation(
   }
   if (raw.source.type) context.channel = raw.source.type;
   if (hasAttachments) context.has_attachments = true;
-  if (totalParts > MAX_PARTS) context.parts_truncated = true;
+  if (partsTruncated) context.parts_truncated = true;
+  if (actionsWithoutReply) context.actions_without_reply = actionsWithoutReply;
   if (contactCount > 1) context.contact_count = contactCount;
   for (const key of options.contextAttributeKeys ?? []) {
     const value = raw.custom_attributes?.[key];
@@ -981,10 +1035,11 @@ export function normalizeFinConversation(
   const csat = raw.conversation_rating;
   if (typeof csat?.rating === 'number') {
     if (handedOff) context.csat_after_handoff = true;
+    const ratedAt = csat.updated_at ?? csat.created_at;
     scores.push({
       name: 'csat',
       value: csat.rating,
-      timestamp: Math.max(lastMessageAt, csat.created_at ? ms(csat.created_at) : lastMessageAt),
+      timestamp: Math.max(lastMessageAt, ratedAt ? ms(ratedAt) : lastMessageAt),
       source: 'user',
       ...(csat.remark ? { comment: csat.remark } : {}),
     });
@@ -1006,10 +1061,11 @@ export function normalizeFinConversation(
           : undefined,
     },
     droppedAfterHandoff,
+    partsTruncated,
   };
 }
 
-/** Only conversations untouched for this long are forwarded. */
+/** Only conversations untouched for this long are forwarded, by the scheduled job and the webhook alike. */
 const SETTLE_SECONDS = 2 * 60 * 60;
 
 const redact = (text: string): string => text; // replace with your PII redaction
@@ -1020,41 +1076,109 @@ const MAPPING: FinMappingOptions = {
   resolveUserId: (c) => c.contacts?.contacts[0]?.external_id ?? undefined,
 };
 
-async function forward(raw: IntercomConversation): Promise<'sent' | 'no_identity' | 'empty'> {
-  const { conversation } = normalizeFinConversation(raw, MAPPING);
-  if (!conversation.userId && !conversation.deviceId) return 'no_identity';
-  const events = toAgentEvents(conversation, { redact, source: 'fin' });
-  if (events.length === 0) return 'empty';
-  if (process.env.AMPLITUDE_DRY_RUN) {
-    console.log(JSON.stringify(events, null, 2));
-    return 'sent';
+type Outcome = 'sent' | 'no_identity' | 'empty' | 'failed';
+
+const amplitude = () => ({
+  apiKey: process.env.AMPLITUDE_API_KEY ?? '',
+  /** EU data residency: https://api.eu.amplitude.com/2/httpapi */
+  endpoint: process.env.AMPLITUDE_ENDPOINT || undefined,
+  /** Set if your user IDs are shorter than 5 characters. */
+  minIdLength: Number(process.env.AMPLITUDE_MIN_ID_LENGTH) || undefined,
+});
+
+function requireApiKey(): void {
+  if (!process.env.AMPLITUDE_DRY_RUN && !process.env.AMPLITUDE_API_KEY) {
+    throw new Error('Set AMPLITUDE_API_KEY, or AMPLITUDE_DRY_RUN=1 to print events instead.');
   }
-  await send(events, { apiKey: process.env.AMPLITUDE_API_KEY ?? '' });
-  return 'sent';
 }
 
-/** Forwards Fin conversations last updated after `watermark` (epoch seconds) that have since settled. Returns the next watermark. */
-export async function syncFin(watermark: number): Promise<number> {
-  const until = Math.floor(Date.now() / 1000) - SETTLE_SECONDS;
-  const counts = { sent: 0, no_identity: 0, empty: 0 };
-  for await (const id of searchFinConversations({ updatedAfter: watermark, updatedBefore: until })) {
-    counts[await forward(await retrieveIntercomConversation(id))] += 1;
+/** A rejection that retrying won't fix. Anything else (an outage) stops the run. */
+const isPermanent = (error: unknown) =>
+  /Amplitude HTTP API returned 4(?!29)\d\d/.test(error instanceof Error ? error.message : '');
+
+async function forward(
+  raw: IntercomConversation,
+  mapping: FinMappingOptions,
+): Promise<{ outcome: Outcome; partsTruncated: boolean }> {
+  let events: AgentEvent[];
+  let partsTruncated = false;
+  try {
+    const result = normalizeFinConversation(raw, mapping);
+    partsTruncated = result.partsTruncated;
+    const { conversation } = result;
+    if (!conversation.userId && !conversation.deviceId) return { outcome: 'no_identity', partsTruncated };
+    events = toAgentEvents(conversation, { redact, source: 'fin' });
+  } catch (error) {
+    console.error(`Conversation ${raw.id} could not be mapped:`, error);
+    return { outcome: 'failed', partsTruncated };
   }
-  if (counts.no_identity || counts.empty) {
+  if (events.length === 0) return { outcome: 'empty', partsTruncated };
+  if (process.env.AMPLITUDE_DRY_RUN) {
+    console.log(JSON.stringify(events, null, 2));
+    return { outcome: 'sent', partsTruncated };
+  }
+  try {
+    await send(events, amplitude());
+  } catch (error) {
+    if (!isPermanent(error)) throw error;
+    console.error(`Conversation ${raw.id} was rejected by Amplitude:`, error);
+    return { outcome: 'failed', partsTruncated };
+  }
+  return { outcome: 'sent', partsTruncated };
+}
+
+/** Retrieves one conversation and forwards it. A conversation deleted since it was found counts as failed. */
+export async function forwardFinConversation(
+  id: string,
+  mapping: FinMappingOptions = MAPPING,
+): Promise<{ outcome: Outcome; partsTruncated: boolean }> {
+  requireApiKey();
+  let raw: IntercomConversation;
+  try {
+    raw = await retrieveIntercomConversation(id);
+  } catch (error) {
+    if (!/Intercom returned 404/.test(String(error))) throw error;
+    console.error(`Conversation ${id} could not be retrieved:`, error);
+    return { outcome: 'failed', partsTruncated: false };
+  }
+  return forward(raw, mapping);
+}
+
+/**
+ * Forwards Fin conversations last updated after `watermark` (epoch seconds) that have since settled.
+ * Returns the next watermark. A conversation that cannot be mapped, was deleted, or that Amplitude
+ * rejects is logged and skipped; an Intercom or Amplitude outage throws, so the watermark is not advanced.
+ */
+export async function syncFin(watermark: number, mapping: FinMappingOptions = MAPPING): Promise<number> {
+  requireApiKey();
+  const until = Math.floor(Date.now() / 1000) - SETTLE_SECONDS;
+  const counts = { sent: 0, no_identity: 0, empty: 0, failed: 0, truncated: 0 };
+  for await (const id of searchFinConversations({ updatedAfter: watermark, updatedBefore: until })) {
+    const { outcome, partsTruncated } = await forwardFinConversation(id, mapping);
+    counts[outcome] += 1;
+    if (partsTruncated && outcome === 'sent') counts.truncated += 1;
+  }
+  if (counts.no_identity || counts.empty || counts.failed) {
     console.warn(
-      `Skipped ${counts.no_identity} conversations without a user ID and ${counts.empty} with no Fin messages`,
+      `Skipped ${counts.no_identity} conversations without a user ID, ${counts.empty} with no messages to send, and ${counts.failed} that failed (logged above)`,
     );
+  }
+  if (counts.truncated) {
+    console.warn(`Sent ${counts.truncated} conversations flagged parts_truncated: their oldest parts are missing`);
   }
   return until;
 }
 
-/** Intercom signs webhook bodies with HMAC-SHA1, keyed by the app's client secret (not the access token). */
+/**
+ * Intercom signs each webhook body in the X-Hub-Signature header: `sha1=` followed by the hex
+ * HMAC-SHA1 of the raw body, keyed by the app's client secret (not the access token).
+ */
 export async function verifyIntercomSignature(
   rawBody: string | Uint8Array,
-  header: string | null | undefined,
+  xHubSignature: string | null | undefined,
   clientSecret: string,
 ): Promise<boolean> {
-  const received = header?.startsWith('sha1=') ? header.slice(5).toLowerCase() : '';
+  const received = xHubSignature?.startsWith('sha1=') ? xHubSignature.slice(5).toLowerCase() : '';
   if (received.length !== 40 || !clientSecret) return false;
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -1072,36 +1196,59 @@ export async function verifyIntercomSignature(
   return diff === 0;
 }
 
+export interface FinWebhookJob {
+  conversationId: string;
+  /** Epoch milliseconds. Forward no earlier than this, so a rating given after close lands before Session End. */
+  notBefore: number;
+}
+
+/**
+ * Default queue: an in-process timer. It is lost on restart; the scheduled job forwards anything
+ * it drops. Replace it with your durable queue (a jobs table, SQS with a delay) that calls
+ * forwardFinConversation at notBefore.
+ */
+export function deferInProcess(job: FinWebhookJob): void {
+  setTimeout(() => {
+    forwardFinConversation(job.conversationId).catch((error) =>
+      console.error(`Conversation ${job.conversationId} could not be forwarded:`, error),
+    );
+  }, Math.max(0, job.notBefore - Date.now()));
+}
+
 /**
  * Webhook receiver for the conversation.admin.closed topic. Pass the raw request body, not
- * re-serialized JSON. The webhook only says which conversation closed; the transcript is
- * always retrieved, so both paths send identical events. Returns the HTTP status to reply with.
+ * re-serialized JSON, and the X-Hub-Signature header. Intercom allows 5 seconds for a reply and
+ * retries once, so this only verifies and enqueues; the conversation is retrieved and forwarded
+ * after the settle window. Returns the HTTP status to reply with.
  */
 export async function handleIntercomWebhook(
   rawBody: string,
-  signatureHeader: string | null | undefined,
+  xHubSignature: string | null | undefined,
+  enqueue: (job: FinWebhookJob) => void | Promise<void> = deferInProcess,
 ): Promise<number> {
   const valid = await verifyIntercomSignature(
     rawBody,
-    signatureHeader,
+    xHubSignature,
     process.env.INTERCOM_CLIENT_SECRET ?? '',
   );
   if (!valid) return 401;
-  const notification = JSON.parse(rawBody) as {
-    topic?: string;
-    data?: { item?: { id?: string; ai_agent_participated?: boolean } };
-  };
+  let notification: { topic?: string; data?: { item?: { id?: string; ai_agent_participated?: boolean } } };
+  try {
+    notification = JSON.parse(rawBody);
+  } catch {
+    return 400;
+  }
   const id = notification.data?.item?.id;
   if (notification.topic !== 'conversation.admin.closed' || !id) return 200;
   if (notification.data?.item?.ai_agent_participated === false) return 200;
-  await forward(await retrieveIntercomConversation(id));
+  await enqueue({ conversationId: id, notBefore: Date.now() + SETTLE_SECONDS * 1000 });
   return 200;
 }
 ```
 
 **Why the settle window.** Intercom search returns conversations by last-updated time, and returns a conversation again whenever it changes. Forwarding only conversations untouched for `SETTLE_SECONDS` means they are finished before they are sent. If a conversation is updated after it was forwarded (a reopen, a late rating), the next run sends it again: events already sent are deduplicated, new ones are stored, but anything after Session End does not reach that session's quality signals. Raise the window if your conversations often resume after two hours.
 
-**Why the webhook only triggers a fetch.** A webhook notification carries a conversation snapshot, but the scheduled job reads the retrieved transcript. Retrieving in both paths means a conversation forwarded by the webhook and again by the job produces identical events, which deduplicate.
+**Why the webhook only triggers a fetch, later.** A webhook notification carries a conversation snapshot, but the scheduled job reads the retrieved transcript. Retrieving in both paths means a conversation forwarded by the webhook and again by the job produces identical events, which deduplicate. Retrieving at close would send Session End before a rating the contact gives a few minutes later, so the webhook path waits the same `SETTLE_SECONDS` as the job. The webhook therefore does not make delivery faster than an hourly job; it makes it event-driven. If you do not need that, run the scheduled job alone.
 
 ### Privacy
 
@@ -1151,15 +1298,23 @@ Intercom keeps conversation history, so a backfill can reach far back. Because A
 | Message text full of HTML tags | Retrieved without `display_as=plaintext` |
 | First user message missing | The opening message is in `source`, not `conversation_parts` |
 | Teammate notes or replies appear as the agent | `note` parts not skipped, or the handoff cut not applied |
+| Contact replies after a reopen missing | Only `comment` parts treated as messages; a contact reopening a conversation sends `part_type: open` |
+| Sessions cut short as `handed_off` with no teammate involved | A workflow posts as an admin that `isAutomated` does not recognize; add it |
+| Fin's actions missing | Fin's actions are authored by an admin in this workspace; widen `isFinAction` |
+| `actions_without_reply` in context | Fin ran actions after its last reply in an exchange, for example right before a handoff |
+| Webhook deliveries time out or arrive twice | The handler retrieves or sends before replying; Intercom allows 5 seconds and retries once |
+| CSAT arrives after Session End | The webhook path forwarded at close instead of after `SETTLE_SECONDS` |
+| Sync fails on every run at the same conversation | A per-conversation error is rethrown instead of logged and skipped |
 | Fin's replies missing | Fin parts lack `from_ai_agent` and `is_ai_answer` in this workspace; confirm how Fin's author appears |
 | Only the first 150 conversations arrive | Pagination not following `pages.next.starting_after` |
 | Abandoned or assumed-resolution conversations missing | The search filtered on `state = closed`, but this workspace leaves them open |
 | Webhook returns 401 | Signed with the access token instead of the client secret, or the body was parsed and re-serialized before verifying |
 | Empty search results or 404 | Wrong Intercom region; set `INTERCOM_API` |
-| `parts_truncated` in context | The conversation has more than 500 parts; Intercom returns only the 500 most recent |
+| `parts_truncated` in context | The conversation has 500 parts or more; Intercom returns only the 500 most recent, so the oldest are missing |
+| Events land in the US project on an EU account | `AMPLITUDE_ENDPOINT` not set to `https://api.eu.amplitude.com/2/httpapi` |
 | Filters missing a dimension | Sent as `[Agent] Tags` or as a flat property instead of a key in `[Agent] Context` |
 | Session never enriched, or late messages missing from signals | Events arrived after the session closed; raise `SETTLE_SECONDS` |
-| `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
+| `400` about ID length | User or device ID shorter than 5 characters; set `AMPLITUDE_MIN_ID_LENGTH` |
 
 ### More
 
