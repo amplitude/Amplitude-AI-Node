@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.20.0
+
+### Added (AA-152361)
+- **`[Agent] Git SHA`, `[Agent] Git Ref`, `[Agent] Git Repo`, and
+  `[Agent] Provider Request ID` are now in the bundled event catalog.** The SDK
+  already emitted all four, but they were absent from
+  `data/agent_event_catalog.json`, so `amplitude-ai-register-catalog` never wrote
+  them into a customer's tracking plan — they arrived with no description, no
+  declared type, and outside the governed schema.
+- **`pnpm run check:catalog`**, wired into CI. Every `EVENT_*`/`PROP_*` constant
+  must exist in the bundled catalog or the build fails. The validator existed but
+  ran nowhere, which is how the four properties above went missing for months.
+
+### Fixed (AA-152361)
+- **`[Agent] Enrichment Cost USD` is no longer registered.** It was retired
+  server-side (it measured Amplitude-controlled cost, not customer spend) and is
+  no longer emitted, so registering it left a permanently empty field in the
+  customer's tracking plan. Its customer-attributable replacement,
+  `[Agent] Evaluator Enrichment Cost USD`, is registered on
+  `[Agent] Evaluator Result`.
+- **The catalog validator no longer reports success when it checked nothing.** Its
+  temporal-worker target resolved outside any checkout once this package was split
+  out of the `javascript` monorepo, so it printed `SKIP:` and exited 0. That target
+  is now opt-in via `AMPLITUDE_JAVASCRIPT_REPO`, and a configured target that
+  cannot be read is a hard failure.
+- **`@pydantic/genai-prices` is bounded to `^0.1.3`** (was `>=0.1.3`). The old
+  range would install a future major with a changed `calcPrice` signature, and the
+  cost path catches the throw and returns `null` — silently dropping
+  `[Agent] Cost USD` rather than failing loudly. Pricing data within `0.1.x` is
+  unchanged.
+
 ## 0.19.0
 
 ### Added (AA-152464)

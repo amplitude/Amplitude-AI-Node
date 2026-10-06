@@ -90,3 +90,9 @@ jobs:
 
       - name: Lint
         run: pnpm run lint
+
+      # Every EVENT_*/PROP_* constant must exist in the bundled catalog, which is
+      # what `amplitude-ai-register-catalog` writes into a customer's tracking plan.
+      # An unregistered property reaches the customer undocumented and untyped.
+      - name: Check catalog constants
+        run: pnpm run check:catalog
