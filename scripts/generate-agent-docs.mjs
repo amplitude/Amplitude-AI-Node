@@ -123,17 +123,13 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Need span/observability: use \`observe()\`.
 - Cannot modify call sites at all: use \`patch()\` for aggregate-only monitoring (no per-user analytics).
 - Already emit OTEL GenAI spans: use \`AmplitudeAgentExporter({ amplitudeAI: ai })\` (or \`enableOtel()\`) to map them to [Agent] events.
-- Routing through OpenRouter / LiteLLM / Requesty: SDK-through with OpenAI \`baseURL\` + canonical model id; tag \`context: { ingestion_path: 'gateway', gateway: '...' }\` (see Works with in \`amplitude-ai.md\` / README).
-- Gateway product labels only (e.g. \`openrouter/auto\`): cost is omitted — normalize to the routed provider model id.
-- LiteLLM / Strands OTLP partners: ensure \`gen_ai.request.model\` + input/output token attrs; LiteLLM needs \`CAPTURE_MESSAGE_CONTENT\` for bodies; Requesty has no OTLP (SDK-through only).
 - LangChain / LangGraph: use \`AmplitudeCallbackHandler\` (duck-typed; implements \`handleChatModelStart\` for User Message).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
-- Works-with partners (OpenRouter, LiteLLM, Requesty, Strands): see **Works with** in \`amplitude-ai.md\` and README.
 - Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
-- Requests go through an inference router or AI gateway (for example Fireworks): follow \`docs/integrations/routers.md\`; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
+- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty) or a partner exporting GenAI spans (Strands): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
 - Offline eval run or model bake-off (${offlineEvals.runners.join(', ')}, or any runner): not \`[Agent]\` events. Build one document, check it with \`docs/integrations/check-offline-eval.mjs\`, and POST it with \`curl\` by following \`docs/integrations/offline-eval.md\`. Ask which values of each detector are issues; never guess. Do not install a package to post.
 
 ## MCP Surface

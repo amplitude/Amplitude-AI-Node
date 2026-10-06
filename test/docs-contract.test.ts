@@ -237,6 +237,41 @@ describe('docs/integrations contract', () => {
     }
   });
 
+  it('keeps one gateway recipe per smoke-tested gateway, tagged on the Path 1 agents', () => {
+    const page = readPage('routers.md');
+    const recipes = page.slice(page.indexOf('### Gateway recipes'), page.indexOf('## Path 2'));
+    const smoke = readFileSync(resolve(__dirname, 'gateway-smoke.test.ts'), 'utf8');
+    const smoked = new Set([...smoke.matchAll(/gatewayContext\('([a-z]+)'\)/g)].map((m) => m[1]));
+    expect(smoked.size).toBeGreaterThan(0);
+    for (const gateway of smoked) expect(recipes).toContain(`| \`${gateway}\` |`);
+
+    const path1 = page.slice(page.indexOf('## Path 1'), page.indexOf('### Gateway recipes'));
+    expect(path1).toContain('{"ingestion_path": "gateway", "gateway": "fireworks"}');
+    expect(path1).toContain("{ ingestion_path: 'gateway', gateway: 'fireworks' }");
+  });
+
+  it('links the gateway guide from README and amplitude-ai.md, and keeps gateway base URLs out of their code', () => {
+    const root = resolve(__dirname, '..');
+    const others = ['README.md', 'amplitude-ai.md', 'AGENTS.md', 'llms.txt', 'llms-full.txt'].map((f) =>
+      readFileSync(join(root, f), 'utf8'),
+    );
+    expect(others[0]).toContain('(docs/integrations/routers.md)');
+    expect(others[1]).toContain('docs/integrations/routers.md');
+
+    const gatewayUrls = ['openrouter.ai/api/v1', 'router.requesty.ai', 'localhost:4000'];
+    const pages = [
+      ...others,
+      ...readdirSync(DOCS_DIR)
+        .filter((f) => f.endsWith('.md') && f !== 'routers.md')
+        .map(readPage),
+    ];
+    for (const text of pages) {
+      for (const block of text.match(/```[\s\S]*?```/g) ?? []) {
+        for (const url of gatewayUrls) expect(block).not.toContain(url);
+      }
+    }
+  });
+
   it('carries a byte-identical forwarder core on every platform page', () => {
     const cores = PLATFORM_PAGES.map((page) => extractCore(readPage(page)));
     for (const core of cores) expect(core).toBe(cores[0]);

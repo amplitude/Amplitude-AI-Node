@@ -14,7 +14,7 @@ A router picks which model answers each request. Agent Analytics measures whethe
 
 ## Path 1: wrap the client
 
-Point the Amplitude-wrapped OpenAI client at the router's OpenAI-compatible URL and run each request inside an agent session. Fireworks is detected from a `*.fireworks.ai` URL.
+Point the Amplitude-wrapped OpenAI client at the router's OpenAI-compatible URL, tag the agent with the gateway, and run each request inside an agent session. Fireworks is detected from a `*.fireworks.ai` URL. Other gateways use the same code with the base URL and tag from [Gateway recipes](#gateway-recipes).
 
 Python:
 
@@ -28,7 +28,7 @@ client = wrap(
     OpenAI(api_key=os.environ["FIREWORKS_API_KEY"], base_url="https://api.fireworks.ai/inference/v1"),
     amplitude=ai,
 )
-agent = ai.agent("support-bot")
+agent = ai.agent("support-bot", context={"ingestion_path": "gateway", "gateway": "fireworks"})
 
 def handle_chat(user_id: str, session_id: str, messages: list):
     with agent.session(user_id=user_id, session_id=session_id).run() as s:
@@ -48,7 +48,7 @@ const fireworks = new OpenAI({
   apiKey: process.env.FIREWORKS_API_KEY,
   baseUrl: 'https://api.fireworks.ai/inference/v1',
 });
-const agent = ai.agent('support-bot');
+const agent = ai.agent('support-bot', { context: { ingestion_path: 'gateway', gateway: 'fireworks' } });
 
 export async function handleChat(userId: string, sessionId: string, messages: { role: 'user'; content: string }[]) {
   return agent.session({ userId, sessionId }).run(async () => {
@@ -62,9 +62,22 @@ On each `[Agent] AI Response`, for Chat Completions and Responses, streamed or n
 
 - `[Agent] Provider` is `fireworks`.
 - `[Agent] Provider Request ID` is the router's `response.id`. This is the key that ties a score in Amplitude back to one routed inference.
-- `[Agent] Model Name` is the model the router selected. Cost is priced on the router ID you requested.
+- `[Agent] Model Name` is the model the router selected.
+- `[Agent] Cost USD` uses public rates. A tier router such as `accounts/fireworks/routers/kimi-k3-fast` is priced at its tier. FireRouter and other routers are priced at the model they selected. If that model is not a Fireworks model (a bring-your-own-key Claude call, for example), it is priced at that provider's list rate. Anything the SDK cannot price has no cost rather than `$0`; pass `totalCostUsd` if you know the billed amount.
+- `[Agent] Context` carries `ingestion_path: 'gateway'` and the gateway name, so dashboards can separate gateway traffic from direct provider calls.
 
 If Fireworks sits behind your own proxy URL, set `provider: 'fireworks'` on the Node client; see the Fireworks section of the SDK README.
+
+### Gateway recipes
+
+| Gateway | OpenAI-compatible base URL | `gateway` tag | OTLP export | Notes |
+|---|---|---|---|---|
+| Fireworks | `https://api.fireworks.ai/inference/v1` | `fireworks` | See Path 2 | Provider is detected from the URL and the request ID is captured |
+| OpenRouter | `https://openrouter.ai/api/v1` | `openrouter` | No | Match Amplitude `contentMode` to OpenRouter Privacy Mode, so you do not expect text the gateway stripped |
+| LiteLLM | Your proxy, for example `http://localhost:4000/v1` | `litellm` | Yes | Set `CAPTURE_MESSAGE_CONTENT=true` on the proxy if spans should carry message text |
+| Requesty | `https://router.requesty.ai/v1` | `requesty` | No | Wrap the client; there is no exporter |
+
+Pass the model the gateway actually routes to (`gpt-4o-mini`, `claude-sonnet-4-20250514`) when you choose it. A gateway alias such as `openrouter/auto` has no price, so the SDK omits `[Agent] Cost USD` rather than recording `$0`.
 
 ## Path 2: the router or gateway exports traces
 
@@ -73,6 +86,8 @@ The router exports [OpenTelemetry GenAI](https://opentelemetry.io/docs/specs/sem
 ```text
 your application  --request + analytics metadata-->  router  --GenAI spans (OTLP/HTTP)-->  Amplitude
 ```
+
+Agent frameworks that already emit GenAI spans, such as Strands, take the same path: export them with `AmplitudeAgentExporter` or `enableOtel()`. Cost needs at least `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens` on each span.
 
 ### Analytics metadata (your application, on every request)
 

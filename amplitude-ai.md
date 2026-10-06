@@ -1162,67 +1162,16 @@ OpenAI-compatible gateways and OTEL partners that `@amplitude/ai` already suppor
 
 Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans (LiteLLM, Strands) or as a future OpenRouter webhook path.
 
-### Install recipes (SDK-through)
+### Recipes and partner notes
 
-```typescript
-import { AmplitudeAI, OpenAI } from '@amplitude/ai';
-
-const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
-
-// OpenRouter
-const client = new OpenAI({
-  amplitude: ai,
-  apiKey: process.env.OPENROUTER_API_KEY!,
-  baseURL: 'https://openrouter.ai/api/v1',
-});
-const agent = ai.agent('openrouter-agent', {
-  userId,
-  context: { ingestion_path: 'gateway', gateway: 'openrouter' },
-});
-```
-
-```typescript
-// LiteLLM proxy
-const client = new OpenAI({
-  amplitude: ai,
-  apiKey: process.env.LITELLM_API_KEY!,
-  baseURL: 'http://localhost:4000/v1',
-});
-const agent = ai.agent('litellm-agent', {
-  userId,
-  context: { ingestion_path: 'gateway', gateway: 'litellm' },
-});
-```
-
-```typescript
-// Requesty (SDK-through only — no OTLP push today)
-const client = new OpenAI({
-  amplitude: ai,
-  apiKey: process.env.REQUESTY_API_KEY!,
-  baseURL: 'https://router.requesty.ai/v1',
-});
-const agent = ai.agent('requesty-agent', {
-  userId,
-  context: { ingestion_path: 'gateway', gateway: 'requesty' },
-});
-```
-
-**Model id rule:** pass the **real provider model** the gateway routed to (`gpt-4o-mini`, `claude-sonnet-4-20250514`). Gateway product labels (`openrouter/auto`, router aliases) cannot be priced — the SDK **omits** `[Agent] Cost USD` rather than recording `$0`.
-
-### Partner notes
-
-- **Fireworks:** use the built-in `OpenAI` wrapper with `baseUrl: 'https://api.fireworks.ai/inference/v1'`. The SDK labels valid `*.fireworks.ai` endpoints as `fireworks` and captures `response.id` into `[Agent] Provider Request ID` for Chat Completions and Responses, including streams. Set `provider: 'fireworks'` for a private proxy. Costs use only public Fireworks/genai-prices data; unsupported models omit cost.
-- **LiteLLM + OTLP:** set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on GenAI spans. Without it, spans carry metadata/tokens only.
-- **OpenRouter Privacy Mode:** binary content on/off at the gateway. Align Amplitude `contentMode` (`full` vs `metadata_only`) so you do not expect thread text the gateway already stripped.
-- **Requesty:** no OTLP exporter today — use SDK-through with Requesty's OpenAI-compatible base URL.
-- **Strands → Nova:** export GenAI spans into Amplitude via `AmplitudeAgentExporter` / `enableOtel()`. Required OTLP attributes for cost fill: `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`.
+Base URLs and `gateway` tags for Fireworks, OpenRouter, LiteLLM, and Requesty, the model ID rule, router pricing, and OTLP attributes for partners that export spans (LiteLLM, Strands) are in one place: fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md` (or read `node_modules/@amplitude/ai/docs/integrations/routers.md`).
 
 ### `ingestion_path` convention
 
 Use existing `[Agent] Context` (no new schema fields):
 
 ```typescript
-context: { ingestion_path: 'gateway', gateway: 'openrouter' } // or litellm | requesty
+context: { ingestion_path: 'gateway', gateway: 'openrouter' } // or fireworks | litellm | requesty
 ```
 
 Segment dashboards on `ingestion_path` / `gateway` to separate direct-provider traffic from gateway traffic.
