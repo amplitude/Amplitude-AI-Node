@@ -834,14 +834,17 @@ describe('forwarder core and adapters', () => {
     process.env.AMPLITUDE_DRY_RUN = '1';
     try {
       const jobs: { conversationId: string }[] = [];
-      const enqueue = (job: { conversationId: string }) => {
-        jobs.push(job);
+      const store = {
+        put: async (job: { conversationId: string }) => {
+          jobs.push(job);
+        },
+        takeDue: async () => [],
       };
-      expect(await fin.handleIntercomWebhook(body, 'sha1=0000000000000000000000000000000000000000', enqueue)).toBe(401);
+      expect(await fin.handleIntercomWebhook(store, body, 'sha1=0000000000000000000000000000000000000000')).toBe(401);
       const other = JSON.stringify({ topic: 'conversation.user.replied', data: { item: { id: '9' } } });
-      expect(await fin.handleIntercomWebhook(other, sign(other), enqueue)).toBe(200);
+      expect(await fin.handleIntercomWebhook(store, other, sign(other))).toBe(200);
       expect(jobs).toHaveLength(0);
-      expect(await fin.handleIntercomWebhook(body, sign(body), enqueue)).toBe(200);
+      expect(await fin.handleIntercomWebhook(store, body, sign(body))).toBe(200);
       expect(urls).toHaveLength(0);
       expect(jobs.map((j) => j.conversationId)).toEqual(['9']);
       await fin.forwardFinConversation('9');

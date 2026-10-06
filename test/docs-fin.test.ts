@@ -281,19 +281,67 @@ describe('Fin integration guide adapter', () => {
     expect(trailing.conversation.context.actions_without_reply).toBe(1);
   });
 
-  it('credits only Fin, workflow, and Operator actions to Fin, not a teammate', () => {
+  const toolNames = (events: AgentEvent[]) =>
+    events.filter((e) => e.event_type === '[Agent] Tool Call').map((e) => e.event_properties['[Agent] Tool Name']);
+
+  it('excludes and counts actions that finish before Fin first takes part (a pre-Fin workflow)', () => {
     const parts = [
+      action('1', 'started', workflowBot, 3, 'Tag VIP'),
+      action('2', 'finished', workflowBot, 4, 'Tag VIP'),
       // Intercom's v2.14 example authors custom actions as an admin.
-      action('1', 'started', teammate, 3, 'Jira Create Issue'),
-      action('2', 'finished', teammate, 5, 'Jira Create Issue'),
-      action('3', 'started', operator, 6, 'Look up order'),
-      action('4', 'finished', operator, 7, 'Look up order'),
+      action('3', 'started', teammate, 5, 'Jira Create Issue'),
+      action('4', 'finished', teammate, 6, 'Jira Create Issue'),
       part('5', 'comment', finAuthor, 8, 'Your order shipped.'),
     ];
     const { conversation, events } = eventsOf(finConversation({}, parts));
-    expect(events.filter((e) => e.event_type === '[Agent] Tool Call').map((e) => e.event_properties['[Agent] Tool Name'])).toEqual(['Look up order']);
+    expect(toolNames(events)).toEqual([]);
+    expect(conversation.context.actions_before_fin).toBe(2);
     expect(conversation.context).not.toHaveProperty('actions_without_reply');
     expect(conversation.context.handed_off).toBe(false);
+
+    // A conversation Fin opens has no pre-Fin stretch.
+    const finOpened = normalize(finConversation({ source: { id: 's', type: 'conversation', body: 'Hi, I am Fin.', author: finAuthor } }, parts));
+    expect(finOpened.conversation.context).not.toHaveProperty('actions_before_fin');
+  });
+
+  it("credits actions between Fin's first part and the handoff to Fin, whoever authors them", () => {
+    const parts = [
+      // Fin's first part has no body: it still starts Fin's stretch.
+      part('1', 'assignment', finAuthor, 3),
+      action('2', 'started', teammate, 4, 'Jira Create Issue'),
+      action('3', 'finished', teammate, 5, 'Jira Create Issue'),
+      action('4', 'started', operator, 6, 'Look up order'),
+      action('5', 'finished', operator, 7, 'Look up order', 'failure'),
+      action('6', 'started', finAuthor, 8, 'Send receipt'),
+      action('7', 'finished', finAuthor, 9, 'Send receipt'),
+      part('8', 'comment', finAuthor, 10, 'Your order shipped.'),
+    ];
+    const { conversation, events } = eventsOf(finConversation({}, parts));
+    expect(toolNames(events)).toEqual(['Jira Create Issue', 'Look up order', 'Send receipt']);
+    const failed = events.find((e) => e.event_properties['[Agent] Tool Name'] === 'Look up order');
+    expect(failed?.event_properties).toMatchObject({ '[Agent] Tool Success': false, '[Agent] Latency Ms': 1000 });
+    expect(conversation.context).not.toHaveProperty('actions_before_fin');
+    expect(conversation.context.handed_off).toBe(false);
+  });
+
+  it('cuts actions after the handoff with the rest, without counting them as dropped messages', () => {
+    const parts = [
+      part('1', 'comment', finAuthor, 3, 'Let me get a teammate.'),
+      part('2', 'comment', teammate, 10, 'Jamie here.'),
+      action('3', 'started', teammate, 11, 'Jira Create Issue'),
+      action('4', 'finished', teammate, 12, 'Jira Create Issue'),
+      action('5', 'started', finAuthor, 13, 'Send receipt'),
+      action('6', 'finished', finAuthor, 14, 'Send receipt'),
+      part('7', 'comment', finAuthor, 15, 'Anything else?'),
+    ];
+    const result = normalize(finConversation({}, parts));
+    const events: AgentEvent[] = core.toAgentEvents(result.conversation, { source: 'fin' });
+    assertForwarderRules(events);
+    expect(toolNames(events)).toEqual([]);
+    expect(result.droppedAfterHandoff).toBe(1);
+    expect(result.conversation.context.handed_off).toBe(true);
+    expect(result.conversation.context).not.toHaveProperty('actions_before_fin');
+    expect(result.conversation.context).not.toHaveProperty('actions_without_reply');
   });
 
   it('flags truncated transcripts from a full page or a reported total above 500', () => {
@@ -306,6 +354,27 @@ describe('Fin integration guide adapter', () => {
     const whole = normalize(finConversation({ statistics: { count_conversation_parts: 3 } }, few));
     expect(whole.partsTruncated).toBe(false);
     expect(whole.conversation.context).not.toHaveProperty('parts_truncated');
+  });
+
+  // The v2.14 spec gives conversation_parts.total_count no description, so exactly 500 cannot be told from more.
+  it('flags 500 parts and above, not 499', () => {
+    const parts = (n: number) => Array.from({ length: n }, (_, i) => part(String(i + 1), 'comment', i % 2 ? finAuthor : contact, 10 + i, `m${i}`));
+    const flagged = (returned: number, totalCount: number, counted?: number) =>
+      normalize(
+        finConversation({
+          conversation_parts: { total_count: totalCount, conversation_parts: parts(returned) },
+          ...(counted === undefined ? {} : { statistics: { count_conversation_parts: counted } }),
+        }),
+      ).partsTruncated;
+    expect(flagged(499, 499)).toBe(false);
+    expect(flagged(499, 499, 499)).toBe(false);
+    expect(flagged(500, 500)).toBe(true);
+    expect(flagged(500, 500, 500)).toBe(true);
+    // 501 parts on the conversation, of which retrieve returns the 500 most recent.
+    expect(flagged(500, 501)).toBe(true);
+    expect(flagged(500, 500, 501)).toBe(true);
+    expect(flagged(499, 499, 501)).toBe(true);
+    expect(flagged(501, 501)).toBe(true);
   });
 
   it('times CSAT at conversation_rating.updated_at, falling back to created_at (the request time)', () => {
@@ -432,37 +501,106 @@ describe('Fin integration guide adapter', () => {
     expect(Date.now() - before).toBe(reset * 1000 - before + 10_000);
   });
 
-  it('acknowledges webhooks without calling Intercom and forwards after the settle window', async () => {
-    const secret = 'client-secret';
-    const sign = (body: string) => `sha1=${createHmac('sha1', secret).update(body).digest('hex')}`;
+  type Job = { conversationId: string; notBefore: number };
+  /** A FinJobStore for tests only: keeps the first job per conversation, as the jobs-table recipe does. */
+  const memoryStore = () => {
+    const jobs = new Map<string, Job>();
+    const puts: Job[] = [];
+    return {
+      jobs,
+      puts,
+      async put(job: Job) {
+        puts.push(job);
+        if (!jobs.has(job.conversationId)) jobs.set(job.conversationId, job);
+      },
+      async takeDue(now: number, limit: number) {
+        const due = [...jobs.values()].filter((j) => j.notBefore <= now).sort((a, b) => a.notBefore - b.notBefore).slice(0, limit);
+        for (const job of due) jobs.delete(job.conversationId);
+        return due;
+      },
+    };
+  };
+  const secret = 'client-secret';
+  const sign = (body: string) => `sha1=${createHmac('sha1', secret).update(body).digest('hex')}`;
+  const closed = (id: string) => JSON.stringify({ topic: 'conversation.admin.closed', data: { item: { id, ai_agent_participated: true } } });
+
+  it('acknowledges webhooks by storing a job due after the settle window, without calling Intercom', async () => {
+    process.env.INTERCOM_CLIENT_SECRET = secret;
+    const calls = stubFetch(() => json(conversationWith('9')));
+    const now = Date.UTC(2026, 9, 6, 20, 0, 0);
+    vi.useFakeTimers({ now });
+    const store = memoryStore();
+
+    expect(await fin.handleIntercomWebhook(store, closed('9'), 'sha1=0000000000000000000000000000000000000000')).toBe(401);
+    expect(await fin.handleIntercomWebhook(store, 'not json', sign('not json'))).toBe(400);
+    const skipped = JSON.stringify({ topic: 'conversation.admin.closed', data: { item: { id: '9', ai_agent_participated: false } } });
+    expect(await fin.handleIntercomWebhook(store, skipped, sign(skipped))).toBe(200);
+    expect(store.puts).toEqual([]);
+    expect(await fin.handleIntercomWebhook(store, closed('9'), sign(closed('9')))).toBe(200);
+    expect(store.puts).toEqual([{ conversationId: '9', notBefore: now + SETTLE_MS }]);
+    expect(calls).toHaveLength(0);
+    expect(fin).not.toHaveProperty('deferInProcess');
+  });
+
+  it('forwards due webhook jobs at the start of syncFin and leaves future ones in the store', async () => {
     process.env.INTERCOM_CLIENT_SECRET = secret;
     process.env.AMPLITUDE_DRY_RUN = '1';
-    const calls = stubFetch(() => json(conversationWith('9')));
+    const calls = stubFetch((call) => {
+      if (call.url.endsWith('/conversations/search')) return json({ conversations: [{ id: '3' }], pages: { next: null } });
+      return json(conversationWith(call.url.match(/\/conversations\/([^?]+)/)?.[1] ?? ''));
+    });
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.useFakeTimers({ now: Date.UTC(2026, 9, 6, 20, 0, 0) });
+    const store = memoryStore();
+    const now = Date.UTC(2026, 9, 6, 20, 0, 0);
+    vi.useFakeTimers({ now: now - SETTLE_MS - 60_000 });
+    await fin.handleIntercomWebhook(store, closed('1'), sign(closed('1')));
+    vi.setSystemTime(now - SETTLE_MS);
+    await fin.handleIntercomWebhook(store, closed('2'), sign(closed('2')));
+    vi.setSystemTime(now - 60_000);
+    await fin.handleIntercomWebhook(store, closed('4'), sign(closed('4')));
+    vi.setSystemTime(now);
 
-    expect(await fin.handleIntercomWebhook('not json', sign('not json'))).toBe(400);
-    const skipped = JSON.stringify({ topic: 'conversation.admin.closed', data: { item: { id: '9', ai_agent_participated: false } } });
-    expect(await fin.handleIntercomWebhook(skipped, sign(skipped))).toBe(200);
-    const body = JSON.stringify({ topic: 'conversation.admin.closed', data: { item: { id: '9', ai_agent_participated: true } } });
-    expect(await fin.handleIntercomWebhook(body, sign(body))).toBe(200);
-    expect(calls).toHaveLength(0);
+    await fin.syncFin(0, finOptions, store);
+    const retrieved = calls.filter((c) => c.method === 'GET').map((c) => new URL(c.url).pathname);
+    expect(retrieved).toEqual(['/conversations/1', '/conversations/2', '/conversations/3']);
+    expect(calls.findIndex((c) => c.method === 'POST')).toBe(2);
+    expect(log).toHaveBeenCalledTimes(3);
+    expect([...store.jobs.keys()]).toEqual(['4']);
+  });
 
-    await vi.advanceTimersByTimeAsync(SETTLE_MS - 1_000);
-    expect(calls).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(1_000);
-    vi.useRealTimers();
-    await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(1));
-    expect(calls.map((c) => c.url)).toEqual(['https://api.intercom.io/conversations/9?display_as=plaintext']);
-    assertForwarderRules(JSON.parse(log.mock.calls[0]?.[0] as string));
+  it('forwards a conversation once when Intercom delivers its webhook twice', async () => {
+    process.env.INTERCOM_CLIENT_SECRET = secret;
+    process.env.AMPLITUDE_DRY_RUN = '1';
+    const calls = stubFetch((call) => {
+      if (call.url.endsWith('/conversations/search')) return json({ conversations: [{ id: '9' }], pages: { next: null } });
+      return json(conversationWith('9'));
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const now = Date.UTC(2026, 9, 6, 20, 0, 0);
+    vi.useFakeTimers({ now: now - SETTLE_MS });
+    const store = memoryStore();
+    await fin.handleIntercomWebhook(store, closed('9'), sign(closed('9')));
+    vi.setSystemTime(now - SETTLE_MS + 60_000);
+    await fin.handleIntercomWebhook(store, closed('9'), sign(closed('9')));
+    expect(store.puts).toHaveLength(2);
+    vi.setSystemTime(now + 60_000);
 
-    const jobs: { conversationId: string; notBefore: number }[] = [];
-    const now = Date.now();
-    expect(await fin.handleIntercomWebhook(body, sign(body), (job: { conversationId: string; notBefore: number }) => {
-      jobs.push(job);
-    })).toBe(200);
-    expect(jobs[0]?.conversationId).toBe('9');
-    expect(jobs[0]?.notBefore).toBeGreaterThanOrEqual(now + SETTLE_MS);
+    // The search returns the same conversation: it is still retrieved and sent once per run.
+    await fin.syncFin(0, finOptions, store);
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(store.jobs.size).toBe(0);
+
+    // A store that keeps both deliveries forwards twice, and the events are identical, so they deduplicate.
+    const both: Job[] = [{ conversationId: '9', notBefore: now }, { conversationId: '9', notBefore: now + 60_000 }];
+    const sent: AgentEvent[][] = [];
+    for (const job of both) {
+      log.mockClear();
+      await fin.syncFin(0, finOptions, { put: async () => {}, takeDue: async () => [job] });
+      sent.push(JSON.parse(log.mock.calls[0]?.[0] as string));
+    }
+    expect(sent[1]).toEqual(sent[0]);
+    expect(new Set(sent[0]?.map((e) => e.insert_id)).size).toBe(sent[0]?.length);
   });
 
   it('warns how many sent conversations were truncated', async () => {
