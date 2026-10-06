@@ -717,6 +717,8 @@ export class AmplitudeAI {
     browserSessionId?: string | number | null;
     privacyConfig?: PrivacyConfig | null;
   }): string {
+    const sessionId = opts.sessionId ?? getActiveContext()?.sessionId;
+    const effectiveTurnId = opts.turnId ?? (sessionId ? this._nextTurnId(sessionId) : undefined);
     return trackToolCall({
       amplitude: this._amplitude,
       userId: opts.userId,
@@ -728,7 +730,7 @@ export class AmplitudeAI {
       latencyMs: opts.latencyMs,
       sessionId: opts.sessionId,
       traceId: opts.traceId,
-      turnId: opts.turnId ?? undefined,
+      turnId: effectiveTurnId,
       invocationId: opts.invocationId,
       toolInput: opts.input,
       toolOutput: opts.output,

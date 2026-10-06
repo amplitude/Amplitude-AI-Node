@@ -138,16 +138,17 @@ describe('OpenAI-like E2E flow', () => {
     const userMsgs = mock.getEvents(EVENT_USER_MESSAGE);
     expect(userMsgs).toHaveLength(2);
     expect(propsOf(userMsgs, 0)[PROP_TURN_ID]).toBe(1);
-    expect(propsOf(userMsgs, 1)[PROP_TURN_ID]).toBe(3);
+    expect(propsOf(userMsgs, 1)[PROP_TURN_ID]).toBe(4);
 
     const aiMsgs = mock.getEvents(EVENT_AI_RESPONSE);
     expect(aiMsgs).toHaveLength(2);
     expect(propsOf(aiMsgs, 0)[PROP_TURN_ID]).toBe(2);
-    expect(propsOf(aiMsgs, 1)[PROP_TURN_ID]).toBe(4);
+    expect(propsOf(aiMsgs, 1)[PROP_TURN_ID]).toBe(5);
 
     const toolEvents = mock.getEvents(EVENT_TOOL_CALL);
     expect(toolEvents).toHaveLength(1);
     const toolProps = propsOf(toolEvents, 0);
+    expect(toolProps[PROP_TURN_ID]).toBe(3);
     expect(toolProps[PROP_TOOL_NAME]).toBe('search_papers');
     expect(toolProps[PROP_TOOL_SUCCESS]).toBe(true);
     expect(toolProps[PROP_IS_ERROR]).toBe(false);
