@@ -9,7 +9,15 @@ import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
-const PLATFORM_PAGES = ['sierra.md', 'decagon.md', 'fin.md', 'langfuse.md', 'langsmith.md', 'braintrust.md'];
+const PLATFORM_PAGES = [
+  'sierra.md',
+  'decagon.md',
+  'fin.md',
+  'agentforce.md',
+  'langfuse.md',
+  'langsmith.md',
+  'braintrust.md',
+];
 const TRACING_ADAPTERS = [
   { name: 'langfuse', page: 'langfuse.md', heading: '### Langfuse adapter' },
   { name: 'langsmith', page: 'langsmith.md', heading: '### LangSmith adapter' },
@@ -298,6 +306,8 @@ describe('forwarder core and adapters', () => {
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   let fin: any;
   // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
+  let agentforce: any;
+  // biome-ignore lint/suspicious/noExplicitAny: dynamically imported doc snippets
   const tracing: Record<string, any> = {};
 
   const t0 = Date.UTC(2026, 0, 15, 12, 0, 0);
@@ -331,11 +341,13 @@ describe('forwarder core and adapters', () => {
     const decagonSource = extractFencedBlockAfter(readPage('decagon.md'), '### Decagon adapter', 'ts');
     const sierraSource = extractFencedBlockAfter(readPage('sierra.md'), '### Sierra adapter skeleton', 'ts');
     const finSource = extractFencedBlockAfter(readPage('fin.md'), '### Fin adapter', 'ts');
+    const agentforceSource = extractFencedBlockAfter(readPage('agentforce.md'), '### Agentforce adapter', 'ts');
 
     writeFileSync(join(dir, 'amplitude-agent-forwarder.ts'), coreSource);
     writeFileSync(join(dir, 'decagon.ts'), decagonSource);
     writeFileSync(join(dir, 'sierra.ts'), sierraSource);
     writeFileSync(join(dir, 'fin.ts'), finSource);
+    writeFileSync(join(dir, 'agentforce.ts'), agentforceSource);
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     const tracingSources = TRACING_ADAPTERS.map((a) => ({
       name: a.name,
@@ -349,6 +361,7 @@ describe('forwarder core and adapters', () => {
         'decagon.ts',
         'sierra.ts',
         'fin.ts',
+        'agentforce.ts',
         ...tracingSources.map((s) => `${s.name}.ts`),
         'env.d.ts',
       ].map((f) => join(dir, f)),
@@ -360,6 +373,7 @@ describe('forwarder core and adapters', () => {
     core = await import(pathToFileURL(corePath).href);
     decagon = await import(pathToFileURL(decagonPath).href);
     fin = await import(pathToFileURL(transpileTo(dir, 'fin', finSource)).href);
+    agentforce = await import(pathToFileURL(transpileTo(dir, 'agentforce', agentforceSource)).href);
     for (const { name, source } of tracingSources) {
       tracing[name] = await import(pathToFileURL(transpileTo(dir, name, source)).href);
     }
@@ -834,6 +848,283 @@ describe('forwarder core and adapters', () => {
       else process.env.INTERCOM_CLIENT_SECRET = env.secret;
       if (env.dry === undefined) delete process.env.AMPLITUDE_DRY_RUN;
       else process.env.AMPLITUDE_DRY_RUN = env.dry;
+    }
+  });
+
+  const sf = (fields: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(fields).map(([k, v]) => [k.endsWith('__c') ? k : `ssot__${k}__c`, v]));
+  const AF_SESSION = '3f2c9a1e-7b4d-4e8a-9c61-2d5f0b8e4a17';
+  const afAt = (s: string) => `2026-10-06T19:${s}.000Z`;
+  const afTurn = (id: string, start: string, end: string, topic = 'NOT_SET', type = 'TURN') =>
+    sf({ Id: id, AiAgentSessionId: AF_SESSION, AiAgentInteractionType: type, TopicApiName: topic, StartTimestamp: afAt(start), EndTimestamp: afAt(end) });
+  const afMessage = (id: string, turn: string, type: 'Input' | 'Output', text: string, sent: string, modality = 'Text', contentType = 'NOT_SET') =>
+    sf({ Id: id, AiAgentSessionId: AF_SESSION, AiAgentInteractionId: turn, AiAgentSessionParticipantId: type === 'Input' ? 'p-user' : 'p-agent', AiAgentInteractionMessageType: type, AiAgentInteractionMsgContentType: contentType, ContentText: text, MessageSentTimestamp: afAt(sent), Modality__c: modality, MessageStartTimestamp__c: null });
+  const afStep = (id: string, turn: string, type: string, name: string, start: string, end: string, extra: Record<string, unknown> = {}) =>
+    sf({ Id: id, AiAgentInteractionId: turn, AiAgentInteractionStepType: type, Name: name, InputValueText: 'NOT_SET', OutputValueText: 'NOT_SET', ErrorMessageText: 'NOT_SET', GenerationId: 'NOT_SET', StartTimestamp: afAt(start), EndTimestamp: afAt(end), ...extra });
+  const afBundle = () => ({
+    session: sf({ Id: AF_SESSION, StartTimestamp: afAt('00:00'), EndTimestamp: afAt('01:30'), AiAgentChannelType: 'SCRT2 - EmbeddedMessaging', AiAgentSessionEndType: 'Completed', PreviousSessionId: 'NOT_SET', VariableText: '{&quot;plan_tier&quot;:&quot;pro&quot;,&quot;email&quot;:&quot;someone@example.com&quot;}', IndividualId: 'NOT_SET' }),
+    participants: [
+      sf({ Id: 'p-user', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'USER', ParticipantObject: 'MessagingEndUser', ParticipantId: '0PAxx0000004CzQ', ParticipantUserId: 'NOT_SET', IndividualId: 'NOT_SET', AiAgentApiName: 'NOT_SET', AiAgentVersionApiName: 'NOT_SET', AiAgentType: 'NOT_SET' }),
+      sf({ Id: 'p-agent', AiAgentSessionId: AF_SESSION, AiAgentSessionParticipantRole: 'AGENT', ParticipantObject: 'GenAiPlannerDefinition', ParticipantId: '16jxx0000004D1A', ParticipantUserId: 'NOT_SET', IndividualId: 'NOT_SET', AiAgentApiName: 'Order_Assistant', AiAgentVersionApiName: 'v3', AiAgentType: 'AgentforceServiceAgent' }),
+    ],
+    interactions: [
+      afTurn('turn-0', '00:00', '00:01'),
+      afTurn('turn-1', '00:10', '00:15', 'Order_Management'),
+      afTurn('turn-2', '01:00', '01:02', 'Order_Management'),
+      afTurn('turn-end', '01:30', '01:30', 'NOT_SET', 'SESSION_END'),
+    ],
+    messages: [
+      afMessage('msg-0', 'turn-0', 'Output', "Hi, I'm the Acme order assistant. How can I help?", '00:01'),
+      afMessage('msg-1', 'turn-1', 'Input', 'Where is order 10482?', '00:10'),
+      afMessage('msg-2', 'turn-1', 'Output', 'Order 10482 has shipped and should arrive Friday, October 9.', '00:15'),
+      afMessage('msg-3', 'turn-2', 'Input', 'Great, thanks!', '01:00'),
+      afMessage('msg-4', 'turn-2', 'Output', "You're welcome. Anything else?", '01:02'),
+    ],
+    steps: [
+      afStep('step-1a', 'turn-1', 'TOPIC_STEP', 'Order_Management', '00:11', '00:11'),
+      afStep('step-1b', 'turn-1', 'LLM_STEP', 'AiCopilot__ReactTopicPrompt', '00:11', '00:12', { GenerationId: 'gen-1' }),
+      afStep('step-1c', 'turn-1', 'ACTION_STEP', 'Get_Order_Status', '00:12', '00:14', {
+        InputValueText: '{&quot;orderNumber&quot;:&quot;10482&quot;}',
+        OutputValueText: '{&quot;status&quot;:&quot;Shipped&quot;,&quot;eta&quot;:&quot;2026-10-09&quot;}',
+      }),
+      afStep('step-2a', 'turn-2', 'LLM_STEP', 'AiCopilot__ReactTopicPrompt', '01:00', '01:01', { GenerationId: 'gen-2' }),
+    ],
+    tokens: [
+      { sessionId: AF_SESSION, interactionId: 'turn-1', timestamp: Date.parse(afAt('00:11')), model: 'gpt-4o-mini', provider: 'OpenAI', inputTokens: 1820, outputTokens: 96 },
+      { sessionId: AF_SESSION, interactionId: 'turn-1', timestamp: Date.parse(afAt('00:14')), model: 'gpt-4o-mini', provider: 'OpenAI', inputTokens: 2410, outputTokens: 42 },
+      { sessionId: AF_SESSION, interactionId: 'turn-2', timestamp: Date.parse(afAt('01:01')), model: 'gpt-4o-mini', provider: 'OpenAI', inputTokens: 2600, outputTokens: 18 },
+    ],
+    feedback: [{ feedbackId__c: 'fb-1', generationId__c: 'gen-2', feedback__c: 'UP', timestamp__c: afAt('01:10') }],
+  });
+  const afOptions = { agentId: 'order-assistant', resolveUserId: () => 'user_48213', contextVariableKeys: ['plan_tier'] };
+
+  it('produces the documented Agentforce example from Session Tracing rows', () => {
+    const bundle = afBundle();
+    expect(agentforce.isTraceComplete(bundle)).toBe(true);
+    const conversation = agentforce.normalizeAgentforceSession(bundle, afOptions);
+    expect(conversation.context).toEqual({
+      platform: 'agentforce',
+      handed_off: false,
+      channel: 'SCRT2 - EmbeddedMessaging',
+      end_type: 'completed',
+      topics: 'Order_Management',
+      agent_type: 'AgentforceServiceAgent',
+      agent_version: 'v3',
+      plan_tier: 'pro',
+    });
+    const events: AgentEvent[] = core.toAgentEvents(conversation, { source: 'agentforce' });
+    assertForwarderRules(events);
+    const example = JSON.parse(
+      extractFencedBlockAfter(readPage('agentforce.md'), '### Example: one complete session', 'json'),
+    ) as AgentEvent[];
+    expect(events).toEqual(example);
+
+    const tool = events.find((e) => e.event_type === '[Agent] Tool Call');
+    expect(tool?.event_properties).toMatchObject({
+      '[Agent] Tool Name': 'Get_Order_Status',
+      '[Agent] Tool Success': true,
+      '[Agent] Latency Ms': 2000,
+      '[Agent] Tool Input': '{"orderNumber":"10482"}',
+    });
+    const reply = events.find((e) => e.insert_id === `${AF_SESSION}:msg-2`);
+    expect(reply?.event_properties).toMatchObject({
+      '[Agent] Model Name': 'gpt-4o-mini',
+      '[Agent] Provider': 'OpenAI',
+      '[Agent] Input Tokens': 4230,
+      '[Agent] Output Tokens': 138,
+    });
+    expect(events.find((e) => e.event_type === '[Agent] Span')?.event_properties['[Agent] Span Name']).toBe('topic_selection');
+    expect(events.find((e) => e.event_type === '[Agent] Score')?.event_properties).toMatchObject({
+      '[Agent] Score Name': 'user_feedback',
+      '[Agent] Score Value': 1,
+    });
+    expect(JSON.stringify(events)).not.toContain('someone@example.com');
+    expect(agentforce.normalizeAgentforceSession(bundle, { resolveUserId: () => 'user_48213' }).agentId).toBe('Order_Assistant');
+  });
+
+  it('maps escalation, failed actions, rich replies, guardrails, voice, and gateway tokens bound by time', () => {
+    const bundle = afBundle();
+    bundle.session = { ...bundle.session, ssot__AiAgentSessionEndType__c: 'Escalated' };
+    bundle.messages = [
+      bundle.messages[0],
+      bundle.messages[1],
+      afMessage('msg-2', 'turn-1', 'Output', '', '00:15', 'Text', 'OrderStatusCard'),
+      afMessage('msg-3', 'turn-2', 'Input', 'I need a person.', '01:00', 'Voice'),
+      afMessage('msg-4', 'turn-2', 'Output', 'Connecting you with an agent now.', '01:02'),
+    ];
+    bundle.steps = [
+      afStep('step-1c', 'turn-1', 'FunctionStep', 'Get_Order_Status', '00:12', '00:14', { ErrorMessageText: 'Order service timed out' }),
+      afStep('step-2a', 'turn-2', 'TRUST_GUARDRAILS_STEP', 'Guardrails', '01:00', '01:01'),
+    ];
+    bundle.tokens = [
+      { sessionId: AF_SESSION, timestamp: Date.parse(afAt('00:12')), model: 'gpt-4o', provider: 'OpenAI', inputTokens: 100, outputTokens: 10 },
+      { sessionId: AF_SESSION, timestamp: Date.parse(afAt('01:01')), model: 'gpt-4o', provider: 'OpenAI', inputTokens: 200, outputTokens: 20 },
+    ];
+    bundle.feedback = [];
+    const conversation = agentforce.normalizeAgentforceSession(bundle, afOptions);
+    expect(conversation.context).toMatchObject({ handed_off: true, end_type: 'escalated', modality: 'voice', steps_with_errors: 1 });
+    expect(conversation.scores).toBeUndefined();
+    const events: AgentEvent[] = core.toAgentEvents(conversation, { source: 'agentforce' });
+    assertForwarderRules(events);
+    const card = events.find((e) => e.insert_id === `${AF_SESSION}:msg-2`);
+    expect(card?.event_properties.$llm_message).toEqual({ text: '[Displayed: OrderStatusCard]' });
+    expect(card?.event_properties['[Agent] Input Tokens']).toBe(100);
+    const tool = events.find((e) => e.event_type === '[Agent] Tool Call');
+    expect(tool?.event_properties).toMatchObject({ '[Agent] Tool Success': false, '[Agent] Is Error': true, '[Agent] Tool Output': 'Order service timed out' });
+    expect(tool?.event_properties['[Agent] Trace ID']).toBe(card?.event_properties['[Agent] Trace ID']);
+    const spanNames = events.filter((e) => e.event_type === '[Agent] Span').map((e) => e.event_properties['[Agent] Span Name']);
+    expect(spanNames).toEqual(['OrderStatusCard', 'trust_guardrails']);
+    expect(events.find((e) => e.insert_id === `${AF_SESSION}:msg-4`)?.event_properties['[Agent] Input Tokens']).toBe(200);
+
+    // A turn that ends with no agent message keeps its actions out of later turns.
+    const unanswered = agentforce.normalizeAgentforceSession(
+      { ...bundle, messages: bundle.messages.filter((m: Record<string, unknown>) => m.ssot__Id__c !== 'msg-2') },
+      afOptions,
+    );
+    expect(unanswered.context.actions_without_reply).toBe(1);
+    const unansweredEvents: AgentEvent[] = core.toAgentEvents(unanswered, { source: 'agentforce' });
+    assertForwarderRules(unansweredEvents);
+    expect(unansweredEvents.some((e) => e.event_type === '[Agent] Tool Call')).toBe(false);
+
+    const { tokens: _tokens, ...withoutTokens } = bundle;
+    expect(agentforce.normalizeAgentforceSession(withoutTokens, afOptions).context.tokens_unavailable).toBe(true);
+  });
+
+  it('holds traces until Data Cloud has written every turn', () => {
+    const bundle = afBundle();
+    expect(agentforce.isTraceComplete({ ...bundle, interactions: [] })).toBe(false);
+    expect(agentforce.isTraceComplete({ ...bundle, messages: bundle.messages.filter((m: Record<string, unknown>) => m.ssot__Id__c !== 'msg-4') })).toBe(true);
+    expect(agentforce.isTraceComplete({ ...bundle, messages: bundle.messages.filter((m: Record<string, unknown>) => !String(m.ssot__Id__c).match(/msg-[34]/)) })).toBe(false);
+    expect(agentforce.isTraceComplete({ ...bundle, steps: bundle.steps.filter((s: Record<string, unknown>) => s.ssot__AiAgentInteractionId__c !== 'turn-2') })).toBe(false);
+    // The greeting turn has no user message, so it needs no steps.
+    expect(agentforce.isTraceComplete({ ...bundle, steps: bundle.steps.filter((s: Record<string, unknown>) => s.ssot__AiAgentInteractionId__c !== 'turn-0') })).toBe(true);
+    const partial = agentforce.normalizeAgentforceSession({ ...bundle, steps: [] }, afOptions);
+    expect(partial.context.trace_incomplete).toBe(true);
+    expect(agentforce.value({ a: 'NOT_SET', b: '', c: 0 }, 'a')).toBeUndefined();
+    expect(agentforce.value({ a: 'NOT_SET', b: '', c: 0 }, 'b')).toBeUndefined();
+    expect(agentforce.value({ a: 'NOT_SET', b: '', c: 0 }, 'c')).toBe('0');
+    expect(agentforce.unescapeHtml('{&quot;a&quot;:&quot;x &amp;lt; y&quot;}')).toBe('{"a":"x &lt; y"}');
+  });
+
+  it('authenticates once, polls and pages Query Connect results, and refreshes on 401', async () => {
+    const calls: { url: string; init?: { method?: string; body?: string; headers?: Record<string, string> } }[] = [];
+    const responses = [
+      new Response(JSON.stringify({ access_token: 't1', instance_url: 'https://acme.my.salesforce.com' })),
+      new Response('expired', { status: 401 }),
+      new Response(JSON.stringify({ access_token: 't2', instance_url: 'https://acme.my.salesforce.com' })),
+      new Response(JSON.stringify({
+        metadata: [{ name: 'ssot__Id__c' }, { name: 'n__c' }],
+        data: [['a', 1]],
+        status: { queryId: 'q%2F1', completionStatus: 'Running', rowCount: 3, progress: 0.2 },
+      })),
+      new Response('{}', { status: 429, headers: { 'retry-after': '0' } }),
+      new Response(JSON.stringify({ queryId: 'q%2F1', completionStatus: 'Finished', rowCount: 3, progress: 1 })),
+      new Response(JSON.stringify({ data: [['b', 2], ['c', 3]] })),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => {
+        calls.push({ url, init });
+        return responses.shift() ?? new Response('{}', { status: 500 });
+      }),
+    );
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    process.env.SALESFORCE_CLIENT_ID = 'id';
+    process.env.SALESFORCE_CLIENT_SECRET = 'secret';
+    agentforce.resetSalesforceToken();
+    try {
+      const rows = await agentforce.queryDataCloud('SELECT 1');
+      expect(rows).toEqual([
+        { ssot__Id__c: 'a', n__c: 1 },
+        { ssot__Id__c: 'b', n__c: 2 },
+        { ssot__Id__c: 'c', n__c: 3 },
+      ]);
+      expect(calls[0]?.url).toBe('https://acme.my.salesforce.com/services/oauth2/token');
+      expect(calls[0]?.init?.body).toContain('grant_type=client_credentials');
+      expect(calls[3]?.url).toBe(
+        'https://acme.my.salesforce.com/services/data/v64.0/ssot/query-sql?dataspace=default&workloadName=amplitude-agent-forwarder',
+      );
+      expect(calls[3]?.init?.headers?.Authorization).toBe('Bearer t2');
+      expect(JSON.parse(calls[3]?.init?.body ?? '{}')).toEqual({ sql: 'SELECT 1' });
+      expect(calls[5]?.url).toContain('/ssot/query-sql/q%2F1?');
+      expect(calls[5]?.url).toContain('waitTimeMs=10000');
+      expect(calls[6]?.url).toContain('/ssot/query-sql/q%2F1/rows?');
+      expect(calls[6]?.url).toContain('offset=1&rowLimit=2000&omitSchema=true');
+      expect(calls).toHaveLength(7);
+    } finally {
+      process.env = env;
+      agentforce.resetSalesforceToken();
+    }
+  });
+
+  it('syncs only complete traces, skips Builder previews, and holds the watermark for the rest', async () => {
+    const complete = afBundle();
+    const waitingId = 'aaaaaaaa-0000-4000-8000-000000000002';
+    const sqls: string[] = [];
+    const table = (sql: string) => sql.match(/^SELECT .*? FROM (\S+)/)?.[1] ?? '';
+    const reply = (columns: string[], rows: Record<string, unknown>[]) =>
+      new Response(JSON.stringify({ metadata: columns.map((name) => ({ name })), data: rows.map((r) => columns.map((col) => r[col] ?? null)), status: { completionStatus: 'Finished', rowCount: rows.length } }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: { body?: string }) => {
+        if (url.endsWith('/services/oauth2/token')) {
+          return new Response(JSON.stringify({ access_token: 't', instance_url: 'https://acme.my.salesforce.com' }));
+        }
+        const sql = JSON.parse(init?.body ?? '{}').sql as string;
+        sqls.push(sql);
+        if (sql.endsWith('LIMIT 1')) {
+          return table(sql) === 'AiAgentGenerativeAiUsage_std__dlm' ? new Response('no such table', { status: 400 }) : reply([], []);
+        }
+        const columns = sql.match(/^SELECT (.*?) FROM /)?.[1]?.split(', ') ?? [];
+        switch (table(sql)) {
+          case 'ssot__AIAgentSession__dlm':
+            return reply(columns, [complete.session, { ...complete.session, ssot__Id__c: waitingId, ssot__EndTimestamp__c: afAt('05:00') }]);
+          case 'ssot__AiAgentSessionParticipant__dlm':
+            return reply(columns, complete.participants);
+          case 'ssot__AIAgentInteraction__dlm':
+            return reply(columns, [...complete.interactions, sf({ Id: 'w-1', AiAgentSessionId: waitingId, AiAgentInteractionType: 'TURN', StartTimestamp: afAt('04:00'), EndTimestamp: afAt('04:10') })]);
+          case 'ssot__AiAgentInteractionMessage__dlm':
+            return reply(columns, complete.messages);
+          case 'ssot__AIAgentInteractionStep__dlm':
+            return reply(columns, complete.steps);
+          case 'GenAIGatewayRequest__dlm':
+            return reply(columns, [{ sessionId__c: `"${AF_SESSION}"`, timestamp__c: afAt('00:12'), model__c: 'gpt-4o-mini', provider__c: 'OpenAI', promptTokens__c: 50, completionTokens__c: 5 }]);
+          case 'GenAIFeedback__dlm':
+            return reply(columns, complete.feedback);
+          default:
+            return new Response(`unexpected ${sql}`, { status: 500 });
+        }
+      }),
+    );
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-06T21:00:00.000Z'));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { ...process.env };
+    process.env.SALESFORCE_MY_DOMAIN_URL = 'https://acme.my.salesforce.com';
+    process.env.AMPLITUDE_DRY_RUN = '1';
+    agentforce.resetSalesforceToken();
+    try {
+      const next = await agentforce.syncAgentforce('2026-10-06T18:00:00.000Z', afOptions);
+      expect(next).toBe(afAt('05:00'));
+      const sessionQuery = sqls.find((s) => s.startsWith('SELECT ssot__Id__c, ssot__StartTimestamp__c'));
+      expect(sessionQuery).toContain("ssot__EndTimestamp__c >= '2026-10-06T18:00:00.000Z'");
+      expect(sessionQuery).toContain("ssot__EndTimestamp__c < '2026-10-06T20:45:00.000Z'");
+      expect(sessionQuery).toContain("NOT IN ('Builder')");
+      expect(sqls.find((s) => table(s) === 'GenAIGatewayRequest__dlm' && !s.endsWith('LIMIT 1'))).toContain(`'"' || ssot__Id__c || '"'`);
+      expect(log).toHaveBeenCalledTimes(1);
+      const sent = JSON.parse(log.mock.calls[0]?.[0] as string) as AgentEvent[];
+      assertForwarderRules(sent);
+      expect(new Set(sent.map((e) => e.event_properties['[Agent] Session ID']))).toEqual(new Set([AF_SESSION]));
+      expect(sent.find((e) => e.insert_id === `${AF_SESSION}:msg-2`)?.event_properties['[Agent] Input Tokens']).toBe(50);
+      expect(warn.mock.calls[0]?.[0]).toContain('1 still waiting');
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+      vi.useRealTimers();
+      process.env = env;
+      agentforce.resetSalesforceToken();
     }
   });
 

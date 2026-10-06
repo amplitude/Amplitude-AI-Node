@@ -39,6 +39,17 @@
       "last_verified": "2026-10-06"
     },
     {
+      "id": "agentforce",
+      "name": "Agentforce",
+      "category": "hosted_agent_platform",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/agentforce.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md",
+      "extraction_methods": ["query_api"],
+      "vendor_format_source": "vendor_public_dmo_docs_2026_10",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-10-06"
+    },
+    {
       "id": "langfuse",
       "name": "Langfuse",
       "category": "tracing_tool",
