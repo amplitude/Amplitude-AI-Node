@@ -52,7 +52,7 @@ Conversations missing a conversation ID or a user ID are skipped, and the job re
 ### What you need before starting
 
 1. An Amplitude project and its API key.
-2. A LangSmith API key, the tracing project's ID (a UUID), and the API URL for your [region](https://docs.langchain.com/langsmith/cloud): `https://api.smith.langchain.com` (US), `https://eu.api.smith.langchain.com` (EU), `https://apac.api.smith.langchain.com` (APAC), or `https://aws.api.smith.langchain.com` (AWS US). For self-hosted LangSmith (v0.16 or later), use the same `LANGSMITH_ENDPOINT` your application uses, `http(s)://<host>/api/v1` [per LangSmith's self-hosting guide](https://docs.langchain.com/langsmith/self-host-usage); the adapter strips the trailing `/api/v1`, because its paths carry their own `/api/v2`.
+2. A LangSmith API key, the tracing project's ID (a UUID), and the API URL for your [region](https://docs.langchain.com/langsmith/cloud): `https://api.smith.langchain.com` (US), `https://eu.api.smith.langchain.com` (EU), `https://apac.api.smith.langchain.com` (APAC), or `https://aws.api.smith.langchain.com` (AWS US). For self-hosted LangSmith (v0.16 or later), use the same `LANGSMITH_ENDPOINT` your application uses, `http(s)://<host>/api/v1` [per LangSmith's self-hosting guide](https://docs.langchain.com/langsmith/self-host-usage). The adapter normalizes it [the way the LangSmith SDK does for its v2 calls](https://github.com/langchain-ai/langsmith-sdk/blob/2fd05b9b113987a8c378f26b64492c86a56cbd4e/js/src/client.ts#L1751-L1757): it drops a trailing `/` and then a trailing `/api/v1` or `/api`, because its paths carry their own `/api/v2`. `LANGCHAIN_ENDPOINT` is read when `LANGSMITH_ENDPOINT` is unset, as in the SDK.
 3. A decision on which field identifies the user. It must match the `user_id` your product analytics already uses.
 
 ### Effort
@@ -715,10 +715,20 @@ interface Page<T> {
  * Self-hosted (v0.16 or later): the LANGSMITH_ENDPOINT your application uses, http(s)://<host>/api/v1.
  */
 export function langsmithBaseUrl(
-  endpoint = process.env.LANGSMITH_ENDPOINT || 'https://api.smith.langchain.com',
+  endpoint = process.env.LANGSMITH_ENDPOINT || process.env.LANGCHAIN_ENDPOINT || 'https://api.smith.langchain.com',
 ): string {
-  // Self-hosted endpoints end in /api/v1, and every path below carries its own /api/v2.
-  return endpoint.replace(/\/+$/, '').replace(/\/api\/v[12]$/, '');
+  // As langsmith-sdk builds the base URL of its v2 client (Client._getOpenAPIBaseUrl):
+  // https://github.com/langchain-ai/langsmith-sdk/blob/2fd05b9b113987a8c378f26b64492c86a56cbd4e/js/src/client.ts#L1751-L1757
+  const url = endpoint
+    .trim()
+    .replace(/^"(.*)"$/, '$1')
+    .replace(/^'(.*)'$/, '$1')
+    .replace(/\/$/, '')
+    .replace(/\/$/, '');
+  for (const suffix of ['/api/v1', '/api']) {
+    if (url.endsWith(suffix)) return url.slice(0, -suffix.length);
+  }
+  return url;
 }
 
 /** RunSelectField values from LangSmith's OpenAPI specification. */
@@ -1148,7 +1158,7 @@ Historical `time` values are kept as sent, with no age limit. For a backfill, st
 | `Set AMPLITUDE_API_KEY` error at start | No Amplitude API key and no `AMPLITUDE_DRY_RUN`; the job refuses to start rather than fail every thread |
 | No threads found | Root runs have no `session_id` or `thread_id` metadata, or the project ID is wrong |
 | LangSmith returns `404` or `501` on every call (self-hosted) | LangSmith is older than v0.16, or `LANGSMITH_ENDPOINT` points somewhere other than `http(s)://<host>/api/v1` |
-| Every request goes to `/api/v1/api/v2/...` (in a port) | The port did not strip `/api/v1` from the self-hosted endpoint; keep `langsmithBaseUrl` |
+| Every request goes to `/api/v1/api/v2/...` or `/api/api/v2/...` (in a port) | The port did not strip `/api/v1` or `/api` from the self-hosted endpoint; keep `langsmithBaseUrl` |
 | A thread is missing earlier exchanges | Those traces aged out of LangSmith's retention |
 | A thread never arrives | It keeps getting new traces, or one is newer than `SETTLE_MS`; the warning line counts it as still active |
 | Tool calls or tokens missing | Child runs were not returned, or a port compares `run_type` in lowercase; v2 run types are uppercase. Check the API key can read the project |
