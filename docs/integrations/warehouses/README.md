@@ -2,7 +2,7 @@
 
 **Amplitude Agent Analytics can import agent conversations that already live in Snowflake, BigQuery, or Databricks, with one SQL query and Amplitude's warehouse import. No SDK or forwarder required.**
 
-Last verified: 2026-09-24. Corrections are welcome as a pull request.
+Last verified: 2026-10-06. Corrections are welcome as a pull request.
 
 ---
 
@@ -179,6 +179,7 @@ Stage 1 produces one row per message, tool call, or span, with these columns:
 | `span_input` | string (JSON text) | No | Span rows: what was rendered or passed in. |
 | `span_output` | string (JSON text) | No | Span rows: what the user did, or what the step returned. |
 | `context` | string (JSON object text) | No | Filterable dimensions, one key per dimension. Becomes `[Agent] Context`. |
+| `updated_at` | timestamp (UTC) | No | When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded. |
 <!-- warehouse-sql:canonical-columns:end -->
 
 ### What Stage 2 does
@@ -187,11 +188,11 @@ Stage 2 implements the same rules as the [hosted-platform forwarder](../sierra.m
 
 1. **Exchanges.** A new exchange starts at the first row of a conversation and at each user message that follows a non-user row. Every row in an exchange shares one `[Agent] Trace ID` (`<session_id>:trace-<n>`).
 2. **Turn order.** Rows are ordered by `event_time`, then user, tool, assistant, span, then `message_id`. `[Agent] Turn ID` counts messages and tool calls; a span shares the Turn ID of the reply before it.
-3. **Deterministic IDs.** `insert_id` is `<session_id>:<message_id>`, and the matching Message ID, Invocation ID, or Span ID has the same value, so a re-sync never duplicates.
+3. **Deterministic IDs.** `insert_id` is `<session_id>:<message_id>`, and the matching Message ID, Invocation ID, or Span ID has the same value, so a re-sync within Amplitude's [7-day deduplication window](https://amplitude.com/docs/apis/analytics/http-v2#event-deduplication) doesn't duplicate events. Re-importing older rows does.
 4. **No empty replies.** An assistant row with no text followed by a span becomes `[Displayed: <span_name>]`. An empty reply scores as an incomplete turn, so the checker fails any that remain.
 5. **Cost and tokens only on AI Response**, and only when your table records them.
 6. **Session End**, once per conversation at its last activity, with the final exchange's Trace ID.
-7. **Settled sessions only.** A conversation imports once it has been idle for `settle_hours`.
+7. **Settled sessions only.** A conversation imports once `settle_hours` have passed since the later of its last `event_time` and its latest `updated_at`.
 
 Two settings at the top of Stage 2 are safe to edit:
 
@@ -204,7 +205,7 @@ To redact rather than drop content, apply the redaction in Stage 1 (for example,
 
 ### Set up the import
 
-Every query outputs `import_cursor`: the time the conversation settled. Snowflake and BigQuery sync on it. It moves forward only when a conversation gets new rows, so each conversation imports once it settles and again only if it resumes.
+Every query outputs `import_cursor`: the time the conversation settled. Snowflake and BigQuery sync on it. It moves forward only when a conversation gets new rows or a later `updated_at`, so each conversation imports once it settles and again only if it resumes.
 
 #### Snowflake
 
@@ -303,4 +304,4 @@ If your format is public and others would use it, a pull request adding a format
 
 ## Maintenance
 
-Owner: Amplitude Agent Analytics team. The SQL blocks are generated from [`scripts/warehouse-sql/`](../../../scripts/warehouse-sql/) and tested in CI; edit the templates, then run `pnpm docs:warehouse`. Corrections are welcome as pull requests.
+Owner: Amplitude Agent Analytics team. The SQL blocks are generated from [`scripts/warehouse-sql/`](../../../scripts/warehouse-sql/) and the DuckDB rendering runs in CI on each page's sample rows. The Snowflake, BigQuery, and Databricks renderings come from the same templates but aren't executed in CI. Edit the templates, then run `pnpm docs:warehouse`. Corrections are welcome as pull requests.

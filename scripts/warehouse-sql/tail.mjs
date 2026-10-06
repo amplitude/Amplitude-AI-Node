@@ -29,6 +29,7 @@ export const CANONICAL_COLUMNS = [
   ['span_input', 'string (JSON text)', false, 'Span rows: what was rendered or passed in.'],
   ['span_output', 'string (JSON text)', false, 'Span rows: what the user did, or what the step returned.'],
   ['context', 'string (JSON object text)', false, 'Filterable dimensions, one key per dimension. Becomes `[Agent] Context`.'],
+  ['updated_at', 'timestamp (UTC)', false, 'When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded.'],
 ];
 
 /** Every event property the tail can emit, with the Databricks import type. */
@@ -160,7 +161,9 @@ sequenced AS (
     LAG(o.role) OVER (${window}) AS previous_role,
     LEAD(CASE WHEN o.role = 'span' THEN o.span_name END) OVER (${window}) AS next_span_name,
     COUNT(*) OVER (PARTITION BY session_id) AS session_rows,
-    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity
+    MAX(o.event_time) OVER (PARTITION BY session_id) AS last_activity,
+    MAX(CASE WHEN o.updated_at > o.event_time THEN o.updated_at ELSE o.event_time END)
+      OVER (PARTITION BY session_id) AS last_change
   FROM ordered o
 ),
 exchanges AS (
@@ -178,7 +181,7 @@ exchanges AS (
       OVER (${running}) AS exchange_number,
     ${d.lastNonNull("CASE WHEN s.role = 'user' THEN s.message_id END")}
       OVER (${running}) AS parent_message_id,
-    ${d.addHours('s.last_activity', 'settings.settle_hours')} AS import_cursor
+    ${d.addHours('s.last_change', 'settings.settle_hours')} AS import_cursor
   FROM sequenced s
   CROSS JOIN settings
 ),

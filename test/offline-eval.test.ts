@@ -179,7 +179,7 @@ describe('offline eval document', () => {
           model: 'gpt-4.1',
           baseline: true,
           rows: [
-            { id: 'row-1', input: 'hello', scores: { 'refund-error': 0, tone: null } },
+            { origin: { object_type: 'dataset', id: 'row-1' }, input: 'hello', scores: { 'refund-error': 0, tone: null } },
           ],
         },
       ],
@@ -199,7 +199,7 @@ describe('offline eval document', () => {
           id: 'exp-a',
           name: 'gpt',
           baseline: true,
-          rows: [{ id: 'row-1', scores: { tone: true } }],
+          rows: [{ origin: { object_type: 'dataset', id: 'row-1' }, scores: { tone: true } }],
         },
       ],
     });
@@ -218,7 +218,7 @@ describe('offline eval document', () => {
           id: 'exp-a',
           name: 'gpt',
           baseline: true,
-          rows: [{ id: 'row-1', scores: { tone: true } }],
+          rows: [{ origin: { object_type: 'dataset', id: 'row-1' }, scores: { tone: true } }],
         },
       ],
     });
@@ -237,13 +237,13 @@ describe('offline eval document', () => {
       {
         id: 'exp-b',
         name: 'claude',
-        rows: [{ id: 'row-1', scores: { tone: 0.4 } }],
+        rows: [{ origin: { object_type: 'dataset', id: 'row-1' }, scores: { tone: 0.4 } }],
       },
       {
         id: 'exp-a',
         name: 'gpt',
         baseline: true,
-        rows: [{ id: 'row-1', scores: { tone: 0.8 } }],
+        rows: [{ origin: { object_type: 'dataset', id: 'row-1' }, scores: { tone: 0.8 } }],
       },
     ];
     const forward = braintrustExperimentsToDocument({
@@ -278,8 +278,8 @@ describe('offline eval document', () => {
           name: 'gpt',
           baseline: true,
           rows: [
-            { id: 'row-1', scores: { tone: true } },
-            { id: 'row-2', scores: { tone: false } },
+            { origin: { object_type: 'dataset', id: 'row-1' }, scores: { tone: true } },
+            { origin: { object_type: 'dataset', id: 'row-2' }, scores: { tone: false } },
           ],
         },
       ],
@@ -302,7 +302,7 @@ describe('offline eval document', () => {
           id: 'exp-a',
           name: 'gpt',
           baseline: true,
-          rows: [{ id: 'row-1', scores: { tone: true } }],
+          rows: [{ origin: { object_type: 'dataset', id: 'row-1' }, scores: { tone: true } }],
         },
       ],
     });
@@ -327,7 +327,7 @@ describe('offline eval document', () => {
           baseline: true,
           rows: [
             {
-              id: 'row-1',
+              origin: { object_type: 'dataset', id: 'row-1' },
               scores: { tone: true },
               metrics: { start: 0, end: 1_700_000_000 },
             },
