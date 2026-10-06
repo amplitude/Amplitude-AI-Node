@@ -11,7 +11,7 @@ import {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
 } from './core/constants.js';
-import { calculateCost } from './utils/costs.js';
+import { calculateCost, pricingTarget } from './utils/costs.js';
 import {
   _AnthropicModule,
   ANTHROPIC_AVAILABLE,
@@ -1019,16 +1019,11 @@ async function* _wrapPatchedStream(
       if (inputTokens != null && outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName:
-              providerName === 'fireworks'
-                ? String(req?.model ?? model)
-                : model,
+            ...pricingTarget(providerName === 'azure-openai' ? 'openai' : providerName, req?.model, model),
             inputTokens,
             outputTokens,
             reasoningTokens: reasoningTokens ?? 0,
             cacheReadInputTokens: cachedTokens ?? 0,
-            defaultProvider:
-              providerName === 'azure-openai' ? 'openai' : providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -1890,19 +1885,21 @@ function _trackCompletionResponse(
   const inputTokens = usage?.prompt_tokens as number | undefined;
   const outputTokens = usage?.completion_tokens as number | undefined;
   const modelName = String(resp.model ?? req?.model ?? 'unknown');
-  const pricingModel =
-    providerName === 'fireworks' ? String(req?.model ?? modelName) : modelName;
+  const pricing = pricingTarget(
+    providerName === 'azure-openai' ? 'openai' : providerName,
+    req?.model,
+    modelName,
+  );
 
   let costUsd: number | null = null;
   if (inputTokens != null && outputTokens != null) {
     try {
       costUsd = calculateCost({
-        modelName: pricingModel,
+        ...pricing,
         inputTokens,
         outputTokens,
         reasoningTokens: reasoningTokens ?? 0,
         cacheReadInputTokens: cachedTokens ?? 0,
-        defaultProvider: providerName === 'azure-openai' ? 'openai' : providerName,
       });
     } catch {
       // cost calculation is best-effort
@@ -2341,14 +2338,10 @@ function _trackResponsesResponse(
             .reasoning_tokens as number)
         : 0;
       costUsd = calculateCost({
-        modelName:
-          providerName === 'fireworks'
-            ? String(opts?.model ?? modelName)
-            : modelName,
+        ...pricingTarget(providerName, opts?.model, modelName),
         inputTokens,
         outputTokens,
         reasoningTokens,
-        defaultProvider: providerName,
       });
     } catch {
       // cost calculation is best-effort
@@ -2472,14 +2465,10 @@ async function* _wrapPatchedResponsesStream(
       if (inputTokens != null && outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName:
-              providerName === 'fireworks'
-                ? String(opts?.model ?? model)
-                : model,
+            ...pricingTarget(providerName, opts?.model, model),
             inputTokens,
             outputTokens,
             reasoningTokens: reasoningTokens ?? 0,
-            defaultProvider: providerName,
           });
         } catch {
           // cost calculation is best-effort

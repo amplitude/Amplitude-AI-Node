@@ -21,29 +21,36 @@ const FIREWORKS_MODEL_ID_PREFIXES = [
   'accounts/fireworks/routers/',
 ] as const;
 
-/** Fireworks-published USD rates per million tokens. */
+/** Fireworks models genai-prices prices by endpoint (`routers` for `-fast`, else `models`). */
+const FIREWORKS_CATALOG_MODEL_IDS = new Set([
+  'kimi-k3',
+  'kimi-k3-fast',
+  'deepseek-v4-flash-0731',
+]);
+
+/** Fireworks-published USD rates per million tokens not yet in genai-prices. */
 const FIREWORKS_PUBLIC_RATES_PER_MTOK: Record<
   string,
   { input: number; output: number; cacheRead: number; cacheWrite: number }
 > = {
-  'kimi-k3': { input: 3.0, cacheRead: 0.3, cacheWrite: 3.0, output: 15.0 },
-  'kimi-k3-fast': {
-    input: 4.5,
-    cacheRead: 0.45,
-    cacheWrite: 4.5,
-    output: 22.5,
-  },
-  'deepseek-v4-flash-0731': {
-    input: 0.14,
-    cacheRead: 0.028,
-    cacheWrite: 0.14,
-    output: 0.28,
-  },
   'deepseek-v4-flash-0731-fast': {
     input: 0.21,
     cacheRead: 0.042,
     cacheWrite: 0.21,
     output: 0.42,
+  },
+  'deepseek-v4p1-flash': {
+    input: 0.22,
+    cacheRead: 0.007,
+    cacheWrite: 0.22,
+    output: 0.66,
+  },
+  'glm-5p3': { input: 1.4, cacheRead: 0.26, cacheWrite: 1.4, output: 4.4 },
+  'glm-5p3-flash': {
+    input: 0.15,
+    cacheRead: 0.03,
+    cacheWrite: 0.15,
+    output: 0.5,
   },
 };
 
@@ -152,6 +159,59 @@ function getFireworksPeriodAliasCandidates(
     : [{ model: dottedModelId }];
 }
 
+function isPricedFireworksId(bare: string): boolean {
+  return (
+    bare in FIREWORKS_PUBLIC_RATES_PER_MTOK ||
+    FIREWORKS_CATALOG_MODEL_IDS.has(bare)
+  );
+}
+
+function isFireworksModelId(modelName: string): boolean {
+  return (
+    /^(accounts\/|fireworks:|firerouter)/.test(modelName) ||
+    isPricedFireworksId(
+      stripFireworksModelIdPrefix(stripProviderPrefix(modelName)),
+    )
+  );
+}
+
+/**
+ * Model and default provider to price a Fireworks call with.
+ *
+ * Tier routers (`.../routers/<model>-fast`) bill at their tier, so they keep the
+ * requested router id even though the response reports the base model. Other
+ * routers, FireRouter included, are not separately priced: each request bills at
+ * the model it selected. A selected model outside Fireworks (a BYOK Claude turn)
+ * is priced by model-name inference, or omitted when nothing matches.
+ */
+export function fireworksPricingTarget(
+  requested: string,
+  selected: string | undefined,
+): { modelName: string; defaultProvider: string | undefined } {
+  if (requested.includes('/routers/')) {
+    const bare = stripFireworksModelIdPrefix(stripProviderPrefix(requested));
+    if (bare.endsWith('-fast') || isPricedFireworksId(bare)) {
+      return { modelName: requested, defaultProvider: 'fireworks' };
+    }
+  }
+  const modelName = selected || requested;
+  return {
+    modelName,
+    defaultProvider: isFireworksModelId(modelName) ? 'fireworks' : undefined,
+  };
+}
+
+/** Pricing inputs for a provider call; Fireworks follows `fireworksPricingTarget`. */
+export function pricingTarget(
+  providerName: string,
+  requested: unknown,
+  selected: string,
+): { modelName: string; defaultProvider: string | undefined } {
+  return providerName === 'fireworks'
+    ? fireworksPricingTarget(String(requested ?? selected), selected)
+    : { modelName: selected, defaultProvider: providerName };
+}
+
 export function fireworksExplicitPriceCost(options: {
   modelName: string;
   inputTokens: number;
@@ -163,9 +223,6 @@ export function fireworksExplicitPriceCost(options: {
   const bare = stripFireworksModelIdPrefix(
     stripProviderPrefix(options.modelName),
   );
-  const rates = FIREWORKS_PUBLIC_RATES_PER_MTOK[bare];
-  if (!rates) return null;
-
   const provider = normalizeProviderForGenaiPrices(
     options.modelName.includes(':')
       ? options.modelName.split(':', 1)[0]
@@ -175,6 +232,28 @@ export function fireworksExplicitPriceCost(options: {
 
   const cacheRead = Math.max(0, safeInt(options.cacheReadInputTokens));
   const cacheWrite = Math.max(0, safeInt(options.cacheCreationInputTokens));
+  const rates = FIREWORKS_PUBLIC_RATES_PER_MTOK[bare];
+  if (!rates) {
+    if (!FIREWORKS_CATALOG_MODEL_IDS.has(bare)) return null;
+    const endpoint = bare.endsWith('-fast') ? 'routers' : 'models';
+    try {
+      const price = calcPrice(
+        {
+          input_tokens: Math.max(0, safeInt(options.inputTokens)),
+          output_tokens: Math.max(0, safeInt(options.outputTokens)),
+          cache_read_tokens: cacheRead,
+          cache_write_tokens: cacheWrite,
+        },
+        `accounts/fireworks/${endpoint}/${bare}`,
+        { providerId: 'fireworks' },
+      );
+      if (price?.total_price == null) return null;
+      return Math.round(price.total_price * 1_000_000) / 1_000_000;
+    } catch {
+      return null;
+    }
+  }
+
   const uncached = Math.max(
     0,
     safeInt(options.inputTokens) - cacheRead - cacheWrite,

@@ -21,7 +21,7 @@ import type {
   OpenAIResponseOutputItem,
   TrackFn,
 } from '../types.js';
-import { calculateCost } from '../utils/costs.js';
+import { calculateCost, pricingTarget } from '../utils/costs.js';
 import { resolveOpenAIProvider } from '../utils/openai-provider.js';
 import {
   extractBodyResponseId,
@@ -236,15 +236,11 @@ export class WrappedCompletions {
       if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
         try {
           costUsd = calculateCost({
-            modelName:
-              this._providerName === 'fireworks'
-                ? String(requestParams.model ?? modelName)
-                : modelName,
+            ...pricingTarget(this._providerName, requestParams.model, modelName),
             inputTokens: usage.prompt_tokens,
             outputTokens: usage.completion_tokens,
             reasoningTokens: reasoningTokens ?? 0,
             cacheReadInputTokens: cachedTokens ?? 0,
-            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -410,21 +406,17 @@ export class WrappedCompletions {
     } finally {
       const state = accumulator.getState();
       const modelName = String(accumulator.model ?? params.model ?? 'unknown');
-      const pricingModel =
-        this._providerName === 'fireworks'
-          ? String(params.model ?? modelName)
-          : modelName;
+      const pricing = pricingTarget(this._providerName, params.model, modelName);
 
       let costUsd: number | null = null;
       if (state.inputTokens != null && state.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: pricingModel,
+            ...pricing,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
             cacheReadInputTokens: state.cacheReadTokens ?? 0,
-            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -606,14 +598,10 @@ export class WrappedResponses {
       if (usage?.input_tokens != null && usage?.output_tokens != null) {
         try {
           costUsd = calculateCost({
-            modelName:
-              this._providerName === 'fireworks'
-                ? String(requestParams.model ?? modelName)
-                : modelName,
+            ...pricingTarget(this._providerName, requestParams.model, modelName),
             inputTokens: usage.input_tokens,
             outputTokens: usage.output_tokens,
             reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
-            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort
@@ -767,19 +755,15 @@ export class WrappedResponses {
     } finally {
       const state = accumulator.getState();
       const modelName = String(accumulator.model ?? params.model ?? 'unknown');
-      const pricingModel =
-        this._providerName === 'fireworks'
-          ? String(params.model ?? modelName)
-          : modelName;
+      const pricing = pricingTarget(this._providerName, params.model, modelName);
       let costUsd: number | null = null;
       if (state.inputTokens != null && state.outputTokens != null) {
         try {
           costUsd = calculateCost({
-            modelName: pricingModel,
+            ...pricing,
             inputTokens: state.inputTokens,
             outputTokens: state.outputTokens,
             reasoningTokens: state.reasoningTokens ?? 0,
-            defaultProvider: this._providerName,
           });
         } catch {
           // cost calculation is best-effort

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed (AA-152024)
+- **Fireworks routers other than tier routers are priced at the selected
+  model.** Every Fireworks call was priced on the requested model, so FireRouter
+  and account routers had no rate and lost `[Agent] Cost USD`, and plain model
+  calls ignored the response model. Tier routers (`...-fast`) still price at
+  their tier. A selected model outside Fireworks (bring-your-own-key) is priced
+  by model-name inference. Same rule as the Python SDK.
+- **Fireworks rates match the Python SDK.** Added GLM 5.3, GLM 5.3 Flash, and
+  DeepSeek V4.1 Flash. Kimi K3, Kimi K3 Fast, and DeepSeek V4 Flash 0731 are now
+  priced from genai-prices by endpoint instead of hard-coded copies.
+
 ## 0.18.0
 
 ### Added (AA-152308)

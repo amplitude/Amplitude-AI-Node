@@ -451,6 +451,41 @@ describe('OpenAI provider', () => {
       expect(opts.totalCostUsd).toBe(4.5);
     });
 
+    // FireRouter response shape follows Fireworks' documented contract
+    // (response `model` is the selected model); not yet verified live.
+    it('prices FireRouter at the model it selected', async () => {
+      const fakeCreate = vi.fn().mockResolvedValueOnce({
+        id: 'fw-router-123',
+        model: 'accounts/fireworks/models/glm-5p3',
+        choices: [{ message: { content: 'routed' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 1_000_000,
+          completion_tokens: 0,
+          total_tokens: 1_000_000,
+        },
+      });
+      const amp = createMockAmplitude();
+      const provider = new TestProvider(amp);
+      const completions = new WrappedCompletions(
+        { create: fakeCreate },
+        provider as never,
+        amp,
+        null,
+        false,
+        'fireworks',
+      );
+
+      await completions.create({
+        model: 'accounts/fireworks/routers/firerouter',
+        messages: [],
+      });
+
+      const opts = lastTrackOpts();
+      expect(opts.provider).toBe('fireworks');
+      expect(opts.modelName).toBe('accounts/fireworks/models/glm-5p3');
+      expect(opts.totalCostUsd).toBeCloseTo(1.4, 6);
+    });
+
     it('tracks user message inputs before AI response', async (): Promise<void> => {
       const fakeCreate = vi.fn().mockResolvedValueOnce({
         model: 'gpt-4',
