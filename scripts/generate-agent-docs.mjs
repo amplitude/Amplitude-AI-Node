@@ -54,6 +54,7 @@ const toolNames = [
 const resources = ['amplitude-ai://event-schema', 'amplitude-ai://integration-patterns', 'amplitude-ai://instrument-guide'];
 const events = Array.isArray(catalog?.events)
   ? catalog.events
+      .filter((event) => event?.deprecated !== true)
       .map((event) => event?.event_type)
       .filter((name) => typeof name === 'string')
       .sort((a, b) => a.localeCompare(b))

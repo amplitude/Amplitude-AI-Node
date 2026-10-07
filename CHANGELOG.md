@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.20.1
+
+### Fixed (AA-152502)
+- **The README described the wrong quality data model.** It said every
+  server-side result is an `[Agent] Score` event, listed rubrics that don't
+  exist, and called `[Agent] Topic Classification` live. Built-in signals land
+  as properties on `[Agent] Session Record`, custom evaluators emit
+  `[Agent] Evaluator Result`, Amplitude never emits Scores, and Topic
+  Classification no longer fires. `AGENTS.md` and `llms.txt` no longer list
+  deprecated events.
+- **The provider matrix said Gemini, Azure OpenAI, and Bedrock have no cache
+  token stats.** All three report them; only Mistral doesn't.
+- **`amplitude-ai.md` showed `trackToolCall` with `toolInput` / `toolOutput`.**
+  The options are `input` / `output`; the old names fail type-checking in
+  TypeScript and are dropped in JavaScript. Serverless auto-flush detects
+  Cloudflare Pages Functions (`CF_PAGES`), not Cloudflare Workers.
+- **`@google/genai` is declared as an optional peer dependency**, like
+  `@google/generative-ai`. The `GoogleGenAI` wrapper already required it.
+- The npm page's homepage and README help section link the Agent Analytics
+  docs, and the README version table shows the current version.
+
+### Changed (AA-152502)
+- **Tag pushes create a GitHub Release** from the version's CHANGELOG section,
+  so the docs site's SDK release watcher sees each release. The
+  README-to-docs sync workflow, which targeted the archived docs repo and
+  failed on every run, is removed.
+
 ## 0.20.0
 
 ### Added (AA-152361)

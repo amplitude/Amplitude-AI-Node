@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.20.0
+Package: `@amplitude/ai` v0.20.1
 
 ## Install
 
@@ -160,5 +160,4 @@ Prompt:
 - `[Agent] Session Record`
 - `[Agent] Span`
 - `[Agent] Tool Call`
-- `[Agent] Topic Classification`
 - `[Agent] User Message`
