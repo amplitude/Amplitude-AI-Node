@@ -1,5 +1,7 @@
 # Offline eval runs + Amplitude Agent Analytics: run upload
 
+> **Not released.** Offline eval upload isn't rolled out yet. This guide, its checker, and its schema move back to `docs/integrations/` when it is.
+
 **Amplitude Agent Analytics can store an offline eval run (a model bake-off over a fixed dataset) in your project, from any eval runner, over one authenticated HTTP call.**
 
 Give this page to your coding agent. The schema is [`offline-eval-document.schema.json`](./offline-eval-document.schema.json) and the checker is [`check-offline-eval.mjs`](./check-offline-eval.mjs). From those three, the agent can finish in the repository that already runs the eval. No package install.
@@ -362,7 +364,7 @@ await reportOfflineEval(document);
 
 Pass a stable `ranAt`, such as the experiment's created time. The adapter otherwise sets `ran_at` to the current time, and `ran_at` is part of the document the idempotency hash covers, so a retry would not replay. A retry replays only when the rest of the document is identical too, including row order. The default `idempotency_key` is a hash of the experiment ids, `gitSha`, `slice` (default `full`), and chunk index 0; the adapter writes one unchunked document. Pass `idempotencyKey` to use your own. The function does not call Braintrust. The CI post in Part 2 uses `curl` and does not install this package. Use the adapter only when the job already imports `@amplitude/ai`.
 
-`rows` are the experiment's events: `origin` (or the legacy `dataset_record_id`), `input`, `expected`, `scores`, and `metrics.start` and `metrics.end` (Unix seconds, used for `latency_ms`). The row id is `origin.id` when `origin.object_type` is `dataset`, else `dataset_record_id`. An event with neither throws, because its own `id` never matches across arms; pass `rowKey: (row) => ...` to name the row from the event, for example from an input field. `provider` on an experiment is the model provider and is left out when you don't pass it. The Braintrust log-forwarding guide ([braintrust.md](./braintrust.md)) stays the path for production conversations.
+`rows` are the experiment's events: `origin` (or the legacy `dataset_record_id`), `input`, `expected`, `scores`, and `metrics.start` and `metrics.end` (Unix seconds, used for `latency_ms`). The row id is `origin.id` when `origin.object_type` is `dataset`, else `dataset_record_id`. An event with neither throws, because its own `id` never matches across arms; pass `rowKey: (row) => ...` to name the row from the event, for example from an input field. `provider` on an experiment is the model provider and is left out when you don't pass it. The Braintrust log-forwarding guide ([braintrust.md](../../integrations/braintrust.md)) stays the path for production conversations.
 
 LangSmith, Langfuse, MLflow, and a results file use the same document. The harness field maps in Part 2 are the shapes to copy. `report_offline_eval` in the Python SDK takes the same document when that job already installed `amplitude-ai`.
 
@@ -439,6 +441,6 @@ Per IP, 30 requests per minute. Per project, 20 requests and 80 MB per minute, a
 
 ### More
 
-- [Integrations index](./README.md)
+- [Integrations index](../../integrations/README.md)
 - [`check-offline-eval.mjs`](./check-offline-eval.mjs): checks a document before it is posted. No dependencies.
 - [Python SDK](https://pypi.org/project/amplitude-ai/): `report_offline_eval` takes the same document.

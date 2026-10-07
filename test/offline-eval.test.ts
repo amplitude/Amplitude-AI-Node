@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { braintrustExperimentsToDocument } from '../src/integrations/braintrust-experiment.js';
 import { OfflineEvalUploadError, reportOfflineEval } from '../src/offline-eval.js';
-import { checkOfflineEval } from '../docs/integrations/check-offline-eval.mjs';
+import { checkOfflineEval } from '../docs/unreleased/offline-eval/check-offline-eval.mjs';
 
 describe('reportOfflineEval', () => {
   it('posts the document with the project key and secret and does not retry a 409', async () => {
@@ -146,7 +146,7 @@ describe('offline eval document', () => {
   it('keeps the vendored schema on version 1', () => {
     const schema = JSON.parse(
       readFileSync(
-        new URL('../docs/integrations/offline-eval-document.schema.json', import.meta.url),
+        new URL('../docs/unreleased/offline-eval/offline-eval-document.schema.json', import.meta.url),
         'utf8',
       ),
     ) as { properties: { schema_version: { const: number } }; required: string[] };
@@ -158,7 +158,7 @@ describe('offline eval document', () => {
 
   it('accepts the complete example in the guide', () => {
     const guide = readFileSync(
-      new URL('../docs/integrations/offline-eval.md', import.meta.url),
+      new URL('../docs/unreleased/offline-eval/offline-eval.md', import.meta.url),
       'utf8',
     );
     const section = guide.slice(guide.indexOf('### Example: one complete run'));
