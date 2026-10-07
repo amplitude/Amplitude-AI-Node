@@ -1,7 +1,7 @@
 <!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
-version=0.20.0
+version=0.20.1
 
 [mcp.tools]
 get_event_schema
@@ -29,7 +29,6 @@ amplitude-ai://instrument-guide
 [Agent] Session Record
 [Agent] Span
 [Agent] Tool Call
-[Agent] Topic Classification
 [Agent] User Message
 
 [integrations]

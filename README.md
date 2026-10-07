@@ -68,7 +68,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.11.0                                                                                                                                                                           |
+| Version         | 0.20.1                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
@@ -191,9 +191,9 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
 
-**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Evaluator Result` events with rubric scores (`output_type: 'score'`), `[Agent] Topic Classification` events with category labels, and `[Agent] Session Record` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. Built-in signals (task completion, response quality, user intent, session safety, user friction, negative feedback, data quality) land as properties on one `[Agent] Session Record` event per session, alongside a one-sentence `[Agent] Topic Summary`. Custom evaluators you define in Amplitude produce `[Agent] Evaluator Result` events. No eval code to write or maintain, and everything is queryable in charts, cohorts, and funnels alongside your product events.
 
-**Quality signals from multiple event types.** User thumbs up/down and customer-run evals produce `[Agent] Score` events via the SDK's `score()` method (`source: 'user'`, `source: 'ai'`, or `source: 'reviewer'`). Server-side enrichment rubric scores produce `[Agent] Evaluator Result` events (`output_type: 'score'`). Both are queryable in charts, cohorts, and funnels. Filter by `[Agent] Evaluation Source` or `[Agent] Agent ID` for per-agent quality attribution.
+**Your own feedback stays yours.** User thumbs up/down and your own evals produce `[Agent] Score` events through `score()` / `trackScore()` (`source: 'user'`, `'ai'`, or `'reviewer'`). Amplitude never emits Score events. Filter by `[Agent] Evaluation Source` or `[Agent] Agent ID` for per-agent quality attribution.
 
 **Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
 
@@ -230,18 +230,21 @@ ai.trackScore({
 | Edit | `[Agent] Is Edit` | `[Agent] User Message` | User refined their prompt — friction |
 | Abandonment | `[Agent] Abandonment Turn` | `[Agent] Session End` | User left after N turns — potential failure |
 
-**3. Automated server-side evaluation** — When `contentMode: 'full'`, Amplitude's enrichment pipeline runs LLM-as-judge evaluators on every session after it closes. No eval code to write or maintain:
+**3. Automated server-side evaluation** — When `contentMode: 'full'`, Amplitude's enrichment pipeline judges every session after it closes. No eval code to write or maintain:
 
-| Rubric | What it measures | Scale |
-|--------|-----------------|-------|
-| `task_completion` | Did the agent accomplish what the user asked? | 0–2 |
-| `response_quality` | Was the response clear, accurate, and helpful? | 0–2 |
-| `user_satisfaction` | Did the user seem satisfied based on conversation signals? | 0–2 |
-| `agent_confusion` | Did the agent misunderstand or go off track? | 0–2 |
+| Signal | Session Record property | Result |
+|--------|------------------------|--------|
+| Task Completed | `[Agent] Task Completed` | boolean, with rationale and evidence |
+| Response Quality | `[Agent] Response Quality` | boolean, with rationale and evidence |
+| User Intent | `[Agent] User Intent` | classification, with rationale |
+| Session Safety | `[Agent] Session Safety` | classification, with rationale |
+| User Friction | `[Agent] Has User Friction` | boolean, with rationale and the detected patterns |
+| Negative Feedback | `[Agent] Has Negative Feedback` | boolean, with rationale and the detected phrases |
+| Data Quality Issues | `[Agent] Has Data Quality Issues` | boolean (rule-based, no LLM), with the detected issues |
 
-Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure` (agent failed to deliver), `data_quality_issues`, and `user_friction` (clarification loops, topic drift). All results are emitted as `[Agent] Score` events with `source: 'ai'`.
+Signals land as properties on the session's `[Agent] Session Record` event, not as separate events. Custom evaluators you define in Amplitude add one `[Agent] Evaluator Result` event per evaluator per session.
 
-**All three layers use the same `[Agent] Score` event type**, differentiated by `[Agent] Evaluation Source` (`'user'`, `'ai'`, or `'reviewer'`). One chart shows user feedback alongside automated evals. No joins, no separate tables.
+**Where each layer lands:** your feedback is `[Agent] Score` (sent by your app only), implicit signals are properties on the events above, built-in signals are on `[Agent] Session Record`, and custom evaluators are `[Agent] Evaluator Result`. Read [Signals: where quality lands](https://amplitude.com/docs/amplitude-ai/agent-analytics/taxonomy#signals-where-quality-lands) for the full property list.
 
 ## What You Set vs What You Get
 
@@ -977,7 +980,7 @@ You can set `provider: 'fireworks'` explicitly for a private proxy. Cost calcula
 | Streaming             | Yes    | Yes       | Yes    | Yes         | Yes     | Yes     |
 | Tool call tracking    | Yes    | Yes       | No     | Yes         | Yes     | No      |
 | TTFB measurement      | Yes    | Yes       | No     | Yes         | No      | No      |
-| Cache token stats     | Yes    | Yes       | No     | No          | No      | No      |
+| Cache token stats     | Yes    | Yes       | Yes    | Yes         | Yes     | No      |
 | Responses API         | Yes    | -         | -      | -           | -       | -       |
 | Reasoning content     | Yes    | Yes       | No     | Yes         | No      | No      |
 | System prompt capture | Yes    | Yes       | Yes    | Yes         | Yes     | Yes     |
@@ -2359,10 +2362,10 @@ The secret key is used for this request only and never reaches the analytics cli
 | `[Agent] Span`                 | SDK    | Span (e.g. RAG step, transform)                                                 |
 | `[Agent] Session End`          | SDK    | Session ended                                                                   |
 | `[Agent] Session Enrichment`   | SDK    | Session-level enrichment data                                                   |
-| `[Agent] Score`                | Both   | Evaluation score (quality, sentiment, etc.)                                     |
+| `[Agent] Score`                | SDK    | Feedback your app records (thumbs, your own judge, a reviewer). Amplitude never emits it. |
 | `[Agent] Session Record`       | Server | Session-level summary: outcome, turn count, flags, cost. Emitted automatically. |
 | `[Agent] Evaluator Result`     | Server | One event per custom evaluator per session. Covers classifiers, detectors, scorers. |
-| `[Agent] Topic Classification` | Server | **Deprecated.** Replaced by `[Agent] Evaluator Result`. One event per topic model per session. |
+| `[Agent] Topic Classification` | Server | **Deprecated; no longer fires.** Topic outputs land on `[Agent] Evaluator Result` and `[Agent] Topic Summary`. |
 
 ## Event Property Reference
 
@@ -2607,9 +2610,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 
 ### Server-Side: Topic Classification Properties (Deprecated)
 
-> **Deprecated:** `[Agent] Topic Classification` is replaced by `[Agent] Evaluator Result`. It is still emitted for backward compatibility but will be removed in a future version.
+> **Deprecated:** `[Agent] Topic Classification` no longer fires. Topic and classification outputs land on `[Agent] Evaluator Result` (classification type) and in `[Agent] Topic Summary` on the Session Record. These properties remain only on historical events.
 
-`[Agent] Topic Classification` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
+Do not send this event from your code.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -2793,7 +2796,7 @@ When you use this SDK, the following are managed automatically. If you send even
 | **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set an `insert_id` per event derived from your source IDs (not a fresh UUID per send), so retries and re-imports deduplicate                  |
 | **Property prefixing**       | All properties are prefixed with `[Agent]`                                                                                                                                | You must include the `[Agent] ` prefix in every property name                                                                                 |
 | **Cost / token calculation** | Auto-computed from model and token counts                                                                                                                                 | Compute and send `[Agent] Cost USD`, `[Agent] Input Tokens`, etc. yourself                                                                    |
-| **Server-side enrichment**   | `[Agent] Session Record`, `[Agent] Topic Classification`, and `[Agent] Score` events are emitted automatically by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Just send the SDK-level events and close the session with `[Agent] Session End`. |
+| **Server-side enrichment**   | `[Agent] Session Record` and `[Agent] Evaluator Result` events are emitted by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Send `[Agent] Score` yourself when you have feedback; Amplitude never emits it. |
 
 ### Ingestion methods
 
@@ -3028,6 +3031,7 @@ const search = tool(async (args: { query: string }) => db.search(args.query), {
 
 ## Need Help?
 
+- **Documentation**: [Agent Analytics SDK reference](https://amplitude.com/docs/sdks/agent-analytics/sdk) and [Set up Agent Analytics](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup)
 - **Bug reports and feature requests**: [Open an issue](https://github.com/amplitude/Amplitude-AI-Node/issues)
 - **General questions**: [Amplitude Support](https://help.amplitude.com)
 - **Python SDK**: Looking for the Python version? See [amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)

@@ -21,7 +21,7 @@ Your agent runs in your own code and is already traced; the forwarder reads sess
 
 | Tool | Guide | How conversations are extracted | Last verified |
 |---|---|---|---|
-| Langfuse | [langfuse.md](./langfuse.md) | Scheduled pull of sessions from the v2 observations API | 2026-09-24 |
+| Langfuse | [langfuse.md](./langfuse.md) | Scheduled pull of sessions from the v2 observations API | 2026-10-06 |
 | LangSmith | [langsmith.md](./langsmith.md) | Scheduled pull of threads from the SmithDB v2 traces and threads API | 2026-10-06 |
 | Braintrust | [braintrust.md](./braintrust.md) | Scheduled SQL queries against project logs | 2026-10-06 |
 
@@ -49,7 +49,7 @@ As with tracing tools, the import brings in what the table already records, incl
 
 ## Offline eval runs
 
-A model bake-off from your eval runner (Braintrust experiments, LangSmith or Langfuse datasets, MLflow, a notebook) is not a conversation. It is uploaded as one document, from CI, with the project API key and secret key, and stored as a run you can compare arm by arm. Do not send it as `[Agent]` events. See [offline-eval.md](./offline-eval.md) (last verified 2026-10-03).
+A model bake-off from your eval runner (Braintrust experiments, LangSmith or Langfuse datasets, MLflow, a notebook) is not a conversation. It is uploaded as one document, from CI, with the project API key and secret key, and stored as a run you can compare arm by arm. Do not send it as `[Agent]` events. See [offline-eval.md](./offline-eval.md) (last verified 2026-10-06).
 
 ## Tools
 

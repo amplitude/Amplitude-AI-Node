@@ -212,7 +212,7 @@ export async function POST(req: Request) {
     const response = await client.chat.completions.create({ model: 'gpt-4o', messages });
     return Response.json(response);
   });
-  // session.run() auto-flushes in serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Workers)
+  // session.run() auto-flushes in serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Pages Functions)
   // For non-serverless, or tracking outside session.run(), call: await ai.flush()
 }
 ```
@@ -419,8 +419,8 @@ s.trackAiMessage(responseText, event.model, 'anthropic', responseLatencyMs, {
 
 ```typescript
 s.trackToolCall(toolEvent.name, toolEvent.durationMs, !toolEvent.isError, {
-  toolInput: toolEvent.input,
-  toolOutput: toolEvent.output,
+  input: toolEvent.input,
+  output: toolEvent.output,
 });
 ```
 
@@ -457,8 +457,8 @@ await session.run(async (s) => {
       });
     } else if (event.type === 'tool_use') {
       s.trackToolCall(event.name, event.durationMs, true, {
-        toolInput: event.input,
-        toolOutput: event.output,
+        input: event.input,
+        output: event.output,
       });
     }
   }
@@ -1061,7 +1061,7 @@ After the PR is merged and deployed:
 | `new AIConfig({ contentMode?, redactPii?, customRedactionPatterns?, customRedactionFn?, dryRun?, validate?, onEventCallback?, propagateContext?, debug? })` — `contentMode`: `'full'` (text + PII redaction) \| `'metadata_only'` (tokens/latency/cost, no text) \| `'customer_enriched'` (no text by default, customer sends enriched summaries via `trackSessionEnrichment`). `dryRun`: emit no events (safe for testing the instrumentation path). `validate`: surface schema violations before sending. `onEventCallback(event, statusCode, message)`: fired per tracked event, useful for debugging or secondary sinks. `propagateContext`: auto-propagate session context across async boundaries. | Privacy/debug config |
 | `ai.agent(agentId, opts?)` — `opts`: `{ description?, context?, userId?, env?, agentVersion? }`. `env` tags events with deployment environment (e.g. `'staging'`, `'production'`). `agentVersion` versions the agent for A/B comparison in dashboards. | Create bound agent |
 | `agent.child(agentId, opts?)` — `opts`: `{ description?, context? }` | Create child agent |
-| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush? }`. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Workers). | Create session |
+| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush? }`. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Pages Functions). | Create session |
 | `session.run(fn)` | Execute with session context (auto-flushes in serverless) |
 | `s.runAs(childAgent, fn)` | Delegate to child agent |
 | `ai.flush()` | Flush queued events — required after each session in long-lived servers. Always use `try/finally`: `try { await session.run(...) } finally { await ai.flush() }` — without `finally`, a thrown error inside `session.run()` skips the flush and silently drops all events from that session. |
@@ -1072,7 +1072,7 @@ After the PR is merged and deployed:
 |--------|--------------|
 | `s.trackUserMessage(content, opts?)` — `opts`: `{ context?, attachments?, isRegeneration?, isEdit?, editedMessageId?, labels? }` | `[Agent] User Message` |
 | `s.trackAiMessage(content, model, provider, latencyMs, opts?)` — `opts`: `{ inputTokens?, outputTokens?, totalTokens?, totalCostUsd?, cacheReadTokens?, cacheCreationInputTokens?, modelTier?, wasCopied?, wasCached?, isError?, errorMessage?, attachments?, context? }`. `modelTier`: `'fast'` \| `'standard'` \| `'reasoning'`. | `[Agent] AI Response` |
-| `s.trackToolCall(toolName, latencyMs, success, opts?)` — `opts`: `{ toolInput?, toolOutput?, errorMessage?, errorType?, context? }`. Field names are `toolInput`/`toolOutput` (not `input`/`output`). Use directly for synchronous tools; `tool()` HOF is async-only. | `[Agent] Tool Call` |
+| `s.trackToolCall(toolName, latencyMs, success, opts?)` — `opts`: `{ input?, output?, errorMessage?, errorType?, context? }`. Field names are `input`/`output` (not `toolInput`/`toolOutput`, which TypeScript rejects and JavaScript silently drops). Use directly for synchronous tools; `tool()` HOF is async-only. | `[Agent] Tool Call` |
 | `s.trackConversation({ amplitude, userId, sessionId, agentId, messages })` — `messages`: `{ role: 'user'\|'assistant'\|'system', content, model?, provider?, latency_ms? }[]`. Convenience method for batch/replay: processes the array and emits the correct event sequence in one call. Useful for apps that reconstruct conversation history from logs. | `[Agent] User Message` + `[Agent] AI Response` sequence |
 | `s.trackSessionEnd(opts?)` — `opts`: `{ abandonmentTurn? }`. `abandonmentTurn`: the turn index at which the user abandoned the session — used for drop-off analysis. | `[Agent] Session End` |
 | `s.score(name, value, targetId)` | `[Agent] Score` |
@@ -1125,8 +1125,8 @@ await agent.session({ userId, sessionId }).run(async (s) => {
   const toolStart = Date.now();
   const context = await inspectMessage(userInput);   // any sync/async preprocessing step
   s.trackToolCall('inspect_message', Date.now() - toolStart, true, {
-    toolInput: { message: userInput },
-    toolOutput: { context },
+    input: { message: userInput },
+    output: { context },
   });
 
   const start = Date.now();
