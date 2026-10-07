@@ -65,7 +65,15 @@ After this, all future publishes go through GitHub Actions OIDC -- no npm tokens
    ```
 
 5. The GitHub Actions workflow (`.github/workflows/publish.yml`) triggers automatically
-   and publishes to npm with provenance via Trusted Publishing (OIDC).
+   and publishes to npm with provenance via Trusted Publishing (OIDC). It then
+   creates a GitHub Release from the version's `CHANGELOG.md` section, so add
+   a `## X.Y.Z` section before tagging or the release job fails.
+
+6. **Docs site.** The docs repo's SDK release watcher picks up the GitHub
+   Release and opens a Doc Bot PR against
+   `sdks/agent-analytics/sdk-release-notes` in `amplitude/amplitude-docs-next`.
+   Review that PR, and update `sdks/agent-analytics/sdk.md` yourself for any new
+   or changed public API, default, or event property.
 
 ## Versioning
 
