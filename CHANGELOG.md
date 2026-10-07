@@ -66,15 +66,6 @@
 
 ## 0.19.0
 
-### Added (AA-152464)
-- **`reportOfflineEval()` posts an offline eval run to your project.** One
-  authenticated call with the project API key and secret key, which are never
-  passed to the analytics client. Retries honor `Retry-After` (capped at 60
-  seconds), and failures throw `OfflineEvalUploadError`. See
-  `docs/integrations/offline-eval.md`.
-- **`braintrustExperimentsToDocument()`** maps Braintrust experiments to an
-  offline eval document.
-
 ### Added (AA-152415)
 - **`PROP_INGESTION_PATH` and `PROP_SOURCE`** (`[Agent] Ingestion Path`,
   `[Agent] Source`). The log-forwarding guides and warehouse SQL now stamp

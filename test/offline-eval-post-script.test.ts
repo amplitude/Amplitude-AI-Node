@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-const guide = readFileSync(resolve(__dirname, '../docs/integrations/offline-eval.md'), 'utf8');
+const guide = readFileSync(resolve(__dirname, '../docs/unreleased/offline-eval/offline-eval.md'), 'utf8');
 const script = guide.match(/```bash\n(#!\/bin\/sh\n[\s\S]*?)\n```/)?.[1] ?? '';
 const example = guide.slice(guide.indexOf('### Example: one complete run')).match(/```json\n([\s\S]*?)\n```/)?.[1] ?? '';
-const checker = resolve(__dirname, '../docs/integrations/check-offline-eval.mjs');
+const checker = resolve(__dirname, '../docs/unreleased/offline-eval/check-offline-eval.mjs');
 
 // Fake curl: the checker download copies the local checker; each POST pops one
 // scripted response ("<status> [retry-after]" or "net" for a connection error).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkOfflineEval } from '../docs/integrations/check-offline-eval.mjs';
+import { checkOfflineEval } from '../docs/unreleased/offline-eval/check-offline-eval.mjs';
 import { braintrustExperimentsToDocument } from '../src/integrations/braintrust-experiment.js';
 
 // Braintrust eval events carry `origin: { object_type: 'dataset', id: <dataset record id> }`;
