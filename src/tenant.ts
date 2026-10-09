@@ -45,9 +45,10 @@ export class TenantHandle {
       groups?: Record<string, unknown> | null;
     } = {},
   ): BoundAgent {
-    if (!('customerOrgId' in opts)) opts.customerOrgId = this._customerOrgId;
-    if (this._groups != null && !('groups' in opts)) opts.groups = this._groups;
-    if (this._env != null && !('env' in opts)) opts.env = this._env;
-    return this._ai.agent(agentId, opts);
+    const merged = { ...opts };
+    if (!('customerOrgId' in merged)) merged.customerOrgId = this._customerOrgId;
+    if (this._groups != null && !('groups' in merged)) merged.groups = this._groups;
+    if (this._env != null && !('env' in merged)) merged.env = this._env;
+    return this._ai.agent(agentId, merged);
   }
 }

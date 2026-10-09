@@ -12,6 +12,7 @@ import {
   PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
+  PrivacyConfig,
   runWithContextAsync,
   SessionContext,
   tool,
@@ -170,7 +171,10 @@ describe('tool() HOF', () => {
 
   it('tracks errors on failure', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
-    ToolCallTracker.setAmplitude(mock.amplitude, 'u1', { sessionId: 's1' });
+    ToolCallTracker.setAmplitude(mock.amplitude, 'u1', {
+      sessionId: 's1',
+      privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+    });
 
     const failingTool = tool(
       (): never => {
@@ -411,7 +415,9 @@ describe('observe() expanded', () => {
 
   it('observe tracks error on failure (isError=true, errorMessage set)', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
-    ToolCallTracker.setAmplitude(mock.amplitude, 'u1');
+    ToolCallTracker.setAmplitude(mock.amplitude, 'u1', {
+      privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+    });
 
     const failingObserved = observe(
       async (): Promise<never> => {

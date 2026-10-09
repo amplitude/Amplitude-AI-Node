@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
+import { getLogger } from './utils/logger.js';
 
 export interface SessionContextOptions {
   sessionId: string;
@@ -19,6 +21,8 @@ export interface SessionContextOptions {
   browserSessionId?: string | null;
   nextTurnIdFn?: (() => number) | null;
   amplitude?: AmplitudeLike | null;
+  /** Privacy config of the `AmplitudeAI` that owns this session. */
+  privacyConfig?: PrivacyConfig | null;
   trackerManaged?: boolean;
   skipAutoUserTracking?: boolean;
 }
@@ -40,6 +44,7 @@ export class SessionContext {
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
   readonly amplitude: AmplitudeLike | null;
+  readonly privacyConfig: PrivacyConfig | null;
   readonly trackerManaged: boolean;
   readonly skipAutoUserTracking: boolean;
   private readonly _nextTurnIdFn: (() => number) | null;
@@ -73,6 +78,7 @@ export class SessionContext {
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;
     this.amplitude = options.amplitude ?? null;
+    this.privacyConfig = options.privacyConfig ?? null;
     this.trackerManaged = options.trackerManaged ?? false;
     this.skipAutoUserTracking = options.skipAutoUserTracking ?? false;
     this._nextTurnIdFn = options.nextTurnIdFn ?? null;
@@ -112,17 +118,54 @@ export function runWithContextAsync<T>(
   return _sessionStorage.run(ctx, fn);
 }
 
+let _warnedUnscopedPush = false;
+
+/** @internal Reset the one-time warning flag. For test isolation only. */
+export function _resetPushContextWarning(): void {
+  _warnedUnscopedPush = false;
+}
+
 /**
- * Set the active SessionContext for the current async scope.
+ * Run `fn` with `ctx` as the active SessionContext.
  *
- * Returns a cleanup function that restores the previous context.
- * Use this in middleware or interceptors where the context must outlive
- * the call frame that created it.
+ * The context is visible to `fn` and everything it awaits or schedules, and
+ * is gone once `fn` returns (same semantics as {@link runWithContext}). Use
+ * this in middleware by wrapping the downstream handler:
  *
- * For scoped usage, prefer `agent.session()` (callback-based) or
- * `runWithContext()`.
+ * ```typescript
+ * app.use((req, res, next) => pushContext(ctxFor(req), next));
+ * ```
+ *
+ * For Express-style apps, `createAmplitudeAIMiddleware()` does this for you.
  */
-export function pushContext(ctx: SessionContext | null): () => void {
+export function pushContext<T>(ctx: SessionContext | null, fn: () => T): T;
+/**
+ * @deprecated Set the context for the rest of the current async scope and
+ * return a cleanup function that restores the previous context. Logs a
+ * one-time warning.
+ *
+ * Unsafe on HTTP servers: `AsyncLocalStorage.enterWith()` attaches the
+ * context to the socket's execution context, so later requests on the same
+ * keep-alive connection that never call `pushContext` inherit the previous
+ * caller's identity, and the cleanup does not undo that. Prefer
+ * `pushContext(ctx, fn)`, `runWithContext()` or `session.run()`.
+ */
+export function pushContext(ctx: SessionContext | null): () => void;
+export function pushContext<T>(
+  ctx: SessionContext | null,
+  fn?: () => T,
+): T | (() => void) {
+  if (typeof fn === 'function') {
+    return _sessionStorage.run(ctx, fn);
+  }
+  if (!_warnedUnscopedPush) {
+    _warnedUnscopedPush = true;
+    getLogger().warn(
+      'pushContext(ctx) without a callback is deprecated: on HTTP servers the context can carry over ' +
+        'to later requests on the same connection. Use pushContext(ctx, fn), runWithContext(ctx, fn), ' +
+        'or session.run(fn).',
+    );
+  }
   const previous = _sessionStorage.getStore() ?? null;
   _sessionStorage.enterWith(ctx);
   return () => {

@@ -42,7 +42,7 @@ app.post('/chat', async (req, res) => {
 
 ```bash
 npm install @amplitude/ai
-npx amplitude-ai
+npx -y -p @amplitude/ai amplitude-ai
 ```
 
 The CLI prints a prompt to paste into any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.):
@@ -68,7 +68,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.20.1                                                                                                                                                                           |
+| Version         | 0.21.0                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
@@ -147,7 +147,7 @@ Install provider SDKs based on what you use (for example: `openai`, `@anthropic-
 
 1. **Install:** `npm install @amplitude/ai @amplitude/analytics-node`
 2. **Get your API key:** In Amplitude, go to **Settings > Projects** and copy the API key.
-3. **Instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
+3. **Instrument:** Run `npx -y -p @amplitude/ai amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
 4. **Set your API key** in the generated `.env` file and replace the placeholder `userId`/`sessionId`.
 5. **Run your app.** You should see `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` within 30 seconds.
 
@@ -407,7 +407,7 @@ await session.run(async (s) => {
 Main client that wraps Amplitude `analytics-node`. Create it with an API key or an existing Amplitude instance:
 
 ```typescript
-const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 // Or with existing client:
 const ai = new AmplitudeAI({ amplitude: existingAmplitudeClient });
 ```
@@ -625,7 +625,7 @@ const config = new AIConfig({
   dryRun: false,
 });
 
-const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY!, config });
 ```
 
 | Option                    | Description                                                                                                 |
@@ -783,7 +783,7 @@ function redactNames(text: string): string {
 }
 
 const ai = new AmplitudeAI({
-  apiKey: 'YOUR_KEY',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({
     redactPii: true,
     customRedactionFn: redactNames,
@@ -1031,7 +1031,7 @@ const instrumented = wrap(client, ai);
 Provider wrappers (`OpenAI`, `AzureOpenAI`, `Anthropic`, `Gemini`, `Mistral`, `Bedrock`) automatically detect supported streaming responses and track them transparently. The wrapper intercepts the `AsyncIterable`, accumulates chunks, measures TTFB, and emits an `[Agent] AI Response` event after the stream is fully consumed:
 
 ```typescript
-const openai = new OpenAI({ amplitude: ai, apiKey: '...' });
+const openai = new OpenAI({ amplitude: ai, apiKey: process.env.OPENAI_API_KEY });
 
 // Streaming is handled automatically — just iterate the result
 const stream = await openai.chat.completions.create({
@@ -1498,7 +1498,7 @@ Prints a colored (ANSI) summary of every tracked event to stderr. All 8 event ty
 
 ```typescript
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ debug: true }),
 });
 
@@ -1514,7 +1514,7 @@ Logs the full event JSON to stderr WITHOUT sending to Amplitude. Events are neve
 
 ```typescript
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ dryRun: true }),
 });
 
@@ -1666,7 +1666,7 @@ Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 
 ### Examples and AI Coding Agent Guide
 
-- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx amplitude-ai` to see the prompt that points your agent to this file.
+- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx -y -p @amplitude/ai amplitude-ai` to see the prompt that points your agent to this file.
 - Mock-based examples demonstrating the event model (also used as CI smoke tests):
   - `examples/zero-code.ts`
   - `examples/wrap-openai.ts`
@@ -1808,7 +1808,7 @@ Track tool calls with execution latency and AI messages from Claude Agent SDK.
 import { AmplitudeAI } from '@amplitude/ai';
 import { ClaudeAgentSDKTracker } from '@amplitude/ai/integrations/claude-agent-sdk';
 
-const ai = new AmplitudeAI({ apiKey: 'YOUR_KEY' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const agent = ai.agent({ agentId: 'code-reviewer' });
 const tracker = new ClaudeAgentSDKTracker();
 
@@ -2171,7 +2171,7 @@ export async function POST(req: Request) {
 import { AIConfig, AmplitudeAI, ValidationError } from '@amplitude/ai';
 
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ validate: true }),
 });
 
@@ -2853,20 +2853,12 @@ Amplitude's [Data Catalog](https://amplitude.com/docs/data/data-catalog) documen
 The bundled CLI reads `data/agent_event_catalog.json` and prints executable curl commands — it makes **no network requests** itself. Credentials are never embedded in the output: the generated script reads `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` from the environment when it runs, so the script is safe to save, share, or commit. Never pass credentials on the command line — argv is visible to other local users via `ps` and persists in shell history and CI logs.
 
 ```bash
-# Preview the curl commands
-npx amplitude-ai-register-catalog
+# Write the script to a file (add --eu for EU data residency)
+npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh
 
-# Save the script, then execute with credentials from the environment
-npx amplitude-ai-register-catalog > register.sh
-AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash register.sh
-
-# Or pipe to bash to execute immediately. The env vars go on the bash side
-# of the pipe — a prefix on npx applies only to npx, not to the bash that
-# runs the script.
-npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
-
-# EU data residency
-npx amplitude-ai-register-catalog --eu | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
+# Review register.sh, then run it with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY
+# already exported in your shell (for example from your secret manager)
+bash register.sh
 ```
 
 ### Option B: Python CLI (direct execution)
@@ -2875,7 +2867,8 @@ If you have Python available, the `amplitude-ai` package provides a CLI that cal
 
 ```bash
 pip install amplitude-ai
-AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET amplitude-ai-register-catalog
+# with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY exported in your shell:
+amplitude-ai-register-catalog
 ```
 
 ### What gets registered
@@ -2937,7 +2930,7 @@ This SDK is designed to be discovered and used by any AI coding agent — Cursor
 
 ```bash
 npm install @amplitude/ai
-npx amplitude-ai
+npx -y -p @amplitude/ai amplitude-ai
 ```
 
 The CLI prints a prompt to paste into your agent:
@@ -2984,9 +2977,11 @@ Features that do not map 1:1 because of platform/runtime constraints:
 
 ```python
 # Python
+import os
+
 from amplitude_ai import AmplitudeAI, tool, observe
 
-ai = AmplitudeAI(api_key="xxx")
+ai = AmplitudeAI(api_key=os.environ["AMPLITUDE_AI_API_KEY"])
 agent = ai.agent("my-agent", user_id="u1")
 
 with agent.session(user_id="u1") as s:
@@ -3002,7 +2997,7 @@ def search(query: str) -> str:
 // TypeScript
 import { AmplitudeAI, tool } from '@amplitude/ai';
 
-const ai = new AmplitudeAI({ apiKey: 'xxx' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const agent = ai.agent('my-agent', { userId: 'u1' });
 
 const session = agent.session({ userId: 'u1' });

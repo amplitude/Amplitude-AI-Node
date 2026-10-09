@@ -6,6 +6,7 @@
  * Amplitude [Agent] events.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from '../client.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import {
@@ -16,6 +17,11 @@ import { calculateCost } from '../utils/costs.js';
 
 export interface ExporterOptions {
   amplitudeAI: AmplitudeAI;
+  /**
+   * User ID for spans without an `amplitude.user_id` attribute. When unset,
+   * such spans are sent with an anonymous device ID and session ID derived
+   * from the span's trace ID (one per trace), never a shared constant.
+   */
   defaultUserId?: string;
   privacyConfig?: PrivacyConfig | null;
   /**
@@ -42,14 +48,14 @@ interface OTELSpan {
 
 export class AmplitudeAgentExporter {
   private _ai: AmplitudeAI;
-  private _defaultUserId: string;
+  private _defaultUserId: string | null;
   private _privacyConfig: PrivacyConfig | null;
   private _allowedScopes: Set<string> | null;
   private _blockedScopes: Set<string>;
 
   constructor(options: ExporterOptions) {
     this._ai = options.amplitudeAI;
-    this._defaultUserId = options.defaultUserId ?? 'otel-user';
+    this._defaultUserId = options.defaultUserId ?? null;
     this._privacyConfig = options.privacyConfig ?? null;
     this._allowedScopes =
       options.allowedScopes == null
@@ -127,10 +133,17 @@ export class AmplitudeAgentExporter {
     const operation =
       (attrs['gen_ai.operation.name'] as string | undefined) ??
       (attrs['gen_ai.operation'] as string | undefined);
+    // Spans are exported in batches outside any request context, so identity
+    // comes from span attributes. Without them, fall back to an anonymous
+    // identity scoped to the span's trace rather than a constant shared ID.
+    const runKey = spanCtx?.traceId || randomUUID();
     const userId =
-      _normalizeOtelString(attrs['amplitude.user_id']) ?? this._defaultUserId;
+      _normalizeOtelString(attrs['amplitude.user_id']) ?? this._defaultUserId ?? undefined;
+    const deviceId =
+      _normalizeOtelString(attrs['amplitude.device_id']) ??
+      (userId == null ? `otel-${runKey}` : undefined);
     const sessionId =
-      _normalizeOtelString(attrs['amplitude.session_id']) ?? 'otel-session';
+      _normalizeOtelString(attrs['amplitude.session_id']) ?? `otel-${runKey}`;
 
     // Prefer response.model (actual versioned model) over request.model
     const modelName = String(
@@ -147,6 +160,7 @@ export class AmplitudeAgentExporter {
     ) {
       this._ai.trackToolCall({
         userId,
+        deviceId,
         toolName: String(attrs['gen_ai.tool.name'] ?? span.name ?? 'tool'),
         latencyMs,
         success: !isError,
@@ -166,6 +180,7 @@ export class AmplitudeAgentExporter {
     if (operation === 'embedding' || operation === 'embeddings') {
       this._ai.trackEmbedding({
         userId,
+        deviceId,
         model: modelName,
         provider: providerName,
         latencyMs,
@@ -202,6 +217,7 @@ export class AmplitudeAgentExporter {
         ) {
           this._ai.trackUserMessage({
             userId,
+            deviceId,
             content: m.content,
             sessionId,
             traceId: spanCtx?.traceId,
@@ -255,6 +271,7 @@ export class AmplitudeAgentExporter {
 
     this._ai.trackAiMessage({
       userId,
+      deviceId,
       content: String(attrs['gen_ai.response.text'] ?? ''),
       sessionId,
       model: modelName,

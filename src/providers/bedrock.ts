@@ -13,6 +13,11 @@ import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import { applySessionContext, BaseAIProvider, contextFields } from './base.js';
+import {
+  safeErrorMessage,
+  safeTrack,
+  warnTrackingFailure,
+} from '../utils/logger.js';
 
 const _resolved = tryRequire('@aws-sdk/client-bedrock-runtime');
 export const BEDROCK_AVAILABLE = _resolved != null;
@@ -65,47 +70,48 @@ export class Bedrock extends BaseAIProvider {
 
     try {
       const response = await client.send(command);
-      const latencyMs = performance.now() - startTime;
+      safeTrack(() => {
+        const latencyMs = performance.now() - startTime;
 
-      const extracted = extractBedrockResponse(response);
-      let costUsd: number | null = null;
-      if (extracted.inputTokens != null && extracted.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: modelId,
-            inputTokens: extracted.inputTokens,
-            outputTokens: extracted.outputTokens,
-            cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
-            cacheCreationInputTokens: extracted.cacheWriteTokens ?? 0,
-            defaultProvider: 'bedrock',
-          });
-        } catch {
-          // cost calculation is best-effort
+        const extracted = extractBedrockResponse(response);
+        let costUsd: number | null = null;
+        if (extracted.inputTokens != null && extracted.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: modelId,
+              inputTokens: extracted.inputTokens,
+              outputTokens: extracted.outputTokens,
+              cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
+              cacheCreationInputTokens: extracted.cacheWriteTokens ?? 0,
+              defaultProvider: 'bedrock',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      const ctx = applySessionContext();
-      this._track({
-        ...contextFields(ctx),
-        modelName: modelId,
-        provider: 'bedrock',
-        responseContent: extracted.text,
-        latencyMs,
-        inputTokens: extracted.inputTokens,
-        outputTokens: extracted.outputTokens,
-        totalTokens: extracted.totalTokens,
-        totalCostUsd: costUsd,
-        finishReason: extracted.stopReason,
-        toolCalls:
-          extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
-        toolDefinitions: extractBedrockToolDefinitions(params),
-        systemPrompt: extracted.systemPrompt,
-        temperature: extracted.temperature,
-        topP: extracted.topP,
-        maxOutputTokens: extracted.maxOutputTokens,
-        isStreaming: false,
+        const ctx = applySessionContext();
+        this._track({
+          ...contextFields(ctx),
+          modelName: modelId,
+          provider: 'bedrock',
+          responseContent: extracted.text,
+          latencyMs,
+          inputTokens: extracted.inputTokens,
+          outputTokens: extracted.outputTokens,
+          totalTokens: extracted.totalTokens,
+          totalCostUsd: costUsd,
+          finishReason: extracted.stopReason,
+          toolCalls:
+            extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
+          toolDefinitions: extractBedrockToolDefinitions(params),
+          systemPrompt: extracted.systemPrompt,
+          temperature: extracted.temperature,
+          topP: extracted.topP,
+          maxOutputTokens: extracted.maxOutputTokens,
+          isStreaming: false,
+        });
       });
-
       return response;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -118,7 +124,7 @@ export class Bedrock extends BaseAIProvider {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
 
       throw error;
@@ -165,7 +171,7 @@ export class Bedrock extends BaseAIProvider {
         responseContent: '',
         latencyMs: performance.now() - startTime,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
         isStreaming: true,
       });
       throw error;
@@ -197,48 +203,54 @@ export class Bedrock extends BaseAIProvider {
     try {
       const response = (await client.send(command)) as Record<string, unknown>;
       const latencyMs = performance.now() - startTime;
-
-      const requestBody = parseMaybeJson(params.body);
-      const responseBody = parseMaybeJson(await decodeBedrockBlob(response.body));
-      const extracted = extractBedrockInvokeModelResponse(
-        modelId,
-        requestBody,
-        responseBody,
+      const decodedBody = await decodeBedrockBlob(response.body).catch(
+        (decodeError: unknown) => {
+          warnTrackingFailure(decodeError);
+          return '';
+        },
       );
+      safeTrack(() => {
+        const requestBody = parseMaybeJson(params.body);
+        const responseBody = parseMaybeJson(decodedBody);
+        const extracted = extractBedrockInvokeModelResponse(
+          modelId,
+          requestBody,
+          responseBody,
+        );
 
-      let costUsd: number | null = null;
-      if (extracted.inputTokens != null && extracted.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: modelId,
-            inputTokens: extracted.inputTokens,
-            outputTokens: extracted.outputTokens,
-            defaultProvider: 'bedrock',
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (extracted.inputTokens != null && extracted.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: modelId,
+              inputTokens: extracted.inputTokens,
+              outputTokens: extracted.outputTokens,
+              defaultProvider: 'bedrock',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      const ctx = applySessionContext();
-      this._track({
-        ...contextFields(ctx),
-        modelName: modelId,
-        provider: 'bedrock',
-        responseContent: extracted.text,
-        latencyMs,
-        inputTokens: extracted.inputTokens,
-        outputTokens: extracted.outputTokens,
-        totalTokens: extracted.totalTokens,
-        totalCostUsd: costUsd,
-        finishReason: extracted.stopReason,
-        systemPrompt: extracted.systemPrompt,
-        temperature: extracted.temperature,
-        topP: extracted.topP,
-        maxOutputTokens: extracted.maxOutputTokens,
-        isStreaming: false,
+        const ctx = applySessionContext();
+        this._track({
+          ...contextFields(ctx),
+          modelName: modelId,
+          provider: 'bedrock',
+          responseContent: extracted.text,
+          latencyMs,
+          inputTokens: extracted.inputTokens,
+          outputTokens: extracted.outputTokens,
+          totalTokens: extracted.totalTokens,
+          totalCostUsd: costUsd,
+          finishReason: extracted.stopReason,
+          systemPrompt: extracted.systemPrompt,
+          temperature: extracted.temperature,
+          topP: extracted.topP,
+          maxOutputTokens: extracted.maxOutputTokens,
+          isStreaming: false,
+        });
       });
-
       return response;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -251,7 +263,7 @@ export class Bedrock extends BaseAIProvider {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
 
       throw error;
@@ -303,7 +315,7 @@ export class Bedrock extends BaseAIProvider {
         responseContent: '',
         latencyMs: performance.now() - startTime,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
         isStreaming: true,
       });
       throw error;
@@ -326,65 +338,73 @@ export class Bedrock extends BaseAIProvider {
 
     try {
       for await (const rawEvent of stream) {
-        // Each event is `{ chunk: { bytes: Uint8Array } }`; the decoded
-        // payload is model-family-specific. Parse defensively — unknown
-        // shapes contribute nothing rather than corrupting the accumulation.
-        const event = rawEvent as Record<string, unknown>;
-        const chunk = event.chunk as Record<string, unknown> | undefined;
-        const decoded = parseMaybeJson(decodeBedrockChunkBytes(chunk?.bytes));
-        if (decoded != null) {
-          const delta = extractBedrockInvokeModelStreamDelta(modelId, decoded);
-          if (delta.text) accumulator.addContent(delta.text);
-          if (delta.stopReason != null)
-            accumulator.finishReason = delta.stopReason;
-          if (delta.inputTokens != null || delta.outputTokens != null) {
-            accumulator.setUsage({
-              inputTokens: delta.inputTokens,
-              outputTokens: delta.outputTokens,
-            });
+        try {
+          // Each event is `{ chunk: { bytes: Uint8Array } }`; the decoded
+          // payload is model-family-specific. Parse defensively — unknown
+          // shapes contribute nothing rather than corrupting the accumulation.
+          const event = rawEvent as Record<string, unknown>;
+          const chunk = event.chunk as Record<string, unknown> | undefined;
+          const decoded = parseMaybeJson(decodeBedrockChunkBytes(chunk?.bytes));
+          if (decoded != null) {
+            const delta = extractBedrockInvokeModelStreamDelta(modelId, decoded);
+            if (delta.text) accumulator.addContent(delta.text);
+            if (delta.stopReason != null)
+              accumulator.finishReason = delta.stopReason;
+            if (delta.inputTokens != null || delta.outputTokens != null) {
+              accumulator.setUsage({
+                inputTokens: delta.inputTokens,
+                outputTokens: delta.outputTokens,
+              });
+            }
           }
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
         yield rawEvent;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      const state = accumulator.getState();
-      const modelName = String(accumulator.model ?? modelId);
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-            defaultProvider: 'bedrock',
-          });
-        } catch {
-          // cost calculation is best-effort
+      try {
+        const state = accumulator.getState();
+        const modelName = String(accumulator.model ?? modelId);
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName,
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              defaultProvider: 'bedrock',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._track({
-        ...contextFields(ctx),
-        modelName,
-        provider: 'bedrock',
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: state.inputTokens,
-        outputTokens: state.outputTokens,
-        totalTokens: state.totalTokens,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        systemPrompt: extractInvokeModelSystemPrompt(requestBody),
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-      });
+        this._track({
+          ...contextFields(ctx),
+          modelName,
+          provider: 'bedrock',
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          totalTokens: state.totalTokens,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          systemPrompt: extractInvokeModelSystemPrompt(requestBody),
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
+      }
     }
   }
 
@@ -399,113 +419,120 @@ export class Bedrock extends BaseAIProvider {
 
     try {
       for await (const rawEvent of stream) {
-        const event = rawEvent as Record<string, unknown>;
-        const contentBlockDelta = event.contentBlockDelta as
-          | Record<string, unknown>
-          | undefined;
-        const delta = contentBlockDelta?.delta as
-          | Record<string, unknown>
-          | undefined;
-        if (delta?.text != null) {
-          accumulator.addContent(String(delta.text));
+        try {
+          const event = rawEvent as Record<string, unknown>;
+          const contentBlockDelta = event.contentBlockDelta as
+            | Record<string, unknown>
+            | undefined;
+          const delta = contentBlockDelta?.delta as
+            | Record<string, unknown>
+            | undefined;
+          if (delta?.text != null) {
+            accumulator.addContent(String(delta.text));
+          }
+
+          const contentBlockStart = event.contentBlockStart as
+            | Record<string, unknown>
+            | undefined;
+          const start = contentBlockStart?.start as
+            | Record<string, unknown>
+            | undefined;
+          if (start?.toolUse != null) {
+            accumulator.addToolCall(start.toolUse as Record<string, unknown>);
+          }
+
+          const messageStart = event.messageStart as
+            | Record<string, unknown>
+            | undefined;
+          if (messageStart?.model != null) {
+            accumulator.model = String(messageStart.model);
+          }
+
+          const messageStop = event.messageStop as
+            | Record<string, unknown>
+            | undefined;
+          if (messageStop?.stopReason != null) {
+            accumulator.finishReason = String(messageStop.stopReason);
+          }
+
+          const metadata = event.metadata as Record<string, unknown> | undefined;
+          const usage = metadata?.usage as Record<string, unknown> | undefined;
+          const rawInput = usage?.inputTokens as number | undefined;
+          const cacheRead = usage?.cacheReadInputTokens as number | undefined;
+          const cacheWrite = usage?.cacheWriteInputTokens as number | undefined;
+          // Bedrock's `inputTokens` excludes cache tokens; pre-sum so both the
+          // emitted token count and cost are cache-inclusive (AA-151026 C1).
+          const inputTokens =
+            rawInput != null && (cacheRead || cacheWrite)
+              ? rawInput + (cacheRead ?? 0) + (cacheWrite ?? 0)
+              : rawInput;
+          accumulator.setUsage({
+            inputTokens,
+            outputTokens: usage?.outputTokens as number | undefined,
+            totalTokens: usage?.totalTokens as number | undefined,
+            cacheReadTokens: cacheRead,
+            cacheCreationTokens: cacheWrite,
+          });
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
-
-        const contentBlockStart = event.contentBlockStart as
-          | Record<string, unknown>
-          | undefined;
-        const start = contentBlockStart?.start as
-          | Record<string, unknown>
-          | undefined;
-        if (start?.toolUse != null) {
-          accumulator.addToolCall(start.toolUse as Record<string, unknown>);
-        }
-
-        const messageStart = event.messageStart as
-          | Record<string, unknown>
-          | undefined;
-        if (messageStart?.model != null) {
-          accumulator.model = String(messageStart.model);
-        }
-
-        const messageStop = event.messageStop as
-          | Record<string, unknown>
-          | undefined;
-        if (messageStop?.stopReason != null) {
-          accumulator.finishReason = String(messageStop.stopReason);
-        }
-
-        const metadata = event.metadata as Record<string, unknown> | undefined;
-        const usage = metadata?.usage as Record<string, unknown> | undefined;
-        const rawInput = usage?.inputTokens as number | undefined;
-        const cacheRead = usage?.cacheReadInputTokens as number | undefined;
-        const cacheWrite = usage?.cacheWriteInputTokens as number | undefined;
-        // Bedrock's `inputTokens` excludes cache tokens; pre-sum so both the
-        // emitted token count and cost are cache-inclusive (AA-151026 C1).
-        const inputTokens =
-          rawInput != null && (cacheRead || cacheWrite)
-            ? rawInput + (cacheRead ?? 0) + (cacheWrite ?? 0)
-            : rawInput;
-        accumulator.setUsage({
-          inputTokens,
-          outputTokens: usage?.outputTokens as number | undefined,
-          totalTokens: usage?.totalTokens as number | undefined,
-          cacheReadTokens: cacheRead,
-          cacheCreationTokens: cacheWrite,
-        });
-
         yield rawEvent;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      const state = accumulator.getState();
-      const modelName = String(accumulator.model ?? modelId);
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-            cacheReadInputTokens: state.cacheReadTokens ?? 0,
-            cacheCreationInputTokens: state.cacheCreationTokens ?? 0,
-            defaultProvider: 'bedrock',
-          });
-        } catch {
-          // cost calculation is best-effort
+      try {
+        const state = accumulator.getState();
+        const modelName = String(accumulator.model ?? modelId);
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName,
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              cacheReadInputTokens: state.cacheReadTokens ?? 0,
+              cacheCreationInputTokens: state.cacheCreationTokens ?? 0,
+              defaultProvider: 'bedrock',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._track({
-        ...contextFields(ctx),
-        modelName,
-        provider: 'bedrock',
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: state.inputTokens,
-        outputTokens: state.outputTokens,
-        totalTokens: state.totalTokens,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
-        toolDefinitions: extractBedrockToolDefinitions(params),
-        systemPrompt: extractSystemPromptFromParams(params),
-        temperature: (
-          params.inferenceConfig as Record<string, unknown> | undefined
-        )?.temperature as number | undefined,
-        topP: (params.inferenceConfig as Record<string, unknown> | undefined)
-          ?.topP as number | undefined,
-        maxOutputTokens: (
-          params.inferenceConfig as Record<string, unknown> | undefined
-        )?.maxTokens as number | undefined,
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-      });
+        this._track({
+          ...contextFields(ctx),
+          modelName,
+          provider: 'bedrock',
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          totalTokens: state.totalTokens,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+          toolDefinitions: extractBedrockToolDefinitions(params),
+          systemPrompt: extractSystemPromptFromParams(params),
+          temperature: (
+            params.inferenceConfig as Record<string, unknown> | undefined
+          )?.temperature as number | undefined,
+          topP: (params.inferenceConfig as Record<string, unknown> | undefined)
+            ?.topP as number | undefined,
+          maxOutputTokens: (
+            params.inferenceConfig as Record<string, unknown> | undefined
+          )?.maxTokens as number | undefined,
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
+      }
     }
   }
 }

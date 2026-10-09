@@ -10,7 +10,7 @@
 import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { trackToolCall, trackUserMessage } from '../core/tracking.js';
-import { getDefaultPropagateContext, injectContext } from '../propagation.js';
+import { invokeWithPropagation, resolvePropagateContext } from '../propagation.js';
 import type {
   AmplitudeLike,
   AmplitudeOrAI,
@@ -38,8 +38,15 @@ import {
   applySessionContext,
   BaseAIProvider,
   contextFields,
+  type ProviderCallOptions,
   type ProviderTrackOptions,
+  splitCallOptions,
 } from './base.js';
+import {
+  safeErrorMessage,
+  safeTrack,
+  warnTrackingFailure,
+} from '../utils/logger.js';
 
 const _resolved = tryRequire('openai');
 export const OPENAI_AVAILABLE = _resolved != null;
@@ -57,6 +64,11 @@ export interface OpenAIOptions {
   propagateContext?: boolean;
   /** Pass the `openai` module directly to bypass `tryRequire` (required in bundler environments). */
   openaiModule?: unknown;
+  /**
+   * Existing `openai` client to instrument instead of constructing a new one.
+   * Its transport settings (baseURL, fetch, headers, proxy, timeouts) are kept.
+   */
+  client?: unknown;
 }
 
 /**
@@ -82,25 +94,31 @@ export class OpenAI<
       providerName,
     });
 
-    const mod =
-      (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
-    if (mod == null) {
-      throw new Error(
-        'openai package is required. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
-      );
+    if (options.client != null) {
+      this._client = options.client as TClient;
+    } else {
+      const mod =
+        (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
+      if (mod == null) {
+        throw new Error(
+          'openai package is required. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
+        );
+      }
+
+      const OpenAISDK = mod.OpenAI as new (
+        opts: Record<string, unknown>,
+      ) => unknown;
+
+      const clientOpts: Record<string, unknown> = {};
+      if (options.apiKey) clientOpts.apiKey = options.apiKey;
+      if (options.baseUrl) clientOpts.baseURL = options.baseUrl;
+
+      this._client = new OpenAISDK(clientOpts) as TClient;
     }
-
-    const OpenAISDK = mod.OpenAI as new (
-      opts: Record<string, unknown>,
-    ) => unknown;
-
-    const clientOpts: Record<string, unknown> = {};
-    if (options.apiKey) clientOpts.apiKey = options.apiKey;
-    if (options.baseUrl) clientOpts.baseURL = options.baseUrl;
-
-    this._client = new OpenAISDK(clientOpts) as TClient;
-    this._propagateContext =
-      options.propagateContext ?? getDefaultPropagateContext();
+    this._propagateContext = resolvePropagateContext(
+      options.propagateContext,
+      options.amplitude,
+    );
     this.chat = new WrappedChat(
       this._client,
       this.trackFn(),
@@ -177,13 +195,41 @@ export class WrappedCompletions {
 
   async create(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    requestOptions?: Record<string, unknown>,
   ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
     const createFn = this._original.create as (
       ...args: unknown[]
     ) => Promise<unknown>;
+    return this._invoke(createFn, params, options, requestOptions);
+  }
+
+  async parse(
+    params: Record<string, unknown>,
+    options?: ProviderCallOptions,
+    requestOptions?: Record<string, unknown>,
+  ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
+    const parseFn = this._original.parse as
+      | ((...args: unknown[]) => Promise<unknown>)
+      | undefined;
+    if (typeof parseFn !== 'function') {
+      throw new Error('OpenAI SDK does not expose chat.completions.parse');
+    }
+    return this._invoke(parseFn, params, options, requestOptions);
+  }
+
+  private async _invoke(
+    createFn: (...args: unknown[]) => Promise<unknown>,
+    params: Record<string, unknown>,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
+  ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
-    let requestParams = this._withContextHeaders(params);
+    let requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     if (requestParams.stream === true && requestParams.stream_options == null) {
@@ -194,13 +240,21 @@ export class WrappedCompletions {
     }
 
     try {
-      this._trackInputMessages(
-        requestParams.messages as unknown,
-        ctx,
-        amplitudeOverrides?.trackInputMessages ?? true,
+      safeTrack(() =>
+        this._trackInputMessages(
+          requestParams.messages as unknown,
+          ctx,
+          amplitudeOverrides?.trackInputMessages ?? true,
+        ),
       );
       const resolved = await resolveProviderResponse(
-        createFn.call(this._original, requestParams),
+        invokeWithPropagation(
+          createFn,
+          this._original,
+          requestParams,
+          this._propagateContext,
+          requestOptions,
+        ),
       );
       const response = resolved.data;
 
@@ -214,72 +268,73 @@ export class WrappedCompletions {
         );
       }
 
-      const latencyMs = performance.now() - startTime;
+      safeTrack(() => {
+        const latencyMs = performance.now() - startTime;
 
-      const resp = response as ChatCompletionResponse;
-      const usage = resp.usage;
-      const choice = resp.choices?.[0];
-      const modelName = String(resp.model ?? requestParams.model ?? 'unknown');
-      const toolCalls = choice?.message?.tool_calls;
+        const resp = response as ChatCompletionResponse;
+        const usage = resp.usage;
+        const choice = resp.choices?.[0];
+        const modelName = String(resp.model ?? requestParams.model ?? 'unknown');
+        const toolCalls = choice?.message?.tool_calls;
 
-      const usageExt = usage as Record<string, unknown> | undefined;
-      const promptDetails = usageExt?.prompt_tokens_details as
-        | Record<string, number>
-        | undefined;
-      const completionDetails = usageExt?.completion_tokens_details as
-        | Record<string, number>
-        | undefined;
-      const reasoningTokens = completionDetails?.reasoning_tokens;
-      const cachedTokens = promptDetails?.cached_tokens;
+        const usageExt = usage as Record<string, unknown> | undefined;
+        const promptDetails = usageExt?.prompt_tokens_details as
+          | Record<string, number>
+          | undefined;
+        const completionDetails = usageExt?.completion_tokens_details as
+          | Record<string, number>
+          | undefined;
+        const reasoningTokens = completionDetails?.reasoning_tokens;
+        const cachedTokens = promptDetails?.cached_tokens;
 
-      let costUsd: number | null = null;
-      if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
-        try {
-          costUsd = calculateCost({
-            ...pricingTarget(this._providerName, requestParams.model, modelName),
-            inputTokens: usage.prompt_tokens,
-            outputTokens: usage.completion_tokens,
-            reasoningTokens: reasoningTokens ?? 0,
-            cacheReadInputTokens: cachedTokens ?? 0,
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
+          try {
+            costUsd = calculateCost({
+              ...pricingTarget(this._providerName, requestParams.model, modelName),
+              inputTokens: usage.prompt_tokens,
+              outputTokens: usage.completion_tokens,
+              reasoningTokens: reasoningTokens ?? 0,
+              cacheReadInputTokens: cachedTokens ?? 0,
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._trackFn({
-        ...contextFields(ctx),
-        modelName,
-        provider: this._providerName,
-        providerRequestId: extractProviderRequestId(
-          resp,
-          resolved.headerRequestId,
-        ),
-        responseContent: String(choice?.message?.content ?? ''),
-        latencyMs,
-        inputTokens: usage?.prompt_tokens,
-        outputTokens: usage?.completion_tokens,
-        totalTokens: usage?.total_tokens,
-        reasoningTokens,
-        cacheReadInputTokens: cachedTokens,
-        totalCostUsd: costUsd,
-        finishReason: choice?.finish_reason,
-        toolCalls: toolCalls ?? undefined,
-        isStreaming: false,
-        toolDefinitions: extractToolDefinitions(requestParams),
-        systemPrompt: extractSystemPrompt(requestParams),
-        temperature: requestParams.temperature as number | undefined,
-        maxOutputTokens: requestParams.max_tokens as number | undefined,
-        topP: requestParams.top_p as number | undefined,
+        this._trackFn({
+          ...contextFields(ctx),
+          modelName,
+          provider: this._providerName,
+          providerRequestId: extractProviderRequestId(
+            resp,
+            resolved.headerRequestId,
+          ),
+          responseContent: String(choice?.message?.content ?? ''),
+          latencyMs,
+          inputTokens: usage?.prompt_tokens,
+          outputTokens: usage?.completion_tokens,
+          totalTokens: usage?.total_tokens,
+          reasoningTokens,
+          cacheReadInputTokens: cachedTokens,
+          totalCostUsd: costUsd,
+          finishReason: choice?.finish_reason,
+          toolCalls: toolCalls ?? undefined,
+          isStreaming: false,
+          toolDefinitions: extractToolDefinitions(requestParams),
+          systemPrompt: extractSystemPrompt(requestParams),
+          temperature: requestParams.temperature as number | undefined,
+          maxOutputTokens: requestParams.max_tokens as number | undefined,
+          topP: requestParams.top_p as number | undefined,
+        });
+
+        // Record the moment each tool_call was emitted so the next turn's
+        // matching tool result reports real latencyMs.
+        recordToolUsesFromResponse(toolCalls, {
+          sessionId: ctx.sessionId,
+          agentId: ctx.agentId,
+        });
       });
-
-      // Record the moment each tool_call was emitted so the next turn's
-      // matching tool result reports real latencyMs.
-      recordToolUsesFromResponse(toolCalls, {
-        sessionId: ctx.sessionId,
-        agentId: ctx.agentId,
-      });
-
       return response as ChatCompletionResponse;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -290,29 +345,10 @@ export class WrappedCompletions {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
 
       throw error;
-    }
-  }
-
-  async parse(
-    params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
-  ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
-    const parseFn = this._original.parse as
-      | ((...args: unknown[]) => Promise<unknown>)
-      | undefined;
-    if (typeof parseFn !== 'function') {
-      throw new Error('OpenAI SDK does not expose chat.completions.parse');
-    }
-    const originalCreate = this._original.create;
-    this._original.create = parseFn;
-    try {
-      return await this.create(params, amplitudeOverrides);
-    } finally {
-      this._original.create = originalCreate;
     }
   }
 
@@ -330,147 +366,140 @@ export class WrappedCompletions {
 
     try {
       for await (const chunk of stream) {
-        const c = chunk as Record<string, unknown>;
-        bodyProviderRequestId ??= extractBodyResponseId(c);
-        if (typeof c.model === 'string' && c.model.length > 0) {
-          accumulator.model = c.model;
-        }
-        const choices = c.choices as Array<Record<string, unknown>> | undefined;
-        const delta = choices?.[0]?.delta as
-          | Record<string, unknown>
-          | undefined;
+        try {
+          const c = chunk as Record<string, unknown>;
+          bodyProviderRequestId ??= extractBodyResponseId(c);
+          if (typeof c.model === 'string' && c.model.length > 0) {
+            accumulator.model = c.model;
+          }
+          const choices = c.choices as Array<Record<string, unknown>> | undefined;
+          const delta = choices?.[0]?.delta as
+            | Record<string, unknown>
+            | undefined;
 
-        if (delta?.content != null) {
-          accumulator.addContent(String(delta.content));
-        }
+          if (delta?.content != null) {
+            accumulator.addContent(String(delta.content));
+          }
 
-        const deltaToolCalls = delta?.tool_calls as
-          | Array<Record<string, unknown>>
-          | undefined;
-        if (Array.isArray(deltaToolCalls)) {
-          for (const call of deltaToolCalls) {
-            const idx = call.index as number | undefined;
-            const id = call.id as string | undefined;
-            const fn = call.function as Record<string, unknown> | undefined;
-            if (idx != null && id && fn?.name != null) {
-              accumulator.setToolCallAt(idx, {
-                type: 'function',
-                id,
-                function: {
-                  name: fn.name,
-                  arguments: ((fn.arguments as string) ?? ''),
-                },
-              });
-            } else if (idx != null && fn?.arguments) {
-              accumulator.appendToolCallArgs(idx, fn.arguments as string);
-            } else {
-              accumulator.addToolCall(call);
+          const deltaToolCalls = delta?.tool_calls as
+            | Array<Record<string, unknown>>
+            | undefined;
+          if (Array.isArray(deltaToolCalls)) {
+            for (const call of deltaToolCalls) {
+              const idx = call.index as number | undefined;
+              const id = call.id as string | undefined;
+              const fn = call.function as Record<string, unknown> | undefined;
+              if (idx != null && id && fn?.name != null) {
+                accumulator.setToolCallAt(idx, {
+                  type: 'function',
+                  id,
+                  function: {
+                    name: fn.name,
+                    arguments: ((fn.arguments as string) ?? ''),
+                  },
+                });
+              } else if (idx != null && fn?.arguments) {
+                accumulator.appendToolCallArgs(idx, fn.arguments as string);
+              } else {
+                accumulator.addToolCall(call);
+              }
             }
           }
+
+          if (delta?.reasoning_content != null) {
+            reasoningContent += String(delta.reasoning_content);
+          }
+
+          const finishReason = choices?.[0]?.finish_reason;
+          if (finishReason != null) {
+            accumulator.finishReason = String(finishReason);
+          }
+
+          const usage = c.usage as Record<string, unknown> | undefined;
+          if (usage != null) {
+            const promptDetails = usage.prompt_tokens_details as
+              | Record<string, number>
+              | undefined;
+            const completionDetails = usage.completion_tokens_details as
+              | Record<string, number>
+              | undefined;
+
+            accumulator.setUsage({
+              inputTokens: usage.prompt_tokens as number | undefined,
+              outputTokens: usage.completion_tokens as number | undefined,
+              totalTokens: usage.total_tokens as number | undefined,
+              reasoningTokens: completionDetails?.reasoning_tokens,
+              cacheReadTokens: promptDetails?.cached_tokens,
+            });
+          }
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
-
-        if (delta?.reasoning_content != null) {
-          reasoningContent += String(delta.reasoning_content);
-        }
-
-        const finishReason = choices?.[0]?.finish_reason;
-        if (finishReason != null) {
-          accumulator.finishReason = String(finishReason);
-        }
-
-        const usage = c.usage as Record<string, unknown> | undefined;
-        if (usage != null) {
-          const promptDetails = usage.prompt_tokens_details as
-            | Record<string, number>
-            | undefined;
-          const completionDetails = usage.completion_tokens_details as
-            | Record<string, number>
-            | undefined;
-
-          accumulator.setUsage({
-            inputTokens: usage.prompt_tokens as number | undefined,
-            outputTokens: usage.completion_tokens as number | undefined,
-            totalTokens: usage.total_tokens as number | undefined,
-            reasoningTokens: completionDetails?.reasoning_tokens,
-            cacheReadTokens: promptDetails?.cached_tokens,
-          });
-        }
-
         yield chunk;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      const state = accumulator.getState();
-      const modelName = String(accumulator.model ?? params.model ?? 'unknown');
-      const pricing = pricingTarget(this._providerName, params.model, modelName);
+      try {
+        const state = accumulator.getState();
+        const modelName = String(accumulator.model ?? params.model ?? 'unknown');
+        const pricing = pricingTarget(this._providerName, params.model, modelName);
 
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            ...pricing,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-            reasoningTokens: state.reasoningTokens ?? 0,
-            cacheReadInputTokens: state.cacheReadTokens ?? 0,
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              ...pricing,
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              reasoningTokens: state.reasoningTokens ?? 0,
+              cacheReadInputTokens: state.cacheReadTokens ?? 0,
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
+
+        this._trackFn({
+          ...contextFields(sessionCtx),
+          modelName,
+          provider: this._providerName,
+          providerRequestId: bodyProviderRequestId ?? headerRequestId,
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          totalTokens: state.totalTokens,
+          reasoningTokens: state.reasoningTokens,
+          cacheReadInputTokens: state.cacheReadTokens,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+          reasoningContent: reasoningContent || undefined,
+          toolDefinitions: extractToolDefinitions(params),
+          systemPrompt: extractSystemPrompt(params),
+          temperature: params.temperature as number | undefined,
+          maxOutputTokens: params.max_tokens as number | undefined,
+          topP: params.top_p as number | undefined,
+        });
+
+        // Record the moment each streamed tool_call was emitted so the next
+        // turn's matching tool result reports real latencyMs.
+        recordToolUsesFromResponse(state.toolCalls, {
+          sessionId: sessionCtx.sessionId,
+          agentId: sessionCtx.agentId,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
-
-      this._trackFn({
-        ...contextFields(sessionCtx),
-        modelName,
-        provider: this._providerName,
-        providerRequestId: bodyProviderRequestId ?? headerRequestId,
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: state.inputTokens,
-        outputTokens: state.outputTokens,
-        totalTokens: state.totalTokens,
-        reasoningTokens: state.reasoningTokens,
-        cacheReadInputTokens: state.cacheReadTokens,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-        reasoningContent: reasoningContent || undefined,
-        toolDefinitions: extractToolDefinitions(params),
-        systemPrompt: extractSystemPrompt(params),
-        temperature: params.temperature as number | undefined,
-        maxOutputTokens: params.max_tokens as number | undefined,
-        topP: params.top_p as number | undefined,
-      });
-
-      // Record the moment each streamed tool_call was emitted so the next
-      // turn's matching tool result reports real latencyMs.
-      recordToolUsesFromResponse(state.toolCalls, {
-        sessionId: sessionCtx.sessionId,
-        agentId: sessionCtx.agentId,
-      });
     }
-  }
-
-  private _withContextHeaders(
-    params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (!this._propagateContext) return params;
-    const existing = (params.extra_headers ?? params.headers) as
-      | Record<string, string>
-      | undefined;
-    const injected = injectContext(existing);
-    return {
-      ...params,
-      extra_headers: injected,
-    };
   }
 
   private _trackInputMessages(
@@ -558,23 +587,36 @@ export class WrappedResponses {
 
   async create(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
   ): Promise<OpenAIResponse | AsyncIterable<unknown>> {
     const createFn = this._original.create as (
       ...args: unknown[]
     ) => Promise<unknown>;
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
-    const requestParams = this._withContextHeaders(params);
+    const requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     try {
-      this._trackInputMessages(
-        requestParams.input as unknown,
-        ctx,
-        amplitudeOverrides?.trackInputMessages ?? true,
+      safeTrack(() =>
+        this._trackInputMessages(
+          requestParams.input as unknown,
+          ctx,
+          amplitudeOverrides?.trackInputMessages ?? true,
+        ),
       );
       const resolved = await resolveProviderResponse(
-        createFn.call(this._original, requestParams),
+        invokeWithPropagation(
+          createFn,
+          this._original,
+          requestParams,
+          this._propagateContext,
+          requestOptions,
+        ),
       );
       const response = resolved.data;
       if (requestParams.stream === true && _isAsyncIterable(response)) {
@@ -587,59 +629,60 @@ export class WrappedResponses {
         );
       }
 
-      const latencyMs = performance.now() - startTime;
-      const resp = response as OpenAIResponse;
-      const usage = resp.usage;
-      const responseText = extractResponsesText(resp);
-      const responseToolCalls = extractResponsesToolCalls(resp);
-      const modelName = String(resp.model ?? requestParams.model ?? 'unknown');
+      safeTrack(() => {
+        const latencyMs = performance.now() - startTime;
+        const resp = response as OpenAIResponse;
+        const usage = resp.usage;
+        const responseText = extractResponsesText(resp);
+        const responseToolCalls = extractResponsesToolCalls(resp);
+        const modelName = String(resp.model ?? requestParams.model ?? 'unknown');
 
-      let costUsd: number | null = null;
-      if (usage?.input_tokens != null && usage?.output_tokens != null) {
-        try {
-          costUsd = calculateCost({
-            ...pricingTarget(this._providerName, requestParams.model, modelName),
-            inputTokens: usage.input_tokens,
-            outputTokens: usage.output_tokens,
-            reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (usage?.input_tokens != null && usage?.output_tokens != null) {
+          try {
+            costUsd = calculateCost({
+              ...pricingTarget(this._providerName, requestParams.model, modelName),
+              inputTokens: usage.input_tokens,
+              outputTokens: usage.output_tokens,
+              reasoningTokens: usage.output_tokens_details?.reasoning_tokens ?? 0,
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._trackFn({
-        ...contextFields(ctx),
-        modelName,
-        provider: this._providerName,
-        providerRequestId: extractProviderRequestId(
-          resp,
-          resolved.headerRequestId,
-        ),
-        responseContent: responseText,
-        latencyMs,
-        inputTokens: usage?.input_tokens,
-        outputTokens: usage?.output_tokens,
-        totalTokens: usage?.total_tokens,
-        reasoningTokens: usage?.output_tokens_details?.reasoning_tokens,
-        totalCostUsd: costUsd,
-        finishReason: extractResponsesFinishReason(resp),
-        toolCalls: responseToolCalls.length > 0 ? responseToolCalls : undefined,
-        isStreaming: false,
-        toolDefinitions: extractResponsesToolDefinitions(requestParams),
-        systemPrompt: extractResponsesSystemPrompt(requestParams),
-        temperature: requestParams.temperature as number | undefined,
-        maxOutputTokens: requestParams.max_output_tokens as number | undefined,
-        topP: requestParams.top_p as number | undefined,
+        this._trackFn({
+          ...contextFields(ctx),
+          modelName,
+          provider: this._providerName,
+          providerRequestId: extractProviderRequestId(
+            resp,
+            resolved.headerRequestId,
+          ),
+          responseContent: responseText,
+          latencyMs,
+          inputTokens: usage?.input_tokens,
+          outputTokens: usage?.output_tokens,
+          totalTokens: usage?.total_tokens,
+          reasoningTokens: usage?.output_tokens_details?.reasoning_tokens,
+          totalCostUsd: costUsd,
+          finishReason: extractResponsesFinishReason(resp),
+          toolCalls: responseToolCalls.length > 0 ? responseToolCalls : undefined,
+          isStreaming: false,
+          toolDefinitions: extractResponsesToolDefinitions(requestParams),
+          systemPrompt: extractResponsesSystemPrompt(requestParams),
+          temperature: requestParams.temperature as number | undefined,
+          maxOutputTokens: requestParams.max_output_tokens as number | undefined,
+          topP: requestParams.top_p as number | undefined,
+        });
+
+        // Record the moment each Responses-API tool_call was emitted so the
+        // next turn's matching function_call_output reports real latencyMs.
+        recordToolUsesFromResponse(responseToolCalls, {
+          sessionId: ctx.sessionId,
+          agentId: ctx.agentId,
+        });
       });
-
-      // Record the moment each Responses-API tool_call was emitted so the
-      // next turn's matching function_call_output reports real latencyMs.
-      recordToolUsesFromResponse(responseToolCalls, {
-        sessionId: ctx.sessionId,
-        agentId: ctx.agentId,
-      });
-
       return response as OpenAIResponse;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -650,7 +693,7 @@ export class WrappedResponses {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
       throw error;
     }
@@ -658,7 +701,8 @@ export class WrappedResponses {
 
   async stream(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
   ): Promise<AsyncIterable<unknown>> {
     const streamFn = this._original.stream as
       | ((...args: unknown[]) => Promise<unknown>)
@@ -666,18 +710,30 @@ export class WrappedResponses {
     if (typeof streamFn !== 'function') {
       throw new Error('OpenAI SDK does not expose responses.stream');
     }
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
-    const requestParams = this._withContextHeaders(params);
+    const requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     try {
-      this._trackInputMessages(
-        requestParams.input as unknown,
-        ctx,
-        amplitudeOverrides?.trackInputMessages ?? true,
+      safeTrack(() =>
+        this._trackInputMessages(
+          requestParams.input as unknown,
+          ctx,
+          amplitudeOverrides?.trackInputMessages ?? true,
+        ),
       );
       const resolved = await resolveProviderResponse(
-        streamFn.call(this._original, requestParams),
+        invokeWithPropagation(
+          streamFn,
+          this._original,
+          requestParams,
+          this._propagateContext,
+          requestOptions,
+        ),
       );
       const response = resolved.data;
       if (!_isAsyncIterable(response)) {
@@ -698,7 +754,7 @@ export class WrappedResponses {
         responseContent: '',
         latencyMs: performance.now() - startTime,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
         isStreaming: true,
       });
       throw error;
@@ -718,95 +774,89 @@ export class WrappedResponses {
 
     try {
       for await (const event of stream) {
-        const e = event as Record<string, unknown>;
-        const response = e.response as OpenAIResponse | undefined;
-        bodyProviderRequestId ??= extractBodyResponseId(response);
-        const type = e.type as string | undefined;
-        if (type === 'response.output_text.delta') {
-          const delta = e.delta;
-          if (typeof delta === 'string') accumulator.addContent(delta);
-        } else if (type === 'response.completed') {
-          if (response != null) {
-            if (typeof response.model === 'string' && response.model.length > 0) {
-              accumulator.model = response.model;
+        try {
+          const e = event as Record<string, unknown>;
+          const response = e.response as OpenAIResponse | undefined;
+          bodyProviderRequestId ??= extractBodyResponseId(response);
+          const type = e.type as string | undefined;
+          if (type === 'response.output_text.delta') {
+            const delta = e.delta;
+            if (typeof delta === 'string') accumulator.addContent(delta);
+          } else if (type === 'response.completed') {
+            if (response != null) {
+              if (typeof response.model === 'string' && response.model.length > 0) {
+                accumulator.model = response.model;
+              }
+              const outputText = extractResponsesText(response);
+              if (outputText.length > 0) {
+                accumulator.content = outputText;
+              }
+              const usage = response.usage;
+              accumulator.setUsage({
+                inputTokens: usage?.input_tokens,
+                outputTokens: usage?.output_tokens,
+                totalTokens: usage?.total_tokens,
+                reasoningTokens: usage?.output_tokens_details?.reasoning_tokens,
+              });
+              const finishReason = extractResponsesFinishReason(response);
+              if (finishReason != null) accumulator.finishReason = finishReason;
             }
-            const outputText = extractResponsesText(response);
-            if (outputText.length > 0) {
-              accumulator.content = outputText;
-            }
-            const usage = response.usage;
-            accumulator.setUsage({
-              inputTokens: usage?.input_tokens,
-              outputTokens: usage?.output_tokens,
-              totalTokens: usage?.total_tokens,
-              reasoningTokens: usage?.output_tokens_details?.reasoning_tokens,
-            });
-            const finishReason = extractResponsesFinishReason(response);
-            if (finishReason != null) accumulator.finishReason = finishReason;
           }
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
         yield event;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      const state = accumulator.getState();
-      const modelName = String(accumulator.model ?? params.model ?? 'unknown');
-      const pricing = pricingTarget(this._providerName, params.model, modelName);
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            ...pricing,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-            reasoningTokens: state.reasoningTokens ?? 0,
-          });
-        } catch {
-          // cost calculation is best-effort
+      try {
+        const state = accumulator.getState();
+        const modelName = String(accumulator.model ?? params.model ?? 'unknown');
+        const pricing = pricingTarget(this._providerName, params.model, modelName);
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              ...pricing,
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              reasoningTokens: state.reasoningTokens ?? 0,
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
+        this._trackFn({
+          ...contextFields(sessionCtx),
+          modelName,
+          provider: this._providerName,
+          providerRequestId: bodyProviderRequestId ?? headerRequestId,
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          totalTokens: state.totalTokens,
+          reasoningTokens: state.reasoningTokens,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+          toolDefinitions: extractResponsesToolDefinitions(params),
+          systemPrompt: extractResponsesSystemPrompt(params),
+          temperature: params.temperature as number | undefined,
+          maxOutputTokens: params.max_output_tokens as number | undefined,
+          topP: params.top_p as number | undefined,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
-      this._trackFn({
-        ...contextFields(sessionCtx),
-        modelName,
-        provider: this._providerName,
-        providerRequestId: bodyProviderRequestId ?? headerRequestId,
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: state.inputTokens,
-        outputTokens: state.outputTokens,
-        totalTokens: state.totalTokens,
-        reasoningTokens: state.reasoningTokens,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-        toolDefinitions: extractResponsesToolDefinitions(params),
-        systemPrompt: extractResponsesSystemPrompt(params),
-        temperature: params.temperature as number | undefined,
-        maxOutputTokens: params.max_output_tokens as number | undefined,
-        topP: params.top_p as number | undefined,
-      });
     }
-  }
-
-  private _withContextHeaders(
-    params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (!this._propagateContext) return params;
-    const existing = (params.extra_headers ?? params.headers) as
-      | Record<string, string>
-      | undefined;
-    const injected = injectContext(existing);
-    return {
-      ...params,
-      extra_headers: injected,
-    };
   }
 
   private _trackInputMessages(

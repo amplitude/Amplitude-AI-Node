@@ -701,6 +701,23 @@ describe('TenantHandle expanded', () => {
     expect(props['[Agent] Customer Org ID']).toBe('org-sess');
     expect(props[PROP_SESSION_ID]).toBe('tenant-sess');
   });
+
+  it('does not mutate shared caller options across tenants (AA-152528 M8)', (): void => {
+    const mock = new MockAmplitudeAI();
+    const sharedOpts = { userId: 'shared-user' };
+    const agentA = mock.tenant('org-a', { env: 'envA', groups: { g: 'a' } }).agent('bot', sharedOpts);
+    expect(sharedOpts).toEqual({ userId: 'shared-user' });
+    const agentB = mock.tenant('org-b', { env: 'envB', groups: { g: 'b' } }).agent('bot', sharedOpts);
+    expect(sharedOpts).toEqual({ userId: 'shared-user' });
+
+    agentA.trackUserMessage('A', { sessionId: 'sess-a' });
+    agentB.trackUserMessage('B', { sessionId: 'sess-b' });
+    const propsA = mock.events[0].event_properties as Record<string, unknown>;
+    const propsB = mock.events[1].event_properties as Record<string, unknown>;
+    expect(propsA['[Agent] Customer Org ID']).toBe('org-a');
+    expect(propsB['[Agent] Customer Org ID']).toBe('org-b');
+    expect(propsB['[Agent] Env']).toBe('envB');
+  });
 });
 
 // --------------------------------------------------------

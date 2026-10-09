@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -13,6 +16,8 @@ jobs:
         node-version: [20, 22]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
@@ -46,6 +51,8 @@ jobs:
         openai-version: ['4.104.0', '5.23.2', '6.33.0']
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
@@ -77,6 +84,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
@@ -96,3 +105,60 @@ jobs:
       # An unregistered property reaches the customer undocumented and untyped.
       - name: Check catalog constants
         run: pnpm run check:catalog
+
+  package-and-docs:
+    name: Package contents, docs and workflow checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      # Nothing third-party may be vendored into the published tarball.
+      - name: Check package contents
+        run: |
+          npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[0].files.map((f) => f.path);
+            const vendored = files.filter((p) => p.startsWith("dist/node_modules/"));
+            console.log(`${files.length} files in package`);
+            if (vendored.length) {
+              console.error(`::error::dist/node_modules is in the package (${vendored.length} files)`);
+              process.exit(1);
+            }
+          ' "$RUNNER_TEMP/pack.json"
+
+      # npx must name the scoped package, and agent-facing URLs must not track a branch.
+      - name: Lint docs commands and URLs
+        run: |
+          status=0
+          if git grep -nE 'npx (-y |--yes )?amplitude-ai' -- ':!CHANGELOG.md' ':!test/**' ':!docs/unreleased/**'; then
+            echo "::error::Use 'npx -y -p @amplitude/ai <bin>' instead of an unscoped npx command"
+            status=1
+          fi
+          if git grep -nE 'raw\.githubusercontent\.com/[^[:space:]]*/main/' -- ':!CHANGELOG.md' ':!test/**' ':!docs/unreleased/**'; then
+            echo "::error::Pin raw.githubusercontent.com URLs to a release tag, not main"
+            status=1
+          fi
+          exit $status
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          version: 1.30.1
+          inputs: .github/workflows
+          min-severity: medium
+          advanced-security: false
