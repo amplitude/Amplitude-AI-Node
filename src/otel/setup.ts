@@ -7,7 +7,7 @@ import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import type { AmplitudeClientLike } from '../types.js';
 import { getLogger } from '../utils/logger.js';
-import { type OtelSpan, SpanEventMapper } from './mapper.js';
+import { type OtelSpan, type OtelSpanFilter, SpanEventMapper } from './mapper.js';
 import { AmplitudeEventSpanProcessor } from './processor.js';
 
 const _require = createRequire(import.meta.url);
@@ -19,6 +19,7 @@ export interface OtelSetupOptions {
   defaultDeviceId?: string | null;
   otelEndpoint?: string | null;
   privacyConfig?: PrivacyConfig | null;
+  otelSpanFilter?: OtelSpanFilter;
 }
 
 export interface OtelSetupResult {
@@ -108,6 +109,7 @@ export function setupOtel(options: OtelSetupOptions): OtelSetupResult {
     defaultUserId: options.defaultUserId,
     defaultDeviceId: options.defaultDeviceId,
     privacyConfig: options.privacyConfig,
+    otelSpanFilter: options.otelSpanFilter,
   });
 
   for (const key of _transportKeys(options.amplitude)) _mappers.set(key, mapper);

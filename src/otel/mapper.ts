@@ -135,11 +135,19 @@ export interface OtelSpan {
   events?: OtelSpanEvent[];
 }
 
+/**
+ * Which spans become events. `'genai'` (default) maps only spans carrying a
+ * `gen_ai.*` or `amplitude.*` attribute; `'all'` also maps every other span
+ * in the process (HTTP, DB, ...) as `[Agent] Span`.
+ */
+export type OtelSpanFilter = 'genai' | 'all';
+
 export interface SpanEventMapperOptions {
   amplitude: AmplitudeClientLike;
   defaultUserId?: string | null;
   defaultDeviceId?: string | null;
   privacyConfig?: PrivacyConfig | null;
+  otelSpanFilter?: OtelSpanFilter;
 }
 
 export class SpanEventMapper {
@@ -147,12 +155,14 @@ export class SpanEventMapper {
   private readonly _defaultUserId: string | null;
   private readonly _defaultDeviceId: string | null;
   private readonly _privacyConfig: PrivacyConfig;
+  private readonly _spanFilter: OtelSpanFilter;
 
   constructor(options: SpanEventMapperOptions) {
     this._amplitude = options.amplitude;
     this._defaultUserId = options.defaultUserId ?? null;
     this._defaultDeviceId = options.defaultDeviceId ?? null;
     // No config means no consent to capture content.
+    this._spanFilter = options.otelSpanFilter === 'all' ? 'all' : 'genai';
     this._privacyConfig =
       options.privacyConfig ??
       new PrivacyConfig({ privacyMode: true, contentMode: 'metadata_only' });
@@ -168,6 +178,14 @@ export class SpanEventMapper {
 
   private _mapAndTrackInner(span: OtelSpan): void {
     const attrs: Record<string, unknown> = { ...(span.attributes ?? {}) };
+    if (
+      this._spanFilter === 'genai' &&
+      !Object.keys(attrs).some(
+        (k) => k.startsWith('gen_ai.') || k.startsWith('amplitude.'),
+      )
+    ) {
+      return;
+    }
     const ctx = getActiveContext();
 
     if (ctx?.trackerManaged) {

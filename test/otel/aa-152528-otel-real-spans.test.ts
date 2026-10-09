@@ -118,6 +118,28 @@ describe('INT-13: real spans are mapped', () => {
   });
 });
 
+describe('M21: only GenAI / Amplitude spans are mapped by default', () => {
+  function httpSpan(): void {
+    const span = trace.getTracer('aa-152528').startSpan(`GET /users/${EMAIL}`);
+    span.setAttribute('http.url', `/users/${EMAIL}`);
+    span.end();
+  }
+
+  it('default: plain HTTP span is not tracked', () => {
+    const { amp } = client({ contentMode: 'metadata_only' });
+    httpSpan();
+    expect(amp.events).toHaveLength(0);
+  });
+
+  it("otelSpanFilter 'all': plain HTTP span is tracked", () => {
+    const amp = transport();
+    const ai = new AmplitudeAI({ amplitude: amp, config: new AIConfig({}) });
+    ai.enableOtel({ defaultUserId: 'otel-default-user', otelSpanFilter: 'all' });
+    httpSpan();
+    expect(amp.events.map((e) => e.event_type)).toEqual(['[Agent] Span']);
+  });
+});
+
 describe('L-OT1: stack traces', () => {
   it('metadata_only + captureStackTrace: no stack trace', () => {
     const { amp } = client({ contentMode: 'metadata_only', captureStackTrace: true });

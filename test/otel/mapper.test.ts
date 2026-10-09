@@ -377,12 +377,29 @@ describe('SpanEventMapper', () => {
     expect(event?.event_type).toBe('[Agent] AI Response');
   });
 
-  it('fallback: span without gen_ai.* attrs → generic Span', () => {
+  it("fallback with otelSpanFilter 'all': span without gen_ai.* attrs → generic Span", () => {
+    const allMapper = new SpanEventMapper({
+      amplitude: amplitude as never,
+      defaultUserId: 'default-user',
+      otelSpanFilter: 'all',
+    });
     const span = makeSpan({ 'custom.attr': 'value' }, 'my-operation');
-    mapper.mapAndTrack(span);
+    allMapper.mapAndTrack(span);
     expect(amplitude.track).toHaveBeenCalledTimes(1);
     const event = amplitude.track.mock.calls[0]?.[0];
     expect(event?.event_type).toBe('[Agent] Span');
+  });
+
+  it('AA-152528 M21: default filter skips spans without gen_ai.*/amplitude.* attrs', () => {
+    mapper.mapAndTrack(
+      makeSpan({ 'http.url': '/users/bob@example.com' }, 'GET /users/bob@example.com'),
+    );
+    expect(amplitude.track).not.toHaveBeenCalled();
+  });
+
+  it('AA-152528 M21: default filter keeps amplitude.* spans', () => {
+    mapper.mapAndTrack(makeSpan({ 'amplitude.span.kind': 'span' }, 'step'));
+    expect(amplitude.track).toHaveBeenCalledTimes(1);
   });
 
   // --- Deduplication ---
