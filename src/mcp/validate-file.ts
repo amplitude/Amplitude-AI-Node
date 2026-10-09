@@ -597,6 +597,10 @@ function analyzeWithAST(source: string, sourceLines: string[]): FileAnalysis | n
 
 // ---- Regex fallback (used when acorn is not available) ----
 
+const MAX_SCAN_SPAN = 10_000;
+const MAX_FUNCTION_LOOKBACK_LINES = 500;
+const RECEIVER_WINDOW_CHARS = 256;
+
 const regexLlmPatterns = [
   { pattern: /\.chat\.completions\.create\s*\(/g, receiverRe: /(\w+)(?:\.\w+)*\.chat\.completions\.create\s*\(/, provider: 'openai', api: 'chat.completions.create' },
   { pattern: /\.chat\.completions\.parse\s*\(/g, receiverRe: /(\w+)(?:\.\w+)*\.chat\.completions\.parse\s*\(/, provider: 'openai', api: 'chat.completions.parse' },
@@ -622,15 +626,16 @@ function findWrappedConstructorsRegex(source: string): Set<string> {
     const varName = m[1] ?? '';
     if (!varName) continue;
     let depth = 1;
-    let i = (m.index ?? 0) + m[0].length;
-    let argBlock = '';
-    while (i < source.length && depth > 0) {
+    const argStart = (m.index ?? 0) + m[0].length;
+    const limit = Math.min(source.length, argStart + MAX_SCAN_SPAN);
+    let i = argStart;
+    while (i < limit && depth > 0) {
       const ch = source[i];
       if (ch === '(') depth++;
       else if (ch === ')') depth--;
-      if (depth > 0) argBlock += ch;
       i++;
     }
+    const argBlock = source.slice(argStart, depth > 0 ? i : i - 1);
     if (/\bamplitude\s*:/.test(argBlock)) {
       result.add(varName);
     }
@@ -639,8 +644,9 @@ function findWrappedConstructorsRegex(source: string): Set<string> {
 }
 
 function findContainingFunctionRegex(lines: string[], lineIndex: number): string | null {
-  for (let i = lineIndex; i >= 0; i--) {
-    const line = lines[i] ?? '';
+  const stop = Math.max(0, lineIndex - MAX_FUNCTION_LOOKBACK_LINES);
+  for (let i = lineIndex; i >= stop; i--) {
+    const line = (lines[i] ?? '').slice(0, MAX_SCAN_SPAN);
     const fnDeclMatch = line.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/);
     if (fnDeclMatch) {
       const name = fnDeclMatch[1] ?? '';
@@ -658,13 +664,13 @@ function findContainingFunctionRegex(lines: string[], lineIndex: number): string
 function findToolDefinitionsRegex(source: string): string[] {
   const tools: string[] = [];
   // OpenAI function-calling: { type: 'function', function: { name: '...' } }
-  const funcDefRe = /function:\s*\{[^}]*name:\s*['"](\w+)['"]/g;
+  const funcDefRe = /function:\s*\{[^}]{0,500}?name:\s*['"](\w+)['"]/g;
   for (const m of source.matchAll(funcDefRe)) {
     const name = m[1] ?? '';
     if (name && !tools.includes(name)) tools.push(name);
   }
   // Anthropic-style: { name: '...', input_schema: { ... } }
-  const anthropicRe = /name:\s*['"](\w+)['"][^}]*input_schema\s*:/g;
+  const anthropicRe = /name:\s*['"](\w+)['"][^}]{0,500}?input_schema\s*:/g;
   for (const m of source.matchAll(anthropicRe)) {
     const name = m[1] ?? '';
     if (name && !tools.includes(name)) tools.push(name);
@@ -674,7 +680,7 @@ function findToolDefinitionsRegex(source: string): string[] {
 
 function findFunctionDefinitionsRegex(source: string): string[] {
   const fns: string[] = [];
-  const re = /(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>/g;
+  const re = /(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]{0,500}\)|[^=])\s*=>/g;
   for (const m of source.matchAll(re)) {
     const name = m[1] ?? m[2] ?? '';
     if (name && !fns.includes(name)) fns.push(name);
@@ -711,14 +717,18 @@ function analyzeWithRegex(source: string): FileAnalysis {
     const line = lines[i] ?? '';
     for (const { pattern, receiverRe, provider, api } of regexLlmPatterns) {
       pattern.lastIndex = 0;
-      if (pattern.test(line)) {
+      const hit = pattern.exec(line);
+      if (hit) {
         let effectiveProvider = provider;
         let effectiveApi = api;
         if (provider === 'anthropic' && assistantsApiRe.test(line)) {
           effectiveProvider = 'openai-assistants';
           effectiveApi = 'beta.threads.messages.create';
         }
-        const rm = receiverRe ? line.match(receiverRe) : null;
+        // Only look just before the call so long dotted lines can't backtrack quadratically.
+        const windowStart = Math.max(0, hit.index - RECEIVER_WINDOW_CHARS);
+        const window = line.slice(windowStart, hit.index + hit[0].length);
+        const rm = receiverRe ? window.match(receiverRe) : null;
         const receiver = rm?.[1] ?? '';
         const instrumented = hasPatch || wrappedClients.has(receiver);
         callSites.push({
@@ -780,7 +790,12 @@ function analyzeWithRegex(source: string): FileAnalysis {
 
 // ---- Public API ----
 
-export function analyzeFileInstrumentation(source: string): FileAnalysis {
+/** Inputs above this are analyzed only up to the limit. */
+export const MAX_ANALYZE_SOURCE_CHARS = 1_000_000;
+
+export function analyzeFileInstrumentation(fullSource: string): FileAnalysis {
+  const source =
+    fullSource.length > MAX_ANALYZE_SOURCE_CHARS ? fullSource.slice(0, MAX_ANALYZE_SOURCE_CHARS) : fullSource;
   const sourceLines = source.split('\n');
   const astResult = analyzeWithAST(source, sourceLines);
   if (astResult) return astResult;

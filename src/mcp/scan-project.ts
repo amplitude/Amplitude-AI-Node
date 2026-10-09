@@ -71,6 +71,9 @@ const SKIP_DIRS = new Set([
   'test',
 ]);
 const MAX_DEPTH = 5;
+export const MAX_SCAN_FILES = 5000;
+export const MAX_SCAN_FILE_BYTES = 1_000_000;
+const SKIP_FILE_RE = /\.d\.ts$|\.min\.[cm]?js$/;
 
 const FRAMEWORK_DEPS: Array<[string, string]> = [
   ['next', 'nextjs'],
@@ -196,8 +199,9 @@ function collectSourceFiles(
   realRoot: string,
   depth: number,
   visited: Set<string>,
+  budget: { files: number },
 ): string[] {
-  if (depth > MAX_DEPTH) return [];
+  if (depth > MAX_DEPTH || budget.files >= MAX_SCAN_FILES) return [];
   const realDir = realpathOrNull(dir);
   if (!realDir || visited.has(realDir) || !isPathInside(realDir, realRoot)) return [];
   visited.add(realDir);
@@ -209,8 +213,14 @@ function collectSourceFiles(
   }
 
   const files: string[] = [];
+  const take = (path: string, size: number): void => {
+    if (size > MAX_SCAN_FILE_BYTES || budget.files >= MAX_SCAN_FILES) return;
+    budget.files++;
+    files.push(path);
+  };
   for (const entry of entries) {
-    if (SKIP_DIRS.has(entry)) continue;
+    if (budget.files >= MAX_SCAN_FILES) break;
+    if (SKIP_DIRS.has(entry) || SKIP_FILE_RE.test(entry)) continue;
     const fullPath = join(dir, entry);
     let stat: ReturnType<typeof lstatSync> | undefined;
     try {
@@ -224,14 +234,15 @@ function collectSourceFiles(
       const target = realpathOrNull(fullPath);
       if (!target || !isPathInside(target, realRoot)) continue;
       try {
-        if (statSync(target).isFile()) files.push(target);
+        const targetStat = statSync(target);
+        if (targetStat.isFile()) take(target, targetStat.size);
       } catch {
         // dangling or unreadable
       }
     } else if (stat.isDirectory()) {
-      files.push(...collectSourceFiles(fullPath, realRoot, depth + 1, visited));
+      files.push(...collectSourceFiles(fullPath, realRoot, depth + 1, visited, budget));
     } else if (stat.isFile() && SOURCE_EXTENSIONS.has(ext)) {
-      files.push(fullPath);
+      take(fullPath, stat.size);
     }
   }
   return files;
@@ -324,7 +335,7 @@ export function scanProject(requestedRoot: string): ScanResult {
   const hasAmplitudeAiDep = allDeps.has('@amplitude/ai');
 
   // Walk source files and analyze
-  const sourceFiles = [...new Set(collectSourceFiles(rootPath, rootPath, 0, new Set()))];
+  const sourceFiles = [...new Set(collectSourceFiles(rootPath, rootPath, 0, new Set(), { files: 0 }))];
 
   let totalCallSites = 0;
   let instrumentedCallSites = 0;
