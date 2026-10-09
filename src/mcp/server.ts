@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -13,7 +13,12 @@ import {
 import { getIntegrationPatterns } from './patterns.js';
 import { generateVerifyTest } from './generate-verify-test.js';
 import { InstrumentFileInputError, instrumentFile } from './instrument-file.js';
-import { type ScanResult, scanProject } from './scan-project.js';
+import {
+  type ScanResult,
+  defaultScanRoots,
+  resolveScanRoot,
+  scanProject,
+} from './scan-project.js';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
 type EventSchema = {
@@ -166,6 +171,31 @@ const headingPriority = (heading: string): number => {
     return 2;
   }
   return 1;
+};
+
+/**
+ * Directories `scan_project` may read: the client's MCP roots plus
+ * AMPLITUDE_AI_MCP_ROOTS, falling back to the server's working directory.
+ */
+const resolveAllowedScanRoots = async (server: McpServer): Promise<string[]> => {
+  const roots = (process.env.AMPLITUDE_AI_MCP_ROOTS ?? '')
+    .split(delimiter)
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const clientRoots: string[] = [];
+  if (server.server.getClientCapabilities()?.roots) {
+    try {
+      const res = await server.server.listRoots(undefined, { timeout: 5000 });
+      for (const root of res.roots) {
+        if (root.uri.startsWith('file:')) clientRoots.push(fileURLToPath(root.uri));
+      }
+    } catch {
+      // Client advertised roots but didn't answer; fall back below.
+    }
+  }
+  roots.push(...clientRoots);
+  if (clientRoots.length === 0) roots.push(...defaultScanRoots());
+  return roots;
 };
 
 const createServer = (): McpServer => {
@@ -438,13 +468,29 @@ const createServer = (): McpServer => {
       inputSchema: {
         root_path: z
           .string()
-          .describe('Absolute path to the project root directory'),
+          .describe('Absolute path to the project root directory (must be inside the workspace roots)'),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
     async (args: any) => {
-      const rootPath =
+      const requested =
         typeof args?.root_path === 'string' ? args.root_path : '';
+      const rootPath = resolveScanRoot(requested, await resolveAllowedScanRoots(server));
+      if (!rootPath) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                error:
+                  'root_path must be an existing directory inside the MCP client roots or the server working directory. ' +
+                  'Set AMPLITUDE_AI_MCP_ROOTS to allow other directories.',
+              }),
+            },
+          ],
+        };
+      }
       const result = scanProject(rootPath);
       return {
         content: [
