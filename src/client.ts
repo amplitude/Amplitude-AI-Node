@@ -310,7 +310,7 @@ export class AmplitudeAI {
         console.warn(formatDebugLine(event));
       }
       if (dryRun) {
-        console.warn(formatDryRunLine(event));
+        console.warn(formatDryRunLine(event, this._config.contentMode));
       }
       if (!dryRun) {
         originalTrack(event);

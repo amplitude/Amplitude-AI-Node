@@ -124,6 +124,10 @@ const _FAIL_CLOSED_PRIVACY_CONFIG = new PrivacyConfig({
  * Privacy config resolution for decorators: decorator option → owning
  * session's `AmplitudeAI` config → `ToolCallTracker` → `metadata_only`.
  */
+function _isFullMode(pc: PrivacyConfig): boolean {
+  return pc.contentMode === 'full' || (pc.contentMode == null && !pc.privacyMode);
+}
+
 function _resolvePrivacyConfig(
   explicit: PrivacyConfig | null | undefined,
   ctx: SessionContext | null,
@@ -353,7 +357,12 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           // swallow callback errors
         }
       }
-      getLogger().error(`Tool '${toolName}' failed: ${errorMsg}`);
+      const errorType = e instanceof Error ? e.name : typeof e;
+      getLogger().error(
+        _isFullMode(r.privacyConfig)
+          ? `Tool '${toolName}' failed: ${errorMsg}`
+          : `Tool '${toolName}' failed (${errorType})`,
+      );
       throw e;
     } finally {
       const latencyMs = performance.now() - startTime;
@@ -518,9 +527,7 @@ function _serializeState(
   value: unknown,
   pc: PrivacyConfig,
 ): Record<string, unknown> | null {
-  if (value == null) return null;
-  const mode = pc.contentMode;
-  if (mode != null ? mode !== 'full' : pc.privacyMode) return null;
+  if (value == null || !_isFullMode(pc)) return null;
   if (typeof value === 'object' && !Array.isArray(value))
     return value as Record<string, unknown>;
   return { value: String(value) };
@@ -625,9 +632,7 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
       // meant the `full` fallback path always shipped it, and
       // `customer_enriched` mode leaked it too.
       const pc = params.privacyConfig;
-      const gateOpen =
-        pc.contentMode === 'full' ||
-        (pc.contentMode == null && !pc.privacyMode);
+      const gateOpen = _isFullMode(pc);
       const inputState = _serializeState(
         args.length === 1 ? args[0] : args.length > 0 ? { args } : null,
         pc,
