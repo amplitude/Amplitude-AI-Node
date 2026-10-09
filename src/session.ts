@@ -31,6 +31,7 @@ import {
   SessionContext,
 } from './context.js';
 import type { SessionEnrichments } from './core/enrichments.js';
+import type { PrivacyConfig } from './core/privacy.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { isServerless } from './serverless.js';
 import { getLogger } from './utils/logger.js';
@@ -145,6 +146,9 @@ export class Session {
         this.browserSessionId ?? (defaults.browserSessionId as string | null),
       nextTurnIdFn: () => ai._nextTurnId(sid),
       amplitude: ai.amplitude,
+      privacyConfig:
+        (ai as unknown as { _privacyConfig?: PrivacyConfig | null })
+          ._privacyConfig ?? null,
       skipAutoUserTracking: this._skipAutoUserTracking,
     });
   }

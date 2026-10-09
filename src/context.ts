@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
 
 export interface SessionContextOptions {
@@ -19,6 +20,8 @@ export interface SessionContextOptions {
   browserSessionId?: string | null;
   nextTurnIdFn?: (() => number) | null;
   amplitude?: AmplitudeLike | null;
+  /** Privacy config of the `AmplitudeAI` that owns this session. */
+  privacyConfig?: PrivacyConfig | null;
   trackerManaged?: boolean;
   skipAutoUserTracking?: boolean;
 }
@@ -40,6 +43,7 @@ export class SessionContext {
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
   readonly amplitude: AmplitudeLike | null;
+  readonly privacyConfig: PrivacyConfig | null;
   readonly trackerManaged: boolean;
   readonly skipAutoUserTracking: boolean;
   private readonly _nextTurnIdFn: (() => number) | null;
@@ -73,6 +77,7 @@ export class SessionContext {
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;
     this.amplitude = options.amplitude ?? null;
+    this.privacyConfig = options.privacyConfig ?? null;
     this.trackerManaged = options.trackerManaged ?? false;
     this.skipAutoUserTracking = options.skipAutoUserTracking ?? false;
     this._nextTurnIdFn = options.nextTurnIdFn ?? null;
