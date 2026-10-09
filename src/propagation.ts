@@ -112,20 +112,80 @@ export function invokeWithPropagation<R>(
   return fn.call(thisArg, params, { headers });
 }
 
+const _MAX_TRACEPARENT_LENGTH = 512;
+const _MAX_TRACE_ID_LENGTH = 64;
+const _MAX_HEADER_ID_LENGTH = 256;
+const _TRACEPARENT_RE =
+  /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(?:-.*)?$/;
+const _TRACE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+function _hasControlChars(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function _firstHeader(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  return null;
+}
+
+/**
+ * Parse a W3C `traceparent` header and return its trace-id, or `null` when
+ * the header is malformed, too long, uses version `ff`, or carries an
+ * all-zero trace-id or parent-id.
+ */
+export function parseTraceparent(value: unknown): string | null {
+  const header = _firstHeader(value)?.trim().toLowerCase();
+  if (!header || header.length > _MAX_TRACEPARENT_LENGTH) return null;
+  const m = _TRACEPARENT_RE.exec(header);
+  if (m == null) return null;
+  const [, version, traceId, parentId] = m;
+  if (version === 'ff') return null;
+  if (/^0+$/.test(traceId ?? '') || /^0+$/.test(parentId ?? '')) return null;
+  if (version === '00' && header.length !== 55) return null;
+  return traceId ?? null;
+}
+
+/**
+ * Validate a caller-supplied trace ID (e.g. an `x-trace-id` header). Accepts
+ * a short token of letters, digits and `._:-` (covers W3C 32-hex trace-ids
+ * and UUIDs) up to 64 characters; returns `null` for anything else.
+ */
+export function normalizeTraceId(value: unknown): string | null {
+  const raw = _firstHeader(value)?.trim();
+  if (!raw || raw.length > _MAX_TRACE_ID_LENGTH) return null;
+  return _TRACE_TOKEN_RE.test(raw) ? raw : null;
+}
+
+function _safeHeaderId(value: unknown): string | null {
+  const raw = _firstHeader(value)?.trim();
+  if (!raw || raw.length > _MAX_HEADER_ID_LENGTH) return null;
+  return _hasControlChars(raw) ? null : raw;
+}
+
+/**
+ * Read propagation headers written by {@link injectContext}.
+ *
+ * Every value here is controlled by whoever sent the request. Only call this
+ * on traffic from services you operate (e.g. an internal queue consumer),
+ * never on requests that reach you from end users or the public internet —
+ * otherwise a caller can choose the `userId` / `sessionId` their events are
+ * attributed to. The trace ID is validated (W3C `traceparent`, else a short
+ * `x-trace-id` token); other values longer than 256 characters or containing
+ * control characters are dropped.
+ */
 export function extractContext(
   headers: Record<string, string>,
 ): Record<string, string> {
   const result: Record<string, string> = {};
 
-  const traceparent = headers.traceparent ?? '';
-  if (traceparent) {
-    const parts = traceparent.split('-');
-    if (parts.length >= 2 && parts[1]) result.traceId = parts[1];
-  }
-  if (!result.traceId) {
-    const xTrace = headers['x-trace-id'];
-    if (xTrace) result.traceId = xTrace;
-  }
+  const traceId =
+    parseTraceparent(headers.traceparent) ?? normalizeTraceId(headers['x-trace-id']);
+  if (traceId) result.traceId = traceId;
 
   const headerMap: Array<[string, string]> = [
     ['x-amplitude-session-id', 'sessionId'],
@@ -134,7 +194,7 @@ export function extractContext(
   ];
 
   for (const [header, key] of headerMap) {
-    const val = headers[header];
+    const val = _safeHeaderId(headers[header]);
     if (val) result[key] = val;
   }
 

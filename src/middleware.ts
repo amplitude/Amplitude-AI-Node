@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from './client.js';
 import { runWithContext, SessionContext } from './context.js';
+import { normalizeTraceId, parseTraceparent } from './propagation.js';
 import { getLogger } from './utils/logger.js';
 
 /** A static value or a `(req) => value` resolver for per-request values. */
@@ -15,7 +16,19 @@ type ValueOrResolver<T> = T | ((req: unknown) => T | null) | null;
 
 export interface MiddlewareOptions {
   amplitudeAI: AmplitudeAI;
+  /**
+   * Return the authenticated end user for this request (e.g. from your auth
+   * middleware's session or a verified token), or `null` for anonymous
+   * requests. Do not read it from a request header the client controls:
+   * any caller could then send events as any user.
+   */
   userIdResolver: (req: unknown) => string | null;
+  /**
+   * Optional device / anonymous ID for the request (e.g. an Amplitude
+   * `device_id` your frontend sends). Lets anonymous traffic be tracked and
+   * still emit session-end events when there is no user ID.
+   */
+  deviceIdResolver?: (req: unknown) => string | null;
   sessionIdResolver?: (req: unknown) => string;
   agentId?: string | null;
   env?: string | null;
@@ -49,16 +62,22 @@ interface ExpressLikeResponse {
 /**
  * Creates Express-compatible middleware.
  *
- * Usage:
+ * Usage (mount after your authentication middleware):
  *   app.use(createAmplitudeAIMiddleware({
  *     amplitudeAI: ai,
- *     userIdResolver: (req) => req.headers['x-user-id'],
+ *     userIdResolver: (req) => req.user?.id ?? null,
  *   }));
+ *
+ * `userIdResolver` must return the authenticated principal, not a value read
+ * from a client-supplied header. The trace ID is taken from a valid W3C
+ * `traceparent` or a short `x-trace-id` token (letters, digits, `._:-`, up to
+ * 64 chars); anything else is ignored and a fresh trace ID is generated.
  */
 export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
   const {
     amplitudeAI,
     userIdResolver,
+    deviceIdResolver = null,
     sessionIdResolver = () => randomUUID(),
     agentId = null,
     env = null,
@@ -77,14 +96,13 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     next: () => void,
   ): void => {
     const userId = userIdResolver(req);
+    const deviceId = deviceIdResolver?.(req) ?? null;
     const sessionId = sessionIdResolver(req);
 
-    let traceId = req.headers['x-trace-id'] as string | undefined;
-    if (!traceId && req.headers.traceparent) {
-      const parts = String(req.headers.traceparent).split('-');
-      traceId = parts.length >= 2 ? parts[1] : undefined;
-    }
-    if (!traceId) traceId = randomUUID();
+    const traceId =
+      normalizeTraceId(req.headers['x-trace-id']) ??
+      parseTraceparent(req.headers.traceparent) ??
+      randomUUID();
 
     const resolvedCustomerOrgId = resolveOption(customerOrgId, req);
     const resolvedContext = resolveOption(context, req);
@@ -94,6 +112,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
       sessionId,
       traceId,
       userId,
+      deviceId,
       agentId,
       env,
       agentVersion,
@@ -106,12 +125,13 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
 
     runWithContext(ctx, () => {
       res.on('finish', () => {
-        if (trackSessionEvents && userId != null) {
+        if (trackSessionEvents && (userId != null || deviceId != null)) {
           try {
             amplitudeAI.trackSessionEnd({
-              userId,
+              userId: userId ?? undefined,
+              deviceId,
               sessionId,
-              traceId: traceId ?? undefined,
+              traceId,
               env,
               agentId,
               agentVersion,

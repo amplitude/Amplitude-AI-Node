@@ -78,7 +78,7 @@ describe('createAmplitudeAIMiddleware', () => {
     const req = {
       headers: {
         traceparent:
-          '00-tracefromw3c00000000000000000000000000-0000000000000000-01',
+          '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
       },
     };
 
@@ -88,9 +88,7 @@ describe('createAmplitudeAIMiddleware', () => {
       next,
     );
 
-    expect(capturedContext?.traceId).toBe(
-      'tracefromw3c00000000000000000000000000',
-    );
+    expect(capturedContext?.traceId).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
   });
 
   it('calls next function', (): void => {
@@ -158,6 +156,7 @@ describe('createAmplitudeAIMiddleware', () => {
 
     expect(trackSessionEndSpy).toHaveBeenCalledWith({
       userId: 'u1',
+      deviceId: null,
       sessionId: 'sess-1',
       traceId: 'trace-1',
       env: null,
@@ -214,5 +213,104 @@ describe('createAmplitudeAIMiddleware', () => {
       expect.stringContaining('Failed to flush events in middleware'),
     );
     warnSpy.mockRestore();
+  });
+
+  describe('inbound trace headers (AA-152528 M27)', () => {
+    function traceIdFor(headers: Record<string, string>): string | null {
+      const mock = new MockAmplitudeAI();
+      let traceId: string | null = null;
+      const middleware = createAmplitudeAIMiddleware({
+        amplitudeAI: mock,
+        userIdResolver: () => 'user-1',
+        trackSessionEvents: false,
+        flushOnResponse: false,
+      });
+      middleware(
+        { headers } as Parameters<typeof middleware>[0],
+        { on: () => {} } as Parameters<typeof middleware>[1],
+        () => {
+          traceId = getActiveContext()?.traceId ?? null;
+        },
+      );
+      return traceId;
+    }
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+    it('replaces an oversized x-trace-id with a fresh trace ID', (): void => {
+      const traceId = traceIdFor({ 'x-trace-id': 'a'.repeat(100_000) });
+      expect(traceId).toMatch(UUID_RE);
+    });
+
+    it('rejects x-trace-id values with unexpected characters', (): void => {
+      expect(traceIdFor({ 'x-trace-id': 'bob@example.com' })).toMatch(UUID_RE);
+      expect(traceIdFor({ 'x-trace-id': '<script>' })).toMatch(UUID_RE);
+    });
+
+    it('rejects malformed or all-zero traceparent headers', (): void => {
+      expect(
+        traceIdFor({ traceparent: '00-00000000000000000000000000000000-00f067aa0ba902b7-01' }),
+      ).toMatch(UUID_RE);
+      expect(
+        traceIdFor({ traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01' }),
+      ).toMatch(UUID_RE);
+      expect(traceIdFor({ traceparent: `00-${'z'.repeat(32)}-00f067aa0ba902b7-01` })).toMatch(UUID_RE);
+      expect(traceIdFor({ traceparent: 'ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' })).toMatch(UUID_RE);
+    });
+
+    it('accepts W3C hex trace IDs and UUIDs in x-trace-id', (): void => {
+      expect(traceIdFor({ 'x-trace-id': '4bf92f3577b34da6a3ce929d0e0e4736' })).toBe(
+        '4bf92f3577b34da6a3ce929d0e0e4736',
+      );
+      const uuid = '3fa85f64-5717-4562-b3fc-2c963f66afa6';
+      expect(traceIdFor({ 'x-trace-id': uuid })).toBe(uuid);
+    });
+  });
+
+  describe('deviceIdResolver (AA-152528 CTX-L3)', () => {
+    it('sets deviceId on the context and sends session end for device-only requests', (): void => {
+      const mock = new MockAmplitudeAI();
+      const trackSessionEndSpy = vi.spyOn(mock, 'trackSessionEnd');
+      let finish: (() => void) | null = null;
+      let ctxDevice: string | null = null;
+      const middleware = createAmplitudeAIMiddleware({
+        amplitudeAI: mock,
+        userIdResolver: () => null,
+        deviceIdResolver: () => 'device-abc123',
+        sessionIdResolver: () => 'sess-dev',
+        flushOnResponse: false,
+      });
+      middleware(
+        { headers: {} } as Parameters<typeof middleware>[0],
+        {
+          on: (event: string, cb: () => void) => {
+            if (event === 'finish') finish = cb;
+          },
+        } as Parameters<typeof middleware>[1],
+        () => {
+          ctxDevice = getActiveContext()?.deviceId ?? null;
+        },
+      );
+      expect(ctxDevice).toBe('device-abc123');
+      (finish as unknown as () => void)();
+      expect(trackSessionEndSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: undefined, deviceId: 'device-abc123', sessionId: 'sess-dev' }),
+      );
+    });
+
+    it('does not send session end when neither user nor device is known', (): void => {
+      const mock = new MockAmplitudeAI();
+      const trackSessionEndSpy = vi.spyOn(mock, 'trackSessionEnd');
+      const middleware = createAmplitudeAIMiddleware({
+        amplitudeAI: mock,
+        userIdResolver: () => null,
+        flushOnResponse: false,
+      });
+      middleware(
+        { headers: {} } as Parameters<typeof middleware>[0],
+        { on: (_e: string, cb: () => void) => cb() } as Parameters<typeof middleware>[1],
+        () => {},
+      );
+      expect(trackSessionEndSpy).not.toHaveBeenCalled();
+    });
   });
 });
