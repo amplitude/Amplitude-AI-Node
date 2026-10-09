@@ -28,6 +28,11 @@ import {
   sdkCallArgs,
   splitCallOptions,
 } from './base.js';
+import {
+  safeErrorMessage,
+  safeTrack,
+  warnTrackingFailure,
+} from '../utils/logger.js';
 
 const _resolved = tryRequire('@anthropic-ai/sdk');
 export const ANTHROPIC_AVAILABLE = _resolved != null;
@@ -142,10 +147,12 @@ export class WrappedMessages {
     const ctx = applySessionContext(amplitudeOverrides);
 
     try {
-      this._trackInputMessages(
-        requestParams.messages as unknown,
-        ctx,
-        amplitudeOverrides?.trackInputMessages ?? true,
+      safeTrack(() =>
+        this._trackInputMessages(
+          requestParams.messages as unknown,
+          ctx,
+          amplitudeOverrides?.trackInputMessages ?? true,
+        ),
       );
       const response = await createFn.apply(
         this._original,
@@ -161,70 +168,71 @@ export class WrappedMessages {
         );
       }
 
-      const latencyMs = performance.now() - startTime;
+      safeTrack(() => {
+        const latencyMs = performance.now() - startTime;
 
-      const resp = response as AnthropicResponse;
-      const usage = resp.usage;
-      const extracted = extractAnthropicContent(
-        resp.content as unknown as Array<Record<string, unknown>> | undefined,
-      );
-      const firstTextBlock = resp.content?.find((b) => b.type === 'text');
-      const modelName = String(resp.model ?? requestParams.model ?? 'unknown');
+        const resp = response as AnthropicResponse;
+        const usage = resp.usage;
+        const extracted = extractAnthropicContent(
+          resp.content as unknown as Array<Record<string, unknown>> | undefined,
+        );
+        const firstTextBlock = resp.content?.find((b) => b.type === 'text');
+        const modelName = String(resp.model ?? requestParams.model ?? 'unknown');
 
-      const cacheRead = usage?.cache_read_input_tokens ?? 0;
-      const cacheCreation = usage?.cache_creation_input_tokens ?? 0;
-      const rawInput = usage?.input_tokens ?? 0;
-      const normalizedInput =
-        cacheRead || cacheCreation
-          ? rawInput + cacheRead + cacheCreation
-          : rawInput;
+        const cacheRead = usage?.cache_read_input_tokens ?? 0;
+        const cacheCreation = usage?.cache_creation_input_tokens ?? 0;
+        const rawInput = usage?.input_tokens ?? 0;
+        const normalizedInput =
+          cacheRead || cacheCreation
+            ? rawInput + cacheRead + cacheCreation
+            : rawInput;
 
-      let costUsd: number | null = null;
-      if (usage?.input_tokens != null && usage?.output_tokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName,
-            inputTokens: normalizedInput,
-            outputTokens: usage.output_tokens,
-            cacheReadInputTokens: cacheRead,
-            cacheCreationInputTokens: cacheCreation,
-            defaultProvider: 'anthropic',
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (usage?.input_tokens != null && usage?.output_tokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName,
+              inputTokens: normalizedInput,
+              outputTokens: usage.output_tokens,
+              cacheReadInputTokens: cacheRead,
+              cacheCreationInputTokens: cacheCreation,
+              defaultProvider: 'anthropic',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._trackFn({
-        ...contextFields(ctx),
-        modelName,
-        provider: 'anthropic',
-        responseContent: String(firstTextBlock?.text ?? ''),
-        reasoningContent: extracted.reasoning,
-        latencyMs,
-        inputTokens: normalizedInput || undefined,
-        outputTokens: usage?.output_tokens,
-        cacheReadInputTokens: cacheRead || undefined,
-        cacheCreationInputTokens: cacheCreation || undefined,
-        totalCostUsd: costUsd,
-        finishReason: resp.stop_reason,
-        toolCalls:
-          extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
-        isStreaming: false,
-        toolDefinitions: extractAnthropicToolDefinitions(requestParams),
-        systemPrompt: extractAnthropicSystemPrompt(requestParams.system),
-        temperature: requestParams.temperature as number | undefined,
-        maxOutputTokens: requestParams.max_tokens as number | undefined,
-        topP: requestParams.top_p as number | undefined,
+        this._trackFn({
+          ...contextFields(ctx),
+          modelName,
+          provider: 'anthropic',
+          responseContent: String(firstTextBlock?.text ?? ''),
+          reasoningContent: extracted.reasoning,
+          latencyMs,
+          inputTokens: normalizedInput || undefined,
+          outputTokens: usage?.output_tokens,
+          cacheReadInputTokens: cacheRead || undefined,
+          cacheCreationInputTokens: cacheCreation || undefined,
+          totalCostUsd: costUsd,
+          finishReason: resp.stop_reason,
+          toolCalls:
+            extracted.toolCalls.length > 0 ? extracted.toolCalls : undefined,
+          isStreaming: false,
+          toolDefinitions: extractAnthropicToolDefinitions(requestParams),
+          systemPrompt: extractAnthropicSystemPrompt(requestParams.system),
+          temperature: requestParams.temperature as number | undefined,
+          maxOutputTokens: requestParams.max_tokens as number | undefined,
+          topP: requestParams.top_p as number | undefined,
+        });
+
+        // Record the moment each tool_use was emitted so the next turn's
+        // matching tool_result reports real latencyMs.
+        recordToolUsesFromResponse(extracted.toolCalls, {
+          sessionId: ctx.sessionId,
+          agentId: ctx.agentId,
+        });
       });
-
-      // Record the moment each tool_use was emitted so the next turn's
-      // matching tool_result reports real latencyMs.
-      recordToolUsesFromResponse(extracted.toolCalls, {
-        sessionId: ctx.sessionId,
-        agentId: ctx.agentId,
-      });
-
       return response as AnthropicResponse;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -235,7 +243,7 @@ export class WrappedMessages {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
 
       throw error;
@@ -254,128 +262,135 @@ export class WrappedMessages {
 
     try {
       for await (const event of stream) {
-        const evt = event as Record<string, unknown>;
-        const type = evt.type as string | undefined;
+        try {
+          const evt = event as Record<string, unknown>;
+          const type = evt.type as string | undefined;
 
-        if (type === 'content_block_delta') {
-          const delta = evt.delta as Record<string, unknown> | undefined;
-          if (delta?.type === 'text_delta' && delta.text != null) {
-            accumulator.addContent(String(delta.text));
-          } else if (
-            delta?.type === 'thinking_delta' &&
-            delta.thinking != null
-          ) {
-            reasoningContent += String(delta.thinking);
+          if (type === 'content_block_delta') {
+            const delta = evt.delta as Record<string, unknown> | undefined;
+            if (delta?.type === 'text_delta' && delta.text != null) {
+              accumulator.addContent(String(delta.text));
+            } else if (
+              delta?.type === 'thinking_delta' &&
+              delta.thinking != null
+            ) {
+              reasoningContent += String(delta.thinking);
+            }
+          } else if (type === 'content_block_start') {
+            const block = evt.content_block as
+              | Record<string, unknown>
+              | undefined;
+            if (block?.type === 'tool_use') {
+              accumulator.addToolCall({
+                type: 'function',
+                id: block.id,
+                function: {
+                  name: String(block.name ?? ''),
+                  arguments:
+                    typeof block.input === 'string'
+                      ? block.input
+                      : JSON.stringify(block.input ?? {}),
+                },
+              });
+            }
+          } else if (type === 'message_delta') {
+            const delta = evt.delta as Record<string, unknown> | undefined;
+            if (delta?.stop_reason != null) {
+              accumulator.finishReason = String(delta.stop_reason);
+            }
+            const usage = evt.usage as Record<string, number> | undefined;
+            if (usage != null) {
+              accumulator.setUsage({
+                outputTokens: usage.output_tokens,
+              });
+            }
+          } else if (type === 'message_start') {
+            const message = evt.message as Record<string, unknown> | undefined;
+            if (message?.model != null) {
+              accumulator.model = String(message.model);
+            }
+            const usage = message?.usage as Record<string, number> | undefined;
+            if (usage != null) {
+              accumulator.setUsage({
+                inputTokens: usage.input_tokens,
+                cacheReadTokens: usage.cache_read_input_tokens,
+                cacheCreationTokens: usage.cache_creation_input_tokens,
+              });
+            }
           }
-        } else if (type === 'content_block_start') {
-          const block = evt.content_block as
-            | Record<string, unknown>
-            | undefined;
-          if (block?.type === 'tool_use') {
-            accumulator.addToolCall({
-              type: 'function',
-              id: block.id,
-              function: {
-                name: String(block.name ?? ''),
-                arguments:
-                  typeof block.input === 'string'
-                    ? block.input
-                    : JSON.stringify(block.input ?? {}),
-              },
-            });
-          }
-        } else if (type === 'message_delta') {
-          const delta = evt.delta as Record<string, unknown> | undefined;
-          if (delta?.stop_reason != null) {
-            accumulator.finishReason = String(delta.stop_reason);
-          }
-          const usage = evt.usage as Record<string, number> | undefined;
-          if (usage != null) {
-            accumulator.setUsage({
-              outputTokens: usage.output_tokens,
-            });
-          }
-        } else if (type === 'message_start') {
-          const message = evt.message as Record<string, unknown> | undefined;
-          if (message?.model != null) {
-            accumulator.model = String(message.model);
-          }
-          const usage = message?.usage as Record<string, number> | undefined;
-          if (usage != null) {
-            accumulator.setUsage({
-              inputTokens: usage.input_tokens,
-              cacheReadTokens: usage.cache_read_input_tokens,
-              cacheCreationTokens: usage.cache_creation_input_tokens,
-            });
-          }
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
-
         yield event;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      const state = accumulator.getState();
-      const modelName = String(accumulator.model ?? params.model ?? 'unknown');
+      try {
+        const state = accumulator.getState();
+        const modelName = String(accumulator.model ?? params.model ?? 'unknown');
 
-      const streamCacheRead = state.cacheReadTokens ?? 0;
-      const streamCacheCreation = state.cacheCreationTokens ?? 0;
-      const streamRawInput = state.inputTokens ?? 0;
-      const streamNormalizedInput =
-        streamCacheRead || streamCacheCreation
-          ? streamRawInput + streamCacheRead + streamCacheCreation
-          : streamRawInput;
+        const streamCacheRead = state.cacheReadTokens ?? 0;
+        const streamCacheCreation = state.cacheCreationTokens ?? 0;
+        const streamRawInput = state.inputTokens ?? 0;
+        const streamNormalizedInput =
+          streamCacheRead || streamCacheCreation
+            ? streamRawInput + streamCacheRead + streamCacheCreation
+            : streamRawInput;
 
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName,
-            inputTokens: streamNormalizedInput,
-            outputTokens: state.outputTokens,
-            cacheReadInputTokens: streamCacheRead,
-            cacheCreationInputTokens: streamCacheCreation,
-            defaultProvider: 'anthropic',
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName,
+              inputTokens: streamNormalizedInput,
+              outputTokens: state.outputTokens,
+              cacheReadInputTokens: streamCacheRead,
+              cacheCreationInputTokens: streamCacheCreation,
+              defaultProvider: 'anthropic',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
+
+        this._trackFn({
+          ...contextFields(sessionCtx),
+          modelName,
+          provider: 'anthropic',
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: streamNormalizedInput || undefined,
+          outputTokens: state.outputTokens,
+          cacheReadInputTokens: streamCacheRead || undefined,
+          cacheCreationInputTokens: streamCacheCreation || undefined,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+          reasoningContent: reasoningContent || undefined,
+          toolDefinitions: extractAnthropicToolDefinitions(params),
+          systemPrompt: extractAnthropicSystemPrompt(params.system),
+          temperature: params.temperature as number | undefined,
+          maxOutputTokens: params.max_tokens as number | undefined,
+          topP: params.top_p as number | undefined,
+        });
+
+        // Record the moment each streamed tool_use was emitted so the next
+        // turn's matching tool_result reports real latencyMs.
+        recordToolUsesFromResponse(state.toolCalls, {
+          sessionId: sessionCtx.sessionId,
+          agentId: sessionCtx.agentId,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
-
-      this._trackFn({
-        ...contextFields(sessionCtx),
-        modelName,
-        provider: 'anthropic',
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: streamNormalizedInput || undefined,
-        outputTokens: state.outputTokens,
-        cacheReadInputTokens: streamCacheRead || undefined,
-        cacheCreationInputTokens: streamCacheCreation || undefined,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-        reasoningContent: reasoningContent || undefined,
-        toolDefinitions: extractAnthropicToolDefinitions(params),
-        systemPrompt: extractAnthropicSystemPrompt(params.system),
-        temperature: params.temperature as number | undefined,
-        maxOutputTokens: params.max_tokens as number | undefined,
-        topP: params.top_p as number | undefined,
-      });
-
-      // Record the moment each streamed tool_use was emitted so the next
-      // turn's matching tool_result reports real latencyMs.
-      recordToolUsesFromResponse(state.toolCalls, {
-        sessionId: sessionCtx.sessionId,
-        agentId: sessionCtx.agentId,
-      });
     }
   }
 

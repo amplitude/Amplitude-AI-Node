@@ -47,7 +47,7 @@ import {
   type TrackFn,
 } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
-import { getLogger } from '../utils/logger.js';
+import { getLogger, safeTrack } from '../utils/logger.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 
 const _require = createRequire(import.meta.url);
@@ -420,7 +420,18 @@ export abstract class BaseAIProvider {
     this._providerName = options.providerName;
   }
 
+  /**
+   * Emit the AI response event. Never throws: a failure in validation, cost
+   * enforcement or serialization skips the event with a content-free warning
+   * so the host's provider call is unaffected.
+   */
   protected _track(opts: Omit<TrackAiMessageOptions, 'amplitude'>): string {
+    return safeTrack(() => this._trackUnguarded(opts)) ?? '';
+  }
+
+  private _trackUnguarded(
+    opts: Omit<TrackAiMessageOptions, 'amplitude'>,
+  ): string {
     if (isTrackerManaged()) return '';
 
     const merged = applySessionContext({
