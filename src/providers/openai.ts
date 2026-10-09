@@ -38,7 +38,10 @@ import {
   applySessionContext,
   BaseAIProvider,
   contextFields,
+  type ProviderCallOptions,
   type ProviderTrackOptions,
+  sdkCallArgs,
+  splitCallOptions,
 } from './base.js';
 
 const _resolved = tryRequire('openai');
@@ -186,17 +189,19 @@ export class WrappedCompletions {
 
   async create(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    requestOptions?: Record<string, unknown>,
   ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
     const createFn = this._original.create as (
       ...args: unknown[]
     ) => Promise<unknown>;
-    return this._invoke(createFn, params, amplitudeOverrides);
+    return this._invoke(createFn, params, options, requestOptions);
   }
 
   async parse(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    requestOptions?: Record<string, unknown>,
   ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
     const parseFn = this._original.parse as
       | ((...args: unknown[]) => Promise<unknown>)
@@ -204,14 +209,19 @@ export class WrappedCompletions {
     if (typeof parseFn !== 'function') {
       throw new Error('OpenAI SDK does not expose chat.completions.parse');
     }
-    return this._invoke(parseFn, params, amplitudeOverrides);
+    return this._invoke(parseFn, params, options, requestOptions);
   }
 
   private async _invoke(
     createFn: (...args: unknown[]) => Promise<unknown>,
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
   ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
     let requestParams = this._withContextHeaders(params);
     const ctx = applySessionContext(amplitudeOverrides);
@@ -230,7 +240,10 @@ export class WrappedCompletions {
         amplitudeOverrides?.trackInputMessages ?? true,
       );
       const resolved = await resolveProviderResponse(
-        createFn.call(this._original, requestParams),
+        createFn.apply(
+          this._original,
+          sdkCallArgs(requestParams, requestOptions),
+        ),
       );
       const response = resolved.data;
 
@@ -569,11 +582,16 @@ export class WrappedResponses {
 
   async create(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
   ): Promise<OpenAIResponse | AsyncIterable<unknown>> {
     const createFn = this._original.create as (
       ...args: unknown[]
     ) => Promise<unknown>;
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
     const requestParams = this._withContextHeaders(params);
     const ctx = applySessionContext(amplitudeOverrides);
@@ -585,7 +603,10 @@ export class WrappedResponses {
         amplitudeOverrides?.trackInputMessages ?? true,
       );
       const resolved = await resolveProviderResponse(
-        createFn.call(this._original, requestParams),
+        createFn.apply(
+          this._original,
+          sdkCallArgs(requestParams, requestOptions),
+        ),
       );
       const response = resolved.data;
       if (requestParams.stream === true && _isAsyncIterable(response)) {
@@ -669,7 +690,8 @@ export class WrappedResponses {
 
   async stream(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
   ): Promise<AsyncIterable<unknown>> {
     const streamFn = this._original.stream as
       | ((...args: unknown[]) => Promise<unknown>)
@@ -677,6 +699,10 @@ export class WrappedResponses {
     if (typeof streamFn !== 'function') {
       throw new Error('OpenAI SDK does not expose responses.stream');
     }
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
     const requestParams = this._withContextHeaders(params);
     const ctx = applySessionContext(amplitudeOverrides);
@@ -688,7 +714,10 @@ export class WrappedResponses {
         amplitudeOverrides?.trackInputMessages ?? true,
       );
       const resolved = await resolveProviderResponse(
-        streamFn.call(this._original, requestParams),
+        streamFn.apply(
+          this._original,
+          sdkCallArgs(requestParams, requestOptions),
+        ),
       );
       const response = resolved.data;
       if (!_isAsyncIterable(response)) {

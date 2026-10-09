@@ -23,7 +23,10 @@ import {
   applySessionContext,
   BaseAIProvider,
   contextFields,
+  type ProviderCallOptions,
   type ProviderTrackOptions,
+  sdkCallArgs,
+  splitCallOptions,
 } from './base.js';
 
 const _resolved = tryRequire('@anthropic-ai/sdk');
@@ -124,11 +127,16 @@ export class WrappedMessages {
 
   async create(
     params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
+    options?: ProviderCallOptions,
+    extraRequestOptions?: Record<string, unknown>,
   ): Promise<AnthropicResponse | AsyncIterable<unknown>> {
     const createFn = this._original.create as (
       ...args: unknown[]
     ) => Promise<unknown>;
+    const { overrides: amplitudeOverrides, requestOptions } = splitCallOptions(
+      options,
+      extraRequestOptions,
+    );
     const startTime = performance.now();
     const requestParams = this._withContextHeaders(params);
     const ctx = applySessionContext(amplitudeOverrides);
@@ -139,7 +147,10 @@ export class WrappedMessages {
         ctx,
         amplitudeOverrides?.trackInputMessages ?? true,
       );
-      const response = await createFn.call(this._original, requestParams);
+      const response = await createFn.apply(
+        this._original,
+        sdkCallArgs(requestParams, requestOptions),
+      );
 
       if (requestParams.stream === true && _isAsyncIterable(response)) {
         return this._wrapStream(
