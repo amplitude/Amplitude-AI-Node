@@ -124,7 +124,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a window that ended at least a day ago, and show the user the exact events, plus the job's warning line: how many sessions had no user ID, how many had no messages, and how many are still waiting for their trace. Optionally save the events as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a window that ended at least a day ago, and show the user the exact events, plus the job's warning line: how many sessions had no user ID, how many had no messages, and how many are still waiting for their trace. Optionally save the events as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub).
 2. Send a few real sessions. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each Agentforce session is one session, and the agent's greeting, if any, is its first turn

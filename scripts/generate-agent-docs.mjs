@@ -66,6 +66,15 @@ const mcpJsonCursor = `{ "mcpServers": { ${mcpServerJson} } }`;
 const claudeAddCommand = `claude mcp add --scope project amplitude-ai -- npx -y -p ${packageJson.name} amplitude-ai mcp`;
 const codexToml = `[mcp_servers.amplitude-ai]\ncommand = "npx"\nargs = ${mcpArgs}`;
 
+// Raw GitHub URLs handed to agents are pinned to this release's tag, never a branch.
+const releaseRawPrefix = `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v${packageJson.version}/`;
+const rawRefPattern = /https:\/\/raw\.githubusercontent\.com\/amplitude\/Amplitude-AI-Node\/[^/\s"'`]+\//g;
+const pinnedRawUrlFiles = [
+  join('docs', 'integrations', 'manifest.json'),
+  join('docs', 'integrations', 'README.md'),
+  join('docs', 'integrations', 'analytics-metadata.schema.json'),
+];
+
 const generatedHeader = '<!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->';
 
 const agentsMd = `# AGENTS.md
@@ -222,7 +231,7 @@ warehouses=${warehouses.raw_url}
 routers=${integrations.routers.raw_url}
 ${integrations.schemas.map((s) => `${s.id}-schema=${s.raw_url}`).join('\n')}
 ${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
-`;
+`.replace(rawRefPattern, releaseRawPrefix);
 
 const mcpSchema = JSON.stringify(
   {
@@ -687,6 +696,10 @@ const outputs = [
   { path: join(root, 'llms.txt'), content: llmsTxt },
   { path: join(root, 'llms-full.txt'), content: llmsFullTxtWithExcerpt },
   { path: join(root, 'mcp.schema.json'), content: `${mcpSchema}\n` },
+  ...pinnedRawUrlFiles.map((file) => ({
+    path: join(root, file),
+    content: readFileSync(join(root, file), 'utf8').replace(rawRefPattern, releaseRawPrefix),
+  })),
 ];
 
 let stale = false;

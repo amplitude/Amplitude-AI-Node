@@ -117,8 +117,9 @@ Open the format page and copy the query for the user's warehouse. Then:
 2. Export the result as CSV or JSON and run the checker:
 
    ```bash
-   curl -sO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs
-   node check-agent-events.mjs results.csv
+   # The checker ships in the npm package; run that copy rather than one from GitHub.
+   npm install --no-save --ignore-scripts @amplitude/ai
+   node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs results.csv
    ```
 
 3. Fix every error. The most common: an agent row with no text mapped to `assistant` (map it to `span`), a missing identity column, or a `message_id` that is not stable across runs.

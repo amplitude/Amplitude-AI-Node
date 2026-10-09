@@ -1164,7 +1164,7 @@ Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP
 
 ### Recipes and partner notes
 
-Base URLs and `gateway` tags for Fireworks, OpenRouter, LiteLLM, and Requesty, the model ID rule, router pricing, and OTLP attributes for partners that export spans (LiteLLM, Strands) are in one place: fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md` (or read `node_modules/@amplitude/ai/docs/integrations/routers.md`).
+Base URLs and `gateway` tags for Fireworks, OpenRouter, LiteLLM, and Requesty, the model ID rule, router pricing, and OTLP attributes for partners that export spans (LiteLLM, Strands) are in one place: read `node_modules/@amplitude/ai/docs/integrations/routers.md` (shipped in the package).
 
 ### `ingestion_path` convention
 
