@@ -12,10 +12,12 @@
 
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const registerPath = join(__dirname, '..', 'dist', 'register.js');
+// NODE_OPTIONS is split on whitespace; a quoted file URL keeps the path intact.
+const importFlag = `--import=${JSON.stringify(pathToFileURL(registerPath).href)}`;
 
 const apiKey = process.env.AMPLITUDE_AI_API_KEY || '';
 const autoPatch = (process.env.AMPLITUDE_AI_AUTO_PATCH || '').toLowerCase() === 'true';
@@ -35,8 +37,8 @@ if (args.length === 0) {
 const existingNodeOpts = process.env.NODE_OPTIONS || '';
 if (apiKey && autoPatch) {
   process.env.NODE_OPTIONS = existingNodeOpts
-    ? `${existingNodeOpts} --import ${registerPath}`
-    : `--import ${registerPath}`;
+    ? `${existingNodeOpts} ${importFlag}`
+    : importFlag;
 }
 
 try {
