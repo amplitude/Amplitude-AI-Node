@@ -112,7 +112,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 - Keep to Decagon's documented global limit of 1 request per second; the adapter spaces every request, retries and the one tag-list request per run included, at least 1.1 seconds apart. PostHog's connector notes that Decagon may IP-ban clients that grossly exceed it, so do not run two syncs against the same Decagon account at once. `429` and `5xx` responses are retried up to 6 attempts with exponential backoff, honoring a numeric `Retry-After`.
 - Watch the warning line each run prints: it counts conversations skipped for no user ID and conversations that failed (each logged with its ID).
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

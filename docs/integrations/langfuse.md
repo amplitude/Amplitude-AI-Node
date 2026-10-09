@@ -118,7 +118,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 - Langfuse rate-limits its public API per organization and plan, and returns `429` with a `Retry-After` header. The adapter waits that many seconds (or backs off exponentially, up to 60 seconds) and retries a `429` or `5xx` up to 6 times; after that the run stops without returning a watermark, so the next run reads the same window again. Keep the schedule no more frequent than the settle window needs.
 - One session that cannot be mapped, or that Amplitude rejects with a `4xx` other than `429`, is logged and counted as failed; the run continues. An Amplitude outage stops the run.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

@@ -13,12 +13,9 @@
  * (curl -K -), so it never appears in any process's argv either.
  *
  * Usage:
- *   npx amplitude-ai-register-catalog > register.sh
- *   AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash register.sh
- *
- * Pipe to bash to execute (env vars go on the bash side of the pipe —
- * a prefix on npx would not reach the bash that runs the script):
- *   npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash
+ *   npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh
+ *   # review register.sh, then with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY exported:
+ *   bash register.sh
  */
 
 import { readFileSync } from 'node:fs';
@@ -59,10 +56,10 @@ Credentials are read from the environment when the generated script runs —
 they are never embedded in the output.
 
 Usage:
-  npx amplitude-ai-register-catalog > register.sh
-  AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash register.sh
-
-  npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash
+  npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh
+  # Review register.sh, then run it with AMPLITUDE_API_KEY and
+  # AMPLITUDE_SECRET_KEY exported in your shell:
+  bash register.sh
 
 Options:
   --eu           Use EU data residency endpoint
@@ -84,7 +81,9 @@ Alternatively, use the Python CLI for direct execution:
       '# Command-line credentials are visible to other local users (ps), shell',
     );
     console.error('# history, and CI logs. Provide them via the environment instead:');
-    console.error('#   npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash');
+    console.error('#   npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh');
+    console.error('#   # review register.sh, then with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY exported:');
+    console.error('#   bash register.sh');
     console.error('');
   }
 

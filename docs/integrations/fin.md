@@ -123,7 +123,7 @@ Both recipes remove a job when `syncFin` takes it, before it is forwarded. A job
 
 - Intercom allows 10,000 API calls per minute per app and 25,000 per workspace, shared by every private app in the workspace and spread over 10-second windows. The adapter makes one search call per 150 conversations plus one retrieve per conversation. It waits for `X-RateLimit-Reset` on `429` (at most a minute per wait) and backs off exponentially on `5xx`, up to 6 retries per request, then throws.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

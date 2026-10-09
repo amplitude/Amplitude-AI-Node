@@ -834,19 +834,19 @@ node --test __amplitude_verify__.test.mjs
 ### Step 4c: Run doctor
 
 ```bash
-npx amplitude-ai doctor
+npx -y -p @amplitude/ai amplitude-ai doctor
 ```
 
 If the project uses a different env var for the Amplitude API key (detected in Phase 1 Step 5), pass it with `--key-env` so doctor validates the correct variable:
 
 ```bash
-npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+npx -y -p @amplitude/ai amplitude-ai doctor --key-env AMPLITUDE_API_KEY
 ```
 
 If the key lives in a `.env` file rather than the shell environment, load it first:
 
 ```bash
-set -a && source .env && set +a && npx amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+set -a && source .env && set +a && npx -y -p @amplitude/ai amplitude-ai doctor --key-env AMPLITUDE_API_KEY
 ```
 
 All doctor failures are mandatory to resolve before proceeding. **Exception:** if your Phase 1 list included `REQUIRED: Local LLM`, doctor will report `provider_dependency` — this is expected and not a failure. Ignore that check only; all other doctor checks still apply.
@@ -943,7 +943,7 @@ Do NOT proceed to Phase 5 with any data quality gate failing.
 
 > **Checklist before telling the user instrumentation is complete:**
 > - [ ] Step 4b: verification test ran and passed
-> - [ ] Step 4c: `npx amplitude-ai doctor` ran and all checks passed (or failing checks are explicitly explained)
+> - [ ] Step 4c: `npx -y -p @amplitude/ai amplitude-ai doctor` ran and all checks passed (or failing checks are explicitly explained)
 > - [ ] Step 4d: TypeScript and existing tests still pass
 > - [ ] Step 4d-live: real request sent to the app, session visible in Agent Analytics within ~60 seconds
 > - [ ] `await ai.flush()` is called after each `session.run()` in long-lived servers (Express, Fastify, plain Node `http`) — not needed for serverless/short-lived processes
@@ -1141,7 +1141,7 @@ await agent.session({ userId, sessionId }).run(async (s) => {
 });
 ```
 
-**Doctor false positive:** Running `npx amplitude-ai doctor` against a local-LLM project will report `provider_dependency` because no recognized provider wrapper is detected. This is expected — the instrumentation is correct. Ignore that check; all other doctor checks still apply.
+**Doctor false positive:** Running `npx -y -p @amplitude/ai amplitude-ai doctor` against a local-LLM project will report `provider_dependency` because no recognized provider wrapper is detected. This is expected — the instrumentation is correct. Ignore that check; all other doctor checks still apply.
 
 **Cost tracking:** Cost is structurally impossible for local models — there is no pricing API. Always pass `totalCostUsd: 0` explicitly; omitting it will fail the Phase 4 data quality cost check silently. Do not treat a `$0` cost as a bug — it is the correct suppression value for local inference.
 

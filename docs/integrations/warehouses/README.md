@@ -142,7 +142,7 @@ Open the format page and copy the query for the user's warehouse. Then:
 
 - After the sample looks right, remove the sample-conversation filter. The same source keeps importing. Widen history only by how far the query looks back, not by running a second job.
 - For history, the first sync imports every settled conversation the query returns. Import a week first and check it before widening.
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

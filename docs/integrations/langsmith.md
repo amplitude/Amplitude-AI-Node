@@ -124,7 +124,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 - The job makes one listing call per thread and one runs call per trace. Keep the schedule no more frequent than the settle window needs.
 - One thread that cannot be mapped, or that Amplitude rejects with a `4xx`, is logged and counted as failed, and the job moves on. An outage (LangSmith or Amplitude still failing after retries) stops the run.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

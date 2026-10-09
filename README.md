@@ -42,7 +42,7 @@ app.post('/chat', async (req, res) => {
 
 ```bash
 npm install @amplitude/ai
-npx amplitude-ai
+npx -y -p @amplitude/ai amplitude-ai
 ```
 
 The CLI prints a prompt to paste into any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.):
@@ -147,7 +147,7 @@ Install provider SDKs based on what you use (for example: `openai`, `@anthropic-
 
 1. **Install:** `npm install @amplitude/ai @amplitude/analytics-node`
 2. **Get your API key:** In Amplitude, go to **Settings > Projects** and copy the API key.
-3. **Instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
+3. **Instrument:** Run `npx -y -p @amplitude/ai amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
 4. **Set your API key** in the generated `.env` file and replace the placeholder `userId`/`sessionId`.
 5. **Run your app.** You should see `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` within 30 seconds.
 
@@ -1666,7 +1666,7 @@ Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 
 ### Examples and AI Coding Agent Guide
 
-- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx amplitude-ai` to see the prompt that points your agent to this file.
+- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx -y -p @amplitude/ai amplitude-ai` to see the prompt that points your agent to this file.
 - Mock-based examples demonstrating the event model (also used as CI smoke tests):
   - `examples/zero-code.ts`
   - `examples/wrap-openai.ts`
@@ -2853,20 +2853,12 @@ Amplitude's [Data Catalog](https://amplitude.com/docs/data/data-catalog) documen
 The bundled CLI reads `data/agent_event_catalog.json` and prints executable curl commands — it makes **no network requests** itself. Credentials are never embedded in the output: the generated script reads `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` from the environment when it runs, so the script is safe to save, share, or commit. Never pass credentials on the command line — argv is visible to other local users via `ps` and persists in shell history and CI logs.
 
 ```bash
-# Preview the curl commands
-npx amplitude-ai-register-catalog
+# Write the script to a file (add --eu for EU data residency)
+npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh
 
-# Save the script, then execute with credentials from the environment
-npx amplitude-ai-register-catalog > register.sh
-AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash register.sh
-
-# Or pipe to bash to execute immediately. The env vars go on the bash side
-# of the pipe — a prefix on npx applies only to npx, not to the bash that
-# runs the script.
-npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
-
-# EU data residency
-npx amplitude-ai-register-catalog --eu | AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET bash
+# Review register.sh, then run it with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY
+# already exported in your shell (for example from your secret manager)
+bash register.sh
 ```
 
 ### Option B: Python CLI (direct execution)
@@ -2937,7 +2929,7 @@ This SDK is designed to be discovered and used by any AI coding agent — Cursor
 
 ```bash
 npm install @amplitude/ai
-npx amplitude-ai
+npx -y -p @amplitude/ai amplitude-ai
 ```
 
 The CLI prints a prompt to paste into your agent:

@@ -141,7 +141,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 - Run the job hourly. Each run reads the sessions that ended since the watermark, in 6-hour windows, with one query per table per window. Salesforce's standard API limits apply.
 - A session whose trace is still incomplete holds the watermark at its end time, so the next run reads it again. After 72 hours (`MAX_WAIT_MS`) it is forwarded anyway, flagged `trace_incomplete: true`.
 - For backfill, set the first watermark to the earliest date wanted (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 
