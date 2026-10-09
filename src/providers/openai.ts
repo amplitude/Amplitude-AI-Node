@@ -57,6 +57,11 @@ export interface OpenAIOptions {
   propagateContext?: boolean;
   /** Pass the `openai` module directly to bypass `tryRequire` (required in bundler environments). */
   openaiModule?: unknown;
+  /**
+   * Existing `openai` client to instrument instead of constructing a new one.
+   * Its transport settings (baseURL, fetch, headers, proxy, timeouts) are kept.
+   */
+  client?: unknown;
 }
 
 /**
@@ -82,23 +87,27 @@ export class OpenAI<
       providerName,
     });
 
-    const mod =
-      (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
-    if (mod == null) {
-      throw new Error(
-        'openai package is required. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
-      );
+    if (options.client != null) {
+      this._client = options.client as TClient;
+    } else {
+      const mod =
+        (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
+      if (mod == null) {
+        throw new Error(
+          'openai package is required. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
+        );
+      }
+
+      const OpenAISDK = mod.OpenAI as new (
+        opts: Record<string, unknown>,
+      ) => unknown;
+
+      const clientOpts: Record<string, unknown> = {};
+      if (options.apiKey) clientOpts.apiKey = options.apiKey;
+      if (options.baseUrl) clientOpts.baseURL = options.baseUrl;
+
+      this._client = new OpenAISDK(clientOpts) as TClient;
     }
-
-    const OpenAISDK = mod.OpenAI as new (
-      opts: Record<string, unknown>,
-    ) => unknown;
-
-    const clientOpts: Record<string, unknown> = {};
-    if (options.apiKey) clientOpts.apiKey = options.apiKey;
-    if (options.baseUrl) clientOpts.baseURL = options.baseUrl;
-
-    this._client = new OpenAISDK(clientOpts) as TClient;
     this._propagateContext =
       options.propagateContext ?? getDefaultPropagateContext();
     this.chat = new WrappedChat(
@@ -182,6 +191,27 @@ export class WrappedCompletions {
     const createFn = this._original.create as (
       ...args: unknown[]
     ) => Promise<unknown>;
+    return this._invoke(createFn, params, amplitudeOverrides);
+  }
+
+  async parse(
+    params: Record<string, unknown>,
+    amplitudeOverrides?: ProviderTrackOptions,
+  ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
+    const parseFn = this._original.parse as
+      | ((...args: unknown[]) => Promise<unknown>)
+      | undefined;
+    if (typeof parseFn !== 'function') {
+      throw new Error('OpenAI SDK does not expose chat.completions.parse');
+    }
+    return this._invoke(parseFn, params, amplitudeOverrides);
+  }
+
+  private async _invoke(
+    createFn: (...args: unknown[]) => Promise<unknown>,
+    params: Record<string, unknown>,
+    amplitudeOverrides?: ProviderTrackOptions,
+  ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
     const startTime = performance.now();
     let requestParams = this._withContextHeaders(params);
     const ctx = applySessionContext(amplitudeOverrides);
@@ -294,25 +324,6 @@ export class WrappedCompletions {
       });
 
       throw error;
-    }
-  }
-
-  async parse(
-    params: Record<string, unknown>,
-    amplitudeOverrides?: ProviderTrackOptions,
-  ): Promise<ChatCompletionResponse | AsyncIterable<unknown>> {
-    const parseFn = this._original.parse as
-      | ((...args: unknown[]) => Promise<unknown>)
-      | undefined;
-    if (typeof parseFn !== 'function') {
-      throw new Error('OpenAI SDK does not expose chat.completions.parse');
-    }
-    const originalCreate = this._original.create;
-    this._original.create = parseFn;
-    try {
-      return await this.create(params, amplitudeOverrides);
-    } finally {
-      this._original.create = originalCreate;
     }
   }
 

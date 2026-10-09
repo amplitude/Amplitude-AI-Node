@@ -39,6 +39,11 @@ export interface AnthropicOptions {
   propagateContext?: boolean;
   /** Pass the `@anthropic-ai/sdk` module directly to bypass `tryRequire` (required in bundler environments). */
   anthropicModule?: unknown;
+  /**
+   * Existing `Anthropic` client to instrument instead of constructing a new one.
+   * Its transport settings (baseURL, fetch, headers, proxy, timeouts) are kept.
+   */
+  client?: unknown;
 }
 
 export class Anthropic<
@@ -55,23 +60,27 @@ export class Anthropic<
       providerName: 'anthropic',
     });
 
-    const mod =
-      (options.anthropicModule as Record<string, unknown> | null) ??
-      _AnthropicModule;
-    if (mod == null) {
-      throw new Error(
-        '@anthropic-ai/sdk package is required. Install it with: npm install @anthropic-ai/sdk — or pass the module directly via the anthropicModule option.',
-      );
+    if (options.client != null) {
+      this._client = options.client as TClient;
+    } else {
+      const mod =
+        (options.anthropicModule as Record<string, unknown> | null) ??
+        _AnthropicModule;
+      if (mod == null) {
+        throw new Error(
+          '@anthropic-ai/sdk package is required. Install it with: npm install @anthropic-ai/sdk — or pass the module directly via the anthropicModule option.',
+        );
+      }
+
+      const AnthropicSDK = mod.Anthropic as new (
+        opts: Record<string, unknown>,
+      ) => unknown;
+
+      const clientOpts: Record<string, unknown> = {};
+      if (options.apiKey) clientOpts.apiKey = options.apiKey;
+
+      this._client = new AnthropicSDK(clientOpts) as TClient;
     }
-
-    const AnthropicSDK = mod.Anthropic as new (
-      opts: Record<string, unknown>,
-    ) => unknown;
-
-    const clientOpts: Record<string, unknown> = {};
-    if (options.apiKey) clientOpts.apiKey = options.apiKey;
-
-    this._client = new AnthropicSDK(clientOpts) as TClient;
     this._propagateContext =
       options.propagateContext ?? getDefaultPropagateContext();
     this.messages = new WrappedMessages(

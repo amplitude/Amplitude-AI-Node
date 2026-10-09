@@ -23,6 +23,11 @@ export interface AzureOpenAIOptions {
   propagateContext?: boolean;
   /** Pass the `openai` module directly to bypass `tryRequire` (required in bundler environments). */
   openaiModule?: unknown;
+  /**
+   * Existing `AzureOpenAI` client to instrument instead of constructing a new one.
+   * Its endpoint, deployment, API version and Azure AD token provider are kept.
+   */
+  client?: unknown;
 }
 
 export class AzureOpenAI extends BaseAIProvider {
@@ -42,26 +47,30 @@ export class AzureOpenAI extends BaseAIProvider {
       providerName: 'azure-openai',
     });
 
-    const mod =
-      (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
-    if (mod == null) {
-      throw new Error(
-        'openai package is required for Azure OpenAI. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
-      );
+    if (options.client != null) {
+      this._client = options.client;
+    } else {
+      const mod =
+        (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
+      if (mod == null) {
+        throw new Error(
+          'openai package is required for Azure OpenAI. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
+        );
+      }
+
+      const AzureOpenAISDK = mod.AzureOpenAI as new (
+        opts: Record<string, unknown>,
+      ) => unknown;
+
+      const clientOpts: Record<string, unknown> = {};
+      if (options.apiKey) clientOpts.apiKey = options.apiKey;
+      if (options.azureEndpoint) clientOpts.baseURL = options.azureEndpoint;
+      if (options.apiVersion) {
+        clientOpts.defaultQuery = { 'api-version': options.apiVersion };
+      }
+
+      this._client = new AzureOpenAISDK(clientOpts);
     }
-
-    const AzureOpenAISDK = mod.AzureOpenAI as new (
-      opts: Record<string, unknown>,
-    ) => unknown;
-
-    const clientOpts: Record<string, unknown> = {};
-    if (options.apiKey) clientOpts.apiKey = options.apiKey;
-    if (options.azureEndpoint) clientOpts.baseURL = options.azureEndpoint;
-    if (options.apiVersion) {
-      clientOpts.defaultQuery = { 'api-version': options.apiVersion };
-    }
-
-    this._client = new AzureOpenAISDK(clientOpts);
     this._propagateContext =
       options.propagateContext ?? getDefaultPropagateContext();
     const clientObj = this._client as Record<string, unknown>;
