@@ -115,7 +115,7 @@
     "AGENTS.md",
     "docs/integrations",
     "dist",
-    "bin",
+    "bin/amplitude-ai*.mjs",
     "data",
     "llms.txt",
     "llms-full.txt",
