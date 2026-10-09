@@ -31,6 +31,14 @@ export interface AIConfigOptions {
   debug?: boolean;
   dryRun?: boolean;
   validate?: boolean;
+  /**
+   * When `true`, provider wrappers created from this instance send W3C
+   * `traceparent` plus `x-amplitude-session-id` / `x-amplitude-agent-id`
+   * request headers on LLM calls (for gateway correlation). End-user and
+   * device IDs are never sent to the provider. Applies only to wrappers
+   * bound to this `AmplitudeAI`; a wrapper's own `propagateContext` option
+   * takes precedence. Default: `false`.
+   */
   propagateContext?: boolean;
   /**
    * When `true`, capture `error.stack` on error events and attach as
@@ -40,6 +48,27 @@ export interface AIConfigOptions {
   captureStackTrace?: boolean;
   /** Raise when tokens > 0 but cost cannot be calculated (dev/CI). */
   strictCost?: boolean;
+  /**
+   * Upper bound (ms) on how long `session.run()` waits for its automatic
+   * flush. Event delivery has no network timeout of its own, so without a
+   * bound an unreachable endpoint could stall the caller indefinitely. On
+   * timeout the flush keeps running in the background and `run()` resolves.
+   * Default: 3000. Values above 300000 are clamped; non-positive or
+   * non-numeric values fall back to the default.
+   */
+  flushTimeoutMs?: number;
+}
+
+/** Default for {@link AIConfigOptions.flushTimeoutMs}. */
+export const DEFAULT_FLUSH_TIMEOUT_MS = 3000;
+const MAX_FLUSH_TIMEOUT_MS = 300_000;
+
+/** @internal Normalize a flush timeout: positive, finite, clamped. */
+export function normalizeFlushTimeoutMs(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return value === Number.POSITIVE_INFINITY ? MAX_FLUSH_TIMEOUT_MS : null;
+  }
+  return Math.min(value, MAX_FLUSH_TIMEOUT_MS);
 }
 
 /**
@@ -71,6 +100,7 @@ export class AIConfig {
   readonly propagateContext: boolean;
   readonly captureStackTrace: boolean;
   readonly strictCost: boolean;
+  readonly flushTimeoutMs: number;
 
   constructor(options: AIConfigOptions = {}) {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
@@ -84,6 +114,8 @@ export class AIConfig {
     this.propagateContext = options.propagateContext ?? false;
     this.captureStackTrace = options.captureStackTrace ?? false;
     this.strictCost = options.strictCost ?? false;
+    this.flushTimeoutMs =
+      normalizeFlushTimeoutMs(options.flushTimeoutMs) ?? DEFAULT_FLUSH_TIMEOUT_MS;
   }
 
   toPrivacyConfig(): PrivacyConfig {

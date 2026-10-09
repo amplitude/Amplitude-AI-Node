@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { runWithContextAsync, SessionContext } from '../../src/context.js';
 import type { TrackAiMessageOptions } from '../../src/core/tracking.js';
 import {
   extractAnthropicContent,
@@ -453,7 +454,7 @@ describe('Anthropic provider', () => {
       expect(mockTrackUserMessage).not.toHaveBeenCalled();
     });
 
-    it('injects extra_headers when propagateContext is enabled', async (): Promise<void> => {
+    it('sends propagation headers via request options, without user or device IDs (AA-152528 M26)', async (): Promise<void> => {
       const fakeCreate = vi.fn().mockResolvedValueOnce({
         model: 'claude-3-opus',
         content: [{ type: 'text', text: 'ok' }],
@@ -470,13 +471,31 @@ describe('Anthropic provider', () => {
         null,
         true,
       );
-      await messages.create({
-        model: 'claude-3-opus',
-        messages: [{ role: 'user', content: 'hello' }],
+      const ctx = new SessionContext({
+        sessionId: 'sess-prop-2',
+        agentId: 'agent-prop',
+        userId: 'end-user@example.com',
+        deviceId: 'device-123456',
       });
+      await runWithContextAsync(ctx, () =>
+        messages.create({
+          model: 'claude-3-opus',
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      );
 
-      const call = fakeCreate.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(call).toHaveProperty('extra_headers');
+      const body = fakeCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+      const reqOpts = fakeCreate.mock.calls[0]?.[1] as {
+        headers: Record<string, string>;
+      };
+      expect(body).not.toHaveProperty('extra_headers');
+      expect(reqOpts.headers.traceparent).toMatch(
+        /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/,
+      );
+      expect(reqOpts.headers['x-amplitude-session-id']).toBe('sess-prop-2');
+      const serialized = JSON.stringify(fakeCreate.mock.calls[0]);
+      expect(serialized).not.toContain('end-user@example.com');
+      expect(serialized).not.toContain('device-123456');
     });
   });
 });

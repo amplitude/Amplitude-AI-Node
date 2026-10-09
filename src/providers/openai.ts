@@ -10,7 +10,7 @@
 import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { trackToolCall, trackUserMessage } from '../core/tracking.js';
-import { getDefaultPropagateContext, injectContext } from '../propagation.js';
+import { invokeWithPropagation, resolvePropagateContext } from '../propagation.js';
 import type {
   AmplitudeLike,
   AmplitudeOrAI,
@@ -99,8 +99,10 @@ export class OpenAI<
     if (options.baseUrl) clientOpts.baseURL = options.baseUrl;
 
     this._client = new OpenAISDK(clientOpts) as TClient;
-    this._propagateContext =
-      options.propagateContext ?? getDefaultPropagateContext();
+    this._propagateContext = resolvePropagateContext(
+      options.propagateContext,
+      options.amplitude,
+    );
     this.chat = new WrappedChat(
       this._client,
       this.trackFn(),
@@ -183,7 +185,7 @@ export class WrappedCompletions {
       ...args: unknown[]
     ) => Promise<unknown>;
     const startTime = performance.now();
-    let requestParams = this._withContextHeaders(params);
+    let requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     if (requestParams.stream === true && requestParams.stream_options == null) {
@@ -200,7 +202,12 @@ export class WrappedCompletions {
         amplitudeOverrides?.trackInputMessages ?? true,
       );
       const resolved = await resolveProviderResponse(
-        createFn.call(this._original, requestParams),
+        invokeWithPropagation(
+          createFn,
+          this._original,
+          requestParams,
+          this._propagateContext,
+        ),
       );
       const response = resolved.data;
 
@@ -459,20 +466,6 @@ export class WrappedCompletions {
     }
   }
 
-  private _withContextHeaders(
-    params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (!this._propagateContext) return params;
-    const existing = (params.extra_headers ?? params.headers) as
-      | Record<string, string>
-      | undefined;
-    const injected = injectContext(existing);
-    return {
-      ...params,
-      extra_headers: injected,
-    };
-  }
-
   private _trackInputMessages(
     messages: unknown,
     ctx: ProviderTrackOptions,
@@ -564,7 +557,7 @@ export class WrappedResponses {
       ...args: unknown[]
     ) => Promise<unknown>;
     const startTime = performance.now();
-    const requestParams = this._withContextHeaders(params);
+    const requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     try {
@@ -574,7 +567,12 @@ export class WrappedResponses {
         amplitudeOverrides?.trackInputMessages ?? true,
       );
       const resolved = await resolveProviderResponse(
-        createFn.call(this._original, requestParams),
+        invokeWithPropagation(
+          createFn,
+          this._original,
+          requestParams,
+          this._propagateContext,
+        ),
       );
       const response = resolved.data;
       if (requestParams.stream === true && _isAsyncIterable(response)) {
@@ -667,7 +665,7 @@ export class WrappedResponses {
       throw new Error('OpenAI SDK does not expose responses.stream');
     }
     const startTime = performance.now();
-    const requestParams = this._withContextHeaders(params);
+    const requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     try {
@@ -677,7 +675,12 @@ export class WrappedResponses {
         amplitudeOverrides?.trackInputMessages ?? true,
       );
       const resolved = await resolveProviderResponse(
-        streamFn.call(this._original, requestParams),
+        invokeWithPropagation(
+          streamFn,
+          this._original,
+          requestParams,
+          this._propagateContext,
+        ),
       );
       const response = resolved.data;
       if (!_isAsyncIterable(response)) {
@@ -793,20 +796,6 @@ export class WrappedResponses {
         topP: params.top_p as number | undefined,
       });
     }
-  }
-
-  private _withContextHeaders(
-    params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (!this._propagateContext) return params;
-    const existing = (params.extra_headers ?? params.headers) as
-      | Record<string, string>
-      | undefined;
-    const injected = injectContext(existing);
-    return {
-      ...params,
-      extra_headers: injected,
-    };
   }
 
   private _trackInputMessages(

@@ -5,8 +5,8 @@
  */
 
 import type { AmplitudeAI } from '../client.js';
-import { getActiveContext } from '../context.js';
 import { calculateCost } from '../utils/costs.js';
+import { resolveIdentity } from './identity.js';
 
 export interface ToolLoopOptions {
   amplitudeAI: AmplitudeAI;
@@ -51,11 +51,14 @@ export class AmplitudeToolLoop {
       input: Record<string, unknown>,
     ) => Promise<unknown>;
   }): Promise<Array<Record<string, unknown>>> {
-    const ctx = getActiveContext();
-    const userId = this._userId ?? ctx?.userId ?? 'unknown';
-    const sessionId = this._sessionId ?? ctx?.sessionId ?? 'tool-loop-session';
-    const agentId = this._agentId ?? ctx?.agentId ?? undefined;
-    const env = this._env ?? ctx?.env ?? undefined;
+    // Resolved once per run() call: explicit options, then the active
+    // session context, then an anonymous identity unique to this run.
+    const { userId, deviceId, sessionId, agentId, env } = resolveIdentity({
+      userId: this._userId,
+      sessionId: this._sessionId,
+      agentId: this._agentId,
+      env: this._env,
+    });
 
     const messages = [...options.messages];
     const allResponses: Array<Record<string, unknown>> = [];
@@ -66,6 +69,7 @@ export class AmplitudeToolLoop {
       if (msg.role === 'user' && userText.length > 0) {
         this._ai.trackUserMessage({
           userId,
+          deviceId,
           content: userText,
           sessionId,
           agentId,
@@ -126,6 +130,7 @@ export class AmplitudeToolLoop {
 
       this._ai.trackAiMessage({
         userId,
+        deviceId,
         content: responseText,
         sessionId,
         model: options.model,
@@ -160,6 +165,7 @@ export class AmplitudeToolLoop {
 
           this._ai.trackToolCall({
             userId,
+            deviceId,
             toolName,
             latencyMs: toolLatencyMs,
             success: true,
@@ -182,6 +188,7 @@ export class AmplitudeToolLoop {
 
           this._ai.trackToolCall({
             userId,
+            deviceId,
             toolName,
             latencyMs: toolLatencyMs,
             success: false,
