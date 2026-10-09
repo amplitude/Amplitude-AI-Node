@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AmplitudeLike } from './types.js';
+import { getLogger } from './utils/logger.js';
 
 export interface SessionContextOptions {
   sessionId: string;
@@ -112,22 +113,76 @@ export function runWithContextAsync<T>(
   return _sessionStorage.run(ctx, fn);
 }
 
+export interface PushContextOptions {
+  /**
+   * Restore the previous behavior: set the context with
+   * `AsyncLocalStorage.enterWith()` for the rest of the current async scope.
+   *
+   * Unsafe on HTTP servers: the context attaches to the execution context of
+   * the socket, so later requests on the same keep-alive connection (including
+   * unauthenticated ones that never call `pushContext`) inherit the previous
+   * caller's identity, and calling the returned cleanup does not undo that.
+   * Only use it in single-purpose scripts or workers that never serve more
+   * than one end user per process.
+   */
+  legacyEnterWith?: boolean;
+}
+
+let _warnedUnscopedPush = false;
+
+/** @internal Reset the one-time warning flag. For test isolation only. */
+export function _resetPushContextWarning(): void {
+  _warnedUnscopedPush = false;
+}
+
 /**
- * Set the active SessionContext for the current async scope.
+ * Run `fn` with `ctx` as the active SessionContext.
  *
- * Returns a cleanup function that restores the previous context.
- * Use this in middleware or interceptors where the context must outlive
- * the call frame that created it.
+ * The context is visible to `fn` and everything it awaits or schedules, and
+ * is gone once `fn` returns (same semantics as {@link runWithContext}). Use
+ * this in middleware by wrapping the downstream handler:
  *
- * For scoped usage, prefer `agent.session()` (callback-based) or
- * `runWithContext()`.
+ * ```typescript
+ * app.use((req, res, next) => pushContext(ctxFor(req), next));
+ * ```
+ *
+ * For Express-style apps, `createAmplitudeAIMiddleware()` does this for you.
  */
-export function pushContext(ctx: SessionContext | null): () => void {
-  const previous = _sessionStorage.getStore() ?? null;
-  _sessionStorage.enterWith(ctx);
-  return () => {
-    _sessionStorage.enterWith(previous);
-  };
+export function pushContext<T>(ctx: SessionContext | null, fn: () => T): T;
+/**
+ * @deprecated The callback-less form no longer changes the active
+ * context, because `AsyncLocalStorage.enterWith()` leaked identity across
+ * requests that share a keep-alive socket. It logs a one-time warning and
+ * returns a no-op cleanup. Pass a callback (`pushContext(ctx, fn)`) or use
+ * `runWithContext()` / `session.run()`. To opt back into the old,
+ * process-unsafe behavior, pass `{ legacyEnterWith: true }`.
+ */
+export function pushContext(
+  ctx: SessionContext | null,
+  options?: PushContextOptions,
+): () => void;
+export function pushContext<T>(
+  ctx: SessionContext | null,
+  fnOrOptions?: (() => T) | PushContextOptions,
+): T | (() => void) {
+  if (typeof fnOrOptions === 'function') {
+    return _sessionStorage.run(ctx, fnOrOptions);
+  }
+  if (fnOrOptions?.legacyEnterWith === true) {
+    const previous = _sessionStorage.getStore() ?? null;
+    _sessionStorage.enterWith(ctx);
+    return () => {
+      _sessionStorage.enterWith(previous);
+    };
+  }
+  if (!_warnedUnscopedPush) {
+    _warnedUnscopedPush = true;
+    getLogger().warn(
+      'pushContext(ctx) without a callback is deprecated and no longer sets the active context. ' +
+        'Use pushContext(ctx, fn), runWithContext(ctx, fn), or session.run(fn).',
+    );
+  }
+  return () => {};
 }
 
 export { _sessionStorage };
