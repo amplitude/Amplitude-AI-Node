@@ -164,6 +164,27 @@ function hasKeywordArg(args: EstreeNode[], keyword: string): boolean {
   return false;
 }
 
+const MAX_CONTEXT_LINE_CHARS = 400;
+
+// code_context is returned to the coding agent's LLM; strip credentials first.
+const SECRET_TOKEN_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+  /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/g,
+];
+const SECRET_ASSIGNMENT_RE =
+  /((?:api[_-]?key|secret|token|password|passwd|credential|auth)[\w-]{0,32}['"]?\s*[:=]\s*)(['"`])[^'"`\n]{6,512}?\2/gi;
+
+export function redactSecrets(text: string): string {
+  let out = text.replace(SECRET_ASSIGNMENT_RE, (_m, head: string, q: string) => `${head}${q}[REDACTED]${q}`);
+  for (const re of SECRET_TOKEN_PATTERNS) out = out.replace(re, '[REDACTED]');
+  return out;
+}
+
 function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4): string {
   const idx = lineNum - 1;
   const start = Math.max(0, idx - radius);
@@ -171,7 +192,10 @@ function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4):
   return sourceLines.slice(start, end + 1).map((l, i) => {
     const ln = start + i + 1;
     const marker = ln === lineNum ? '>>>' : '   ';
-    return `${marker} ${ln}: ${l}`;
+    // Redact before truncating so a credential straddling the cut is still caught.
+    const redacted = redactSecrets(l.slice(0, MAX_CONTEXT_LINE_CHARS * 4));
+    const line = redacted.length > MAX_CONTEXT_LINE_CHARS ? `${redacted.slice(0, MAX_CONTEXT_LINE_CHARS)}…` : redacted;
+    return `${marker} ${ln}: ${line}`;
   }).join('\n');
 }
 
