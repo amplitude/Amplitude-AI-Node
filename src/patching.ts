@@ -235,6 +235,70 @@ export function patchGemini(options: {
     | undefined;
   if (!GeminiClass?.prototype) return;
   const proto = GeminiClass.prototype as Record<string, unknown>;
+  const generateWrapper = (
+    innerOriginal: (...a: unknown[]) => unknown,
+    ...innerArgs: unknown[]
+  ): unknown => {
+    const startTime = performance.now();
+    const result = innerOriginal(...innerArgs);
+    if (result instanceof Promise) {
+      return result
+        .then((response) => {
+          _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
+          return response;
+        })
+        .catch((err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            innerArgs[0],
+            'gemini',
+          );
+          throw err;
+        });
+    }
+    return result;
+  };
+  const streamWrapper = (
+    innerOriginal: (...a: unknown[]) => unknown,
+    ...innerArgs: unknown[]
+  ): unknown => {
+    const startTime = performance.now();
+    const result = innerOriginal(...innerArgs);
+    if (result instanceof Promise) {
+      return result
+        .then((response) => {
+          const streamResp = response as Record<string, unknown>;
+          const stream = streamResp.stream;
+          if (_isAsyncIterable(stream)) {
+            return {
+              ...streamResp,
+              stream: _wrapPatchedStream(
+                amplitudeAI,
+                stream as AsyncIterable<unknown>,
+                startTime,
+                innerArgs[0],
+                'gemini',
+              ),
+            };
+          }
+          return response;
+        })
+        .catch((err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            innerArgs[0],
+            'gemini',
+          );
+          throw err;
+        });
+    }
+    return result;
+  };
+
   _patchMethod(
     proto,
     'getGenerativeModel',
@@ -242,89 +306,8 @@ export function patchGemini(options: {
       const modelObj = original(...args);
       if (modelObj == null || typeof modelObj !== 'object') return modelObj;
       const model = modelObj as Record<string, unknown>;
-      if (
-        typeof model.generateContent === 'function' &&
-        !(
-          (model.generateContent as unknown as Record<string, unknown>)
-            .__amplitudePatched === true
-        )
-      ) {
-        _patchMethod(
-          model,
-          'generateContent',
-          (innerOriginal, ...innerArgs) => {
-            const startTime = performance.now();
-            const result = innerOriginal(...innerArgs);
-            if (result instanceof Promise) {
-              return result
-                .then((response) => {
-                  _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
-                  return response;
-                })
-                .catch((err) => {
-                  _trackCompletionError(
-                    amplitudeAI,
-                    err,
-                    startTime,
-                    innerArgs[0],
-                    'gemini',
-                  );
-                  throw err;
-                });
-            }
-            return result;
-          },
-          'gemini',
-        );
-      }
-      if (
-        typeof model.generateContentStream === 'function' &&
-        !(
-          (model.generateContentStream as unknown as Record<string, unknown>)
-            .__amplitudePatched === true
-        )
-      ) {
-        _patchMethod(
-          model,
-          'generateContentStream',
-          (innerOriginal, ...innerArgs) => {
-            const startTime = performance.now();
-            const result = innerOriginal(...innerArgs);
-            if (result instanceof Promise) {
-              return result
-                .then((response) => {
-                  const streamResp = response as Record<string, unknown>;
-                  const stream = streamResp.stream;
-                  if (_isAsyncIterable(stream)) {
-                    return {
-                      ...streamResp,
-                      stream: _wrapPatchedStream(
-                        amplitudeAI,
-                        stream as AsyncIterable<unknown>,
-                        startTime,
-                        innerArgs[0],
-                        'gemini',
-                      ),
-                    };
-                  }
-                  return response;
-                })
-                .catch((err) => {
-                  _trackCompletionError(
-                    amplitudeAI,
-                    err,
-                    startTime,
-                    innerArgs[0],
-                    'gemini',
-                  );
-                  throw err;
-                });
-            }
-            return result;
-          },
-          'gemini',
-        );
-      }
+      _patchGeminiModelMethod(model, 'generateContent', generateWrapper);
+      _patchGeminiModelMethod(model, 'generateContentStream', streamWrapper);
       return modelObj;
     },
     'gemini',
@@ -333,6 +316,55 @@ export function patchGemini(options: {
   if (_isMethodPatched(proto, 'getGenerativeModel')) {
     _patchedProviders.add('gemini');
   }
+}
+
+let _geminiInstancePatchEpoch = 0;
+
+function _findMethodOwner(
+  obj: Record<string, unknown>,
+  methodName: string,
+): Record<string, unknown> | null {
+  let current: object | null = obj;
+  while (current != null && current !== Object.prototype) {
+    if (Object.hasOwn(current, methodName)) {
+      return current as Record<string, unknown>;
+    }
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return null;
+}
+
+/**
+ * Instrument a legacy Gemini model method. Methods defined on a shared
+ * prototype (the real `GenerativeModel` class) are patched once and recorded
+ * for unpatch(). Methods defined on the instance itself are wrapped in place
+ * without a global record, so per-call models stay garbage-collectable;
+ * unpatch() disables those wrappers via the epoch counter.
+ */
+function _patchGeminiModelMethod(
+  model: Record<string, unknown>,
+  methodName: string,
+  wrapper: (
+    original: (...args: unknown[]) => unknown,
+    ...args: unknown[]
+  ) => unknown,
+): void {
+  if (typeof model[methodName] !== 'function') return;
+  if (_isMethodPatched(model, methodName)) return;
+  const owner = _findMethodOwner(model, methodName);
+  if (owner == null) return;
+  if (owner !== model) {
+    _patchMethod(owner, methodName, wrapper, 'gemini');
+    return;
+  }
+  const original = model[methodName] as (...args: unknown[]) => unknown;
+  const epoch = _geminiInstancePatchEpoch;
+  const patched = function (this: unknown, ...args: unknown[]) {
+    if (epoch !== _geminiInstancePatchEpoch) return original.apply(this, args);
+    return wrapper(original.bind(this), ...args);
+  };
+  (patched as unknown as Record<string, unknown>).__amplitudePatched = true;
+  model[methodName] = patched;
 }
 
 /**
@@ -733,6 +765,7 @@ export function unpatch(): void {
   _activePatches.length = 0;
   _patchedProviders.clear();
   _providerOwners.clear();
+  _geminiInstancePatchEpoch++;
 }
 
 export function unpatchOpenAI(): void {
@@ -777,6 +810,7 @@ function _unpatchByProvider(providerName: string): void {
   }
   _patchedProviders.delete(providerName);
   _providerOwners.delete(providerName);
+  if (providerName === 'gemini') _geminiInstancePatchEpoch++;
 }
 
 // ---------------------------------------------------------------
@@ -3290,6 +3324,11 @@ function _contextExtras(ctx: {
 export function _resetToolLatencyForTests(): void {
   _toolLatencyRegistry.clear();
   _evictOpCount = 0;
+}
+
+/** @internal Test-only: number of recorded patches. */
+export function _activePatchCountForTests(): number {
+  return _activePatches.length;
 }
 
 // Tracking never propagates into the host's provider call.
