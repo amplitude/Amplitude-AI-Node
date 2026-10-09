@@ -14,6 +14,21 @@ export interface StreamingAccumulatorState {
   errorMessage: string | null;
 }
 
+/**
+ * Upper bound on tool calls tracked per streamed response. Indices come from
+ * the provider stream, which may be an untrusted OpenAI-compatible endpoint.
+ */
+export const MAX_STREAM_TOOL_CALLS = 128;
+
+export function isValidToolCallIndex(index: unknown): index is number {
+  return (
+    typeof index === 'number' &&
+    Number.isInteger(index) &&
+    index >= 0 &&
+    index < MAX_STREAM_TOOL_CALLS
+  );
+}
+
 export class StreamingAccumulator {
   content = '';
   inputTokens: number | null = null;
@@ -68,17 +83,20 @@ export class StreamingAccumulator {
   }
 
   addToolCall(toolCall: Record<string, unknown>): void {
+    if (this.toolCalls.length >= MAX_STREAM_TOOL_CALLS) return;
     this.toolCalls.push(toolCall);
   }
 
-  setToolCallAt(index: number, toolCall: Record<string, unknown>): void {
+  setToolCallAt(index: unknown, toolCall: Record<string, unknown>): void {
+    if (!isValidToolCallIndex(index)) return;
     while (this.toolCalls.length <= index) {
       this.toolCalls.push({});
     }
     this.toolCalls[index] = toolCall;
   }
 
-  appendToolCallArgs(index: number, args: string): void {
+  appendToolCallArgs(index: unknown, args: string): void {
+    if (!isValidToolCallIndex(index)) return;
     if (index < this.toolCalls.length && this.toolCalls[index]) {
       const fn = this.toolCalls[index].function as
         | Record<string, unknown>

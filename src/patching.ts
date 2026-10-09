@@ -37,6 +37,7 @@ import {
   warnTrackingFailure,
 } from './utils/logger.js';
 import { tryRequire } from './utils/resolve-module.js';
+import { isValidToolCallIndex } from './utils/streaming.js';
 
 type PatchRecord = {
   module: unknown;
@@ -953,7 +954,7 @@ async function* _wrapPatchedStream(
   let reasoningTokens: number | undefined;
   let cachedTokens: number | undefined;
   let bodyProviderRequestId: string | undefined;
-  const streamToolCalls: Array<Record<string, unknown>> = [];
+  const streamToolCalls = new Map<number, Record<string, unknown>>();
   let isError = false;
   let errorMessage: string | undefined;
 
@@ -972,16 +973,19 @@ async function* _wrapPatchedStream(
           | undefined;
         if (Array.isArray(deltaToolCalls)) {
           for (const call of deltaToolCalls) {
-            const idx = call.index as number | undefined;
-            if (idx == null) continue;
+            const idx = call.index;
+            if (!isValidToolCallIndex(idx)) continue;
             const id = call.id as string | undefined;
             const fn = call.function as Record<string, unknown> | undefined;
-            streamToolCalls[idx] ??= {
-              type: 'function',
-              id: id ?? '',
-              function: { name: '', arguments: '' },
-            };
-            const entry = streamToolCalls[idx] as Record<string, unknown>;
+            let entry = streamToolCalls.get(idx);
+            if (entry == null) {
+              entry = {
+                type: 'function',
+                id: id ?? '',
+                function: { name: '', arguments: '' },
+              };
+              streamToolCalls.set(idx, entry);
+            }
             if (id) entry.id = id;
             const entryFn = entry.function as Record<string, unknown>;
             if (fn?.name != null) entryFn.name = fn.name;
@@ -1023,7 +1027,9 @@ async function* _wrapPatchedStream(
     try {
       if (!isTrackerManaged()) {
         const latencyMs = performance.now() - startTime;
-        const filteredToolCalls = streamToolCalls.filter(Boolean);
+        const filteredToolCalls = [...streamToolCalls.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([, call]) => call);
 
         let costUsd: number | null = null;
         if (inputTokens != null && outputTokens != null) {
