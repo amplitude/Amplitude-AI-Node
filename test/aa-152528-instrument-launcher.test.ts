@@ -98,3 +98,31 @@ describe('amplitude-ai-instrument NODE_OPTIONS quoting', (): void => {
     expect(nodeOptions).toContain('My%20Projects');
   });
 });
+
+describe('amplitude-ai-instrument one-shot marker', (): void => {
+  const dumpEnv =
+    "require('fs').writeFileSync(process.env.AA_TEST_LOG, JSON.stringify({m: process.env._AMPLITUDE_AI_BOOTSTRAP, o: process.env._AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS}))";
+
+  beforeEach((): void => {
+    writeFileSync(join(pkgDir, 'dist', 'register.js'), '');
+  });
+
+  it('marks the launch so only the first Node process instruments', (): void => {
+    const res = launch([process.execPath, '-e', dumpEnv], {
+      NODE_OPTIONS: '--trace-warnings',
+    });
+    expect(res.status, String(res.stderr)).toBe(0);
+    expect(JSON.parse(readFileSync(logPath, 'utf8'))).toEqual({
+      m: '1',
+      o: '--trace-warnings',
+    });
+  });
+
+  it('AMPLITUDE_AI_INSTRUMENT_CHILDREN=true opts out of the marker', (): void => {
+    const res = launch([process.execPath, '-e', dumpEnv], {
+      AMPLITUDE_AI_INSTRUMENT_CHILDREN: 'true',
+    });
+    expect(res.status, String(res.stderr)).toBe(0);
+    expect(JSON.parse(readFileSync(logPath, 'utf8'))).toEqual({});
+  });
+});

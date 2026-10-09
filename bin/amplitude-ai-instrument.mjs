@@ -8,6 +8,9 @@
  *
  * This sets NODE_OPTIONS to preload the register module, then exec's the user command.
  * Same pattern as ddtrace, opentelemetry-instrument, etc.
+ *
+ * Only the first Node process (after npm/pnpm/yarn/npx/tsx/nodemon) is instrumented.
+ * Set AMPLITUDE_AI_INSTRUMENT_CHILDREN=true to instrument every descendant Node process.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -18,6 +21,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const registerPath = join(__dirname, '..', 'dist', 'register.js');
 // NODE_OPTIONS is split on whitespace; a quoted file URL keeps the path intact.
 const importFlag = `--import=${JSON.stringify(pathToFileURL(registerPath).href)}`;
+
+// Must match the names in src/register.ts.
+const BOOTSTRAP_MARKER = '_AMPLITUDE_AI_BOOTSTRAP';
+const BOOTSTRAP_NODE_OPTIONS = '_AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS';
+const instrumentChildren =
+  (process.env.AMPLITUDE_AI_INSTRUMENT_CHILDREN || '').toLowerCase() === 'true';
 
 const apiKey = process.env.AMPLITUDE_AI_API_KEY || '';
 const autoPatch = (process.env.AMPLITUDE_AI_AUTO_PATCH || '').toLowerCase() === 'true';
@@ -39,6 +48,15 @@ if (apiKey && autoPatch) {
   process.env.NODE_OPTIONS = existingNodeOpts
     ? `${existingNodeOpts} ${importFlag}`
     : importFlag;
+  if (instrumentChildren) {
+    delete process.env[BOOTSTRAP_MARKER];
+    delete process.env[BOOTSTRAP_NODE_OPTIONS];
+  } else {
+    // register.js consumes this in the first Node process and restores
+    // NODE_OPTIONS so descendants (npm, build workers, MCP servers) are left alone.
+    process.env[BOOTSTRAP_MARKER] = '1';
+    process.env[BOOTSTRAP_NODE_OPTIONS] = existingNodeOpts;
+  }
 }
 
 try {
