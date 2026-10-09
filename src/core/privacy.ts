@@ -27,7 +27,23 @@ const VALID_CONTENT_MODES = new Set([
 ]);
 
 // PII regex patterns
-const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+//
+// Email: every quantifier is bounded and a match may only start where the
+// preceding character can't belong to a local part, so matching is linear
+// in input length (an unbounded `[...]+@` is quadratic on long runs such as
+// "a.a.a..."). Latin/Greek/Cyrillic letters are accepted so local parts like
+// "josé" match; Han/Kana/Hangul are excluded so CJK text written without
+// spaces before an address isn't swallowed into the match.
+const EMAIL_LETTER = '\\p{Script=Latin}\\p{Script=Greek}\\p{Script=Cyrillic}';
+const EMAIL_LOCAL = `${EMAIL_LETTER}\\p{M}\\p{N}._%+\\-`;
+const EMAIL_LABEL = `${EMAIL_LETTER}\\p{M}\\p{N}\\-`;
+const EMAIL_RE = new RegExp(
+  `(?<![${EMAIL_LOCAL}])[${EMAIL_LOCAL}]{1,64}@(?:[${EMAIL_LABEL}]{1,63}\\.){1,8}[${EMAIL_LETTER}]{2,63}(?![${EMAIL_LETTER}\\p{M}\\p{N}_])`,
+  'gu',
+);
+// Text-length cap for prompt-like channels; applied before redaction so
+// regex cost is bounded by what is actually sent.
+const MAX_TEXT_LENGTH = 100_000;
 const PHONE_RE = /\b\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\b/g;
 const CREDIT_CARD_RE = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
@@ -203,7 +219,8 @@ export function sanitizeStructuredContent(
   pc?: PrivacyConfig | null,
 ): unknown {
   if (typeof content === 'string') {
-    let text = content;
+    // Anything past the cap is cut by serializeToJsonString() anyway.
+    let text = capText(content);
     if (redactPii) text = redactPiiPatterns(text);
     if (pc != null) {
       text = pc.applyCustomRedaction(text);
@@ -517,12 +534,7 @@ export class PrivacyConfig {
     if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
 
     if (mode === 'full') {
-      let sanitized = systemPrompt;
-      if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
-      sanitized = this._applyCustomPatterns(sanitized);
-      sanitized = this._applyCustomFn(sanitized);
-      result[PROP_SYSTEM_PROMPT] =
-        sanitized.length > 100_000 ? sanitized.slice(0, 100_000) : sanitized;
+      result[PROP_SYSTEM_PROMPT] = this._redactCappedText(systemPrompt);
     }
 
     return result;
@@ -548,12 +560,7 @@ export class PrivacyConfig {
     if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
 
     if (mode === 'full') {
-      let sanitized = reasoningContent;
-      if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
-      sanitized = this._applyCustomPatterns(sanitized);
-      sanitized = this._applyCustomFn(sanitized);
-      result[PROP_REASONING_CONTENT] =
-        sanitized.length > 100_000 ? sanitized.slice(0, 100_000) : sanitized;
+      result[PROP_REASONING_CONTENT] = this._redactCappedText(reasoningContent);
     }
 
     return result;
@@ -586,14 +593,23 @@ export class PrivacyConfig {
     if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
 
     if (mode === 'full') {
-      let serialized = JSON.stringify(normalized);
-      if (this.redactPii) serialized = redactPiiPatterns(serialized);
-      serialized = this._applyCustomPatterns(serialized);
-      serialized = this._applyCustomFn(serialized);
-      result[PROP_TOOL_DEFINITIONS] =
-        serialized.length > 100_000 ? serialized.slice(0, 100_000) : serialized;
+      result[PROP_TOOL_DEFINITIONS] = this._redactCappedText(
+        JSON.stringify(normalized),
+      );
     }
 
     return result;
   }
+
+  private _redactCappedText(text: string): string {
+    let sanitized = capText(text);
+    if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
+    sanitized = this._applyCustomPatterns(sanitized);
+    sanitized = this._applyCustomFn(sanitized);
+    return capText(sanitized);
+  }
+}
+
+function capText(text: string): string {
+  return text.length > MAX_TEXT_LENGTH ? text.slice(0, MAX_TEXT_LENGTH) : text;
 }
