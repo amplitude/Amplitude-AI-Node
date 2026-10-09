@@ -27,7 +27,6 @@ import { ConfigurationError, CostCalculationError } from './exceptions.js';
 import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
 import type { SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
-import { setDefaultPropagateContext } from './propagation.js';
 import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
 import type {
@@ -256,7 +255,6 @@ export class AmplitudeAI {
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();
-    setDefaultPropagateContext(this._config.propagateContext);
 
     // Always install the track hook — it handles the default delivery
     // callback, short-ID warnings, debug/dry-run output, and the

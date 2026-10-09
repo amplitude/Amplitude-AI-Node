@@ -5,7 +5,7 @@
 import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { trackToolCall, trackUserMessage } from '../core/tracking.js';
-import { getDefaultPropagateContext, injectContext } from '../propagation.js';
+import { invokeWithPropagation, resolvePropagateContext } from '../propagation.js';
 import type {
   AmplitudeLike,
   AmplitudeOrAI,
@@ -72,8 +72,10 @@ export class Anthropic<
     if (options.apiKey) clientOpts.apiKey = options.apiKey;
 
     this._client = new AnthropicSDK(clientOpts) as TClient;
-    this._propagateContext =
-      options.propagateContext ?? getDefaultPropagateContext();
+    this._propagateContext = resolvePropagateContext(
+      options.propagateContext,
+      options.amplitude,
+    );
     this.messages = new WrappedMessages(
       this._client,
       this.trackFn(),
@@ -121,7 +123,7 @@ export class WrappedMessages {
       ...args: unknown[]
     ) => Promise<unknown>;
     const startTime = performance.now();
-    const requestParams = this._withContextHeaders(params);
+    const requestParams = params;
     const ctx = applySessionContext(amplitudeOverrides);
 
     try {
@@ -130,7 +132,12 @@ export class WrappedMessages {
         ctx,
         amplitudeOverrides?.trackInputMessages ?? true,
       );
-      const response = await createFn.call(this._original, requestParams);
+      const response = await invokeWithPropagation(
+        createFn,
+        this._original,
+        requestParams,
+        this._propagateContext,
+      );
 
       if (requestParams.stream === true && _isAsyncIterable(response)) {
         return this._wrapStream(
@@ -357,20 +364,6 @@ export class WrappedMessages {
         agentId: sessionCtx.agentId,
       });
     }
-  }
-
-  private _withContextHeaders(
-    params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    if (!this._propagateContext) return params;
-    const existing = (params.extra_headers ?? params.headers) as
-      | Record<string, string>
-      | undefined;
-    const injected = injectContext(existing);
-    return {
-      ...params,
-      extra_headers: injected,
-    };
   }
 
   private _trackInputMessages(

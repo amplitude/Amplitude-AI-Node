@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrackAiMessageOptions } from '../../src/core/tracking.js';
+import { runWithContextAsync, SessionContext } from '../../src/context.js';
 import { setDefaultPropagateContext } from '../../src/propagation.js';
 import { BaseAIProvider } from '../../src/providers/base.js';
 import {
@@ -529,7 +530,7 @@ describe('OpenAI provider', () => {
       expect(mockTrackUserMessage).not.toHaveBeenCalled();
     });
 
-    it('injects extra_headers when propagateContext is enabled', async (): Promise<void> => {
+    it('sends propagation headers via request options, without user or device IDs (AA-152528 M26)', async (): Promise<void> => {
       const fakeCreate = vi.fn().mockResolvedValueOnce({
         model: 'gpt-4',
         choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
@@ -546,13 +547,48 @@ describe('OpenAI provider', () => {
         true,
       );
 
-      await completions.create({
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: 'hello' }],
+      const ctx = new SessionContext({
+        sessionId: 'sess-prop-1',
+        agentId: 'agent-prop',
+        userId: 'end-user@example.com',
+        deviceId: 'device-123456',
       });
+      await runWithContextAsync(ctx, () =>
+        completions.create({
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      );
 
-      const call = fakeCreate.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(call).toHaveProperty('extra_headers');
+      const body = fakeCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+      const reqOpts = fakeCreate.mock.calls[0]?.[1] as {
+        headers: Record<string, string>;
+      };
+      expect(body).not.toHaveProperty('extra_headers');
+      expect(body).not.toHaveProperty('headers');
+      expect(reqOpts.headers.traceparent).toMatch(
+        /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/,
+      );
+      expect(reqOpts.headers['x-amplitude-session-id']).toBe('sess-prop-1');
+      expect(reqOpts.headers['x-amplitude-agent-id']).toBe('agent-prop');
+      const serialized = JSON.stringify(fakeCreate.mock.calls[0]);
+      expect(serialized).not.toContain('end-user@example.com');
+      expect(serialized).not.toContain('device-123456');
+    });
+
+    it('calls the SDK with the body only when propagateContext is off', async (): Promise<void> => {
+      const fakeCreate = vi.fn().mockResolvedValueOnce({
+        model: 'gpt-4',
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+      const amp = createMockAmplitude();
+      const { completions } = createWrappedCompletions(amp, fakeCreate);
+      const ctx = new SessionContext({ sessionId: 's1', userId: 'u-12345' });
+      await runWithContextAsync(ctx, () =>
+        completions.create({ model: 'gpt-4', messages: [] }),
+      );
+      expect(fakeCreate.mock.calls[0]).toHaveLength(1);
     });
   });
 

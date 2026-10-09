@@ -3,7 +3,7 @@
  */
 
 import type { PrivacyConfig } from '../core/privacy.js';
-import { getDefaultPropagateContext } from '../propagation.js';
+import { resolvePropagateContext } from '../propagation.js';
 import type { AmplitudeOrAI } from '../types.js';
 import { BaseAIProvider, type ProviderTrackOptions } from './base.js';
 import {
@@ -62,8 +62,10 @@ export class AzureOpenAI extends BaseAIProvider {
     }
 
     this._client = new AzureOpenAISDK(clientOpts);
-    this._propagateContext =
-      options.propagateContext ?? getDefaultPropagateContext();
+    this._propagateContext = resolvePropagateContext(
+      options.propagateContext,
+      options.amplitude,
+    );
     const clientObj = this._client as Record<string, unknown>;
     const originalChat = clientObj.chat as Record<string, unknown>;
     const originalCompletions = originalChat.completions as Record<

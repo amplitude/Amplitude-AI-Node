@@ -31,6 +31,14 @@ export interface AIConfigOptions {
   debug?: boolean;
   dryRun?: boolean;
   validate?: boolean;
+  /**
+   * When `true`, provider wrappers created from this instance send W3C
+   * `traceparent` plus `x-amplitude-session-id` / `x-amplitude-agent-id`
+   * request headers on LLM calls (for gateway correlation). End-user and
+   * device IDs are never sent to the provider. Applies only to wrappers
+   * bound to this `AmplitudeAI`; a wrapper's own `propagateContext` option
+   * takes precedence. Default: `false`.
+   */
   propagateContext?: boolean;
   /**
    * When `true`, capture `error.stack` on error events and attach as
