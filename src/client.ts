@@ -134,6 +134,29 @@ export function _getOtelOwner(): { otelEnabled?: boolean } | null {
   return _otelOwner;
 }
 
+/**
+ * Normalize analytics-node's `init()` return (`{ promise }`, a thenable, or
+ * nothing) into a promise that never rejects, so a failed init surfaces as a
+ * warning instead of an unhandled rejection in the host process.
+ */
+function _settleInit(result: unknown): Promise<void> {
+  const awaitable =
+    result != null && typeof (result as { promise?: unknown }).promise === 'object'
+      ? (result as { promise: Promise<unknown> }).promise
+      : result != null && typeof (result as Promise<unknown>).then === 'function'
+        ? (result as Promise<unknown>)
+        : null;
+  if (awaitable == null) return Promise.resolve();
+  return Promise.resolve(awaitable).then(
+    () => undefined,
+    (e: unknown) => {
+      getLogger().warn(
+        `AmplitudeAI: Amplitude client initialization failed (${e instanceof Error ? e.name : typeof e}). Events from this instance may not be delivered.`,
+      );
+    },
+  );
+}
+
 function _registerExitHook(): void {
   if (_exitHookRegistered) return;
   _exitHookRegistered = true;
@@ -176,6 +199,8 @@ export class AmplitudeAI {
   protected _traceEmittedTokens: Map<string, [number, number, number, number]> = new Map();
   /** @internal Tracks events since last flush() — used by the exit warning. */
   _trackCountSinceFlush = 0;
+  /** @internal Settles when an SDK-owned client (apiKey path) finishes init. */
+  _initPromise: Promise<void> = Promise.resolve();
 
   // OTEL span-first fields
   private _otelEnabled = false;
@@ -193,10 +218,12 @@ export class AmplitudeAI {
       rawAmplitude = options.amplitude;
       this._ownsClient = false;
     } else if (options.apiKey != null) {
-      const amplitudeNode = tryRequire('@amplitude/analytics-node') as
-        | (AmplitudeClientLike & { init?: (apiKey: string) => unknown })
-        | null;
-      if (amplitudeNode == null || typeof amplitudeNode.init !== 'function') {
+      const amplitudeNode = tryRequire('@amplitude/analytics-node') as {
+        createInstance?: () => AmplitudeClientLike & {
+          init: (apiKey: string) => unknown;
+        };
+      } | null;
+      if (amplitudeNode == null || typeof amplitudeNode.createInstance !== 'function') {
         if (isBundlerEnvironment) {
           throw new ConfigurationError(
             'Could not resolve @amplitude/analytics-node (likely a bundler environment such as Turbopack or Webpack). ' +
@@ -205,11 +232,17 @@ export class AmplitudeAI {
           );
         }
         throw new ConfigurationError(
-          '@amplitude/analytics-node is required. Install it as a dependency: npm install @amplitude/analytics-node',
+          '@amplitude/analytics-node >= 1.3.0 is required. Install it as a dependency: npm install @amplitude/analytics-node',
         );
       }
-      amplitudeNode.init(options.apiKey);
-      rawAmplitude = amplitudeNode;
+      // Each AmplitudeAI owns a private analytics-node client. Calling
+      // `init()` on the module's default instance would re-key one
+      // process-wide client shared by every AmplitudeAI (and by the host
+      // app's own analytics-node usage). The core client queues track()
+      // and flush() until init resolves, so the instance is usable now.
+      const instance = amplitudeNode.createInstance();
+      this._initPromise = _settleInit(instance.init(options.apiKey));
+      rawAmplitude = instance;
       this._ownsClient = true;
     } else {
       throw new ConfigurationError(
