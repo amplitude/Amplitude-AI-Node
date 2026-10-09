@@ -147,7 +147,7 @@
     "@amplitude/analytics-node": "1.3.5",
     "@biomejs/biome": "1.9.4",
     "@duckdb/node-api": "1.5.5-r.5",
-    "@modelcontextprotocol/sdk": "1.27.1",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@typescript-eslint/eslint-plugin": "8.29.1",
     "@typescript-eslint/parser": "8.29.1",
     "@vitest/coverage-v8": "4.0.14",
@@ -207,7 +207,7 @@
     }
   },
   "optionalDependencies": {
-    "@modelcontextprotocol/sdk": "1.27.1",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "acorn": "^8.16.0",
     "acorn-typescript": "^1.4.13",
     "zod": "3.25.76"
