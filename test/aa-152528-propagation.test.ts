@@ -129,6 +129,43 @@ describe('AA-152528: per-instance propagateContext', () => {
     expect(all).not.toContain('device-abcdef');
   });
 
+  it('propagation headers merge with caller request options, and caller headers win', async (): Promise<void> => {
+    const ai = new AmplitudeAI({
+      amplitude: fakeAmplitude(),
+      config: new AIConfig({ propagateContext: true }),
+    });
+    const create = vi.fn().mockResolvedValue(okChat);
+    const client = new OpenAI({ amplitude: ai, openaiModule: fakeOpenAIModule(create) });
+    const signal = new AbortController().signal;
+    await runWithContextAsync(ctx(), () =>
+      client.chat.completions.create(
+        { model: 'gpt-4o', messages: [] },
+        { timeout: 1234, signal, headers: { 'x-custom': '1', 'x-amplitude-agent-id': 'caller' } },
+      ),
+    );
+
+    const opts = create.mock.calls[0]?.[1] as {
+      timeout: number;
+      signal: AbortSignal;
+      headers: Record<string, string>;
+    };
+    expect(opts.timeout).toBe(1234);
+    expect(opts.signal).toBe(signal);
+    expect(opts.headers['x-custom']).toBe('1');
+    expect(opts.headers['x-amplitude-agent-id']).toBe('caller');
+    expect(opts.headers['x-amplitude-session-id']).toBe('sess-abc-123');
+    expect(opts.headers.traceparent).toMatch(/^00-4bf92f3577b34da6a3ce929d0e0e4736-/);
+  });
+
+  it('request options pass through unchanged when propagation is off', async (): Promise<void> => {
+    const create = vi.fn().mockResolvedValue(okChat);
+    const client = new OpenAI({ amplitude: fakeAmplitude(), openaiModule: fakeOpenAIModule(create) });
+    await runWithContextAsync(ctx(), () =>
+      client.chat.completions.create({ model: 'gpt-4o', messages: [] }, { timeout: 99 }),
+    );
+    expect(create.mock.calls[0]?.[1]).toEqual({ timeout: 99 });
+  });
+
   it('providerPropagationHeaders returns null outside a session', (): void => {
     expect(providerPropagationHeaders()).toBeNull();
   });

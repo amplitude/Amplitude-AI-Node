@@ -164,6 +164,27 @@ function hasKeywordArg(args: EstreeNode[], keyword: string): boolean {
   return false;
 }
 
+const MAX_CONTEXT_LINE_CHARS = 400;
+
+// code_context is returned to the coding agent's LLM; strip credentials first.
+const SECRET_TOKEN_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+  /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/g,
+];
+const SECRET_ASSIGNMENT_RE =
+  /((?:api[_-]?key|secret|token|password|passwd|credential|auth)[\w-]{0,32}['"]?\s*[:=]\s*)(['"`])[^'"`\n]{6,512}?\2/gi;
+
+export function redactSecrets(text: string): string {
+  let out = text.replace(SECRET_ASSIGNMENT_RE, (_m, head: string, q: string) => `${head}${q}[REDACTED]${q}`);
+  for (const re of SECRET_TOKEN_PATTERNS) out = out.replace(re, '[REDACTED]');
+  return out;
+}
+
 function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4): string {
   const idx = lineNum - 1;
   const start = Math.max(0, idx - radius);
@@ -171,7 +192,10 @@ function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4):
   return sourceLines.slice(start, end + 1).map((l, i) => {
     const ln = start + i + 1;
     const marker = ln === lineNum ? '>>>' : '   ';
-    return `${marker} ${ln}: ${l}`;
+    // Redact before truncating so a credential straddling the cut is still caught.
+    const redacted = redactSecrets(l.slice(0, MAX_CONTEXT_LINE_CHARS * 4));
+    const line = redacted.length > MAX_CONTEXT_LINE_CHARS ? `${redacted.slice(0, MAX_CONTEXT_LINE_CHARS)}…` : redacted;
+    return `${marker} ${ln}: ${line}`;
   }).join('\n');
 }
 
@@ -573,6 +597,10 @@ function analyzeWithAST(source: string, sourceLines: string[]): FileAnalysis | n
 
 // ---- Regex fallback (used when acorn is not available) ----
 
+const MAX_SCAN_SPAN = 10_000;
+const MAX_FUNCTION_LOOKBACK_LINES = 500;
+const RECEIVER_WINDOW_CHARS = 256;
+
 const regexLlmPatterns = [
   { pattern: /\.chat\.completions\.create\s*\(/g, receiverRe: /(\w+)(?:\.\w+)*\.chat\.completions\.create\s*\(/, provider: 'openai', api: 'chat.completions.create' },
   { pattern: /\.chat\.completions\.parse\s*\(/g, receiverRe: /(\w+)(?:\.\w+)*\.chat\.completions\.parse\s*\(/, provider: 'openai', api: 'chat.completions.parse' },
@@ -598,15 +626,16 @@ function findWrappedConstructorsRegex(source: string): Set<string> {
     const varName = m[1] ?? '';
     if (!varName) continue;
     let depth = 1;
-    let i = (m.index ?? 0) + m[0].length;
-    let argBlock = '';
-    while (i < source.length && depth > 0) {
+    const argStart = (m.index ?? 0) + m[0].length;
+    const limit = Math.min(source.length, argStart + MAX_SCAN_SPAN);
+    let i = argStart;
+    while (i < limit && depth > 0) {
       const ch = source[i];
       if (ch === '(') depth++;
       else if (ch === ')') depth--;
-      if (depth > 0) argBlock += ch;
       i++;
     }
+    const argBlock = source.slice(argStart, depth > 0 ? i : i - 1);
     if (/\bamplitude\s*:/.test(argBlock)) {
       result.add(varName);
     }
@@ -615,8 +644,9 @@ function findWrappedConstructorsRegex(source: string): Set<string> {
 }
 
 function findContainingFunctionRegex(lines: string[], lineIndex: number): string | null {
-  for (let i = lineIndex; i >= 0; i--) {
-    const line = lines[i] ?? '';
+  const stop = Math.max(0, lineIndex - MAX_FUNCTION_LOOKBACK_LINES);
+  for (let i = lineIndex; i >= stop; i--) {
+    const line = (lines[i] ?? '').slice(0, MAX_SCAN_SPAN);
     const fnDeclMatch = line.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/);
     if (fnDeclMatch) {
       const name = fnDeclMatch[1] ?? '';
@@ -634,13 +664,13 @@ function findContainingFunctionRegex(lines: string[], lineIndex: number): string
 function findToolDefinitionsRegex(source: string): string[] {
   const tools: string[] = [];
   // OpenAI function-calling: { type: 'function', function: { name: '...' } }
-  const funcDefRe = /function:\s*\{[^}]*name:\s*['"](\w+)['"]/g;
+  const funcDefRe = /function:\s*\{[^}]{0,500}?name:\s*['"](\w+)['"]/g;
   for (const m of source.matchAll(funcDefRe)) {
     const name = m[1] ?? '';
     if (name && !tools.includes(name)) tools.push(name);
   }
   // Anthropic-style: { name: '...', input_schema: { ... } }
-  const anthropicRe = /name:\s*['"](\w+)['"][^}]*input_schema\s*:/g;
+  const anthropicRe = /name:\s*['"](\w+)['"][^}]{0,500}?input_schema\s*:/g;
   for (const m of source.matchAll(anthropicRe)) {
     const name = m[1] ?? '';
     if (name && !tools.includes(name)) tools.push(name);
@@ -650,7 +680,7 @@ function findToolDefinitionsRegex(source: string): string[] {
 
 function findFunctionDefinitionsRegex(source: string): string[] {
   const fns: string[] = [];
-  const re = /(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>/g;
+  const re = /(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]{0,500}\)|[^=])\s*=>/g;
   for (const m of source.matchAll(re)) {
     const name = m[1] ?? m[2] ?? '';
     if (name && !fns.includes(name)) fns.push(name);
@@ -687,14 +717,18 @@ function analyzeWithRegex(source: string): FileAnalysis {
     const line = lines[i] ?? '';
     for (const { pattern, receiverRe, provider, api } of regexLlmPatterns) {
       pattern.lastIndex = 0;
-      if (pattern.test(line)) {
+      const hit = pattern.exec(line);
+      if (hit) {
         let effectiveProvider = provider;
         let effectiveApi = api;
         if (provider === 'anthropic' && assistantsApiRe.test(line)) {
           effectiveProvider = 'openai-assistants';
           effectiveApi = 'beta.threads.messages.create';
         }
-        const rm = receiverRe ? line.match(receiverRe) : null;
+        // Only look just before the call so long dotted lines can't backtrack quadratically.
+        const windowStart = Math.max(0, hit.index - RECEIVER_WINDOW_CHARS);
+        const window = line.slice(windowStart, hit.index + hit[0].length);
+        const rm = receiverRe ? window.match(receiverRe) : null;
         const receiver = rm?.[1] ?? '';
         const instrumented = hasPatch || wrappedClients.has(receiver);
         callSites.push({
@@ -756,7 +790,12 @@ function analyzeWithRegex(source: string): FileAnalysis {
 
 // ---- Public API ----
 
-export function analyzeFileInstrumentation(source: string): FileAnalysis {
+/** Inputs above this are analyzed only up to the limit. */
+export const MAX_ANALYZE_SOURCE_CHARS = 1_000_000;
+
+export function analyzeFileInstrumentation(fullSource: string): FileAnalysis {
+  const source =
+    fullSource.length > MAX_ANALYZE_SOURCE_CHARS ? fullSource.slice(0, MAX_ANALYZE_SOURCE_CHARS) : fullSource;
   const sourceLines = source.split('\n');
   const astResult = analyzeWithAST(source, sourceLines);
   if (astResult) return astResult;

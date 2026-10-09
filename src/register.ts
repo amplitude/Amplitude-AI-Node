@@ -19,11 +19,38 @@ import { AmplitudeAI } from './client.js';
 import { AIConfig, ContentMode } from './config.js';
 import { patch } from './patching.js';
 
+/**
+ * `amplitude-ai-instrument` sets `_AMPLITUDE_AI_BOOTSTRAP=1` so only the first
+ * Node process it launches is instrumented. Package-manager and runner
+ * processes (npm, pnpm, yarn, npx, tsx, nodemon) pass the marker on to the
+ * process they start. Returns false when this process should not instrument.
+ */
+function consumeBootstrapMarker(): boolean {
+  const marker = process.env._AMPLITUDE_AI_BOOTSTRAP;
+  if (marker === undefined) return true;
+  const entry = (process.argv[1] ?? '').split(/[\\/]/);
+  const base = entry[entry.length - 1] ?? '';
+  const launchers = ['npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'corepack', 'tsx', 'nodemon'];
+  const isLauncher =
+    entry.some((seg, i) => i > 0 && entry[i - 1] === 'node_modules' && launchers.includes(seg)) ||
+    /^(npm-cli|npx-cli|pnpm|pnpx|yarn(-[\d.]+)?)\.[cm]?js$/.test(base);
+  if (marker === '1' && isLauncher) return false;
+  const original = process.env._AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS;
+  Reflect.deleteProperty(process.env, '_AMPLITUDE_AI_BOOTSTRAP');
+  Reflect.deleteProperty(process.env, '_AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS');
+  if (original) process.env.NODE_OPTIONS = original;
+  else Reflect.deleteProperty(process.env, 'NODE_OPTIONS');
+  return marker === '1';
+}
+
 const apiKey = process.env.AMPLITUDE_AI_API_KEY ?? '';
 const autoPatch =
   (process.env.AMPLITUDE_AI_AUTO_PATCH ?? '').toLowerCase() === 'true';
+const bootstrapOwner = consumeBootstrapMarker();
 
-if (!apiKey) {
+if (!bootstrapOwner) {
+  // Launched by an instrumented ancestor; leave this process alone.
+} else if (!apiKey) {
   if (autoPatch) {
     process.stderr.write(
       'amplitude-ai: AMPLITUDE_AI_API_KEY not set, skipping auto-patch.\n',

@@ -106,10 +106,28 @@ export function invokeWithPropagation<R>(
   thisArg: unknown,
   params: Record<string, unknown>,
   enabled: boolean,
+  requestOptions?: Record<string, unknown>,
 ): R {
   const headers = enabled ? providerPropagationHeaders() : null;
-  if (headers == null) return fn.call(thisArg, params);
-  return fn.call(thisArg, params, { headers });
+  if (headers == null) {
+    return requestOptions === undefined
+      ? fn.call(thisArg, params)
+      : fn.call(thisArg, params, requestOptions);
+  }
+  const callerHeaders = requestOptions?.headers;
+  if (callerHeaders != null && !_isPlainObject(callerHeaders)) {
+    return fn.call(thisArg, params, requestOptions);
+  }
+  return fn.call(thisArg, params, {
+    ...requestOptions,
+    headers: { ...headers, ...(callerHeaders as Record<string, unknown>) },
+  });
+}
+
+function _isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 const _MAX_TRACEPARENT_LENGTH = 512;

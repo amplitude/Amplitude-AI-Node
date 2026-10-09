@@ -31,7 +31,13 @@ import {
   extractProviderRequestId,
   resolveProviderResponse,
 } from './utils/provider-request-id.js';
+import {
+  safeErrorMessage,
+  safeTrack,
+  warnTrackingFailure,
+} from './utils/logger.js';
 import { tryRequire } from './utils/resolve-module.js';
+import { isValidToolCallIndex } from './utils/streaming.js';
 
 type PatchRecord = {
   module: unknown;
@@ -229,6 +235,70 @@ export function patchGemini(options: {
     | undefined;
   if (!GeminiClass?.prototype) return;
   const proto = GeminiClass.prototype as Record<string, unknown>;
+  const generateWrapper = (
+    innerOriginal: (...a: unknown[]) => unknown,
+    ...innerArgs: unknown[]
+  ): unknown => {
+    const startTime = performance.now();
+    const result = innerOriginal(...innerArgs);
+    if (result instanceof Promise) {
+      return result
+        .then((response) => {
+          _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
+          return response;
+        })
+        .catch((err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            innerArgs[0],
+            'gemini',
+          );
+          throw err;
+        });
+    }
+    return result;
+  };
+  const streamWrapper = (
+    innerOriginal: (...a: unknown[]) => unknown,
+    ...innerArgs: unknown[]
+  ): unknown => {
+    const startTime = performance.now();
+    const result = innerOriginal(...innerArgs);
+    if (result instanceof Promise) {
+      return result
+        .then((response) => {
+          const streamResp = response as Record<string, unknown>;
+          const stream = streamResp.stream;
+          if (_isAsyncIterable(stream)) {
+            return {
+              ...streamResp,
+              stream: _wrapPatchedStream(
+                amplitudeAI,
+                stream as AsyncIterable<unknown>,
+                startTime,
+                innerArgs[0],
+                'gemini',
+              ),
+            };
+          }
+          return response;
+        })
+        .catch((err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            innerArgs[0],
+            'gemini',
+          );
+          throw err;
+        });
+    }
+    return result;
+  };
+
   _patchMethod(
     proto,
     'getGenerativeModel',
@@ -236,89 +306,8 @@ export function patchGemini(options: {
       const modelObj = original(...args);
       if (modelObj == null || typeof modelObj !== 'object') return modelObj;
       const model = modelObj as Record<string, unknown>;
-      if (
-        typeof model.generateContent === 'function' &&
-        !(
-          (model.generateContent as unknown as Record<string, unknown>)
-            .__amplitudePatched === true
-        )
-      ) {
-        _patchMethod(
-          model,
-          'generateContent',
-          (innerOriginal, ...innerArgs) => {
-            const startTime = performance.now();
-            const result = innerOriginal(...innerArgs);
-            if (result instanceof Promise) {
-              return result
-                .then((response) => {
-                  _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
-                  return response;
-                })
-                .catch((err) => {
-                  _trackCompletionError(
-                    amplitudeAI,
-                    err,
-                    startTime,
-                    innerArgs[0],
-                    'gemini',
-                  );
-                  throw err;
-                });
-            }
-            return result;
-          },
-          'gemini',
-        );
-      }
-      if (
-        typeof model.generateContentStream === 'function' &&
-        !(
-          (model.generateContentStream as unknown as Record<string, unknown>)
-            .__amplitudePatched === true
-        )
-      ) {
-        _patchMethod(
-          model,
-          'generateContentStream',
-          (innerOriginal, ...innerArgs) => {
-            const startTime = performance.now();
-            const result = innerOriginal(...innerArgs);
-            if (result instanceof Promise) {
-              return result
-                .then((response) => {
-                  const streamResp = response as Record<string, unknown>;
-                  const stream = streamResp.stream;
-                  if (_isAsyncIterable(stream)) {
-                    return {
-                      ...streamResp,
-                      stream: _wrapPatchedStream(
-                        amplitudeAI,
-                        stream as AsyncIterable<unknown>,
-                        startTime,
-                        innerArgs[0],
-                        'gemini',
-                      ),
-                    };
-                  }
-                  return response;
-                })
-                .catch((err) => {
-                  _trackCompletionError(
-                    amplitudeAI,
-                    err,
-                    startTime,
-                    innerArgs[0],
-                    'gemini',
-                  );
-                  throw err;
-                });
-            }
-            return result;
-          },
-          'gemini',
-        );
-      }
+      _patchGeminiModelMethod(model, 'generateContent', generateWrapper);
+      _patchGeminiModelMethod(model, 'generateContentStream', streamWrapper);
       return modelObj;
     },
     'gemini',
@@ -327,6 +316,55 @@ export function patchGemini(options: {
   if (_isMethodPatched(proto, 'getGenerativeModel')) {
     _patchedProviders.add('gemini');
   }
+}
+
+let _geminiInstancePatchEpoch = 0;
+
+function _findMethodOwner(
+  obj: Record<string, unknown>,
+  methodName: string,
+): Record<string, unknown> | null {
+  let current: object | null = obj;
+  while (current != null && current !== Object.prototype) {
+    if (Object.hasOwn(current, methodName)) {
+      return current as Record<string, unknown>;
+    }
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return null;
+}
+
+/**
+ * Instrument a legacy Gemini model method. Methods defined on a shared
+ * prototype (the real `GenerativeModel` class) are patched once and recorded
+ * for unpatch(). Methods defined on the instance itself are wrapped in place
+ * without a global record, so per-call models stay garbage-collectable;
+ * unpatch() disables those wrappers via the epoch counter.
+ */
+function _patchGeminiModelMethod(
+  model: Record<string, unknown>,
+  methodName: string,
+  wrapper: (
+    original: (...args: unknown[]) => unknown,
+    ...args: unknown[]
+  ) => unknown,
+): void {
+  if (typeof model[methodName] !== 'function') return;
+  if (_isMethodPatched(model, methodName)) return;
+  const owner = _findMethodOwner(model, methodName);
+  if (owner == null) return;
+  if (owner !== model) {
+    _patchMethod(owner, methodName, wrapper, 'gemini');
+    return;
+  }
+  const original = model[methodName] as (...args: unknown[]) => unknown;
+  const epoch = _geminiInstancePatchEpoch;
+  const patched = function (this: unknown, ...args: unknown[]) {
+    if (epoch !== _geminiInstancePatchEpoch) return original.apply(this, args);
+    return wrapper(original.bind(this), ...args);
+  };
+  (patched as unknown as Record<string, unknown>).__amplitudePatched = true;
+  model[methodName] = patched;
 }
 
 /**
@@ -727,6 +765,7 @@ export function unpatch(): void {
   _activePatches.length = 0;
   _patchedProviders.clear();
   _providerOwners.clear();
+  _geminiInstancePatchEpoch++;
 }
 
 export function unpatchOpenAI(): void {
@@ -771,6 +810,7 @@ function _unpatchByProvider(providerName: string): void {
   }
   _patchedProviders.delete(providerName);
   _providerOwners.delete(providerName);
+  if (providerName === 'gemini') _geminiInstancePatchEpoch++;
 }
 
 // ---------------------------------------------------------------
@@ -948,125 +988,138 @@ async function* _wrapPatchedStream(
   let reasoningTokens: number | undefined;
   let cachedTokens: number | undefined;
   let bodyProviderRequestId: string | undefined;
-  const streamToolCalls: Array<Record<string, unknown>> = [];
+  const streamToolCalls = new Map<number, Record<string, unknown>>();
   let isError = false;
   let errorMessage: string | undefined;
 
   try {
     for await (const chunk of stream) {
-      const c = chunk as Record<string, unknown>;
-      bodyProviderRequestId ??= extractBodyResponseId(c);
-      const choices = c.choices as Array<Record<string, unknown>> | undefined;
-      const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
-      if (delta?.content != null) content += String(delta.content);
-      if (c.model != null) model = String(c.model);
+      try {
+        const c = chunk as Record<string, unknown>;
+        bodyProviderRequestId ??= extractBodyResponseId(c);
+        const choices = c.choices as Array<Record<string, unknown>> | undefined;
+        const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
+        if (delta?.content != null) content += String(delta.content);
+        if (c.model != null) model = String(c.model);
 
-      const deltaToolCalls = delta?.tool_calls as
-        | Array<Record<string, unknown>>
-        | undefined;
-      if (Array.isArray(deltaToolCalls)) {
-        for (const call of deltaToolCalls) {
-          const idx = call.index as number | undefined;
-          if (idx == null) continue;
-          const id = call.id as string | undefined;
-          const fn = call.function as Record<string, unknown> | undefined;
-          streamToolCalls[idx] ??= {
-            type: 'function',
-            id: id ?? '',
-            function: { name: '', arguments: '' },
-          };
-          const entry = streamToolCalls[idx] as Record<string, unknown>;
-          if (id) entry.id = id;
-          const entryFn = entry.function as Record<string, unknown>;
-          if (fn?.name != null) entryFn.name = fn.name;
-          if (fn?.arguments) {
-            entryFn.arguments =
-              String(entryFn.arguments ?? '') + String(fn.arguments);
+        const deltaToolCalls = delta?.tool_calls as
+          | Array<Record<string, unknown>>
+          | undefined;
+        if (Array.isArray(deltaToolCalls)) {
+          for (const call of deltaToolCalls) {
+            const idx = call.index;
+            if (!isValidToolCallIndex(idx)) continue;
+            const id = call.id as string | undefined;
+            const fn = call.function as Record<string, unknown> | undefined;
+            let entry = streamToolCalls.get(idx);
+            if (entry == null) {
+              entry = {
+                type: 'function',
+                id: id ?? '',
+                function: { name: '', arguments: '' },
+              };
+              streamToolCalls.set(idx, entry);
+            }
+            if (id) entry.id = id;
+            const entryFn = entry.function as Record<string, unknown>;
+            if (fn?.name != null) entryFn.name = fn.name;
+            if (fn?.arguments) {
+              entryFn.arguments =
+                String(entryFn.arguments ?? '') + String(fn.arguments);
+            }
           }
         }
-      }
 
-      if (choices?.[0]?.finish_reason != null)
-        finishReason = String(choices[0].finish_reason);
-      const usage = c.usage as Record<string, unknown> | undefined;
-      if (usage != null) {
-        inputTokens = usage.prompt_tokens as number | undefined;
-        outputTokens = usage.completion_tokens as number | undefined;
-        totalTokens = usage.total_tokens as number | undefined;
-        const completionDetails = usage.completion_tokens_details as
-          | Record<string, number>
-          | undefined;
-        const promptDetails = usage.prompt_tokens_details as
-          | Record<string, number>
-          | undefined;
-        if (completionDetails?.reasoning_tokens != null)
-          reasoningTokens = completionDetails.reasoning_tokens;
-        if (promptDetails?.cached_tokens != null)
-          cachedTokens = promptDetails.cached_tokens;
+        if (choices?.[0]?.finish_reason != null)
+          finishReason = String(choices[0].finish_reason);
+        const usage = c.usage as Record<string, unknown> | undefined;
+        if (usage != null) {
+          inputTokens = usage.prompt_tokens as number | undefined;
+          outputTokens = usage.completion_tokens as number | undefined;
+          totalTokens = usage.total_tokens as number | undefined;
+          const completionDetails = usage.completion_tokens_details as
+            | Record<string, number>
+            | undefined;
+          const promptDetails = usage.prompt_tokens_details as
+            | Record<string, number>
+            | undefined;
+          if (completionDetails?.reasoning_tokens != null)
+            reasoningTokens = completionDetails.reasoning_tokens;
+          if (promptDetails?.cached_tokens != null)
+            cachedTokens = promptDetails.cached_tokens;
+        }
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
       yield chunk;
     }
   } catch (error) {
     isError = true;
-    errorMessage = error instanceof Error ? error.message : String(error);
+    errorMessage = safeErrorMessage(error);
     throw error;
   } finally {
-    if (!isTrackerManaged()) {
-      const latencyMs = performance.now() - startTime;
-      const filteredToolCalls = streamToolCalls.filter(Boolean);
+    try {
+      if (!isTrackerManaged()) {
+        const latencyMs = performance.now() - startTime;
+        const filteredToolCalls = [...streamToolCalls.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([, call]) => call);
 
-      let costUsd: number | null = null;
-      if (inputTokens != null && outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            ...pricingTarget(providerName === 'azure-openai' ? 'openai' : providerName, req?.model, model),
-            inputTokens,
-            outputTokens,
-            reasoningTokens: reasoningTokens ?? 0,
-            cacheReadInputTokens: cachedTokens ?? 0,
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (inputTokens != null && outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              ...pricingTarget(providerName === 'azure-openai' ? 'openai' : providerName, req?.model, model),
+              inputTokens,
+              outputTokens,
+              reasoningTokens: reasoningTokens ?? 0,
+              cacheReadInputTokens: cachedTokens ?? 0,
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      ai.trackAiMessage({
-        userId: ctx.userId ?? undefined,
-        deviceId: ctx.deviceId ?? undefined,
-        content,
-        sessionId: ctx.sessionId,
-        model,
-        provider: providerName,
-        providerRequestId: bodyProviderRequestId ?? headerRequestId,
-        latencyMs,
-        traceId: ctx.traceId,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        reasoningTokens,
-        cacheReadTokens: cachedTokens,
-        totalCostUsd: costUsd,
-        finishReason,
-        toolCalls:
+        ai.trackAiMessage({
+          userId: ctx.userId ?? undefined,
+          deviceId: ctx.deviceId ?? undefined,
+          content,
+          sessionId: ctx.sessionId,
+          model,
+          provider: providerName,
+          providerRequestId: bodyProviderRequestId ?? headerRequestId,
+          latencyMs,
+          traceId: ctx.traceId,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          reasoningTokens,
+          cacheReadTokens: cachedTokens,
+          totalCostUsd: costUsd,
+          finishReason,
+          toolCalls:
+            filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
+          systemPrompt: _extractSystemPrompt(req),
+          toolDefinitions: _extractToolDefinitions(req),
+          temperature: req?.temperature as number | undefined,
+          maxOutputTokens: (req?.max_tokens ?? req?.max_completion_tokens) as number | undefined,
+          topP: req?.top_p as number | undefined,
+          agentId: ctx.agentId,
+          env: ctx.env,
+          isStreaming: true,
+          isError,
+          errorMessage,
+          ..._contextExtras(ctx),
+        });
+
+        _recordToolUses(
           filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
-        systemPrompt: _extractSystemPrompt(req),
-        toolDefinitions: _extractToolDefinitions(req),
-        temperature: req?.temperature as number | undefined,
-        maxOutputTokens: (req?.max_tokens ?? req?.max_completion_tokens) as number | undefined,
-        topP: req?.top_p as number | undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
-        isStreaming: true,
-        isError,
-        errorMessage,
-        ..._contextExtras(ctx),
-      });
-
-      _recordToolUses(
-        filteredToolCalls.length > 0 ? filteredToolCalls : undefined,
-        ctx.sessionId,
-        ctx.agentId,
-      );
+          ctx.sessionId,
+          ctx.agentId,
+        );
+      }
+    } catch (trackingError) {
+      warnTrackingFailure(trackingError);
     }
   }
 }
@@ -1096,142 +1149,150 @@ async function* _wrapPatchedAnthropicStream(
   let errorMessage: string | undefined;
   try {
     for await (const chunk of stream) {
-      const c = chunk as Record<string, unknown>;
-      if (c.type === 'message_start') {
-        const message = c.message as Record<string, unknown> | undefined;
-        if (typeof message?.model === 'string') model = message.model;
-        const usage = message?.usage as Record<string, unknown> | undefined;
-        if (typeof usage?.input_tokens === 'number') {
-          inputTokens = usage.input_tokens;
-        }
-        if (typeof usage?.cache_read_input_tokens === 'number') {
-          cacheRead = usage.cache_read_input_tokens;
-        }
-        if (typeof usage?.cache_creation_input_tokens === 'number') {
-          cacheCreation = usage.cache_creation_input_tokens;
-        }
-      }
-      if (c.type === 'content_block_start') {
-        const block = c.content_block as
-          | Record<string, unknown>
-          | undefined;
-        if (block?.type === 'tool_use') {
-          streamToolCalls.push({
-            type: 'function',
-            id: block.id,
-            function: {
-              name: String(block.name ?? ''),
-              arguments:
-                typeof block.input === 'string'
-                  ? block.input
-                  : JSON.stringify(block.input ?? {}),
-            },
-          });
-        }
-      }
-      if (c.type === 'content_block_delta') {
-        const delta = c.delta as Record<string, unknown> | undefined;
-        if (delta?.type === 'text_delta' && typeof delta?.text === 'string') {
-          content += delta.text;
-        } else if (
-          delta?.type === 'thinking_delta' &&
-          typeof delta?.thinking === 'string'
-        ) {
-          reasoningContent += delta.thinking;
-        } else if (
-          delta?.type === 'input_json_delta' &&
-          typeof delta?.partial_json === 'string'
-        ) {
-          const lastTc = streamToolCalls[streamToolCalls.length - 1];
-          if (lastTc) {
-            const fn = lastTc.function as Record<string, unknown>;
-            fn.arguments = String(fn.arguments ?? '') + delta.partial_json;
+      try {
+        const c = chunk as Record<string, unknown>;
+        if (c.type === 'message_start') {
+          const message = c.message as Record<string, unknown> | undefined;
+          if (typeof message?.model === 'string') model = message.model;
+          const usage = message?.usage as Record<string, unknown> | undefined;
+          if (typeof usage?.input_tokens === 'number') {
+            inputTokens = usage.input_tokens;
+          }
+          if (typeof usage?.cache_read_input_tokens === 'number') {
+            cacheRead = usage.cache_read_input_tokens;
+          }
+          if (typeof usage?.cache_creation_input_tokens === 'number') {
+            cacheCreation = usage.cache_creation_input_tokens;
           }
         }
-      }
-      if (c.type === 'message_delta') {
-        const delta = c.delta as Record<string, unknown> | undefined;
-        if (typeof delta?.stop_reason === 'string') {
-          finishReason = delta.stop_reason;
-        } else if (typeof c.stop_reason === 'string') {
-          finishReason = c.stop_reason;
+        if (c.type === 'content_block_start') {
+          const block = c.content_block as
+            | Record<string, unknown>
+            | undefined;
+          if (block?.type === 'tool_use') {
+            streamToolCalls.push({
+              type: 'function',
+              id: block.id,
+              function: {
+                name: String(block.name ?? ''),
+                arguments:
+                  typeof block.input === 'string'
+                    ? block.input
+                    : JSON.stringify(block.input ?? {}),
+              },
+            });
+          }
         }
-        const usage = c.usage as Record<string, unknown> | undefined;
-        if (typeof usage?.output_tokens === 'number') {
-          outputTokens = usage.output_tokens;
+        if (c.type === 'content_block_delta') {
+          const delta = c.delta as Record<string, unknown> | undefined;
+          if (delta?.type === 'text_delta' && typeof delta?.text === 'string') {
+            content += delta.text;
+          } else if (
+            delta?.type === 'thinking_delta' &&
+            typeof delta?.thinking === 'string'
+          ) {
+            reasoningContent += delta.thinking;
+          } else if (
+            delta?.type === 'input_json_delta' &&
+            typeof delta?.partial_json === 'string'
+          ) {
+            const lastTc = streamToolCalls[streamToolCalls.length - 1];
+            if (lastTc) {
+              const fn = lastTc.function as Record<string, unknown>;
+              fn.arguments = String(fn.arguments ?? '') + delta.partial_json;
+            }
+          }
         }
-      }
-      if (c.type === 'message_stop') {
-        const usage = c.usage as Record<string, unknown> | undefined;
-        if (typeof usage?.output_tokens === 'number')
-          outputTokens = usage.output_tokens;
+        if (c.type === 'message_delta') {
+          const delta = c.delta as Record<string, unknown> | undefined;
+          if (typeof delta?.stop_reason === 'string') {
+            finishReason = delta.stop_reason;
+          } else if (typeof c.stop_reason === 'string') {
+            finishReason = c.stop_reason;
+          }
+          const usage = c.usage as Record<string, unknown> | undefined;
+          if (typeof usage?.output_tokens === 'number') {
+            outputTokens = usage.output_tokens;
+          }
+        }
+        if (c.type === 'message_stop') {
+          const usage = c.usage as Record<string, unknown> | undefined;
+          if (typeof usage?.output_tokens === 'number')
+            outputTokens = usage.output_tokens;
+        }
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
       yield chunk;
     }
   } catch (error) {
     isError = true;
-    errorMessage = error instanceof Error ? error.message : String(error);
+    errorMessage = safeErrorMessage(error);
     throw error;
   } finally {
-    if (!isTrackerManaged()) {
-      const latencyMs = performance.now() - startTime;
-      const rawInput = inputTokens ?? 0;
-      const normalizedInput =
-        cacheRead || cacheCreation
-          ? rawInput + cacheRead + cacheCreation
-          : rawInput;
+    try {
+      if (!isTrackerManaged()) {
+        const latencyMs = performance.now() - startTime;
+        const rawInput = inputTokens ?? 0;
+        const normalizedInput =
+          cacheRead || cacheCreation
+            ? rawInput + cacheRead + cacheCreation
+            : rawInput;
 
-      let costUsd: number | null = null;
-      if (inputTokens != null && outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: model,
-            inputTokens: normalizedInput,
-            outputTokens,
-            cacheReadInputTokens: cacheRead,
-            cacheCreationInputTokens: cacheCreation,
-            defaultProvider: 'anthropic',
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (inputTokens != null && outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: model,
+              inputTokens: normalizedInput,
+              outputTokens,
+              cacheReadInputTokens: cacheRead,
+              cacheCreationInputTokens: cacheCreation,
+              defaultProvider: 'anthropic',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      ai.trackAiMessage({
-        userId: ctx.userId ?? undefined,
-        deviceId: ctx.deviceId ?? undefined,
-        content,
-        sessionId: ctx.sessionId,
-        model,
-        provider: 'anthropic',
-        latencyMs,
-        traceId: ctx.traceId,
-        inputTokens: normalizedInput || undefined,
-        outputTokens,
-        cacheReadTokens: cacheRead || undefined,
-        totalCostUsd: costUsd,
-        finishReason,
-        toolCalls:
+        ai.trackAiMessage({
+          userId: ctx.userId ?? undefined,
+          deviceId: ctx.deviceId ?? undefined,
+          content,
+          sessionId: ctx.sessionId,
+          model,
+          provider: 'anthropic',
+          latencyMs,
+          traceId: ctx.traceId,
+          inputTokens: normalizedInput || undefined,
+          outputTokens,
+          cacheReadTokens: cacheRead || undefined,
+          totalCostUsd: costUsd,
+          finishReason,
+          toolCalls:
+            streamToolCalls.length > 0 ? streamToolCalls : undefined,
+          reasoningContent: reasoningContent || undefined,
+          systemPrompt: _extractAnthropicSystemPrompt(req?.system),
+          toolDefinitions: _extractToolDefinitions(req),
+          temperature: req?.temperature as number | undefined,
+          maxOutputTokens: req?.max_tokens as number | undefined,
+          topP: req?.top_p as number | undefined,
+          agentId: ctx.agentId,
+          env: ctx.env,
+          isStreaming: true,
+          isError,
+          errorMessage,
+          ..._contextExtras(ctx),
+        });
+
+        _recordToolUses(
           streamToolCalls.length > 0 ? streamToolCalls : undefined,
-        reasoningContent: reasoningContent || undefined,
-        systemPrompt: _extractAnthropicSystemPrompt(req?.system),
-        toolDefinitions: _extractToolDefinitions(req),
-        temperature: req?.temperature as number | undefined,
-        maxOutputTokens: req?.max_tokens as number | undefined,
-        topP: req?.top_p as number | undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
-        isStreaming: true,
-        isError,
-        errorMessage,
-        ..._contextExtras(ctx),
-      });
-
-      _recordToolUses(
-        streamToolCalls.length > 0 ? streamToolCalls : undefined,
-        ctx.sessionId,
-        ctx.agentId,
-      );
+          ctx.sessionId,
+          ctx.agentId,
+        );
+      }
+    } catch (trackingError) {
+      warnTrackingFailure(trackingError);
     }
   }
 }
@@ -1260,103 +1321,111 @@ async function* _wrapPatchedGeminiStream(
   let responseId: string | undefined;
   try {
     for await (const chunk of stream) {
-      const c = chunk as Record<string, unknown>;
-      const respObj = (c.response ?? c) as Record<string, unknown>;
-      responseId ??= _geminiResponseId(respObj);
-      // Legacy SDK: text() method. New @google/genai: text string getter.
-      const textVal = respObj.text;
-      if (typeof textVal === 'function') content += String(textVal());
-      else if (typeof textVal === 'string') content += textVal;
-      const usage = respObj.usageMetadata as
-        | Record<string, unknown>
-        | undefined;
-      if (typeof usage?.promptTokenCount === 'number') {
-        inputTokens = usage.promptTokenCount;
+      try {
+        const c = chunk as Record<string, unknown>;
+        const respObj = (c.response ?? c) as Record<string, unknown>;
+        responseId ??= _geminiResponseId(respObj);
+        // Legacy SDK: text() method. New @google/genai: text string getter.
+        const textVal = respObj.text;
+        if (typeof textVal === 'function') content += String(textVal());
+        else if (typeof textVal === 'string') content += textVal;
+        const usage = respObj.usageMetadata as
+          | Record<string, unknown>
+          | undefined;
+        if (typeof usage?.promptTokenCount === 'number') {
+          inputTokens = usage.promptTokenCount;
+        }
+        if (typeof usage?.candidatesTokenCount === 'number') {
+          outputTokens = usage.candidatesTokenCount;
+        }
+        if (typeof usage?.totalTokenCount === 'number') {
+          totalTokens = usage.totalTokenCount;
+        }
+        if (typeof usage?.cachedContentTokenCount === 'number') {
+          cacheReadTokens = usage.cachedContentTokenCount;
+        }
+        const candidates = respObj.candidates as
+          | Array<Record<string, unknown>>
+          | undefined;
+        if (typeof candidates?.[0]?.finishReason === 'string') {
+          finishReason = candidates[0].finishReason;
+        }
+        const chunkToolCalls = _extractGeminiToolCalls(respObj);
+        if (chunkToolCalls.length > 0) streamToolCalls.push(...chunkToolCalls);
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
-      if (typeof usage?.candidatesTokenCount === 'number') {
-        outputTokens = usage.candidatesTokenCount;
-      }
-      if (typeof usage?.totalTokenCount === 'number') {
-        totalTokens = usage.totalTokenCount;
-      }
-      if (typeof usage?.cachedContentTokenCount === 'number') {
-        cacheReadTokens = usage.cachedContentTokenCount;
-      }
-      const candidates = respObj.candidates as
-        | Array<Record<string, unknown>>
-        | undefined;
-      if (typeof candidates?.[0]?.finishReason === 'string') {
-        finishReason = candidates[0].finishReason;
-      }
-      const chunkToolCalls = _extractGeminiToolCalls(respObj);
-      if (chunkToolCalls.length > 0) streamToolCalls.push(...chunkToolCalls);
       yield chunk;
     }
   } catch (error) {
     isError = true;
-    errorMessage = error instanceof Error ? error.message : String(error);
+    errorMessage = safeErrorMessage(error);
     throw error;
   } finally {
-    if (!isTrackerManaged()) {
-      let costUsd: number | null = null;
-      if (inputTokens != null && outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: model,
-            inputTokens,
-            outputTokens,
-            cacheReadInputTokens: cacheReadTokens ?? 0,
-            defaultProvider: 'gemini',
-          });
-        } catch {
-          // cost calculation is best-effort
+    try {
+      if (!isTrackerManaged()) {
+        let costUsd: number | null = null;
+        if (inputTokens != null && outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: model,
+              inputTokens,
+              outputTokens,
+              cacheReadInputTokens: cacheReadTokens ?? 0,
+              defaultProvider: 'gemini',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
+
+        const reqOpts = requestOpts as Record<string, unknown> | undefined;
+        const genConfig = reqOpts?.generationConfig as Record<string, unknown> | undefined;
+        const sysInstr = reqOpts?.systemInstruction;
+        const systemPrompt = typeof sysInstr === 'string'
+          ? sysInstr
+          : (sysInstr != null && typeof sysInstr === 'object'
+              ? String((sysInstr as Record<string, unknown>).text ?? '')
+              : undefined);
+
+        ai.trackAiMessage({
+          userId: ctx.userId ?? undefined,
+          deviceId: ctx.deviceId ?? undefined,
+          content,
+          sessionId: ctx.sessionId,
+          model,
+          provider: 'gemini',
+          latencyMs: performance.now() - startTime,
+          traceId: ctx.traceId,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          cacheReadTokens,
+          totalCostUsd: costUsd,
+          toolCalls: streamToolCalls.length > 0 ? streamToolCalls : undefined,
+          systemPrompt: systemPrompt || undefined,
+          toolDefinitions: _extractToolDefinitions(reqOpts),
+          temperature: genConfig?.temperature as number | undefined,
+          maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
+          topP: genConfig?.topP as number | undefined,
+          finishReason,
+          providerRequestId: responseId,
+          agentId: ctx.agentId,
+          env: ctx.env,
+          isStreaming: true,
+          isError,
+          errorMessage,
+          ..._contextExtras(ctx),
+        });
+
+        _recordToolUses(
+          streamToolCalls.length > 0 ? streamToolCalls : undefined,
+          ctx.sessionId,
+          ctx.agentId,
+        );
       }
-
-      const reqOpts = requestOpts as Record<string, unknown> | undefined;
-      const genConfig = reqOpts?.generationConfig as Record<string, unknown> | undefined;
-      const sysInstr = reqOpts?.systemInstruction;
-      const systemPrompt = typeof sysInstr === 'string'
-        ? sysInstr
-        : (sysInstr != null && typeof sysInstr === 'object'
-            ? String((sysInstr as Record<string, unknown>).text ?? '')
-            : undefined);
-
-      ai.trackAiMessage({
-        userId: ctx.userId ?? undefined,
-        deviceId: ctx.deviceId ?? undefined,
-        content,
-        sessionId: ctx.sessionId,
-        model,
-        provider: 'gemini',
-        latencyMs: performance.now() - startTime,
-        traceId: ctx.traceId,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        cacheReadTokens,
-        totalCostUsd: costUsd,
-        toolCalls: streamToolCalls.length > 0 ? streamToolCalls : undefined,
-        systemPrompt: systemPrompt || undefined,
-        toolDefinitions: _extractToolDefinitions(reqOpts),
-        temperature: genConfig?.temperature as number | undefined,
-        maxOutputTokens: genConfig?.maxOutputTokens as number | undefined,
-        topP: genConfig?.topP as number | undefined,
-        finishReason,
-        providerRequestId: responseId,
-        agentId: ctx.agentId,
-        env: ctx.env,
-        isStreaming: true,
-        isError,
-        errorMessage,
-        ..._contextExtras(ctx),
-      });
-
-      _recordToolUses(
-        streamToolCalls.length > 0 ? streamToolCalls : undefined,
-        ctx.sessionId,
-        ctx.agentId,
-      );
+    } catch (trackingError) {
+      warnTrackingFailure(trackingError);
     }
   }
 }
@@ -1385,110 +1454,118 @@ async function* _wrapPatchedBedrockStream(
   let errorMessage: string | undefined;
   try {
     for await (const rawEvent of stream) {
-      const event = rawEvent as Record<string, unknown>;
-      const delta = (
-        event.contentBlockDelta as Record<string, unknown> | undefined
-      )?.delta as Record<string, unknown> | undefined;
-      if (typeof delta?.text === 'string') content += delta.text;
-      if (typeof delta?.toolUse === 'object' && delta.toolUse != null) {
-        const toolUseDelta = delta.toolUse as Record<string, unknown>;
-        if (typeof toolUseDelta.input === 'string' && currentToolUse) {
-          const fn = currentToolUse.function as Record<string, unknown>;
-          fn.arguments = String(fn.arguments ?? '') + toolUseDelta.input;
+      try {
+        const event = rawEvent as Record<string, unknown>;
+        const delta = (
+          event.contentBlockDelta as Record<string, unknown> | undefined
+        )?.delta as Record<string, unknown> | undefined;
+        if (typeof delta?.text === 'string') content += delta.text;
+        if (typeof delta?.toolUse === 'object' && delta.toolUse != null) {
+          const toolUseDelta = delta.toolUse as Record<string, unknown>;
+          if (typeof toolUseDelta.input === 'string' && currentToolUse) {
+            const fn = currentToolUse.function as Record<string, unknown>;
+            fn.arguments = String(fn.arguments ?? '') + toolUseDelta.input;
+          }
         }
-      }
 
-      const blockStart = event.contentBlockStart as
-        | Record<string, unknown>
-        | undefined;
-      if (blockStart?.start != null) {
-        const start = blockStart.start as Record<string, unknown>;
-        if (start.toolUse != null) {
-          const tu = start.toolUse as Record<string, unknown>;
-          currentToolUse = {
-            type: 'function',
-            id: tu.toolUseId,
-            function: { name: String(tu.name ?? ''), arguments: '' },
-          };
-          streamToolCalls.push(currentToolUse);
+        const blockStart = event.contentBlockStart as
+          | Record<string, unknown>
+          | undefined;
+        if (blockStart?.start != null) {
+          const start = blockStart.start as Record<string, unknown>;
+          if (start.toolUse != null) {
+            const tu = start.toolUse as Record<string, unknown>;
+            currentToolUse = {
+              type: 'function',
+              id: tu.toolUseId,
+              function: { name: String(tu.name ?? ''), arguments: '' },
+            };
+            streamToolCalls.push(currentToolUse);
+          }
         }
-      }
 
-      const messageStart = event.messageStart as
-        | Record<string, unknown>
-        | undefined;
-      if (typeof messageStart?.model === 'string') model = messageStart.model;
-      const messageStop = event.messageStop as
-        | Record<string, unknown>
-        | undefined;
-      if (typeof messageStop?.stopReason === 'string') {
-        finishReason = messageStop.stopReason;
+        const messageStart = event.messageStart as
+          | Record<string, unknown>
+          | undefined;
+        if (typeof messageStart?.model === 'string') model = messageStart.model;
+        const messageStop = event.messageStop as
+          | Record<string, unknown>
+          | undefined;
+        if (typeof messageStop?.stopReason === 'string') {
+          finishReason = messageStop.stopReason;
+        }
+        const usage = (event.metadata as Record<string, unknown> | undefined)
+          ?.usage as Record<string, unknown> | undefined;
+        if (typeof usage?.inputTokens === 'number')
+          inputTokens = usage.inputTokens;
+        if (typeof usage?.outputTokens === 'number')
+          outputTokens = usage.outputTokens;
+        if (typeof usage?.totalTokens === 'number')
+          totalTokens = usage.totalTokens;
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
-      const usage = (event.metadata as Record<string, unknown> | undefined)
-        ?.usage as Record<string, unknown> | undefined;
-      if (typeof usage?.inputTokens === 'number')
-        inputTokens = usage.inputTokens;
-      if (typeof usage?.outputTokens === 'number')
-        outputTokens = usage.outputTokens;
-      if (typeof usage?.totalTokens === 'number')
-        totalTokens = usage.totalTokens;
       yield rawEvent;
     }
   } catch (error) {
     isError = true;
-    errorMessage = error instanceof Error ? error.message : String(error);
+    errorMessage = safeErrorMessage(error);
     throw error;
   } finally {
-    if (!isTrackerManaged()) {
-      const latencyMs = performance.now() - startTime;
+    try {
+      if (!isTrackerManaged()) {
+        const latencyMs = performance.now() - startTime;
 
-      let costUsd: number | null = null;
-      if (inputTokens != null && outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: model,
-            inputTokens,
-            outputTokens,
-            defaultProvider: 'bedrock',
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (inputTokens != null && outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: model,
+              inputTokens,
+              outputTokens,
+              defaultProvider: 'bedrock',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
-      ai.trackAiMessage({
-        userId: ctx.userId ?? undefined,
-        deviceId: ctx.deviceId ?? undefined,
-        content,
-        sessionId: ctx.sessionId,
-        model,
-        provider: 'bedrock',
-        latencyMs,
-        traceId: ctx.traceId,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        totalCostUsd: costUsd,
-        finishReason,
-        toolCalls:
+        const infConfig = opts?.inferenceConfig as Record<string, unknown> | undefined;
+        ai.trackAiMessage({
+          userId: ctx.userId ?? undefined,
+          deviceId: ctx.deviceId ?? undefined,
+          content,
+          sessionId: ctx.sessionId,
+          model,
+          provider: 'bedrock',
+          latencyMs,
+          traceId: ctx.traceId,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          totalCostUsd: costUsd,
+          finishReason,
+          toolCalls:
+            streamToolCalls.length > 0 ? streamToolCalls : undefined,
+          temperature: infConfig?.temperature as number | undefined,
+          maxOutputTokens: infConfig?.maxTokens as number | undefined,
+          topP: infConfig?.topP as number | undefined,
+          agentId: ctx.agentId,
+          env: ctx.env,
+          isStreaming: true,
+          isError,
+          errorMessage,
+          ..._contextExtras(ctx),
+        });
+
+        _recordToolUses(
           streamToolCalls.length > 0 ? streamToolCalls : undefined,
-        temperature: infConfig?.temperature as number | undefined,
-        maxOutputTokens: infConfig?.maxTokens as number | undefined,
-        topP: infConfig?.topP as number | undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
-        isStreaming: true,
-        isError,
-        errorMessage,
-        ..._contextExtras(ctx),
-      });
-
-      _recordToolUses(
-        streamToolCalls.length > 0 ? streamToolCalls : undefined,
-        ctx.sessionId,
-        ctx.agentId,
-      );
+          ctx.sessionId,
+          ctx.agentId,
+        );
+      }
+    } catch (trackingError) {
+      warnTrackingFailure(trackingError);
     }
   }
 }
@@ -1853,7 +1930,7 @@ function _probeNestedPrototype(
   }
 }
 
-function _trackCompletionResponse(
+function _trackCompletionResponseUnguarded(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
@@ -1942,7 +2019,7 @@ function _trackCompletionResponse(
   _recordToolUses(toolCalls, ctx.sessionId, ctx.agentId);
 }
 
-function _trackAnthropicResponse(
+function _trackAnthropicResponseUnguarded(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
@@ -2025,7 +2102,7 @@ function _trackAnthropicResponse(
   );
 }
 
-function _trackCompletionError(
+function _trackCompletionErrorUnguarded(
   ai: AmplitudeAI,
   error: unknown,
   startTime: number,
@@ -2061,7 +2138,7 @@ function _geminiResponseId(respObj: Record<string, unknown>): string | undefined
   return typeof id === 'string' && id.trim() ? id.trim() : undefined;
 }
 
-function _trackGeminiResponse(
+function _trackGeminiResponseUnguarded(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
@@ -2150,7 +2227,7 @@ function _trackGeminiResponse(
   );
 }
 
-function _trackBedrockResponse(
+function _trackBedrockResponseUnguarded(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
@@ -2247,7 +2324,7 @@ function _parseBedrockJson(
   }
 }
 
-function _trackBedrockInvokeModelResponse(
+function _trackBedrockInvokeModelResponseUnguarded(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
@@ -2311,7 +2388,7 @@ function _trackBedrockInvokeModelResponse(
   });
 }
 
-function _trackResponsesResponse(
+function _trackResponsesResponseUnguarded(
   ai: AmplitudeAI,
   response: unknown,
   startTime: number,
@@ -2433,97 +2510,105 @@ async function* _wrapPatchedResponsesStream(
 
   try {
     for await (const event of stream) {
-      const e = event as Record<string, unknown>;
-      const response = e.response as Record<string, unknown> | undefined;
-      bodyProviderRequestId ??= extractBodyResponseId(response);
-      const type = e.type as string | undefined;
-      if (type === 'response.output_text.delta') {
-        const delta = e.delta;
-        if (typeof delta === 'string') content += delta;
-      } else if (type === 'response.completed') {
-        if (typeof response?.model === 'string' && response.model.length > 0) {
-          model = response.model;
+      try {
+        const e = event as Record<string, unknown>;
+        const response = e.response as Record<string, unknown> | undefined;
+        bodyProviderRequestId ??= extractBodyResponseId(response);
+        const type = e.type as string | undefined;
+        if (type === 'response.output_text.delta') {
+          const delta = e.delta;
+          if (typeof delta === 'string') content += delta;
+        } else if (type === 'response.completed') {
+          if (typeof response?.model === 'string' && response.model.length > 0) {
+            model = response.model;
+          }
+          const usage = response?.usage as Record<string, unknown> | undefined;
+          const outputText = response?.output_text;
+          if (typeof outputText === 'string' && outputText.length > 0) {
+            content = outputText;
+          }
+          if (typeof usage?.input_tokens === 'number')
+            inputTokens = usage.input_tokens;
+          if (typeof usage?.output_tokens === 'number')
+            outputTokens = usage.output_tokens;
+          if (typeof usage?.total_tokens === 'number')
+            totalTokens = usage.total_tokens;
+          const outDetails = usage?.output_tokens_details as Record<string, unknown> | undefined;
+          if (typeof outDetails?.reasoning_tokens === 'number')
+            reasoningTokens = outDetails.reasoning_tokens;
+          const status = response?.status;
+          if (typeof status === 'string') finishReason = status;
+          completedOutput = response?.output;
         }
-        const usage = response?.usage as Record<string, unknown> | undefined;
-        const outputText = response?.output_text;
-        if (typeof outputText === 'string' && outputText.length > 0) {
-          content = outputText;
-        }
-        if (typeof usage?.input_tokens === 'number')
-          inputTokens = usage.input_tokens;
-        if (typeof usage?.output_tokens === 'number')
-          outputTokens = usage.output_tokens;
-        if (typeof usage?.total_tokens === 'number')
-          totalTokens = usage.total_tokens;
-        const outDetails = usage?.output_tokens_details as Record<string, unknown> | undefined;
-        if (typeof outDetails?.reasoning_tokens === 'number')
-          reasoningTokens = outDetails.reasoning_tokens;
-        const status = response?.status;
-        if (typeof status === 'string') finishReason = status;
-        completedOutput = response?.output;
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
       }
       yield event;
     }
   } catch (error) {
     isError = true;
-    errorMessage = error instanceof Error ? error.message : String(error);
+    errorMessage = safeErrorMessage(error);
     throw error;
   } finally {
-    if (!isTrackerManaged()) {
-      let costUsd: number | null = null;
-      if (inputTokens != null && outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            ...pricingTarget(providerName, opts?.model, model),
-            inputTokens,
-            outputTokens,
-            reasoningTokens: reasoningTokens ?? 0,
-          });
-        } catch {
-          // cost calculation is best-effort
+    try {
+      if (!isTrackerManaged()) {
+        let costUsd: number | null = null;
+        if (inputTokens != null && outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              ...pricingTarget(providerName, opts?.model, model),
+              inputTokens,
+              outputTokens,
+              reasoningTokens: reasoningTokens ?? 0,
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
+
+        const toolCalls = _extractResponsesOutputToolCalls(completedOutput);
+        const systemPrompt = typeof opts?.instructions === 'string'
+          ? opts.instructions : undefined;
+        const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
+
+        ai.trackAiMessage({
+          userId: ctx.userId ?? undefined,
+          deviceId: ctx.deviceId ?? undefined,
+          content,
+          sessionId: ctx.sessionId,
+          model,
+          provider: providerName,
+          providerRequestId: bodyProviderRequestId ?? headerRequestId,
+          latencyMs: performance.now() - startTime,
+          traceId: ctx.traceId,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          reasoningTokens,
+          totalCostUsd: costUsd,
+          finishReason,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          systemPrompt,
+          toolDefinitions: toolDefs,
+          temperature: opts?.temperature as number | undefined,
+          maxOutputTokens: opts?.max_output_tokens as number | undefined,
+          topP: opts?.top_p as number | undefined,
+          agentId: ctx.agentId,
+          env: ctx.env,
+          isStreaming: true,
+          isError,
+          errorMessage,
+          ..._contextExtras(ctx),
+        });
+
+        _recordToolUses(
+          toolCalls.length > 0 ? toolCalls : undefined,
+          ctx.sessionId,
+          ctx.agentId,
+        );
       }
-
-      const toolCalls = _extractResponsesOutputToolCalls(completedOutput);
-      const systemPrompt = typeof opts?.instructions === 'string'
-        ? opts.instructions : undefined;
-      const toolDefs = _extractToolDefinitions(opts as Record<string, unknown> | undefined);
-
-      ai.trackAiMessage({
-        userId: ctx.userId ?? undefined,
-        deviceId: ctx.deviceId ?? undefined,
-        content,
-        sessionId: ctx.sessionId,
-        model,
-        provider: providerName,
-        providerRequestId: bodyProviderRequestId ?? headerRequestId,
-        latencyMs: performance.now() - startTime,
-        traceId: ctx.traceId,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        reasoningTokens,
-        totalCostUsd: costUsd,
-        finishReason,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        systemPrompt,
-        toolDefinitions: toolDefs,
-        temperature: opts?.temperature as number | undefined,
-        maxOutputTokens: opts?.max_output_tokens as number | undefined,
-        topP: opts?.top_p as number | undefined,
-        agentId: ctx.agentId,
-        env: ctx.env,
-        isStreaming: true,
-        isError,
-        errorMessage,
-        ..._contextExtras(ctx),
-      });
-
-      _recordToolUses(
-        toolCalls.length > 0 ? toolCalls : undefined,
-        ctx.sessionId,
-        ctx.agentId,
-      );
+    } catch (trackingError) {
+      warnTrackingFailure(trackingError);
     }
   }
 }
@@ -2581,7 +2666,7 @@ function _extractResponsesOutputToolCalls(
   return toolCalls;
 }
 
-function _trackResponsesUserMessages(
+function _trackResponsesUserMessagesUnguarded(
   ai: AmplitudeAI,
   requestOpts: unknown,
 ): void {
@@ -2631,7 +2716,7 @@ function _trackResponsesUserMessages(
   }
 }
 
-function _extractResponsesToolCallsFromInput(
+function _extractResponsesToolCallsFromInputUnguarded(
   ai: AmplitudeAI,
   requestOpts: unknown,
 ): void {
@@ -2826,7 +2911,7 @@ function _extractBedrockToolCalls(
  * Mirrors the logic in explicit provider wrappers (WrappedCompletions, etc.)
  * but adapted for the monkey-patch path where we only have the raw request args.
  */
-function _trackInputUserMessages(
+function _trackInputUserMessagesUnguarded(
   ai: AmplitudeAI,
   requestOpts: unknown,
   providerName: string,
@@ -3005,7 +3090,7 @@ function _consumeToolLatencyMs(
 // Mirrors Python SDK's _extract_and_track_tool_calls()
 // ---------------------------------------------------------------
 
-function _extractAndTrackToolCalls(
+function _extractAndTrackToolCallsUnguarded(
   ai: AmplitudeAI,
   requestOpts: unknown,
   providerName: string,
@@ -3240,3 +3325,29 @@ export function _resetToolLatencyForTests(): void {
   _toolLatencyRegistry.clear();
   _evictOpCount = 0;
 }
+
+/** @internal Test-only: number of recorded patches. */
+export function _activePatchCountForTests(): number {
+  return _activePatches.length;
+}
+
+// Tracking never propagates into the host's provider call.
+function _guardTracking<A extends unknown[]>(
+  fn: (...args: A) => void,
+): (...args: A) => void {
+  return (...args) => {
+    safeTrack(() => fn(...args));
+  };
+}
+
+const _trackCompletionResponse = _guardTracking(_trackCompletionResponseUnguarded);
+const _trackAnthropicResponse = _guardTracking(_trackAnthropicResponseUnguarded);
+const _trackCompletionError = _guardTracking(_trackCompletionErrorUnguarded);
+const _trackGeminiResponse = _guardTracking(_trackGeminiResponseUnguarded);
+const _trackBedrockResponse = _guardTracking(_trackBedrockResponseUnguarded);
+const _trackBedrockInvokeModelResponse = _guardTracking(_trackBedrockInvokeModelResponseUnguarded);
+const _trackResponsesResponse = _guardTracking(_trackResponsesResponseUnguarded);
+const _trackResponsesUserMessages = _guardTracking(_trackResponsesUserMessagesUnguarded);
+const _extractResponsesToolCallsFromInput = _guardTracking(_extractResponsesToolCallsFromInputUnguarded);
+const _trackInputUserMessages = _guardTracking(_trackInputUserMessagesUnguarded);
+const _extractAndTrackToolCalls = _guardTracking(_extractAndTrackToolCallsUnguarded);

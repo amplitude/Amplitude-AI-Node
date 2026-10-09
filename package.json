@@ -46,6 +46,7 @@
     "./integrations/braintrust-experiment": "./dist/integrations/braintrust-experiment.js",
     "./integrations/claude-agent-sdk": "./dist/integrations/claude-agent-sdk.js",
     "./integrations/crewai": "./dist/integrations/crewai.js",
+    "./integrations/identity": "./dist/integrations/identity.js",
     "./integrations/langchain": "./dist/integrations/langchain.js",
     "./integrations/llamaindex": "./dist/integrations/llamaindex.js",
     "./integrations/openai-agents": "./dist/integrations/openai-agents.js",

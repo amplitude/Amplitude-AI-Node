@@ -8,6 +8,11 @@ import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import { applySessionContext, BaseAIProvider, contextFields } from './base.js';
+import {
+  safeErrorMessage,
+  safeTrack,
+  warnTrackingFailure,
+} from '../utils/logger.js';
 
 const _resolved = tryRequire('@google/generative-ai');
 export const GEMINI_AVAILABLE = _resolved != null;
@@ -75,49 +80,50 @@ export class Gemini extends BaseAIProvider {
 
     try {
       const response = await generateFn.call(genModel, params);
-      const latencyMs = performance.now() - startTime;
+      safeTrack(() => {
+        const latencyMs = performance.now() - startTime;
 
-      const extracted = extractGeminiResponse(response);
-      let costUsd: number | null = null;
-      if (extracted.inputTokens != null && extracted.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: model,
-            inputTokens: extracted.inputTokens,
-            outputTokens: extracted.outputTokens,
-            cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
-            defaultProvider: 'google',
-          });
-        } catch {
-          // cost calculation is best-effort
+        const extracted = extractGeminiResponse(response);
+        let costUsd: number | null = null;
+        if (extracted.inputTokens != null && extracted.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: model,
+              inputTokens: extracted.inputTokens,
+              outputTokens: extracted.outputTokens,
+              cacheReadInputTokens: extracted.cacheReadTokens ?? 0,
+              defaultProvider: 'google',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      const ctx = applySessionContext();
-      this._track({
-        ...contextFields(ctx),
-        modelName: model,
-        provider: 'gemini',
-        responseContent: extracted.text,
-        latencyMs,
-        inputTokens: extracted.inputTokens,
-        outputTokens: extracted.outputTokens,
-        totalTokens: extracted.totalTokens,
-        cacheReadInputTokens: extracted.cacheReadTokens,
-        totalCostUsd: costUsd,
-        finishReason: extracted.finishReason,
-        toolCalls: extracted.functionCalls?.length
-          ? extracted.functionCalls
-          : undefined,
-        toolDefinitions: extractGeminiToolDefinitions(params),
-        systemPrompt: extractGeminiSystemPrompt(params),
-        temperature: extractGeminiTemperature(params),
-        topP: extractGeminiTopP(params),
-        maxOutputTokens: extractGeminiMaxOutputTokens(params),
-        isStreaming: false,
-        providerRequestId: extracted.responseId,
+        const ctx = applySessionContext();
+        this._track({
+          ...contextFields(ctx),
+          modelName: model,
+          provider: 'gemini',
+          responseContent: extracted.text,
+          latencyMs,
+          inputTokens: extracted.inputTokens,
+          outputTokens: extracted.outputTokens,
+          totalTokens: extracted.totalTokens,
+          cacheReadInputTokens: extracted.cacheReadTokens,
+          totalCostUsd: costUsd,
+          finishReason: extracted.finishReason,
+          toolCalls: extracted.functionCalls?.length
+            ? extracted.functionCalls
+            : undefined,
+          toolDefinitions: extractGeminiToolDefinitions(params),
+          systemPrompt: extractGeminiSystemPrompt(params),
+          temperature: extractGeminiTemperature(params),
+          topP: extractGeminiTopP(params),
+          maxOutputTokens: extractGeminiMaxOutputTokens(params),
+          isStreaming: false,
+          providerRequestId: extracted.responseId,
+        });
       });
-
       return response;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -130,7 +136,7 @@ export class Gemini extends BaseAIProvider {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
 
       throw error;
@@ -181,7 +187,7 @@ export class Gemini extends BaseAIProvider {
         responseContent: '',
         latencyMs: performance.now() - startTime,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
         isStreaming: true,
       });
       throw error;
@@ -204,95 +210,103 @@ export class Gemini extends BaseAIProvider {
 
     try {
       for await (const chunk of stream) {
-        const extracted = extractGeminiResponse(chunk);
-        responseId ??= extracted.responseId;
-        if (extracted.text) accumulator.addContent(extracted.text);
-        if (Array.isArray(extracted.functionCalls)) {
-          for (const fc of extracted.functionCalls) accumulator.addToolCall(fc);
+        try {
+          const extracted = extractGeminiResponse(chunk);
+          responseId ??= extracted.responseId;
+          if (extracted.text) accumulator.addContent(extracted.text);
+          if (Array.isArray(extracted.functionCalls)) {
+            for (const fc of extracted.functionCalls) accumulator.addToolCall(fc);
+          }
+          if (extracted.finishReason != null) {
+            accumulator.finishReason = String(extracted.finishReason);
+          }
+          accumulator.setUsage({
+            inputTokens: extracted.inputTokens,
+            outputTokens: extracted.outputTokens,
+            totalTokens: extracted.totalTokens,
+            cacheReadTokens: extracted.cacheReadTokens,
+          });
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
-        if (extracted.finishReason != null) {
-          accumulator.finishReason = String(extracted.finishReason);
-        }
-        accumulator.setUsage({
-          inputTokens: extracted.inputTokens,
-          outputTokens: extracted.outputTokens,
-          totalTokens: extracted.totalTokens,
-          cacheReadTokens: extracted.cacheReadTokens,
-        });
         yield chunk;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      if (finalResponse != null) {
-        try {
-          const extractedFinal = extractGeminiResponse(await finalResponse);
-          responseId ??= extractedFinal.responseId;
-          accumulator.setUsage({
-            inputTokens: extractedFinal.inputTokens,
-            outputTokens: extractedFinal.outputTokens,
-            totalTokens: extractedFinal.totalTokens,
-            cacheReadTokens: extractedFinal.cacheReadTokens,
-          });
-          if (extractedFinal.finishReason != null) {
-            accumulator.finishReason = String(extractedFinal.finishReason);
-          }
-          if (
-            Array.isArray(extractedFinal.functionCalls) &&
-            accumulator.toolCalls.length === 0
-          ) {
-            for (const fc of extractedFinal.functionCalls) {
-              accumulator.addToolCall(fc);
+      try {
+        if (finalResponse != null) {
+          try {
+            const extractedFinal = extractGeminiResponse(await finalResponse);
+            responseId ??= extractedFinal.responseId;
+            accumulator.setUsage({
+              inputTokens: extractedFinal.inputTokens,
+              outputTokens: extractedFinal.outputTokens,
+              totalTokens: extractedFinal.totalTokens,
+              cacheReadTokens: extractedFinal.cacheReadTokens,
+            });
+            if (extractedFinal.finishReason != null) {
+              accumulator.finishReason = String(extractedFinal.finishReason);
             }
+            if (
+              Array.isArray(extractedFinal.functionCalls) &&
+              accumulator.toolCalls.length === 0
+            ) {
+              for (const fc of extractedFinal.functionCalls) {
+                accumulator.addToolCall(fc);
+              }
+            }
+          } catch {
+            // best-effort final response extraction
           }
-        } catch {
-          // best-effort final response extraction
         }
-      }
 
-      const state = accumulator.getState();
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName: model,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-            cacheReadInputTokens: state.cacheReadTokens ?? 0,
-            defaultProvider: 'google',
-          });
-        } catch {
-          // cost calculation is best-effort
+        const state = accumulator.getState();
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName: model,
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              cacheReadInputTokens: state.cacheReadTokens ?? 0,
+              defaultProvider: 'google',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._track({
-        ...contextFields(ctx),
-        modelName: model,
-        provider: 'gemini',
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: state.inputTokens,
-        outputTokens: state.outputTokens,
-        totalTokens: state.totalTokens,
-        cacheReadInputTokens: state.cacheReadTokens,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
-        toolDefinitions: extractGeminiToolDefinitions(params),
-        systemPrompt: extractGeminiSystemPrompt(params),
-        temperature: extractGeminiTemperature(params),
-        topP: extractGeminiTopP(params),
-        maxOutputTokens: extractGeminiMaxOutputTokens(params),
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-        providerRequestId: responseId,
-      });
+        this._track({
+          ...contextFields(ctx),
+          modelName: model,
+          provider: 'gemini',
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          totalTokens: state.totalTokens,
+          cacheReadInputTokens: state.cacheReadTokens,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+          toolDefinitions: extractGeminiToolDefinitions(params),
+          systemPrompt: extractGeminiSystemPrompt(params),
+          temperature: extractGeminiTemperature(params),
+          topP: extractGeminiTopP(params),
+          maxOutputTokens: extractGeminiMaxOutputTokens(params),
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+          providerRequestId: responseId,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
+      }
     }
   }
 }

@@ -47,7 +47,7 @@ import {
   type TrackFn,
 } from '../types.js';
 import { calculateCost } from '../utils/costs.js';
-import { getLogger } from '../utils/logger.js';
+import { getLogger, safeTrack } from '../utils/logger.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 
 const _require = createRequire(import.meta.url);
@@ -88,6 +88,86 @@ export interface ProviderTrackOptions {
    * session id, so a user message, tool call, and AI response do not share one.
    */
   takeTurnId?: () => number | undefined;
+}
+
+/**
+ * Provider SDK request options accepted alongside Amplitude overrides in the
+ * second argument of wrapped methods, e.g.
+ * `create(params, { userId, signal, timeout })`. They are forwarded to the
+ * underlying SDK call. Anything else can be passed as a third argument.
+ */
+export interface ProviderRequestOptions {
+  signal?: AbortSignal | null;
+  timeout?: number;
+  maxRetries?: number;
+  headers?: Record<string, string | null | undefined>;
+  query?: Record<string, unknown>;
+  idempotencyKey?: string;
+  fetchOptions?: Record<string, unknown>;
+}
+
+export type ProviderCallOptions = ProviderTrackOptions & ProviderRequestOptions;
+
+const TRACK_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'userId',
+  'deviceId',
+  'sessionId',
+  'traceId',
+  'turnId',
+  'agentId',
+  'parentAgentId',
+  'customerOrgId',
+  'agentVersion',
+  'description',
+  'context',
+  'env',
+  'groups',
+  'eventProperties',
+  'browserSessionId',
+  'trackInputMessages',
+  'takeTurnId',
+] satisfies Array<keyof ProviderTrackOptions>);
+
+/**
+ * Separate Amplitude tracking overrides from provider SDK request options.
+ * Request options from `extra` take precedence over those in `options`.
+ */
+export function splitCallOptions(
+  options?: ProviderCallOptions | null,
+  extra?: Record<string, unknown> | null,
+): {
+  overrides: ProviderTrackOptions | undefined;
+  requestOptions: Record<string, unknown> | undefined;
+} {
+  let overrides: Record<string, unknown> | undefined;
+  let requestOptions: Record<string, unknown> | undefined;
+  if (options != null && typeof options === 'object') {
+    for (const key of Object.keys(options)) {
+      const value = (options as Record<string, unknown>)[key];
+      if (TRACK_OPTION_KEYS.has(key)) {
+        overrides ??= {};
+        overrides[key] = value;
+      } else if (value !== undefined) {
+        requestOptions ??= {};
+        requestOptions[key] = value;
+      }
+    }
+  }
+  if (extra != null && typeof extra === 'object') {
+    requestOptions = { ...requestOptions, ...extra };
+  }
+  return {
+    overrides: overrides as ProviderTrackOptions | undefined,
+    requestOptions,
+  };
+}
+
+/** Arguments for the underlying SDK call: `[params]` or `[params, requestOptions]`. */
+export function sdkCallArgs(
+  params: Record<string, unknown>,
+  requestOptions: Record<string, unknown> | undefined,
+): unknown[] {
+  return requestOptions === undefined ? [params] : [params, requestOptions];
 }
 
 /**
@@ -340,7 +420,18 @@ export abstract class BaseAIProvider {
     this._providerName = options.providerName;
   }
 
+  /**
+   * Emit the AI response event. Never throws: a failure in validation, cost
+   * enforcement or serialization skips the event with a content-free warning
+   * so the host's provider call is unaffected.
+   */
   protected _track(opts: Omit<TrackAiMessageOptions, 'amplitude'>): string {
+    return safeTrack(() => this._trackUnguarded(opts)) ?? '';
+  }
+
+  private _trackUnguarded(
+    opts: Omit<TrackAiMessageOptions, 'amplitude'>,
+  ): string {
     if (isTrackerManaged()) return '';
 
     const merged = applySessionContext({

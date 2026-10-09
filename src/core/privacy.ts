@@ -88,9 +88,19 @@ export function isRawBase64(text: string): boolean {
   return RAW_BASE64_RE.test(text);
 }
 
+// String() throws for null-prototype objects and objects whose toString is
+// not callable; content from providers and callers can be either.
+function toTextSafe(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
 export function createContentHash(content: unknown): string {
   if (content == null) return '';
-  const contentStr = typeof content === 'string' ? content : String(content);
+  const contentStr = typeof content === 'string' ? content : toTextSafe(content);
   return crypto.createHash('sha256').update(contentStr, 'utf8').digest('hex');
 }
 
@@ -129,7 +139,7 @@ function extractTextFromStructuredContent(content: unknown): string {
     for (const field of ['content', 'text', 'message']) {
       if (field in dict) return extractTextFromStructuredContent(dict[field]);
     }
-    return String(content);
+    return toTextSafe(content);
   }
 
   if (Array.isArray(content)) {
@@ -143,7 +153,7 @@ function extractTextFromStructuredContent(content: unknown): string {
     return parts.join('');
   }
 
-  return String(content);
+  return toTextSafe(content);
 }
 
 /**

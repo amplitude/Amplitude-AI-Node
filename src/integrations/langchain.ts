@@ -28,6 +28,12 @@ export interface CallbackHandlerOptions {
   privacyConfig?: PrivacyConfig | null;
 }
 
+/**
+ * Runs that start but never end or error (cancelled chains, dropped
+ * callbacks) are evicted oldest-first beyond this many open runs.
+ */
+const MAX_OPEN_RUNS = 10_000;
+
 export class AmplitudeCallbackHandler {
   private _ai: AmplitudeAI;
   private _identities: RunIdentities;
@@ -46,6 +52,22 @@ export class AmplitudeCallbackHandler {
       env: options.env,
     });
     this._privacyConfig = options.privacyConfig ?? null;
+  }
+
+  private _startRun(runId: string): void {
+    while (this._runStartTimes.size >= MAX_OPEN_RUNS) {
+      const oldest = this._runStartTimes.keys().next().value;
+      if (oldest === undefined) break;
+      this._forgetRun(oldest);
+    }
+    this._runStartTimes.set(runId, performance.now());
+  }
+
+  private _forgetRun(runId: string): void {
+    this._runStartTimes.delete(runId);
+    this._runModelNames.delete(runId);
+    this._toolInputs.delete(runId);
+    this._toolNames.delete(runId);
   }
 
   private _rememberModelName(
@@ -91,7 +113,7 @@ export class AmplitudeCallbackHandler {
     runId: string,
     parentRunId?: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
+    this._startRun(runId);
     this._rememberModelName(serialized, runId);
     this._trackUserContents(prompts, this._identities.resolve(runId, parentRunId));
   }
@@ -107,7 +129,7 @@ export class AmplitudeCallbackHandler {
     runId: string,
     parentRunId?: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
+    this._startRun(runId);
     this._rememberModelName(serialized, runId);
 
     const userContents: string[] = [];
@@ -201,7 +223,7 @@ export class AmplitudeCallbackHandler {
     parentRunId?: string,
   ): void {
     this._identities.resolve(runId, parentRunId);
-    this._runStartTimes.set(runId, performance.now());
+    this._startRun(runId);
     this._toolInputs.set(runId, input);
     const name = String(
       serialized.name ??
@@ -284,7 +306,8 @@ export class AmplitudeCallbackHandler {
 
   handleLLMError(error: unknown, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
-    this._runStartTimes.delete(runId);
+    const modelName = this._runModelNames.get(runId) ?? 'unknown';
+    this._forgetRun(runId);
     const latencyMs = performance.now() - startTime;
 
     const ctx = this._identities.resolve(runId, parentRunId);
@@ -294,7 +317,7 @@ export class AmplitudeCallbackHandler {
       deviceId: ctx.deviceId,
       content: '',
       sessionId: ctx.sessionId,
-      model: 'unknown',
+      model: modelName,
       provider: 'langchain',
       latencyMs,
       traceId: ctx.traceId,
