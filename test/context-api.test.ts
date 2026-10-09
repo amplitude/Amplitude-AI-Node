@@ -5,10 +5,8 @@ import {
   pushContext,
   SessionContext,
 } from '@amplitude/ai';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetPushContextWarning } from '../src/context.js';
-
-const legacy = { legacyEnterWith: true } as const;
 
 describe('pushContext(ctx, fn) — scoped', () => {
   it('sets the context only for the callback and returns its result', (): void => {
@@ -51,12 +49,13 @@ describe('pushContext(ctx) — deprecated callback-less form (AA-152528 M6)', ()
     vi.restoreAllMocks();
   });
 
-  it('does not change the active context and warns once without user content', (): void => {
+  it('sets the active context and warns once without user content', (): void => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ctx = new SessionContext({ sessionId: 'sess-secret', userId: 'alice@example.com' });
     const reset = pushContext(ctx);
-    expect(getActiveContext()).toBeNull();
+    expect(getActiveContext()).toBe(ctx);
     reset();
+    expect(getActiveContext()).toBeNull();
     pushContext(ctx)();
     expect(warn).toHaveBeenCalledTimes(1);
     const msg = String(warn.mock.calls[0]?.[0]);
@@ -65,20 +64,17 @@ describe('pushContext(ctx) — deprecated callback-less form (AA-152528 M6)', ()
     expect(msg).not.toContain('sess-secret');
   });
 
-  it('does not leak identity across requests on a keep-alive socket', async (): Promise<void> => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('callback form does not leak identity across requests on a keep-alive socket', async (): Promise<void> => {
     const seen: Array<{ path: string; userId: string | null }> = [];
     const server = http.createServer(async (req, res) => {
       const user = (req.headers['x-user'] as string | undefined) ?? null;
-      let restore = (): void => {};
-      if (user) restore = pushContext(new SessionContext({ sessionId: `s-${user}`, userId: user }));
-      try {
+      const handle = async (): Promise<void> => {
         await new Promise((r) => setTimeout(r, 2));
         seen.push({ path: req.url ?? '', userId: getActiveContext()?.userId ?? null });
         res.end('ok');
-      } finally {
-        restore();
-      }
+      };
+      if (user) await pushContext(new SessionContext({ sessionId: `s-${user}`, userId: user }), handle);
+      else await handle();
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const { port } = server.address() as AddressInfo;
@@ -101,10 +97,18 @@ describe('pushContext(ctx) — deprecated callback-less form (AA-152528 M6)', ()
   });
 });
 
-describe('pushContext(ctx, { legacyEnterWith: true })', () => {
+describe('pushContext(ctx) cleanup', () => {
+  beforeEach((): void => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach((): void => {
+    vi.restoreAllMocks();
+  });
+
   it('sets the active context', (): void => {
     const ctx = new SessionContext({ sessionId: 'push-1', userId: 'u1' });
-    const reset = pushContext(ctx, legacy);
+    const reset = pushContext(ctx);
     try {
       expect(getActiveContext()).toBe(ctx);
       expect(getActiveContext()?.sessionId).toBe('push-1');
@@ -117,10 +121,10 @@ describe('pushContext(ctx, { legacyEnterWith: true })', () => {
     const outer = new SessionContext({ sessionId: 'outer' });
     const inner = new SessionContext({ sessionId: 'inner' });
 
-    const resetOuter = pushContext(outer, legacy);
+    const resetOuter = pushContext(outer);
     try {
       expect(getActiveContext()?.sessionId).toBe('outer');
-      const resetInner = pushContext(inner, legacy);
+      const resetInner = pushContext(inner);
       expect(getActiveContext()?.sessionId).toBe('inner');
       resetInner();
       expect(getActiveContext()?.sessionId).toBe('outer');
@@ -131,9 +135,9 @@ describe('pushContext(ctx, { legacyEnterWith: true })', () => {
 
   it('pushing null clears the active context', (): void => {
     const ctx = new SessionContext({ sessionId: 'active' });
-    const resetCtx = pushContext(ctx, legacy);
+    const resetCtx = pushContext(ctx);
     try {
-      const resetNull = pushContext(null, legacy);
+      const resetNull = pushContext(null);
       expect(getActiveContext()).toBeNull();
       resetNull();
       expect(getActiveContext()?.sessionId).toBe('active');
@@ -145,9 +149,9 @@ describe('pushContext(ctx, { legacyEnterWith: true })', () => {
   it('reset is idempotent', (): void => {
     const a = new SessionContext({ sessionId: 'a' });
     const b = new SessionContext({ sessionId: 'b' });
-    const resetA = pushContext(a, legacy);
+    const resetA = pushContext(a);
     try {
-      const resetB = pushContext(b, legacy);
+      const resetB = pushContext(b);
       resetB();
       resetB();
       expect(getActiveContext()?.sessionId).toBe('a');

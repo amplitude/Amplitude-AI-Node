@@ -118,21 +118,6 @@ export function runWithContextAsync<T>(
   return _sessionStorage.run(ctx, fn);
 }
 
-export interface PushContextOptions {
-  /**
-   * Restore the previous behavior: set the context with
-   * `AsyncLocalStorage.enterWith()` for the rest of the current async scope.
-   *
-   * Unsafe on HTTP servers: the context attaches to the execution context of
-   * the socket, so later requests on the same keep-alive connection (including
-   * unauthenticated ones that never call `pushContext`) inherit the previous
-   * caller's identity, and calling the returned cleanup does not undo that.
-   * Only use it in single-purpose scripts or workers that never serve more
-   * than one end user per process.
-   */
-  legacyEnterWith?: boolean;
-}
-
 let _warnedUnscopedPush = false;
 
 /** @internal Reset the one-time warning flag. For test isolation only. */
@@ -155,39 +140,37 @@ export function _resetPushContextWarning(): void {
  */
 export function pushContext<T>(ctx: SessionContext | null, fn: () => T): T;
 /**
- * @deprecated The callback-less form no longer changes the active
- * context, because `AsyncLocalStorage.enterWith()` leaked identity across
- * requests that share a keep-alive socket. It logs a one-time warning and
- * returns a no-op cleanup. Pass a callback (`pushContext(ctx, fn)`) or use
- * `runWithContext()` / `session.run()`. To opt back into the old,
- * process-unsafe behavior, pass `{ legacyEnterWith: true }`.
+ * @deprecated Set the context for the rest of the current async scope and
+ * return a cleanup function that restores the previous context. Logs a
+ * one-time warning.
+ *
+ * Unsafe on HTTP servers: `AsyncLocalStorage.enterWith()` attaches the
+ * context to the socket's execution context, so later requests on the same
+ * keep-alive connection that never call `pushContext` inherit the previous
+ * caller's identity, and the cleanup does not undo that. Prefer
+ * `pushContext(ctx, fn)`, `runWithContext()` or `session.run()`.
  */
-export function pushContext(
-  ctx: SessionContext | null,
-  options?: PushContextOptions,
-): () => void;
+export function pushContext(ctx: SessionContext | null): () => void;
 export function pushContext<T>(
   ctx: SessionContext | null,
-  fnOrOptions?: (() => T) | PushContextOptions,
+  fn?: () => T,
 ): T | (() => void) {
-  if (typeof fnOrOptions === 'function') {
-    return _sessionStorage.run(ctx, fnOrOptions);
-  }
-  if (fnOrOptions?.legacyEnterWith === true) {
-    const previous = _sessionStorage.getStore() ?? null;
-    _sessionStorage.enterWith(ctx);
-    return () => {
-      _sessionStorage.enterWith(previous);
-    };
+  if (typeof fn === 'function') {
+    return _sessionStorage.run(ctx, fn);
   }
   if (!_warnedUnscopedPush) {
     _warnedUnscopedPush = true;
     getLogger().warn(
-      'pushContext(ctx) without a callback is deprecated and no longer sets the active context. ' +
-        'Use pushContext(ctx, fn), runWithContext(ctx, fn), or session.run(fn).',
+      'pushContext(ctx) without a callback is deprecated: on HTTP servers the context can carry over ' +
+        'to later requests on the same connection. Use pushContext(ctx, fn), runWithContext(ctx, fn), ' +
+        'or session.run(fn).',
     );
   }
-  return () => {};
+  const previous = _sessionStorage.getStore() ?? null;
+  _sessionStorage.enterWith(ctx);
+  return () => {
+    _sessionStorage.enterWith(previous);
+  };
 }
 
 export { _sessionStorage };

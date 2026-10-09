@@ -20,8 +20,9 @@ Hardening release. Upgrading is recommended for all users.
   (`traceparent`, `x-amplitude-session-id`, `x-amplitude-agent-id`) and never
   includes user or device IDs. `setDefaultPropagateContext` is deprecated.
 - **`pushContext(ctx, fn)`** keeps the context only while `fn` runs.
-  `pushContext(ctx)` without a callback is deprecated and no longer changes the
-  context; `{ legacyEnterWith: true }` restores the old behavior.
+  `pushContext(ctx)` without a callback still sets the context but is
+  deprecated and warns once: on HTTP servers the context can carry over to
+  later requests on the same keep-alive connection.
 - **`session.run()` caps its automatic flush at 3 s** (`flushTimeoutMs` on
   `AIConfig` or the session).
 - **Framework integrations resolve identity per run.** Without an identity they

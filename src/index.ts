@@ -56,7 +56,6 @@ export {
   runWithContext,
   runWithContextAsync,
 } from './context.js';
-export type { PushContextOptions } from './context.js';
 
 // Core - Constants & Tracking
 export {
