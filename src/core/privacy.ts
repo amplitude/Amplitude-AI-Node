@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { ConfigurationError } from '../exceptions.js';
 import { getLogger } from '../utils/logger.js';
 import {
   PROP_HAS_REASONING,
@@ -303,6 +304,49 @@ export function normalizeToolDefinitions(
   return normalized;
 }
 
+export type CustomRedactionPattern =
+  | string
+  | { pattern: string; replacement: string };
+
+/**
+ * Compile caller-supplied redaction patterns. Throws `ConfigurationError`
+ * on an invalid entry so a typo is caught at configuration time instead of
+ * silently disabling that rule.
+ */
+export function compileCustomRedactionPatterns(
+  patterns: readonly CustomRedactionPattern[],
+): Array<{ regex: RegExp; replacement: string }> {
+  if (!Array.isArray(patterns)) {
+    throw new ConfigurationError(
+      'customRedactionPatterns must be an array of strings or { pattern, replacement } objects',
+    );
+  }
+  return patterns.map((entry, index) => {
+    const isObject = entry != null && typeof entry === 'object';
+    const source = isObject
+      ? (entry as { pattern: unknown }).pattern
+      : (entry as unknown);
+    const replacement = isObject
+      ? (entry as { replacement: unknown }).replacement
+      : '[REDACTED]';
+    if (
+      (typeof source !== 'string' && !(source instanceof RegExp)) ||
+      typeof replacement !== 'string'
+    ) {
+      throw new ConfigurationError(
+        `customRedactionPatterns[${index}] must be a string or { pattern: string, replacement: string }`,
+      );
+    }
+    try {
+      return { regex: new RegExp(source, 'g'), replacement };
+    } catch (e) {
+      throw new ConfigurationError(
+        `customRedactionPatterns[${index}] is not a valid regular expression: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  });
+}
+
 export interface PrivacyConfigOptions {
   privacyMode?: boolean;
   redactPii?: boolean;
@@ -324,6 +368,7 @@ export class PrivacyConfig {
   private readonly _compiledCustomPatterns: Array<{ regex: RegExp; replacement: string }>;
   private readonly _customRedactionFn: ((text: string) => string) | null;
   private readonly _contentMode: string | null;
+  private _warnedCustomRedactionFailure = false;
 
   constructor(options: PrivacyConfigOptions = {}) {
     this.privacyMode = options.privacyMode ?? false;
@@ -332,29 +377,14 @@ export class PrivacyConfig {
     this.debug = options.debug ?? false;
     this.captureStackTrace = options.captureStackTrace ?? false;
     this.customPatterns = options.customRedactionPatterns ?? [];
-    this._compiledCustomPatterns = [];
-    this._customRedactionFn = options.customRedactionFn ?? null;
-
-    for (const pattern of this.customPatterns) {
-      try {
-        if (typeof pattern === 'string') {
-          this._compiledCustomPatterns.push({
-            regex: new RegExp(pattern, 'g'),
-            replacement: '[REDACTED]',
-          });
-        } else {
-          this._compiledCustomPatterns.push({
-            regex: new RegExp(pattern.pattern, 'g'),
-            replacement: pattern.replacement,
-          });
-        }
-      } catch (e) {
-        const raw = typeof pattern === 'string' ? pattern : pattern.pattern;
-        getLogger().warn(
-          `Invalid custom redaction regex "${raw}": ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
+    this._compiledCustomPatterns = compileCustomRedactionPatterns(
+      this.customPatterns,
+    );
+    const fn = options.customRedactionFn ?? null;
+    if (fn != null && typeof fn !== 'function') {
+      throw new ConfigurationError('customRedactionFn must be a function');
     }
+    this._customRedactionFn = fn;
 
     let modeStr: string | null = null;
     if (options.contentMode != null) {
@@ -393,9 +423,10 @@ export class PrivacyConfig {
       try {
         result = result.replace(regex, replacement);
       } catch (e) {
-        getLogger().warn(
-          `Custom redaction regex "${regex.source}" failed: ${e instanceof Error ? e.message : String(e)}`,
+        this._warnCustomRedactionFailure(
+          `customRedactionPatterns /${regex.source}/ failed (${e instanceof Error ? e.name : typeof e})`,
         );
+        return REDACTED_CONTENT_PLACEHOLDER;
       }
     }
     return result;
@@ -405,18 +436,25 @@ export class PrivacyConfig {
     if (this._customRedactionFn == null || typeof text !== 'string') {
       return text;
     }
+    let detail: string;
     try {
       const result = this._customRedactionFn(text);
       if (typeof result === 'string') return result;
-      getLogger().error(
-        `customRedactionFn returned ${typeof result} instead of string; skipping — PII may not be fully redacted for this event`,
-      );
+      detail = `customRedactionFn returned ${typeof result} instead of string`;
     } catch (e) {
-      getLogger().error(
-        `customRedactionFn raised an exception: ${e instanceof Error ? e.message : String(e)} — PII may not be fully redacted for this event`,
-      );
+      // The exception message may echo the input, so only its type is logged.
+      detail = `customRedactionFn threw ${e instanceof Error ? e.name : typeof e}`;
     }
-    return text;
+    this._warnCustomRedactionFailure(detail);
+    return REDACTED_CONTENT_PLACEHOLDER;
+  }
+
+  private _warnCustomRedactionFailure(detail: string): void {
+    if (this._warnedCustomRedactionFailure) return;
+    this._warnedCustomRedactionFailure = true;
+    getLogger().error(
+      `${detail}; content replaced with "${REDACTED_CONTENT_PLACEHOLDER}". Further failures from this config are not logged.`,
+    );
   }
 
   private _applyCustomPatternsToLlmMessage(

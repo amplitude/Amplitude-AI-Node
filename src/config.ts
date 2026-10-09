@@ -1,4 +1,8 @@
-import { PrivacyConfig } from './core/privacy.js';
+import {
+  compileCustomRedactionPatterns,
+  PrivacyConfig,
+} from './core/privacy.js';
+import { ConfigurationError } from './exceptions.js';
 
 /**
  * Content privacy mode for LLM message tracking.
@@ -76,7 +80,14 @@ export class AIConfig {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
     this.redactPii = options.redactPii ?? true;
     this.customRedactionPatterns = options.customRedactionPatterns ?? [];
+    compileCustomRedactionPatterns(this.customRedactionPatterns);
     this.customRedactionFn = options.customRedactionFn ?? null;
+    if (
+      this.customRedactionFn != null &&
+      typeof this.customRedactionFn !== 'function'
+    ) {
+      throw new ConfigurationError('customRedactionFn must be a function');
+    }
     this.onEventCallback = options.onEventCallback ?? null;
     this.debug = options.debug ?? false;
     this.dryRun = options.dryRun ?? false;
