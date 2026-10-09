@@ -13,42 +13,40 @@ pnpm add @amplitude/ai
 The SDK ships an MCP server for AI coding agents. It provides project scanning,
 file validation, instrumentation, test generation, and the complete API reference.
 
+Install `@amplitude/ai` in the project first, and configure the server per
+project (not in a global config) so it runs the version installed in that project.
+Always name the scoped package in `npx` (`npx -y -p @amplitude/ai amplitude-ai ...`):
+`amplitude-ai` is only a bin name, and `npx` without `-p` looks it up as a separate package.
+
 ### Cursor
 
 Add to `.cursor/mcp.json` in your project root:
 ```json
-{
-  "mcpServers": {
-    "amplitude-ai": {
-      "command": "npx",
-      "args": ["amplitude-ai", "mcp"]
-    }
-  }
-}
+{ "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"] } } }
 ```
 Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
 
 ### Claude Code
 
 ```bash
-claude mcp add amplitude-ai -- npx amplitude-ai mcp
+claude mcp add --scope project amplitude-ai -- npx -y -p @amplitude/ai amplitude-ai mcp
 ```
-Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
+This writes `.mcp.json` in the project root. Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
 
 ### OpenAI Codex CLI
 
-Add to `~/.codex/config.toml`:
+Add to `.codex/config.toml` in your project root (Codex reads project config for trusted projects):
 ```toml
 [mcp_servers.amplitude-ai]
 command = "npx"
-args = ["amplitude-ai", "mcp"]
+args = ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"]
 ```
 Codex auto-reads this `AGENTS.md` file for context.
 
 ### Generic (any MCP-compatible agent)
 
 ```json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+{ "amplitude-ai": { "command": "npx", "args": ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"] } }
 ```
 
 ## Decision Tree

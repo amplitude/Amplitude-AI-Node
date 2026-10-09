@@ -32,15 +32,15 @@ amplitude-ai://instrument-guide
 [Agent] User Message
 
 [integrations]
-sierra=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md
-decagon=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md
-fin=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md
-agentforce=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md
-langfuse=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md
-langsmith=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md
-braintrust=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md
-warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md
-routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md
-analytics-metadata-schema=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json
-check-agent-events=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs
-otlp-replay=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs
+sierra=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/sierra.md
+decagon=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/decagon.md
+fin=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/fin.md
+agentforce=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/agentforce.md
+langfuse=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/langfuse.md
+langsmith=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/langsmith.md
+braintrust=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/braintrust.md
+warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/warehouses/README.md
+routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/routers.md
+analytics-metadata-schema=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/analytics-metadata.schema.json
+check-agent-events=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/check-agent-events.mjs
+otlp-replay=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/warehouses/otlp-replay.mjs

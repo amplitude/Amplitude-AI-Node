@@ -14,25 +14,26 @@ project analysis tools (scan_project, validate_file):
 pnpm add @amplitude/ai
 ```
 
-MCP config (one line — works with any MCP-compatible agent):
+MCP config (one line — works with any MCP-compatible agent). Configure it per
+project, and always name the scoped package in npx:
 ```json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+{ "amplitude-ai": { "command": "npx", "args": ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"] } }
 ```
 
 Agent-specific setup:
 
-Cursor: Add to .cursor/mcp.json:
-  { "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } } }
+Cursor: Add to .cursor/mcp.json in the project root:
+  { "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"] } } }
   Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
-Claude Code:
-  claude mcp add amplitude-ai -- npx amplitude-ai mcp
+Claude Code (writes .mcp.json in the project root):
+  claude mcp add --scope project amplitude-ai -- npx -y -p @amplitude/ai amplitude-ai mcp
   Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
-Codex CLI: Add to ~/.codex/config.toml:
+Codex CLI: Add to .codex/config.toml in the project root:
   [mcp_servers.amplitude-ai]
   command = "npx"
-  args = ["amplitude-ai", "mcp"]
+  args = ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"]
   AGENTS.md in the npm package is auto-read by Codex.
 
 Without MCP: Read amplitude-ai.md for the complete guided workflow, or this file for the API reference.
