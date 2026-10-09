@@ -30,6 +30,10 @@ import {
   getActiveContext,
   SessionContext,
 } from './context.js';
+import {
+  DEFAULT_FLUSH_TIMEOUT_MS,
+  normalizeFlushTimeoutMs,
+} from './config.js';
 import type { SessionEnrichments } from './core/enrichments.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { isServerless } from './serverless.js';
@@ -77,6 +81,13 @@ export interface SessionOptions {
    */
   autoFlush?: boolean;
   /**
+   * Maximum time (ms) `run()` waits for the automatic flush before resolving.
+   * Defaults to the `AIConfig.flushTimeoutMs` of the owning `AmplitudeAI`
+   * (3000 ms unless configured). The flush continues in the background after
+   * the timeout.
+   */
+  flushTimeoutMs?: number;
+  /**
    * Emit `[Agent] Session End` when `run()` finishes.
    *
    * - `true` (default) — always emit session-end
@@ -95,6 +106,7 @@ export class Session {
   readonly browserSessionId: string | null;
   readonly tags: string[] | null;
   readonly autoFlush: boolean;
+  readonly flushTimeoutMs: number | null;
   readonly trackSessionEnd: boolean;
   /** @internal Set by `runAs()` to suppress auto user-message tracking in delegation contexts. */
   _skipAutoUserTracking = false;
@@ -113,6 +125,7 @@ export class Session {
       (agent._defaults.browserSessionId as string | null);
     this.tags = opts.tags ?? null;
     this.autoFlush = opts.autoFlush ?? isServerless();
+    this.flushTimeoutMs = normalizeFlushTimeoutMs(opts.flushTimeoutMs);
     this.trackSessionEnd = opts.trackSessionEnd ?? true;
     this._agent = agent;
     this._sessionReplayId =
@@ -277,6 +290,14 @@ export class Session {
     }
   }
 
+  private _effectiveFlushTimeoutMs(): number {
+    if (this.flushTimeoutMs != null) return this.flushTimeoutMs;
+    const configured = (
+      this._agent._ai as { config?: { flushTimeoutMs?: unknown } } | undefined
+    )?.config?.flushTimeoutMs;
+    return normalizeFlushTimeoutMs(configured) ?? DEFAULT_FLUSH_TIMEOUT_MS;
+  }
+
   private async _flush(): Promise<void> {
     try {
       const result = this._agent.flush() as
@@ -294,11 +315,37 @@ export class Session {
               ? result
               : null;
         if (awaitable != null) {
-          await awaitable;
+          await this._awaitWithTimeout(awaitable as Promise<unknown>);
         }
       }
     } catch (e) {
-      getLogger().warn(`Failed to flush after session ${this.sessionId}: ${e}`);
+      getLogger().warn(
+        `Failed to flush after session.run() (${e instanceof Error ? e.name : typeof e}).`,
+      );
+    }
+  }
+
+  private async _awaitWithTimeout(awaitable: Promise<unknown>): Promise<void> {
+    const timeoutMs = this._effectiveFlushTimeoutMs();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+    });
+    try {
+      const outcome = await Promise.race([
+        Promise.resolve(awaitable).then(() => 'done' as const),
+        timedOut,
+      ]);
+      if (outcome === 'timeout') {
+        // Keep a late rejection from surfacing as unhandled.
+        Promise.resolve(awaitable).catch(() => {});
+        getLogger().warn(
+          `Flush after session.run() did not complete within ${timeoutMs}ms; continuing without waiting. Pending events may be delivered later or lost if the process exits. Adjust with AIConfig.flushTimeoutMs.`,
+        );
+      }
+    } finally {
+      if (timer != null) clearTimeout(timer);
     }
   }
 
