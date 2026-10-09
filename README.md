@@ -407,7 +407,7 @@ await session.run(async (s) => {
 Main client that wraps Amplitude `analytics-node`. Create it with an API key or an existing Amplitude instance:
 
 ```typescript
-const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 // Or with existing client:
 const ai = new AmplitudeAI({ amplitude: existingAmplitudeClient });
 ```
@@ -625,7 +625,7 @@ const config = new AIConfig({
   dryRun: false,
 });
 
-const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY!, config });
 ```
 
 | Option                    | Description                                                                                                 |
@@ -783,7 +783,7 @@ function redactNames(text: string): string {
 }
 
 const ai = new AmplitudeAI({
-  apiKey: 'YOUR_KEY',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({
     redactPii: true,
     customRedactionFn: redactNames,
@@ -1031,7 +1031,7 @@ const instrumented = wrap(client, ai);
 Provider wrappers (`OpenAI`, `AzureOpenAI`, `Anthropic`, `Gemini`, `Mistral`, `Bedrock`) automatically detect supported streaming responses and track them transparently. The wrapper intercepts the `AsyncIterable`, accumulates chunks, measures TTFB, and emits an `[Agent] AI Response` event after the stream is fully consumed:
 
 ```typescript
-const openai = new OpenAI({ amplitude: ai, apiKey: '...' });
+const openai = new OpenAI({ amplitude: ai, apiKey: process.env.OPENAI_API_KEY });
 
 // Streaming is handled automatically — just iterate the result
 const stream = await openai.chat.completions.create({
@@ -1498,7 +1498,7 @@ Prints a colored (ANSI) summary of every tracked event to stderr. All 8 event ty
 
 ```typescript
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ debug: true }),
 });
 
@@ -1514,7 +1514,7 @@ Logs the full event JSON to stderr WITHOUT sending to Amplitude. Events are neve
 
 ```typescript
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ dryRun: true }),
 });
 
@@ -1808,7 +1808,7 @@ Track tool calls with execution latency and AI messages from Claude Agent SDK.
 import { AmplitudeAI } from '@amplitude/ai';
 import { ClaudeAgentSDKTracker } from '@amplitude/ai/integrations/claude-agent-sdk';
 
-const ai = new AmplitudeAI({ apiKey: 'YOUR_KEY' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const agent = ai.agent({ agentId: 'code-reviewer' });
 const tracker = new ClaudeAgentSDKTracker();
 
@@ -2171,7 +2171,7 @@ export async function POST(req: Request) {
 import { AIConfig, AmplitudeAI, ValidationError } from '@amplitude/ai';
 
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ validate: true }),
 });
 
@@ -2867,7 +2867,8 @@ If you have Python available, the `amplitude-ai` package provides a CLI that cal
 
 ```bash
 pip install amplitude-ai
-AMPLITUDE_API_KEY=YOUR_KEY AMPLITUDE_SECRET_KEY=YOUR_SECRET amplitude-ai-register-catalog
+# with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY exported in your shell:
+amplitude-ai-register-catalog
 ```
 
 ### What gets registered
@@ -2976,9 +2977,11 @@ Features that do not map 1:1 because of platform/runtime constraints:
 
 ```python
 # Python
+import os
+
 from amplitude_ai import AmplitudeAI, tool, observe
 
-ai = AmplitudeAI(api_key="xxx")
+ai = AmplitudeAI(api_key=os.environ["AMPLITUDE_AI_API_KEY"])
 agent = ai.agent("my-agent", user_id="u1")
 
 with agent.session(user_id="u1") as s:
@@ -2994,7 +2997,7 @@ def search(query: str) -> str:
 // TypeScript
 import { AmplitudeAI, tool } from '@amplitude/ai';
 
-const ai = new AmplitudeAI({ apiKey: 'xxx' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const agent = ai.agent('my-agent', { userId: 'u1' });
 
 const session = agent.session({ userId: 'u1' });

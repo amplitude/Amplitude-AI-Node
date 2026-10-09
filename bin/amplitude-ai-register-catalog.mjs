@@ -67,7 +67,7 @@ Options:
 
 Alternatively, use the Python CLI for direct execution:
   pip install amplitude-ai
-  AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET amplitude-ai-register-catalog`);
+  amplitude-ai-register-catalog   # with the same variables exported`);
     process.exit(0);
   }
 

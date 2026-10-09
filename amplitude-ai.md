@@ -843,10 +843,10 @@ If the project uses a different env var for the Amplitude API key (detected in P
 npx -y -p @amplitude/ai amplitude-ai doctor --key-env AMPLITUDE_API_KEY
 ```
 
-If the key lives in a `.env` file rather than the shell environment, load it first:
+If the key lives in a `.env` file rather than the shell environment, let Node load it (Node 20.6+) instead of sourcing the file into your shell:
 
 ```bash
-set -a && source .env && set +a && npx -y -p @amplitude/ai amplitude-ai doctor --key-env AMPLITUDE_API_KEY
+node --env-file=.env node_modules/@amplitude/ai/bin/amplitude-ai.mjs doctor --key-env AMPLITUDE_API_KEY
 ```
 
 All doctor failures are mandatory to resolve before proceeding. **Exception:** if your Phase 1 list included `REQUIRED: Local LLM`, doctor will report `provider_dependency` — this is expected and not a failure. Ignore that check only; all other doctor checks still apply.
@@ -854,7 +854,7 @@ All doctor failures are mandatory to resolve before proceeding. **Exception:** i
 ### Step 4d: Run project checks
 
 ```bash
-npx tsc --noEmit    # TypeScript compiles
+npx --no -- tsc --noEmit    # TypeScript compiles (project-local typescript; never installs the unrelated `tsc` package)
 npm test            # Existing tests still pass
 ```
 
