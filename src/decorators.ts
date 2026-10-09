@@ -14,7 +14,7 @@ import {
   SessionContext,
 } from './context.js';
 import { _getOtelOwner } from './client.js';
-import type { PrivacyConfig } from './core/privacy.js';
+import { PrivacyConfig } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
   AMP_INPUT_STATE,
@@ -113,6 +113,33 @@ export class ToolCallTracker {
 // Context resolution (merges runtime overrides > explicit opts > session ctx > global)
 // ---------------------------------------------------------------------------
 
+// Used when no privacy config is reachable (no decorator option, no owning
+// session, no ToolCallTracker config): content is dropped rather than sent.
+const _FAIL_CLOSED_PRIVACY_CONFIG = new PrivacyConfig({
+  privacyMode: true,
+  contentMode: 'metadata_only',
+});
+
+/**
+ * Privacy config resolution for decorators: decorator option → owning
+ * session's `AmplitudeAI` config → `ToolCallTracker` → `metadata_only`.
+ */
+function _isFullMode(pc: PrivacyConfig): boolean {
+  return pc.contentMode === 'full' || (pc.contentMode == null && !pc.privacyMode);
+}
+
+function _resolvePrivacyConfig(
+  explicit: PrivacyConfig | null | undefined,
+  ctx: SessionContext | null,
+): PrivacyConfig {
+  return (
+    explicit ??
+    ctx?.privacyConfig ??
+    ToolCallTracker._privacyConfig ??
+    _FAIL_CLOSED_PRIVACY_CONFIG
+  );
+}
+
 interface ToolOptions {
   name?: string;
   toolType?: string | null;
@@ -149,7 +176,7 @@ interface ResolvedContext {
   customerOrgId: string | null;
   agentVersion: string | null;
   context: Record<string, unknown> | null;
-  privacyConfig: PrivacyConfig | null;
+  privacyConfig: PrivacyConfig;
   eventProperties: Record<string, unknown> | null;
   userProperties: Record<string, unknown> | null;
   groups: Record<string, unknown> | null;
@@ -208,10 +235,7 @@ function _resolveContextFields(opts: ToolOptions): ResolvedContext {
       ToolCallTracker._context,
       ctx?.context,
     ) as Record<string, unknown> | null,
-    privacyConfig: resolve(
-      opts.privacyConfig,
-      ToolCallTracker._privacyConfig,
-    ) as PrivacyConfig | null,
+    privacyConfig: _resolvePrivacyConfig(opts.privacyConfig, ctx),
     eventProperties: resolve(
       opts.eventProperties,
       ToolCallTracker._eventProperties,
@@ -333,7 +357,12 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           // swallow callback errors
         }
       }
-      getLogger().error(`Tool '${toolName}' failed: ${errorMsg}`);
+      const errorType = e instanceof Error ? e.name : typeof e;
+      getLogger().error(
+        _isFullMode(r.privacyConfig)
+          ? `Tool '${toolName}' failed: ${errorMsg}`
+          : `Tool '${toolName}' failed (${errorType})`,
+      );
       throw e;
     } finally {
       const latencyMs = performance.now() - startTime;
@@ -348,8 +377,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
         ...extraProps,
       };
 
-      const captureStack = r.privacyConfig != null
-        && r.privacyConfig.captureStackTrace === true;
+      const captureStack = r.privacyConfig.captureStackTrace === true;
 
       try {
         trackToolCall({
@@ -479,7 +507,7 @@ interface ResolvedObserveParams {
   userId: string;
   agentId: string | null;
   env: string | null;
-  privacyConfig: PrivacyConfig | null;
+  privacyConfig: PrivacyConfig;
   context: SessionContext | null;
 }
 
@@ -490,21 +518,16 @@ function _resolveObserveParams(opts: ObserveOptions): ResolvedObserveParams {
     userId: opts.userId ?? ctx?.userId ?? ToolCallTracker._userId ?? '',
     agentId: opts.agentId ?? ctx?.agentId ?? ToolCallTracker._agentId ?? null,
     env: opts.env ?? ctx?.env ?? ToolCallTracker._env ?? null,
-    privacyConfig: opts.privacyConfig ?? ToolCallTracker._privacyConfig ?? null,
+    privacyConfig: _resolvePrivacyConfig(opts.privacyConfig, ctx),
     context: ctx,
   };
 }
 
 function _serializeState(
   value: unknown,
-  pc: PrivacyConfig | null,
+  pc: PrivacyConfig,
 ): Record<string, unknown> | null {
-  if (value == null) return null;
-  if (pc != null) {
-    const mode = pc.contentMode;
-    if (mode === 'metadata_only' || (mode == null && pc.privacyMode))
-      return null;
-  }
+  if (value == null || !_isFullMode(pc)) return null;
   if (typeof value === 'object' && !Array.isArray(value))
     return value as Record<string, unknown>;
   return { value: String(value) };
@@ -609,11 +632,7 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
       // meant the `full` fallback path always shipped it, and
       // `customer_enriched` mode leaked it too.
       const pc = params.privacyConfig;
-      const gateOpen =
-        pc == null
-          ? true
-          : pc.contentMode === 'full' ||
-            (pc.contentMode == null && !pc.privacyMode);
+      const gateOpen = _isFullMode(pc);
       const inputState = _serializeState(
         args.length === 1 ? args[0] : args.length > 0 ? { args } : null,
         pc,
@@ -743,6 +762,7 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
         agentId: params.agentId || spanName,
         env: params.env,
         amplitude: params.amplitude,
+        privacyConfig: params.privacyConfig,
       });
       return _sessionStorage.run(newCtx, runFn);
     }

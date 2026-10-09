@@ -232,7 +232,7 @@ describe('PrivacyConfig customRedactionFn', () => {
     expect(result['[Agent] System Prompt']).toBe('This is [HIDDEN] info');
   });
 
-  it('handles exception gracefully', () => {
+  it('drops content when the function throws', () => {
     const pc = new PrivacyConfig({
       contentMode: 'full',
       redactPii: false,
@@ -242,10 +242,10 @@ describe('PrivacyConfig customRedactionFn', () => {
     });
     const result = pc.sanitizeContent('safe text');
     const msg = result.$llm_message as Record<string, unknown>;
-    expect(msg.text).toBe('safe text');
+    expect(msg.text).toBe('[content redacted]');
   });
 
-  it('handles non-string return gracefully', () => {
+  it('drops content when the function returns a non-string', () => {
     const pc = new PrivacyConfig({
       contentMode: 'full',
       redactPii: false,
@@ -253,7 +253,7 @@ describe('PrivacyConfig customRedactionFn', () => {
     });
     const result = pc.sanitizeContent('safe text');
     const msg = result.$llm_message as Record<string, unknown>;
-    expect(msg.text).toBe('safe text');
+    expect(msg.text).toBe('[content redacted]');
   });
 });
 
@@ -435,18 +435,15 @@ describe('PrivacyConfig custom patterns', () => {
     expect(msg.text).toBe('The code is [REDACTED]');
   });
 
-  it('handles invalid regex patterns gracefully', () => {
-    const pc = new PrivacyConfig({
-      contentMode: 'full',
-      redactPii: false,
-      customRedactionPatterns: ['[invalid'],
-    });
-    const result = pc.sanitizeContent('Hello world');
-    const msg = (result as Record<string, unknown>).$llm_message as Record<
-      string,
-      unknown
-    >;
-    expect(msg.text).toBe('Hello world');
+  it('rejects invalid regex patterns at construction', () => {
+    expect(
+      () =>
+        new PrivacyConfig({
+          contentMode: 'full',
+          redactPii: false,
+          customRedactionPatterns: ['[invalid'],
+        }),
+    ).toThrow(/customRedactionPatterns\[0\] is not a valid regular expression/);
   });
 
   it('applies custom redaction patterns to long content', () => {

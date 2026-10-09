@@ -25,7 +25,7 @@ import {
 } from './core/constants.js';
 import { ConfigurationError, CostCalculationError } from './exceptions.js';
 import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
-import type { SpanEventMapper } from './otel/mapper.js';
+import type { OtelSpanFilter, SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
 import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
@@ -341,7 +341,7 @@ export class AmplitudeAI {
         console.warn(formatDebugLine(event));
       }
       if (dryRun) {
-        console.warn(formatDryRunLine(event));
+        console.warn(formatDryRunLine(event, this._config.contentMode));
       }
       if (!dryRun) {
         originalTrack(event);
@@ -1073,6 +1073,11 @@ export class AmplitudeAI {
     defaultUserId?: string;
     defaultDeviceId?: string;
     otelEndpoint?: string;
+    /**
+     * `'genai'` (default): only spans with `gen_ai.*` / `amplitude.*`
+     * attributes become events. `'all'`: map every span in the process.
+     */
+    otelSpanFilter?: OtelSpanFilter;
   }): this {
     if (this._otelEnabled) {
       getLogger().debug('enableOtel() called more than once — skipping');
@@ -1085,6 +1090,7 @@ export class AmplitudeAI {
       defaultDeviceId: options?.defaultDeviceId,
       otelEndpoint: options?.otelEndpoint,
       privacyConfig: this._privacyConfig,
+      otelSpanFilter: options?.otelSpanFilter,
     });
 
     this._otelTracerProvider = provider;
