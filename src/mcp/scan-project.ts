@@ -181,11 +181,13 @@ function collectSourceFiles(
 
 function inferAgentId(filePath: string): string {
   const base = basename(filePath).replace(/\.[^.]+$/, '');
+  let id = base;
   if (base === 'route' || base === 'index') {
-    const parentDir = basename(dirname(filePath));
-    return parentDir || base;
+    id = basename(dirname(filePath)) || base;
   }
-  return base;
+  // Ids flow into instrument_file's generated code; keep them to a safe charset.
+  const safe = id.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 128);
+  return safe || 'agent';
 }
 
 function inferDescription(

@@ -12,7 +12,7 @@ import {
 } from './contract.js';
 import { getIntegrationPatterns } from './patterns.js';
 import { generateVerifyTest } from './generate-verify-test.js';
-import { instrumentFile } from './instrument-file.js';
+import { InstrumentFileInputError, instrumentFile } from './instrument-file.js';
 import { type ScanResult, scanProject } from './scan-project.js';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
@@ -506,19 +506,28 @@ const createServer = (): McpServer => {
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
     async (args: any) => {
-      const result = instrumentFile({
-        source: typeof args?.source === 'string' ? args.source : '',
-        filePath: typeof args?.file_path === 'string' ? args.file_path : '',
-        tier: args?.tier ?? 'standard',
-        bootstrapImportPath:
-          typeof args?.bootstrap_import_path === 'string'
-            ? args.bootstrap_import_path
-            : '@/lib/amplitude',
-        agentId: typeof args?.agent_id === 'string' ? args.agent_id : 'agent',
-        description:
-          typeof args?.description === 'string' ? args.description : null,
-        providers: Array.isArray(args?.providers) ? args.providers : [],
-      });
+      let result: string;
+      try {
+        result = instrumentFile({
+          source: typeof args?.source === 'string' ? args.source : '',
+          filePath: typeof args?.file_path === 'string' ? args.file_path : '',
+          tier: args?.tier ?? 'standard',
+          bootstrapImportPath:
+            typeof args?.bootstrap_import_path === 'string'
+              ? args.bootstrap_import_path
+              : '@/lib/amplitude',
+          agentId: typeof args?.agent_id === 'string' ? args.agent_id : 'agent',
+          description:
+            typeof args?.description === 'string' ? args.description : null,
+          providers: Array.isArray(args?.providers) ? args.providers : [],
+        });
+      } catch (err) {
+        if (!(err instanceof InstrumentFileInputError)) throw err;
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err.message }) }],
+        };
+      }
       return {
         content: [{ type: 'text' as const, text: result }],
       };
