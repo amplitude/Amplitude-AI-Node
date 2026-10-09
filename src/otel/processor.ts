@@ -6,7 +6,7 @@
  */
 
 import { getLogger } from '../utils/logger.js';
-import type { OtelSpan, SpanEventMapper } from './mapper.js';
+import type { OtelSpan } from './mapper.js';
 
 const logger = getLogger();
 
@@ -17,10 +17,14 @@ export interface SpanProcessor {
   forceFlush(timeoutMillis?: number): Promise<void>;
 }
 
-export class AmplitudeEventSpanProcessor implements SpanProcessor {
-  private readonly _mapper: SpanEventMapper;
+export interface SpanMapperLike {
+  mapAndTrack(span: OtelSpan): void;
+}
 
-  constructor(mapper: SpanEventMapper) {
+export class AmplitudeEventSpanProcessor implements SpanProcessor {
+  private readonly _mapper: SpanMapperLike;
+
+  constructor(mapper: SpanMapperLike) {
     this._mapper = mapper;
   }
 
