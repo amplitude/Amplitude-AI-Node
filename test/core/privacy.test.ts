@@ -19,6 +19,13 @@ describe('isBase64DataUrl', () => {
     expect(isBase64DataUrl('data:image/png;base64,iVBOR...')).toBe(true);
     expect(isBase64DataUrl('https://example.com')).toBe(false);
   });
+
+  it('detects data URLs with media type parameters', () => {
+    expect(isBase64DataUrl('data:text/plain;charset=utf-8;base64,QUJD')).toBe(true);
+    expect(isBase64DataUrl('data:image/png;name=a.png;base64,QUJD')).toBe(true);
+    expect(isBase64DataUrl('data:;base64,QUJD')).toBe(true);
+    expect(isBase64DataUrl('data:text/plain;charset=utf-8,hello')).toBe(false);
+  });
 });
 
 describe('isRawBase64', () => {

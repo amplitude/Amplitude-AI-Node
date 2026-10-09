@@ -56,7 +56,7 @@ const IPV4_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 const IPV6_RE =
   /(?:(?<=\/\/)\[::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\]|(?<=\/\/)\[::1\]|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\b|(?<![^\s])::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b|(?<![^\s])::1\b)/g;
 const INTL_PHONE_RE = /(?<!\w)\+[1-9]\d{6,14}\b/g;
-const BASE64_DATA_URL_RE = /^data:([^;]+);base64,/;
+const BASE64_DATA_URL_RE = /^data:[^;,]*(?:;[^;,]+)*?;base64,/;
 const RAW_BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
 
 export function isBase64DataUrl(text: string): boolean {
