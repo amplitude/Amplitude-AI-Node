@@ -103,7 +103,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID and how many conversations had no user ID. Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub).
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
@@ -118,7 +118,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 - Langfuse rate-limits its public API per organization and plan, and returns `429` with a `Retry-After` header. The adapter waits that many seconds (or backs off exponentially, up to 60 seconds) and retries a `429` or `5xx` up to 6 times; after that the run stops without returning a watermark, so the next run reads the same window again. Keep the schedule no more frequent than the settle window needs.
 - One session that cannot be mapped, or that Amplitude rejects with a `4xx` other than `429`, is logged and counted as failed; the run continues. An Amplitude outage stops the run.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

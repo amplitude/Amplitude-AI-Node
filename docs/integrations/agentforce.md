@@ -124,7 +124,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a window that ended at least a day ago, and show the user the exact events, plus the job's warning line: how many sessions had no user ID, how many had no messages, and how many are still waiting for their trace. Optionally save the events as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a window that ended at least a day ago, and show the user the exact events, plus the job's warning line: how many sessions had no user ID, how many had no messages, and how many are still waiting for their trace. Optionally save the events as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub).
 2. Send a few real sessions. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each Agentforce session is one session, and the agent's greeting, if any, is its first turn
@@ -141,7 +141,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 - Run the job hourly. Each run reads the sessions that ended since the watermark, in 6-hour windows, with one query per table per window. Salesforce's standard API limits apply.
 - A session whose trace is still incomplete holds the watermark at its end time, so the next run reads it again. After 72 hours (`MAX_WAIT_MS`) it is forwarded anyway, flagged `trace_incomplete: true`.
 - For backfill, set the first watermark to the earliest date wanted (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

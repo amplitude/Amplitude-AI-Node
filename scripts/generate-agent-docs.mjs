@@ -59,6 +59,22 @@ const events = Array.isArray(catalog?.events)
       .sort((a, b) => a.localeCompare(b))
   : [];
 
+const mcpArgs = JSON.stringify(['-y', '-p', packageJson.name, 'amplitude-ai', 'mcp']).replaceAll(',', ', ');
+const mcpServerJson = `"amplitude-ai": { "command": "npx", "args": ${mcpArgs} }`;
+const mcpJsonGeneric = `{ ${mcpServerJson} }`;
+const mcpJsonCursor = `{ "mcpServers": { ${mcpServerJson} } }`;
+const claudeAddCommand = `claude mcp add --scope project amplitude-ai -- npx -y -p ${packageJson.name} amplitude-ai mcp`;
+const codexToml = `[mcp_servers.amplitude-ai]\ncommand = "npx"\nargs = ${mcpArgs}`;
+
+// Raw GitHub URLs handed to agents are pinned to this release's tag, never a branch.
+const releaseRawPrefix = `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v${packageJson.version}/`;
+const rawRefPattern = /https:\/\/raw\.githubusercontent\.com\/amplitude\/Amplitude-AI-Node\/[^/\s"'`]+\//g;
+const pinnedRawUrlFiles = [
+  join('docs', 'integrations', 'manifest.json'),
+  join('docs', 'integrations', 'README.md'),
+  join('docs', 'integrations', 'analytics-metadata.schema.json'),
+];
+
 const generatedHeader = '<!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->';
 
 const agentsMd = `# AGENTS.md
@@ -76,42 +92,38 @@ pnpm add ${packageJson.name}
 The SDK ships an MCP server for AI coding agents. It provides project scanning,
 file validation, instrumentation, test generation, and the complete API reference.
 
+Install \`${packageJson.name}\` in the project first, and configure the server per
+project (not in a global config) so it runs the version installed in that project.
+Always name the scoped package in \`npx\` (\`npx -y -p ${packageJson.name} amplitude-ai ...\`):
+\`amplitude-ai\` is only a bin name, and \`npx\` without \`-p\` looks it up as a separate package.
+
 ### Cursor
 
 Add to \`.cursor/mcp.json\` in your project root:
 \`\`\`json
-{
-  "mcpServers": {
-    "amplitude-ai": {
-      "command": "npx",
-      "args": ["amplitude-ai", "mcp"]
-    }
-  }
-}
+${mcpJsonCursor}
 \`\`\`
 Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
 
 ### Claude Code
 
 \`\`\`bash
-claude mcp add amplitude-ai -- npx amplitude-ai mcp
+${claudeAddCommand}
 \`\`\`
-Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
+This writes \`.mcp.json\` in the project root. Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
 
 ### OpenAI Codex CLI
 
-Add to \`~/.codex/config.toml\`:
+Add to \`.codex/config.toml\` in your project root (Codex reads project config for trusted projects):
 \`\`\`toml
-[mcp_servers.amplitude-ai]
-command = "npx"
-args = ["amplitude-ai", "mcp"]
+${codexToml}
 \`\`\`
 Codex auto-reads this \`AGENTS.md\` file for context.
 
 ### Generic (any MCP-compatible agent)
 
 \`\`\`json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+${mcpJsonGeneric}
 \`\`\`
 
 ## Decision Tree
@@ -219,7 +231,7 @@ warehouses=${warehouses.raw_url}
 routers=${integrations.routers.raw_url}
 ${integrations.schemas.map((s) => `${s.id}-schema=${s.raw_url}`).join('\n')}
 ${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
-`;
+`.replace(rawRefPattern, releaseRawPrefix);
 
 const mcpSchema = JSON.stringify(
   {
@@ -250,25 +262,24 @@ project analysis tools (scan_project, validate_file):
 pnpm add @amplitude/ai
 \`\`\`
 
-MCP config (one line — works with any MCP-compatible agent):
+MCP config (one line — works with any MCP-compatible agent). Configure it per
+project, and always name the scoped package in npx:
 \`\`\`json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+${mcpJsonGeneric}
 \`\`\`
 
 Agent-specific setup:
 
-Cursor: Add to .cursor/mcp.json:
-  { "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } } }
+Cursor: Add to .cursor/mcp.json in the project root:
+  ${mcpJsonCursor}
   Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
-Claude Code:
-  claude mcp add amplitude-ai -- npx amplitude-ai mcp
+Claude Code (writes .mcp.json in the project root):
+  ${claudeAddCommand}
   Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
-Codex CLI: Add to ~/.codex/config.toml:
-  [mcp_servers.amplitude-ai]
-  command = "npx"
-  args = ["amplitude-ai", "mcp"]
+Codex CLI: Add to .codex/config.toml in the project root:
+${codexToml.split('\n').map((line) => `  ${line}`).join('\n')}
   AGENTS.md in the npm package is auto-read by Codex.
 
 Without MCP: Read amplitude-ai.md for the complete guided workflow, or this file for the API reference.
@@ -685,6 +696,10 @@ const outputs = [
   { path: join(root, 'llms.txt'), content: llmsTxt },
   { path: join(root, 'llms-full.txt'), content: llmsFullTxtWithExcerpt },
   { path: join(root, 'mcp.schema.json'), content: `${mcpSchema}\n` },
+  ...pinnedRawUrlFiles.map((file) => ({
+    path: join(root, file),
+    content: readFileSync(join(root, file), 'utf8').replace(rawRefPattern, releaseRawPrefix),
+  })),
 ];
 
 let stale = false;

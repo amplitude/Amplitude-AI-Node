@@ -111,7 +111,7 @@ A conversation that cannot be mapped, or that Amplitude rejects with a `4xx` oth
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID, how many conversations had no user ID, and how many failed to map (each logged with its conversation ID). Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning line: how many traces had no conversation ID, how many conversations had no user ID, and how many failed to map (each logged with its conversation ID). Those are skipped, not sent. If either count is a meaningful share, the application needs to log the missing field before this integration is useful; tell the user rather than inventing a fallback. Optionally save them as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub).
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session
@@ -128,7 +128,7 @@ A conversation that cannot be mapped, or that Amplitude rejects with a `4xx` oth
 - Every `project_logs` query has a `created` range or a `root_span_id` predicate, as Braintrust requires to avoid a full scan, and queries that can span pages sort on `_pagination_key`, which cursor pagination requires.
 - For continuous export at high volume, Braintrust recommends its S3 export over polling SQL; this guide's job is for moderate volumes and backfill.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

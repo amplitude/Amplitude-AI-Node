@@ -58,17 +58,17 @@ Every platform and tracing-tool guide shares the same platform-neutral forwarder
 
 ## For coding agents
 
-Fetch the raw page for the source and follow "Part 2: Coding agent procedure":
+Fetch the raw page for the source and follow "Part 2: Coding agent procedure". If `@amplitude/ai` is installed, read the same page from `node_modules/@amplitude/ai/docs/integrations/` instead. The URLs below are pinned to a release tag; don't substitute `main`.
 
-- Sierra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md`
-- Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md`
-- Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md`
-- Agentforce: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md`
-- Langfuse: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md`
-- LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md`
-- Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`
-- Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
-- Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
+- Sierra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/sierra.md`
+- Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/decagon.md`
+- Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/fin.md`
+- Agentforce: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/agentforce.md`
+- Langfuse: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/langfuse.md`
+- LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/langsmith.md`
+- Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/braintrust.md`
+- Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/warehouses/README.md`
+- Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/routers.md`
 
 ## Your source is not listed
 
