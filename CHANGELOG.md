@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.21.0
+
+Hardening release. Upgrading is recommended for all users.
+
+### Changed
+- **`wrap()` instruments your OpenAI, Azure OpenAI or Anthropic client in
+  place** instead of building a new one, so its baseURL, custom `fetch`,
+  headers, proxy, timeouts and Azure settings are kept. Construct
+  `AmpOpenAI` / `AmpAnthropic` directly for a fresh client.
+- **Request options reach the provider.** The second argument of a wrapped
+  method can carry `signal`, `timeout`, `headers`, `maxRetries` and
+  `idempotencyKey` alongside the Amplitude options; an optional third argument
+  is passed to the SDK unchanged.
+- **Tracking never throws into your provider call.** A failed event is skipped
+  with one content-free warning; provider errors pass through unchanged.
+- **Each `AmplitudeAI` uses its own analytics client and its own
+  `propagateContext` setting.** Propagated context goes in request headers
+  (`traceparent`, `x-amplitude-session-id`, `x-amplitude-agent-id`) and never
+  includes user or device IDs. `setDefaultPropagateContext` is deprecated.
+- **`pushContext(ctx, fn)`** keeps the context only while `fn` runs.
+  `pushContext(ctx)` without a callback is deprecated and no longer changes the
+  context; `{ legacyEnterWith: true }` restores the old behavior.
+- **`session.run()` caps its automatic flush at 3 s** (`flushTimeoutMs` on
+  `AIConfig` or the session).
+- **Framework integrations resolve identity per run.** Without an identity they
+  use anonymous per-run IDs instead of shared constants.
+- **`@tool` follows the active content mode.** With no privacy config it sends
+  metadata only and warns once; pass `privacyConfig` to change that. A failing
+  custom redaction function drops the content.
+- **Redaction:** attachments and labels are redacted; debug logs no longer
+  include message content.
+- **OpenTelemetry:** only GenAI and Amplitude spans are mapped, and SDK-emitted
+  spans are skipped.
+- **Inbound headers:** `traceparent` must be valid W3C; `x-trace-id` is limited
+  to 64 characters of `[A-Za-z0-9._:-]`. `extractContext()` is for trusted
+  internal traffic only. New middleware option `deviceIdResolver`.
+- **`amplitude-ai-instrument` instruments only the launched process.** Set
+  `AMPLITUDE_AI_INSTRUMENT_CHILDREN=true` for the previous behavior.
+- **MCP server:** `scan_project` is limited to client roots or
+  `AMPLITUDE_AI_MCP_ROOTS`; scans and inputs have size limits; code snippets
+  mask key-like values.
+- **Offline eval uploads** require https (http only for localhost), don't follow
+  redirects, and time out after 30 s (`timeoutMs`).
+- **Streamed tool calls** with an index outside 0–127 are ignored.
+- **Packaging:** optional dependencies are no longer bundled into
+  `dist/node_modules`; the MCP server uses the installed
+  `@modelcontextprotocol/sdk` (now `^1.31.0`) and `zod`. Peer ranges have upper
+  bounds.
+- **Docs and tooling:** all `npx` commands use the scoped package
+  (`npx -y -p @amplitude/ai amplitude-ai …`); integration scripts run from the
+  installed package; doc URLs point at the release tag; the bundled Claude
+  command no longer pre-approves shell or file-write tools; examples read API
+  keys from the environment.
+- **Release process:** publishing verifies the tagged commit is on `main` and
+  matches `package.json`; CI adds workflow, package-contents and docs checks,
+  plus a weekly dependency audit.
+
 ## 0.20.1
 
 ### Fixed (AA-152502)

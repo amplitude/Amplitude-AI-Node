@@ -68,7 +68,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.20.1                                                                                                                                                                           |
+| Version         | 0.21.0                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |

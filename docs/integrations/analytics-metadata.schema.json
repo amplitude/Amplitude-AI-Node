@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.20.1/docs/integrations/analytics-metadata.schema.json",
+  "$id": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.21.0/docs/integrations/analytics-metadata.schema.json",
   "title": "Amplitude analytics metadata",
   "description": "Identity an application passes on each request to an inference router or AI gateway, so the router's exported GenAI spans become analyzable Agent Analytics sessions. See routers.md for the span attribute each field becomes.",
   "type": "object",

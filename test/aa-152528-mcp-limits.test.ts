@@ -10,7 +10,9 @@ import {
 import { MAX_SCAN_FILE_BYTES, scanProject } from '../src/mcp/scan-project.js';
 import { analyzeFileInstrumentation } from '../src/mcp/validate-file.js';
 
-const BUDGET_MS = 2000;
+// Fixed code runs these in ~1s; the pre-fix regexes took 6–45s.
+const BUDGET_MS = 4000;
+const TEST_TIMEOUT_MS = 20_000;
 // A syntax error forces the regex fallback path.
 const BAD = '\n@@@ syntax error forces regex fallback\n';
 
@@ -39,12 +41,12 @@ describe('instrument_file stays linear on adversarial input', (): void => {
     ['nested constructors', `${'new OpenAI('.repeat(20000)}${')'.repeat(20000)}`],
   ])('%s', (_label, source): void => {
     expect(timed(() => inst(source))).toBeLessThan(BUDGET_MS);
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('unterminated route handler heads', (): void => {
     const source = 'export async function POST('.repeat(32000);
     expect(timed(() => inst(source, 'advanced', []))).toBeLessThan(BUDGET_MS);
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('rejects sources over the size cap', (): void => {
     expect(() => inst('x'.repeat(MAX_INSTRUMENT_SOURCE_CHARS + 1))).toThrow(InstrumentFileInputError);
@@ -79,7 +81,7 @@ describe('validate_file regex fallback stays linear', (): void => {
     ['many call sites far from any function', `${'\n'.repeat(5000)}${'o.chat.completions.create({})\n'.repeat(5000)}${BAD}`],
   ])('%s', (_label, source): void => {
     expect(timed(() => analyzeFileInstrumentation(source))).toBeLessThan(BUDGET_MS);
-  });
+  }, TEST_TIMEOUT_MS);
 });
 
 describe('scan_project size limits', (): void => {
