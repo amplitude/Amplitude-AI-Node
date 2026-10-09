@@ -10,7 +10,8 @@
  * Environment variables:
  * - AMPLITUDE_AI_API_KEY (required): Amplitude API key
  * - AMPLITUDE_AI_AUTO_PATCH: Must be "true" to enable auto-patching
- * - AMPLITUDE_AI_CONTENT_MODE: "full" (default), "metadata_only", or "customer_enriched"
+ * - AMPLITUDE_AI_CONTENT_MODE: "full" (default), "metadata_only", or "customer_enriched".
+ *   Any other value skips auto-patching (nothing is tracked) with a warning.
  * - AMPLITUDE_AI_DEBUG: "true" for debug output to stderr
  */
 
@@ -32,26 +33,26 @@ if (!apiKey) {
   try {
     const debug =
       (process.env.AMPLITUDE_AI_DEBUG ?? '').toLowerCase() === 'true';
-    const contentModeStr = (
-      process.env.AMPLITUDE_AI_CONTENT_MODE ?? 'full'
-    ).toLowerCase();
+    const rawContentMode = process.env.AMPLITUDE_AI_CONTENT_MODE ?? '';
+    const contentModeStr = rawContentMode.trim().toLowerCase() || 'full';
+    const validModes: readonly string[] = Object.values(ContentMode);
 
-    let contentMode = ContentMode.FULL;
-    if (contentModeStr === 'metadata_only')
-      contentMode = ContentMode.METADATA_ONLY;
-    else if (contentModeStr === 'customer_enriched')
-      contentMode = ContentMode.CUSTOMER_ENRICHED;
+    if (!validModes.includes(contentModeStr)) {
+      process.stderr.write(
+        `amplitude-ai: WARNING invalid AMPLITUDE_AI_CONTENT_MODE ${JSON.stringify(rawContentMode.slice(0, 64))}; ` +
+          `expected one of ${validModes.join(', ')}. Skipping auto-patch: no LLM calls will be tracked.\n`,
+      );
+    } else {
+      const contentMode = contentModeStr as ContentMode;
+      const config = new AIConfig({ debug, contentMode });
+      const ai = new AmplitudeAI({ apiKey, config });
 
-    const config = new AIConfig({ debug, contentMode });
-    const ai = new AmplitudeAI({ apiKey, config });
+      patch({ amplitudeAI: ai });
 
-    patch({ amplitudeAI: ai });
-
-    const privacyMode =
-      contentModeStr === 'metadata_only' ||
-      contentModeStr === 'customer_enriched';
-    const note = privacyMode ? ` (content_mode=${contentModeStr})` : '';
-    process.stderr.write(`amplitude-ai: auto-patched providers${note}\n`);
+      const note =
+        contentMode !== ContentMode.FULL ? ` (content_mode=${contentMode})` : '';
+      process.stderr.write(`amplitude-ai: auto-patched providers${note}\n`);
+    }
   } catch (err) {
     process.stderr.write(
       `amplitude-ai: bootstrap error: ${err instanceof Error ? err.message : String(err)}\n`,
