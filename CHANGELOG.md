@@ -18,7 +18,9 @@ Hardening release. Upgrading is recommended for all users.
 - **Each `AmplitudeAI` uses its own analytics client and its own
   `propagateContext` setting.** Propagated context goes in request headers
   (`traceparent`, `x-amplitude-session-id`, `x-amplitude-agent-id`) and never
-  includes user or device IDs. `setDefaultPropagateContext` is deprecated.
+  includes user or device IDs. IDs that are not valid header values
+  (non-ASCII, line breaks, over 256 characters) are left out instead of
+  failing the request. `setDefaultPropagateContext` is deprecated.
 - **`pushContext(ctx, fn)`** keeps the context only while `fn` runs.
   `pushContext(ctx)` without a callback still sets the context but is
   deprecated and warns once: on HTTP servers the context can carry over to

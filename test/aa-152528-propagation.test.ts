@@ -166,6 +166,21 @@ describe('AA-152528: per-instance propagateContext', () => {
     expect(create.mock.calls[0]?.[1]).toEqual({ timeout: 99 });
   });
 
+  it.each([
+    ['non-Latin-1 agent ID', 'sess-1', '客服-agent'],
+    ['CR/LF in session ID', 'sess\r\nX-Injected: 1', 'bot'],
+    ['over-long session ID', 's'.repeat(300), 'bot'],
+  ])('leaves out IDs that are unsafe as header values: %s', async (_label, sessionId, agentId): Promise<void> => {
+    const ctx = new SessionContext({ sessionId, agentId });
+    const headers = await runWithContextAsync(ctx, async () => providerPropagationHeaders());
+    expect(headers?.traceparent).toBeDefined();
+    for (const value of Object.values(headers ?? {})) {
+      expect(value).toMatch(/^[\x20-\x7e]{1,256}$/);
+    }
+    expect(headers?.['x-amplitude-agent-id']).toBe(agentId === 'bot' ? 'bot' : undefined);
+    expect(headers?.['x-amplitude-session-id']).toBe(sessionId === 'sess-1' ? 'sess-1' : undefined);
+  });
+
   it('providerPropagationHeaders returns null outside a session', (): void => {
     expect(providerPropagationHeaders()).toBeNull();
   });

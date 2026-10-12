@@ -64,9 +64,9 @@ export function injectContext(
 
   result.traceparent = _traceparent(ctx.traceId ?? null);
 
-  if (ctx.sessionId) result['x-amplitude-session-id'] = ctx.sessionId;
-  if (ctx.agentId) result['x-amplitude-agent-id'] = ctx.agentId;
-  if (ctx.userId) result['x-amplitude-user-id'] = ctx.userId;
+  _setHeader(result, 'x-amplitude-session-id', ctx.sessionId);
+  _setHeader(result, 'x-amplitude-agent-id', ctx.agentId);
+  _setHeader(result, 'x-amplitude-user-id', ctx.userId);
 
   return result;
 }
@@ -84,8 +84,8 @@ export function providerPropagationHeaders(): Record<string, string> | null {
     const result: Record<string, string> = {
       traceparent: _traceparent(ctx.traceId ?? null),
     };
-    if (ctx.sessionId) result['x-amplitude-session-id'] = ctx.sessionId;
-    if (ctx.agentId) result['x-amplitude-agent-id'] = ctx.agentId;
+    _setHeader(result, 'x-amplitude-session-id', ctx.sessionId);
+    _setHeader(result, 'x-amplitude-agent-id', ctx.agentId);
     return result;
   } catch (e) {
     getLogger().debug(
@@ -122,6 +122,15 @@ export function invokeWithPropagation<R>(
     ...requestOptions,
     headers: { ...headers, ...(callerHeaders as Record<string, unknown>) },
   });
+}
+
+// fetch rejects header values outside Latin-1 or containing CR/LF, which
+// would fail the caller's request; IDs that are not short printable ASCII
+// are left out instead.
+const _SAFE_HEADER_VALUE_RE = /^[\x20-\x7e]{1,256}$/;
+
+function _setHeader(headers: Record<string, string>, name: string, value: string | null | undefined): void {
+  if (value && _SAFE_HEADER_VALUE_RE.test(value)) headers[name] = value;
 }
 
 function _isPlainObject(value: unknown): value is Record<string, unknown> {
