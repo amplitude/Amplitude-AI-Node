@@ -44,6 +44,7 @@ describe('Default delivery callback', () => {
       (msg) => msg.includes('HTTP 400') && msg.includes('[Agent] AI Response'),
     );
     expect(found).toBe(true);
+    expect(warnCalls.some((msg) => msg.includes('u1'))).toBe(false);
   });
 
   it('does not log on HTTP 200', (): void => {
@@ -109,9 +110,10 @@ describe('Short-ID warning', () => {
 
     const warnCalls = warnSpy.mock.calls.map((c) => c[0] as string);
     const found = warnCalls.some(
-      (msg) => msg.includes('user_id="ab"') && msg.includes('shorter than'),
+      (msg) => msg.includes('user_id of length 2') && msg.includes('shorter than'),
     );
     expect(found).toBe(true);
+    expect(warnCalls.some((msg) => msg.includes('"ab"'))).toBe(false);
   });
 
   it('does not warn when user_id is long enough', (): void => {
@@ -140,9 +142,27 @@ describe('Short-ID warning', () => {
 
     const warnCalls = warnSpy.mock.calls.map((c) => c[0] as string);
     const shortIdWarns = warnCalls.filter((msg) =>
-      msg.includes('user_id="ab"'),
+      msg.includes('user_id of length 2'),
     );
     expect(shortIdWarns).toHaveLength(1);
+  });
+
+  it('keeps one warning per field and length, not per identifier', (): void => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const mockAmplitude = makeMockAmplitude();
+    const ai = new AmplitudeAI({ amplitude: mockAmplitude as unknown as AmplitudeLike });
+    for (const userId of ['ab', 'cd', 'ef', 'xyz']) {
+      ai.agent('bot', { userId }).trackUserMessage('hello', { sessionId: 's1' });
+    }
+
+    const shortIdWarns = warnSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((msg) => msg.includes('shorter than'));
+    expect(shortIdWarns).toHaveLength(2);
+    for (const userId of ['ab', 'cd', 'ef', 'xyz']) {
+      expect(shortIdWarns.some((msg) => msg.includes(`"${userId}"`))).toBe(false);
+    }
   });
 });
 

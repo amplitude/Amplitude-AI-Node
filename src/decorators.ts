@@ -14,7 +14,7 @@ import {
   SessionContext,
 } from './context.js';
 import { _getOtelOwner } from './client.js';
-import { PrivacyConfig } from './core/privacy.js';
+import { PrivacyConfig, redactPiiPatterns } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
   AMP_INPUT_STATE,
@@ -126,6 +126,15 @@ const _FAIL_CLOSED_PRIVACY_CONFIG = new PrivacyConfig({
  */
 function _isFullMode(pc: PrivacyConfig): boolean {
   return pc.contentMode === 'full' || (pc.contentMode == null && !pc.privacyMode);
+}
+
+function _redactForLog(message: string, pc: PrivacyConfig, fallback: string): string {
+  try {
+    const redacted = pc.redactPii ? redactPiiPatterns(message) : message;
+    return pc.applyCustomRedaction(redacted);
+  } catch {
+    return fallback;
+  }
 }
 
 function _resolvePrivacyConfig(
@@ -360,7 +369,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
       const errorType = e instanceof Error ? e.name : typeof e;
       getLogger().error(
         _isFullMode(r.privacyConfig)
-          ? `Tool '${toolName}' failed: ${errorMsg}`
+          ? `Tool '${toolName}' failed: ${_redactForLog(errorMsg, r.privacyConfig, errorType)}`
           : `Tool '${toolName}' failed (${errorType})`,
       );
       throw e;

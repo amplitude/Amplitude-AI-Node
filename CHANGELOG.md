@@ -33,12 +33,15 @@ Hardening release. Upgrading is recommended for all users.
   metadata only and warns once; pass `privacyConfig` to change that. A failing
   custom redaction function drops the content.
 - **Redaction:** attachments and labels are redacted; debug logs no longer
-  include message content.
+  include message content. In `full` mode, a failing tool's error message is
+  redacted before it is logged. Delivery-failure and short-ID warnings no
+  longer include user or device IDs.
 - **OpenTelemetry:** only GenAI and Amplitude spans are mapped, and SDK-emitted
   spans are skipped.
 - **Inbound headers:** `traceparent` must be valid W3C; `x-trace-id` is limited
   to 64 characters of `[A-Za-z0-9._:-]`. `extractContext()` is for trusted
-  internal traffic only. New middleware option `deviceIdResolver`.
+  internal traffic only. New middleware option `deviceIdResolver`. Middleware
+  examples resolve the user from your auth layer instead of a request header.
 - **`amplitude-ai-instrument` instruments only the launched process.** Set
   `AMPLITUDE_AI_INSTRUMENT_CHILDREN=true` for the previous behavior.
 - **MCP server:** `scan_project` is limited to client roots or

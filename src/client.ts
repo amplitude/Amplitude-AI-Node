@@ -60,11 +60,13 @@ function _warnShortId(event: AmplitudeEvent, logger: Logger): void {
   for (const field of ['user_id', 'device_id'] as const) {
     const val = (event as Record<string, unknown>)[field];
     if (typeof val === 'string' && val.length > 0 && val.length < _MIN_ID_LENGTH) {
-      const key = `${field}:${val}`;
+      // Keyed by field and length, never the identifier, so the set stays
+      // bounded and identifiers are not written to logs.
+      const key = `${field}:${val.length}`;
       if (!_shortIdWarned.has(key)) {
         _shortIdWarned.add(key);
         logger.warn(
-          `AmplitudeAI: ${field}="${val}" is shorter than ${_MIN_ID_LENGTH} characters. Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
+          `AmplitudeAI: a ${field} of length ${val.length} is shorter than ${_MIN_ID_LENGTH} characters. Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
         );
       }
     }
@@ -322,10 +324,8 @@ export class AmplitudeAI {
         if (statusCode >= 400) {
           const eventType =
             (event as Record<string, unknown> | null)?.event_type ?? 'unknown';
-          const userId =
-            (event as Record<string, unknown> | null)?.user_id ?? '';
           logger.warn(
-            `AmplitudeAI: event delivery failed — HTTP ${statusCode} for event=${String(eventType)} user_id=${String(userId)}: ${message ?? ''}`,
+            `AmplitudeAI: event delivery failed — HTTP ${statusCode} for event=${String(eventType)}: ${message ?? ''}`,
           );
         }
       };

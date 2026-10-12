@@ -120,4 +120,26 @@ describe('AA-152528 M24: tool failure log', () => {
     const logged = err.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain(CANARY);
   });
+
+  it('full mode redacts the error message like event content', async () => {
+    const leaky = tool(
+      async () => {
+        throw new Error('ssn 123-45-6789 for victim@example.com MRN 4471');
+      },
+      { name: 'leaky' },
+    );
+    const err = vi.spyOn(getLogger(), 'error').mockImplementation(() => undefined);
+    ToolCallTracker.setAmplitude(transport(), 'user-m24', {
+      privacyConfig: new PrivacyConfig({
+        contentMode: 'full',
+        customRedactionPatterns: ['MRN \\d+'],
+      }),
+    });
+    await expect(leaky()).rejects.toThrow(Error);
+    const logged = err.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain("Tool 'leaky' failed:");
+    expect(logged).not.toContain('123-45-6789');
+    expect(logged).not.toContain('victim@example.com');
+    expect(logged).not.toContain('MRN 4471');
+  });
 });

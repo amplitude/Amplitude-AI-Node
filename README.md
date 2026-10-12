@@ -480,7 +480,7 @@ agent.trackUserMessage('Hello', {
 app.use(
   createAmplitudeAIMiddleware({
     amplitudeAI: ai,
-    userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+    userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
   }),
 );
 ```
@@ -2269,9 +2269,9 @@ const app = express();
 app.use(
   createAmplitudeAIMiddleware({
     amplitudeAI: ai,
-    userIdResolver: (req) =>
-      (req as { headers: { 'x-user-id'?: string } }).headers['x-user-id'] ??
-      null,
+    // The authenticated user from your auth middleware. Don't read it from a
+    // request header: any caller could then send events as any user.
+    userIdResolver: (req) => (req as { user?: { id?: string } }).user?.id ?? null,
     sessionIdResolver: (req) =>
       (req as { headers: { 'x-session-id'?: string } }).headers[
         'x-session-id'

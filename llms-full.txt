@@ -222,7 +222,7 @@ Express/Fastify/Hono middleware for automatic session tracking.
 import { createAmplitudeAIMiddleware } from '@amplitude/ai';
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
-  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+  userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 ```
 
@@ -323,7 +323,7 @@ import { AmplitudeAI, createAmplitudeAIMiddleware } from '@amplitude/ai';
 const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
-  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+  userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 ```
 

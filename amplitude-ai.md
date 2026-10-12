@@ -737,7 +737,7 @@ If you cannot inspect the client code, ask the developer: "How does the browser 
 import { createAmplitudeAIMiddleware } from '@amplitude/ai';
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
-  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+  userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 ```
 
