@@ -10,16 +10,26 @@ import {
 import { MAX_SCAN_FILE_BYTES, scanProject } from '../src/mcp/scan-project.js';
 import { analyzeFileInstrumentation } from '../src/mcp/validate-file.js';
 
-// Fixed code runs these in ~1s; the pre-fix regexes took 6–45s.
-const BUDGET_MS = 4000;
-const TEST_TIMEOUT_MS = 20_000;
+const TEST_TIMEOUT_MS = 60_000;
 // A syntax error forces the regex fallback path.
 const BAD = '\n@@@ syntax error forces regex fallback\n';
 
 function timed(fn: () => unknown): number {
-  const start = performance.now();
-  fn();
-  return performance.now() - start;
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 3; i++) {
+    const start = performance.now();
+    fn();
+    best = Math.min(best, performance.now() - start);
+  }
+  return best;
+}
+
+// Quadrupling the input costs ~4x for linear code and ~20x for the pre-fix
+// quadratic regexes. Absolute budgets are unreliable on shared CI runners.
+function expectLinear(build: (n: number) => string, run: (source: string) => unknown, n: number): void {
+  const small = timed(() => run(build(n)));
+  const large = timed(() => run(build(n * 4)));
+  expect(large / Math.max(small, 25)).toBeLessThan(10);
 }
 
 function inst(source: string, tier: 'standard' | 'advanced' = 'standard', providers = ['openai']): string {
@@ -34,18 +44,17 @@ function inst(source: string, tier: 'standard' | 'advanced' = 'standard', provid
 }
 
 describe('instrument_file stays linear on adversarial input', (): void => {
-  it.each([
-    ['unterminated named imports', 'import { OpenAI '.repeat(8000)],
-    ['unterminated import braces', 'import {'.repeat(20000)],
-    ['unbalanced constructors', 'new OpenAI('.repeat(32000)],
-    ['nested constructors', `${'new OpenAI('.repeat(20000)}${')'.repeat(20000)}`],
-  ])('%s', (_label, source): void => {
-    expect(timed(() => inst(source))).toBeLessThan(BUDGET_MS);
+  it.each<[string, (n: number) => string, number]>([
+    ['unterminated named imports', (n) => 'import { OpenAI '.repeat(n), 1000],
+    ['unterminated import braces', (n) => 'import {'.repeat(n), 2500],
+    ['unbalanced constructors', (n) => 'new OpenAI('.repeat(n), 4000],
+    ['nested constructors', (n) => `${'new OpenAI('.repeat(n)}${')'.repeat(n)}`, 2500],
+  ])('%s', (_label, build, n): void => {
+    expectLinear(build, (source) => inst(source), n);
   }, TEST_TIMEOUT_MS);
 
   it('unterminated route handler heads', (): void => {
-    const source = 'export async function POST('.repeat(32000);
-    expect(timed(() => inst(source, 'advanced', []))).toBeLessThan(BUDGET_MS);
+    expectLinear((n) => 'export async function POST('.repeat(n), (source) => inst(source, 'advanced', []), 4000);
   }, TEST_TIMEOUT_MS);
 
   it('rejects sources over the size cap', (): void => {
@@ -72,15 +81,19 @@ describe('instrument_file stays linear on adversarial input', (): void => {
 });
 
 describe('validate_file regex fallback stays linear', (): void => {
-  it.each([
-    ['arrow-function heads', `${'const a = ('.repeat(32000)}${BAD}`],
-    ['anthropic tool names', `${"name:'a'".repeat(32000)}${BAD}`],
-    ['function-calling blocks', `${'function:{'.repeat(32000)}${BAD}`],
-    ['wrapped constructors', `${'const a = new OpenAI('.repeat(16000)}${BAD}`],
-    ['long dotted receiver', `${'a.'.repeat(50000)} x.chat.completions.create(${BAD}`],
-    ['many call sites far from any function', `${'\n'.repeat(5000)}${'o.chat.completions.create({})\n'.repeat(5000)}${BAD}`],
-  ])('%s', (_label, source): void => {
-    expect(timed(() => analyzeFileInstrumentation(source))).toBeLessThan(BUDGET_MS);
+  it.each<[string, (n: number) => string, number]>([
+    ['arrow-function heads', (n) => `${'const a = ('.repeat(n)}${BAD}`, 4000],
+    ['anthropic tool names', (n) => `${"name:'a'".repeat(n)}${BAD}`, 4000],
+    ['function-calling blocks', (n) => `${'function:{'.repeat(n)}${BAD}`, 4000],
+    ['wrapped constructors', (n) => `${'const a = new OpenAI('.repeat(n)}${BAD}`, 2000],
+    ['long dotted receiver', (n) => `${'a.'.repeat(n)} x.chat.completions.create(${BAD}`, 6250],
+    [
+      'many call sites far from any function',
+      (n) => `${'\n'.repeat(n)}${'o.chat.completions.create({})\n'.repeat(n)}${BAD}`,
+      1250,
+    ],
+  ])('%s', (_label, build, n): void => {
+    expectLinear(build, analyzeFileInstrumentation, n);
   }, TEST_TIMEOUT_MS);
 });
 

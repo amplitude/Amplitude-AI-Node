@@ -85,7 +85,7 @@ describe('wrap() keeps the caller-configured transport (AA-152528 M5)', () => {
     expect(amplitude.track).toHaveBeenCalled();
   });
 
-  it('OpenAI: parse() does not swap methods on the caller-owned client', async () => {
+  it('OpenAI: parse() does not swap methods on the caller-owned client', async (ctx) => {
     const rec = recordingFetch(CHAT_BODY);
     const client = new OpenAI({
       apiKey: 'sk-test-key',
@@ -93,6 +93,8 @@ describe('wrap() keeps the caller-configured transport (AA-152528 M5)', () => {
       fetch: rec.fetch,
       maxRetries: 0,
     });
+    // openai v4 only has beta.chat.completions.parse.
+    if (typeof (client.chat.completions as { parse?: unknown }).parse !== 'function') ctx.skip();
     const originalCreate = client.chat.completions.create;
     const wrapped = wrap(client, fakeAmplitude(), { providerModule: openaiModule }) as {
       chat: { completions: { parse: (p: unknown) => Promise<unknown> } };
