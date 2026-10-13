@@ -23,6 +23,7 @@ export { TenantHandle } from './tenant.js';
 // Config
 export { AIConfig, ContentMode } from './config.js';
 export type { AIConfigOptions } from './config.js';
+export type { ReviewRequest } from './review.js';
 
 // Shared types
 export { resolveAmplitude } from './types.js';

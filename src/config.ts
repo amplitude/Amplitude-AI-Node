@@ -34,6 +34,11 @@ export interface AIConfigOptions {
   ) => void;
   debug?: boolean;
   dryRun?: boolean;
+  /**
+   * Capture post-redaction events and print sanitized upload previews
+   * without sending them. Default: `false`.
+   */
+  reviewMode?: boolean;
   validate?: boolean;
   /**
    * When `true`, provider wrappers created from this instance send W3C
@@ -100,6 +105,7 @@ export class AIConfig {
     | null;
   readonly debug: boolean;
   readonly dryRun: boolean;
+  readonly reviewMode: boolean;
   readonly validate: boolean;
   readonly propagateContext: boolean;
   readonly captureStackTrace: boolean;
@@ -121,6 +127,7 @@ export class AIConfig {
     this.onEventCallback = options.onEventCallback ?? null;
     this.debug = options.debug ?? false;
     this.dryRun = options.dryRun ?? false;
+    this.reviewMode = options.reviewMode ?? false;
     this.validate = options.validate ?? false;
     this.propagateContext = options.propagateContext ?? false;
     this.captureStackTrace = options.captureStackTrace ?? false;

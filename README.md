@@ -623,6 +623,7 @@ const config = new AIConfig({
   customRedactionPatterns: ['sensitive-\\d+'],
   debug: false,
   dryRun: false,
+  reviewMode: false,
 });
 
 const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY!, config });
@@ -636,6 +637,7 @@ const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY!, config }
 | `customRedactionFn`       | Optional `(text: string) => string` callback for custom redaction logic (e.g. compromise.js NER). Called after all regex-based redaction. |
 | `debug`                   | Log events to stderr                                                                                        |
 | `dryRun`                  | Log without sending to Amplitude                                                                            |
+| `reviewMode`              | Capture full post-redaction events and sanitized upload previews without sending. Default `false`.          |
 | `validate`                | Enable strict validation of required fields                                                                 |
 | `onEventCallback`         | Callback invoked exactly once per tracked event `(event, statusCode, message) => void` — fired from the underlying Amplitude client's delivery path, so it is not double-invoked by provider wrappers or `patch()` |
 | `propagateContext`        | Enable cross-service context propagation                                                                    |
@@ -1522,12 +1524,30 @@ const ai = new AmplitudeAI({
 // Useful for local development, CI pipelines, and validating event shape
 ```
 
+### Review mode
+
+Use review mode when a security team needs to inspect the events instrumentation would upload. It records the event passed to `track()` after redaction, groups those events into previews of at most 100, and does not send them. Each preview is labeled `pre-transport`: the analytics SDK may still add fields such as `insert_id`, library metadata, gzip, and retries after this point. The envelope API key is replaced with `[REDACTED]`. Prompt and message content is left intact, so do not commit the artifact.
+
+```typescript
+const ai = new AmplitudeAI({
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+  config: new AIConfig({ reviewMode: true, validate: true }),
+});
+
+// Exercise one representative session, then:
+await ai.flush();
+console.log(ai.getReviewTraffic());
+```
+
+`onEventCallback` fires once per captured event with status `-1` and message `review-mode`. `ai.flush()` still flushes the underlying Amplitude client, so unrelated product events on a shared client are not stranded. Zero-code instrumentation honors `AMPLITUDE_AI_REVIEW=true`. `AMPLITUDE_AI_DEBUG` does not enable review mode.
+
 ### Environment Variable Configuration
 
-Both modes can be enabled via environment variables when using auto-instrumentation:
+Debug and review can be enabled via environment variables when using auto-instrumentation:
 
 ```bash
 AMPLITUDE_AI_DEBUG=true amplitude-ai-instrument node app.js
+AMPLITUDE_AI_REVIEW=true amplitude-ai-instrument node app.js
 ```
 
 ## Patching
