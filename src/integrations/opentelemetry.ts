@@ -13,6 +13,7 @@ import {
   GENAI_REASONING_OUTPUT_TOKENS,
   GENAI_USAGE_COST,
 } from '../otel/conventions.js';
+import { claimSpan } from '../otel/span-claims.js';
 import { calculateCost } from '../utils/costs.js';
 
 export interface ExporterOptions {
@@ -130,6 +131,9 @@ export class AmplitudeAgentExporter {
     const latencyMs = (endNanos - startNanos) / 1_000_000;
     const isError = span.status?.code === 2;
     const spanCtx = span.spanContext?.();
+    if (!claimSpan(this._ai.amplitude, spanCtx?.traceId, spanCtx?.spanId)) {
+      return;
+    }
     const operation =
       (attrs['gen_ai.operation.name'] as string | undefined) ??
       (attrs['gen_ai.operation'] as string | undefined);

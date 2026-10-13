@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A span seen by both `enableOtel()` and `AmplitudeAgentExporter` on the same
+  `AmplitudeAI` (or exported twice) is recorded once instead of twice.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.
