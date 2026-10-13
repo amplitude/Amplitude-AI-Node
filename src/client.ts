@@ -22,11 +22,13 @@ import {
   PROP_OUTPUT_TOKENS,
   PROP_SESSION_ID,
   PROP_TRACE_ID,
+  SDK_VERSION,
 } from './core/constants.js';
 import { ConfigurationError, CostCalculationError } from './exceptions.js';
 import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
 import type { OtelSpanFilter, SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
+import { ReviewBuffer, resolveReviewUrl, type ReviewRequest } from './review.js';
 import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
 import { registerTrackingClient } from './tracking-registry.js';
@@ -252,6 +254,7 @@ export class AmplitudeAI {
   protected _traceEmittedTokens: Map<string, [number, number, number, number]> = new Map();
   /** @internal Tracks events since last flush() — used by the exit warning. */
   _trackCountSinceFlush = 0;
+  private _reviewBuffer: ReviewBuffer | null = null;
   /** @internal Settles when an SDK-owned client (apiKey path) finishes init. */
   _initPromise: Promise<void> = Promise.resolve();
 
@@ -310,6 +313,14 @@ export class AmplitudeAI {
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();
+    if (this._config.reviewMode) {
+      this._reviewBuffer = new ReviewBuffer(
+        '@amplitude/ai',
+        this._config.contentMode,
+        () => resolveReviewUrl(this._amplitude.configuration),
+        SDK_VERSION,
+      );
+    }
 
     // Always install the track hook — it handles the default delivery
     // callback, short-ID warnings, debug/dry-run output, and the
@@ -325,8 +336,12 @@ export class AmplitudeAI {
   private _installTrackCounter(): void {
     const originalTrack = this._amplitude.track.bind(this._amplitude);
     this._amplitude.track = (event: AmplitudeEvent) => {
-      this._trackCountSinceFlush++;
-      _globalUnflushedCount++;
+      // Reviewed events are intentionally not uploaded, so they must not
+      // trip the unflushed-event exit warning.
+      if (!this._config.reviewMode) {
+        this._trackCountSinceFlush++;
+        _globalUnflushedCount++;
+      }
       return originalTrack(event);
     };
   }
@@ -335,6 +350,8 @@ export class AmplitudeAI {
     const originalTrack = this._amplitude.track.bind(this._amplitude);
     const debug = this._config.debug;
     const dryRun = this._config.dryRun;
+    const reviewMode = this._config.reviewMode;
+    const reviewBuffer = this._reviewBuffer;
     const onEvent = this._config.onEventCallback;
     const logger = getLogger();
     const clientWithConfig = this._amplitude as AmplitudeClientLike & {
@@ -395,6 +412,17 @@ export class AmplitudeAI {
       }
       if (dryRun) {
         console.warn(formatDryRunLine(event, this._config.contentMode));
+      }
+      if (reviewMode && reviewBuffer != null) {
+        reviewBuffer.record(event);
+        if (onEvent != null) {
+          try {
+            onEvent(event, -1, 'review-mode');
+          } catch (e) {
+            logger.debug(`AI SDK onEventCallback raised in review mode: ${e}`);
+          }
+        }
+        return;
       }
       if (!dryRun) {
         originalTrack(event);
@@ -1250,6 +1278,7 @@ export class AmplitudeAI {
       content_mode: this._config.contentMode,
       debug: this._config.debug,
       dry_run: this._config.dryRun,
+      review_mode: this._config.reviewMode,
       redact_pii: this._config.redactPii,
       otel_enabled: this._otelEnabled,
       providers_available: availableProviders,
@@ -1264,7 +1293,18 @@ export class AmplitudeAI {
    * With `timeoutMs`, returns a promise that resolves when the flush settles
    * or when the timeout elapses (whichever comes first). It never rejects.
    */
+  /** Closed review batches plus a snapshot of the still-open batch. */
+  getReviewTraffic(): ReviewRequest[] {
+    return this._reviewBuffer?.getTraffic() ?? [];
+  }
+
+  /** Drop captured review batches without printing them. */
+  clearReviewTraffic(): void {
+    this._reviewBuffer?.clear();
+  }
+
   flush(options?: FlushOptions): unknown {
+    this._reviewBuffer?.close();
     _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
     const timeoutMs = normalizeFlushTimeoutMs(options?.timeoutMs);
@@ -1282,6 +1322,7 @@ export class AmplitudeAI {
   }
 
   shutdown(): void {
+    this._reviewBuffer?.close();
     _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
     if (this._ownsClient) {

@@ -13,11 +13,13 @@
  * - AMPLITUDE_AI_CONTENT_MODE: "full" (default), "metadata_only", or "customer_enriched".
  *   Any other value skips auto-patching (nothing is tracked) with a warning.
  * - AMPLITUDE_AI_DEBUG: "true" for debug output to stderr
+ * - AMPLITUDE_AI_REVIEW: "true" to capture sanitized upload previews and skip sending
  */
 
 import { AmplitudeAI } from './client.js';
 import { AIConfig, ContentMode } from './config.js';
 import { patch } from './patching.js';
+import { reviewModeFromEnv } from './review.js';
 
 /**
  * `amplitude-ai-instrument` sets `_AMPLITUDE_AI_BOOTSTRAP=1` so only the first
@@ -76,7 +78,11 @@ if (!bootstrapOwner) {
       );
     } else {
       const contentMode = contentModeStr as ContentMode;
-      const config = new AIConfig({ debug, contentMode });
+      const config = new AIConfig({
+        debug,
+        contentMode,
+        reviewMode: reviewModeFromEnv(),
+      });
       const ai = new AmplitudeAI({ apiKey, config });
 
       patch({ amplitudeAI: ai });
