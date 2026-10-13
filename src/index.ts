@@ -1,5 +1,6 @@
 // Client
 export { AmplitudeAI } from './client.js';
+export type { FlushOptions } from './client.js';
 export { BoundAgent } from './bound-agent.js';
 export type {
   AgentOptions,
