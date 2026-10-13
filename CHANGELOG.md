@@ -1,46 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.21.0
+
+Hardening release. Upgrading is recommended for all users.
 
 ### Added
 - `ai.flush({ timeoutMs })` (and `agent.flush({ timeoutMs })`) stop waiting
   after `timeoutMs` and resolve without rejecting. `ai.flush()` without
   options is unchanged.
-
-### Fixed
-- With `patch()`, OpenAI and Anthropic calls return the SDK's own types again:
-  `create()` returns an `APIPromise` (so `.withResponse()` and `.asResponse()`
-  work), and `stream: true` resolves to the SDK `Stream` (so `.tee()`,
-  `.toReadableStream()` and `.controller` work). Events are tracked as before.
-- Patched provider calls made inside a session are recorded by the
-  `AmplitudeAI` that owns the session, including when a different instance
-  called `patch()`. Calls outside a session are unchanged.
-- A span seen by both `enableOtel()` and `AmplitudeAgentExporter` on the same
-  `AmplitudeAI` (or exported twice) is recorded once instead of twice.
-- **`amplitude-ai-instrument`** forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to
-  the launched app instead of leaving it running when the wrapper is stopped,
-  and exits with the app's exit code or signal.
-- **`amplitude-ai-doctor`** reports a malformed `package.json` as a failed
-  check instead of crashing.
-
-### Changed
-- MCP server:
-  - `validate_file` code context also masks `sk_live_`/`sk_test_`-style keys,
-    `*Key`/`*_KEY` assignments, quoted 32-character hex strings, and PEM
-    private-key blocks.
-  - Tool arguments have upper bounds: `search_docs` query, `generate_verify_test`
-    scan result, and `instrument_file` paths, agent ID, description and
-    providers.
-  - `scan_project` reads each file through a single descriptor (regular files
-    only, size checked on the open file).
-  - `scan_project` ignores configured roots that are the filesystem root or
-    contain the home directory.
-- `amplitude-ai-instrument` treats `node_modules/.bin/<launcher>` (tsx,
-  nodemon, npm, ...) like the launcher itself.
-
-## 0.21.0
-
-Hardening release. Upgrading is recommended for all users.
 
 ### Changed
 - **`wrap()` instruments your OpenAI, Azure OpenAI or Anthropic client in
@@ -82,9 +49,14 @@ Hardening release. Upgrading is recommended for all users.
   examples resolve the user from your auth layer instead of a request header.
 - **`amplitude-ai-instrument` instruments only the launched process.** Set
   `AMPLITUDE_AI_INSTRUMENT_CHILDREN=true` for the previous behavior.
+  `node_modules/.bin/<launcher>` (tsx, nodemon, npm, ...) is treated like the
+  launcher itself.
 - **MCP server:** `scan_project` is limited to client roots or
-  `AMPLITUDE_AI_MCP_ROOTS`; scans and inputs have size limits; code snippets
-  mask key-like values.
+  `AMPLITUDE_AI_MCP_ROOTS` (roots that are the filesystem root or contain the
+  home directory are ignored) and reads each file through a single descriptor;
+  scans and tool arguments have size limits; code snippets mask key-like
+  values, including `sk_live_`/`sk_test_`-style keys, `*Key`/`*_KEY`
+  assignments, quoted 32-character hex strings and PEM private-key blocks.
 - **Offline eval uploads** require https (http only for localhost), don't follow
   redirects, and time out after 30 s (`timeoutMs`).
 - **Streamed tool calls** with an index outside 0–127 are ignored.
@@ -100,6 +72,21 @@ Hardening release. Upgrading is recommended for all users.
 - **Release process:** publishing verifies the tagged commit is on `main` and
   matches `package.json`; CI adds workflow, package-contents and docs checks,
   plus a weekly dependency audit.
+
+### Fixed
+- With `patch()`, OpenAI and Anthropic calls return the SDK's own types:
+  `create()` returns an `APIPromise` (so `.withResponse()` and `.asResponse()`
+  work), and `stream: true` resolves to the SDK `Stream` (so `.tee()`,
+  `.toReadableStream()` and `.controller` work).
+- Patched provider calls made inside a session are recorded by the
+  `AmplitudeAI` that owns the session, including when a different instance
+  called `patch()`. Calls outside a session are unchanged.
+- A span seen by both `enableOtel()` and `AmplitudeAgentExporter` on the same
+  `AmplitudeAI` (or exported twice) is recorded once.
+- `amplitude-ai-instrument` forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to the
+  launched app and exits with the app's exit code or signal.
+- `amplitude-ai-doctor` reports a malformed `package.json` as a failed check
+  instead of crashing.
 
 ## 0.20.1
 
