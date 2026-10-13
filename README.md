@@ -1560,6 +1560,8 @@ Available patch functions: `patchOpenAI`, `patchAnthropic`, `patchAzureOpenAI`, 
 
 `patch()` returns a `string[]` of providers where at least one supported surface was successfully patched (e.g., `['openai', 'anthropic']`), matching the Python SDK's return signature.
 
+**Multiple `AmplitudeAI` instances:** a provider can be patched by one `AmplitudeAI` at a time. Calls made inside another instance's `session.run()` are recorded by that session's instance (its API key, privacy settings and transport); calls outside any session are recorded by the instance that patched. Use either `wrap()` or `patch()` for a given client, not both, or calls are tracked twice.
+
 **Automatic tool call extraction:** `patch()` automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed for basic tool tracking. For OpenAI Chat Completions, it scans `role: "assistant"` messages with `tool_calls` arrays and correlates with `role: "tool"` result messages. For OpenAI Responses API, it extracts `type: "function_call"` and `type: "function_call_output"` entries. For Anthropic Messages, it scans `type: "tool_use"` content blocks in assistant messages and correlates with `type: "tool_result"` blocks in subsequent user messages.
 
 **Real tool-call latency:** when tool execution happens between two patched LLM calls in the same session, the SDK measures latency from the timestamp at which the assistant emitted the `tool_use` / `tool_call` block to when its result is sent back on the next turn. Tool uses whose result never appears in a subsequent turn (or appear after the 10-minute TTL) fall back to `latencyMs: 0`.

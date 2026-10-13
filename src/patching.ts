@@ -7,6 +7,7 @@
 
 import type { AmplitudeAI } from './client.js';
 import { getActiveContext, isTrackerManaged } from './context.js';
+import { resolveTrackingAI } from './tracking-registry.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
@@ -239,17 +240,18 @@ export function patchGemini(options: {
     innerOriginal: (...a: unknown[]) => unknown,
     ...innerArgs: unknown[]
   ): unknown => {
+    const tracker = resolveTrackingAI(amplitudeAI);
     const startTime = performance.now();
     const result = innerOriginal(...innerArgs);
     if (result instanceof Promise) {
       return result
         .then((response) => {
-          _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
+          _trackGeminiResponse(tracker, response, startTime, innerArgs[0]);
           return response;
         })
         .catch((err) => {
           _trackCompletionError(
-            amplitudeAI,
+            tracker,
             err,
             startTime,
             innerArgs[0],
@@ -264,6 +266,7 @@ export function patchGemini(options: {
     innerOriginal: (...a: unknown[]) => unknown,
     ...innerArgs: unknown[]
   ): unknown => {
+    const tracker = resolveTrackingAI(amplitudeAI);
     const startTime = performance.now();
     const result = innerOriginal(...innerArgs);
     if (result instanceof Promise) {
@@ -275,7 +278,7 @@ export function patchGemini(options: {
             return {
               ...streamResp,
               stream: _wrapPatchedStream(
-                amplitudeAI,
+                tracker,
                 stream as AsyncIterable<unknown>,
                 startTime,
                 innerArgs[0],
@@ -287,7 +290,7 @@ export function patchGemini(options: {
         })
         .catch((err) => {
           _trackCompletionError(
-            amplitudeAI,
+            tracker,
             err,
             startTime,
             innerArgs[0],
@@ -400,9 +403,10 @@ function _patchGoogleGenAIClient(
     modelsProto,
     'generateContent',
     (original, ...args) => {
+      const tracker = resolveTrackingAI(amplitudeAI);
       const startTime = performance.now();
       return _handleGenAIGenerate(
-        amplitudeAI,
+        tracker,
         original(...args),
         startTime,
         args[0],
@@ -415,9 +419,10 @@ function _patchGoogleGenAIClient(
     modelsProto,
     'generateContentStream',
     (original, ...args) => {
+      const tracker = resolveTrackingAI(amplitudeAI);
       const startTime = performance.now();
       return _handleGenAIGenerateStream(
-        amplitudeAI,
+        tracker,
         original(...args),
         startTime,
         args[0],
@@ -583,6 +588,7 @@ export function patchBedrock(options: {
     ClientClass.prototype as Record<string, unknown>,
     'send',
     (original, ...args) => {
+      const tracker = resolveTrackingAI(amplitudeAI);
       const command = args[0] as Record<string, unknown> | undefined;
       const commandName = String(command?.constructor?.name ?? '');
       // InvokeModelWithResponseStreamCommand is intentionally excluded: its
@@ -610,7 +616,7 @@ export function patchBedrock(options: {
                 return {
                   ...streamResp,
                   stream: _wrapPatchedBedrockStream(
-                    amplitudeAI,
+                    tracker,
                     stream as AsyncIterable<unknown>,
                     startTime,
                     args[0],
@@ -619,20 +625,20 @@ export function patchBedrock(options: {
               }
             } else if (isInvokeModel) {
               _trackBedrockInvokeModelResponse(
-                amplitudeAI,
+                tracker,
                 response,
                 startTime,
                 args[0],
               );
             } else {
-              _trackBedrockResponse(amplitudeAI, response, startTime, args[0]);
+              _trackBedrockResponse(tracker, response, startTime, args[0]);
             }
             return response;
           })
           .catch((err) => {
             if (shouldTrack) {
               _trackCompletionError(
-                amplitudeAI,
+                tracker,
                 err,
                 startTime,
                 args[0],
@@ -818,10 +824,11 @@ function _unpatchByProvider(providerName: string): void {
 // ---------------------------------------------------------------
 
 function _makeCompletionWrapper(
-  amplitudeAI: AmplitudeAI,
+  owner: AmplitudeAI,
   providerName: string,
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
+    const amplitudeAI = resolveTrackingAI(owner);
     const startTime = performance.now();
 
     // Intentionally emit user-message and tool-call events before the API call.
@@ -898,9 +905,10 @@ function _makeCompletionWrapper(
 }
 
 function _makeAnthropicStreamWrapper(
-  amplitudeAI: AmplitudeAI,
+  owner: AmplitudeAI,
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
+    const amplitudeAI = resolveTrackingAI(owner);
     const startTime = performance.now();
     const result = original(...args);
     if (!(result instanceof Promise)) return result;
@@ -1760,10 +1768,11 @@ function _patchInstanceCompletions(
 }
 
 function _makeResponsesWrapper(
-  amplitudeAI: AmplitudeAI,
+  owner: AmplitudeAI,
   providerName: string,
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
+    const amplitudeAI = resolveTrackingAI(owner);
     const startTime = performance.now();
 
     // Intentionally emit user-message and tool-call events before the API call.
