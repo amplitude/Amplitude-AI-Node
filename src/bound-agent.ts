@@ -5,7 +5,7 @@
  * automatically inherit agentId, userId, env, and other defaults.
  */
 
-import type { AmplitudeAI } from './client.js';
+import type { AmplitudeAI, FlushOptions } from './client.js';
 import type { SessionEnrichments } from './core/enrichments.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { Session } from './session.js';
@@ -328,8 +328,8 @@ export class BoundAgent {
     return new Session(this, opts);
   }
 
-  flush(): unknown {
-    return this._ai.flush();
+  flush(options?: FlushOptions): unknown {
+    return this._ai.flush(options);
   }
 
   shutdown(): void {

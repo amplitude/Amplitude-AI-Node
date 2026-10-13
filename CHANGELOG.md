@@ -9,6 +9,11 @@
 - **`amplitude-ai-doctor`** reports a malformed `package.json` as a failed
   check instead of crashing.
 
+### Added
+- `ai.flush({ timeoutMs })` (and `agent.flush({ timeoutMs })`) stop waiting
+  after `timeoutMs` and resolve without rejecting. `ai.flush()` without
+  options is unchanged.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.

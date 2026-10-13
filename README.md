@@ -2110,6 +2110,7 @@ export async function handler(event: APIGatewayEvent) {
 ### Flush vs Shutdown
 
 - `ai.flush()` — sends all buffered events and returns a promise. Use in serverless handlers and API endpoints where you need to ensure delivery before responding.
+- `ai.flush({ timeoutMs: 2000 })` — same, but stops waiting after `timeoutMs` and never rejects. Use when a slow network must not hold up the response.
 - `ai.shutdown()` — flushes and closes the underlying Amplitude client. Only needed if you created the client via `apiKey` (not when passing your own instance). Call on process exit (e.g., `SIGTERM` handler).
 
 ```typescript
