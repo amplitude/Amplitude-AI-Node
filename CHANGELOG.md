@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.22.0
+
+### Added
+- **Review mode.** `reviewMode: true` records each post-redaction event and prints a sanitized pre-transport upload preview without sending it. Read the previews with `getReviewTraffic()`. Zero-code instrumentation honors `AMPLITUDE_AI_REVIEW=true`. Prompt and message content is left intact, and the envelope API key is `[REDACTED]`. `AMPLITUDE_AI_DEBUG` does not enable review mode.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.
