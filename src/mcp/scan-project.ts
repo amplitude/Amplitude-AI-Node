@@ -1,8 +1,12 @@
 import {
-  readFileSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
   lstatSync,
+  openSync,
   readdirSync,
+  readSync,
   realpathSync,
   statSync,
 } from 'node:fs';
@@ -179,6 +183,48 @@ export function resolveScanRoot(rootPath: string, allowedRoots: string[]): strin
 }
 
 /**
+ * Read a regular file through one descriptor so the type and size checks
+ * apply to the bytes actually read. Returns null for non-files, files over
+ * `maxBytes`, and symlinks at the final path component.
+ */
+export function readRegularFileCapped(path: string, maxBytes: number): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > maxBytes) return null;
+    const buf = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < buf.length) {
+      const n = readSync(fd, buf, offset, buf.length - offset, offset);
+      if (n === 0) break;
+      offset += n;
+    }
+    return buf.subarray(0, offset).toString('utf8');
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * True for roots too broad to scan: the filesystem root and any directory
+ * that contains the user's home directory (e.g. `/Users`, `/home`).
+ */
+export function isBroadScanRoot(root: string): boolean {
+  const real = realpathOrNull(resolve(root));
+  if (!real) return false;
+  if (real === parse(real).root) return true;
+  const home = realpathOrNull(homedir());
+  return home != null && home !== real && isPathInside(home, real);
+}
+
+/**
  * Roots a scan may target when the MCP client does not provide any: the
  * server's working directory, unless that is the filesystem root or home.
  */
@@ -285,7 +331,8 @@ function readPackageJson(
     return { name: null, allDeps: new Set() };
   }
   try {
-    const raw = readFileSync(pkgPath, 'utf8');
+    const raw = readRegularFileCapped(realPkg, MAX_SCAN_FILE_BYTES);
+    if (raw == null) return { name: null, allDeps: new Set() };
     const pkg = JSON.parse(raw) as Record<string, unknown>;
     const name = typeof pkg.name === 'string' ? pkg.name : null;
     const deps = (pkg.dependencies ?? {}) as Record<string, string>;
@@ -364,12 +411,8 @@ export function scanProject(requestedRoot: string): ScanResult {
   const providerImportsPerFile = new Map<string, Set<string>>();
 
   for (const filePath of sourceFiles) {
-    let content: string;
-    try {
-      content = readFileSync(filePath, 'utf8');
-    } catch {
-      continue;
-    }
+    const content = readRegularFileCapped(filePath, MAX_SCAN_FILE_BYTES);
+    if (content == null) continue;
 
     const analysis = analyzeFileInstrumentation(content);
     if (analysis.has_amplitude_import) globalHasAmplitudeImport = true;
