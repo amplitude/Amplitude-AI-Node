@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- With `patch()`, OpenAI and Anthropic calls return the SDK's own types again:
+  `create()` returns an `APIPromise` (so `.withResponse()` and `.asResponse()`
+  work), and `stream: true` resolves to the SDK `Stream` (so `.tee()`,
+  `.toReadableStream()` and `.controller` work). Events are tracked as before.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.

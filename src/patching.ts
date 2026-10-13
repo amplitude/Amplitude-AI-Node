@@ -28,6 +28,7 @@ import { warnIfProviderMismatch } from './utils/provider-detect.js';
 import { resolveOpenAIProvider } from './utils/openai-provider.js';
 import {
   extractBodyResponseId,
+  extractHeaderRequestId,
   extractProviderRequestId,
   resolveProviderResponse,
 } from './utils/provider-request-id.js';
@@ -847,6 +848,57 @@ function _makeCompletionWrapper(
       );
       throw syncErr;
     }
+    if (_canThenUnwrap(result)) {
+      const usesHeaderId =
+        providerName === 'openai' || providerName === 'fireworks';
+      return _observeAPIPromise(
+        result,
+        (response, headerId) => {
+          const headerRequestId = usesHeaderId ? headerId : undefined;
+          if (_isAsyncIterable(response)) {
+            return _instrumentStreamInPlace(response, (source) =>
+              providerName === 'anthropic'
+                ? _wrapPatchedAnthropicStream(
+                    amplitudeAI,
+                    source,
+                    startTime,
+                    args[0],
+                  )
+                : _wrapPatchedStream(
+                    amplitudeAI,
+                    source,
+                    startTime,
+                    args[0],
+                    providerName,
+                    headerRequestId,
+                  ),
+            );
+          }
+          if (providerName === 'anthropic') {
+            _trackAnthropicResponse(amplitudeAI, response, startTime, args[0]);
+          } else {
+            _trackCompletionResponse(
+              amplitudeAI,
+              response,
+              startTime,
+              args[0],
+              providerName,
+              headerRequestId,
+            );
+          }
+          return response;
+        },
+        (err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            args[0],
+            providerName,
+          );
+        },
+      );
+    }
     if (result instanceof Promise) {
       return _resolvePatchedProviderResponse(result, providerName)
         .then(({ data: response, headerRequestId }) => {
@@ -940,6 +992,79 @@ function _makeAnthropicStreamWrapper(
         throw err;
       });
   };
+}
+
+type ThenUnwrappable = Promise<unknown> & {
+  _thenUnwrap: (
+    transform: (data: unknown, props?: unknown) => unknown,
+  ) => Promise<unknown>;
+};
+
+/** OpenAI / Anthropic `APIPromise` (both expose `_thenUnwrap`). */
+function _canThenUnwrap(value: unknown): value is ThenUnwrappable {
+  return (
+    value instanceof Promise &&
+    typeof (value as { _thenUnwrap?: unknown })._thenUnwrap === 'function'
+  );
+}
+
+/**
+ * Observe an SDK `APIPromise` without replacing it. The caller still gets an
+ * `APIPromise` (`withResponse()`, `asResponse()`, ...) and the same data.
+ */
+function _observeAPIPromise(
+  result: ThenUnwrappable,
+  onData: (data: unknown, headerRequestId: string | undefined) => unknown,
+  onError: (err: unknown) => void,
+): unknown {
+  const observed = result._thenUnwrap((data, props) => {
+    try {
+      return onData(data, extractHeaderRequestId(props));
+    } catch {
+      return data;
+    }
+  });
+  observed.then(undefined, (err: unknown) => {
+    try {
+      onError(err);
+    } catch {
+      // Tracking must never surface to the caller.
+    }
+  });
+  return observed;
+}
+
+/**
+ * Track an SDK stream (OpenAI `Stream`, Anthropic `Stream`) on the same
+ * object, so `tee()`, `toReadableStream()` and `controller` stay available.
+ * Only the first iteration is observed; SDK streams can be consumed once.
+ */
+function _instrumentStreamInPlace<T extends AsyncIterable<unknown>>(
+  stream: T,
+  wrap: (source: AsyncIterable<unknown>) => AsyncIterable<unknown>,
+): T {
+  const target = stream as unknown as Record<symbol, unknown>;
+  const original = target[Symbol.asyncIterator];
+  if (typeof original !== 'function') return stream;
+  const iterate = (): AsyncIterator<unknown> =>
+    (original as () => AsyncIterator<unknown>).call(stream);
+  let observed = false;
+  try {
+    Object.defineProperty(stream, Symbol.asyncIterator, {
+      configurable: true,
+      writable: true,
+      value: (): AsyncIterator<unknown> => {
+        if (observed) return iterate();
+        observed = true;
+        return wrap({ [Symbol.asyncIterator]: iterate })[
+          Symbol.asyncIterator
+        ]();
+      },
+    });
+  } catch {
+    return stream;
+  }
+  return stream;
 }
 
 function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
@@ -1788,6 +1913,46 @@ function _makeResponsesWrapper(
         providerName,
       );
       throw syncErr;
+    }
+    if (_canThenUnwrap(result)) {
+      const usesHeaderId =
+        providerName === 'openai' || providerName === 'fireworks';
+      return _observeAPIPromise(
+        result,
+        (response, headerId) => {
+          const headerRequestId = usesHeaderId ? headerId : undefined;
+          if (_isAsyncIterable(response)) {
+            return _instrumentStreamInPlace(response, (source) =>
+              _wrapPatchedResponsesStream(
+                amplitudeAI,
+                source,
+                startTime,
+                args[0],
+                providerName,
+                headerRequestId,
+              ),
+            );
+          }
+          _trackResponsesResponse(
+            amplitudeAI,
+            response,
+            startTime,
+            args[0],
+            providerName,
+            headerRequestId,
+          );
+          return response;
+        },
+        (err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            args[0],
+            providerName,
+          );
+        },
+      );
     }
     if (result instanceof Promise) {
       return _resolvePatchedProviderResponse(result, providerName)
