@@ -37,6 +37,7 @@ import {
   trackUserMessage,
 } from '../core/tracking.js';
 import type { AmplitudeClientLike } from '../types.js';
+import { claimSpan } from './span-claims.js';
 import { calculateCost } from '../utils/costs.js';
 import { getLogger } from '../utils/logger.js';
 import {
@@ -197,6 +198,15 @@ export class SpanEventMapper {
     const deviceId = ctx?.deviceId ?? this._defaultDeviceId;
     if (!userId && !deviceId) {
       logger.warn('No user_id or device_id available, skipping span mapping');
+      return;
+    }
+    if (
+      !claimSpan(
+        this._amplitude,
+        this._extractOtelTraceId(span),
+        this._extractOtelSpanId(span),
+      )
+    ) {
       return;
     }
 

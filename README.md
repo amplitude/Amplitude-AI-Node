@@ -1744,6 +1744,8 @@ provider.register();
 
 Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are processed; all other spans are silently ignored. This means it's safe to add the exporter to a pipeline that produces mixed (GenAI + HTTP + DB) spans. Use `allowedScopes` / `blockedScopes` to further filter by OpenTelemetry instrumentation scope name.
 
+If the same `AmplitudeAI` also called `enableOtel()`, each span is recorded once: whichever path handles it first wins, and the other skips it. Re-exporting the same span (same trace and span ID) is also recorded once.
+
 **Attribute mapping reference:**
 
 | OTEL Span Attribute | Amplitude Event Property | Notes |
