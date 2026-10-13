@@ -29,6 +29,7 @@ import type { OtelSpanFilter, SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
 import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
+import { registerTrackingClient } from './tracking-registry.js';
 import type {
   AmplitudeClientLike,
   AmplitudeEvent,
@@ -254,6 +255,7 @@ export class AmplitudeAI {
     // Wrap in a mutable proxy so we never mutate the caller's object
     // (which may be a frozen ES module namespace).
     this._amplitude = new TrackingProxy(rawAmplitude);
+    registerTrackingClient(this, this._amplitude);
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();

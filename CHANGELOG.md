@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Patched provider calls made inside a session are recorded by the
+  `AmplitudeAI` that owns the session, including when a different instance
+  called `patch()`. Calls outside a session are unchanged.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.
