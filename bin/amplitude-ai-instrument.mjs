@@ -13,7 +13,7 @@
  * Set AMPLITUDE_AI_INSTRUMENT_CHILDREN=true to instrument every descendant Node process.
  */
 
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -59,14 +59,40 @@ if (apiKey && autoPatch) {
   }
 }
 
-try {
-  execFileSync(args[0], args.slice(1), {
-    stdio: 'inherit',
-    env: process.env,
-  });
-} catch (err) {
-  if (err && typeof err === 'object' && 'status' in err && typeof err.status === 'number') {
-    process.exit(err.status);
+const child = spawn(args[0], args.slice(1), {
+  stdio: 'inherit',
+  env: process.env,
+});
+
+// Forward termination signals so stopping the wrapper (a process manager,
+// `docker stop`, `kill <pid>`) stops the app instead of orphaning it. SIGINT
+// from a terminal already reaches the whole foreground process group, so it
+// is only forwarded when there is no terminal.
+const FORWARDED_SIGNALS =
+  process.platform === 'win32' ? ['SIGTERM', 'SIGHUP'] : ['SIGTERM', 'SIGHUP', 'SIGQUIT'];
+const forward = (signal) => {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill(signal);
   }
-  process.exit(1);
+};
+for (const signal of FORWARDED_SIGNALS) {
+  process.on(signal, forward);
 }
+process.on('SIGINT', () => {
+  if (!process.stdin.isTTY) forward('SIGINT');
+});
+
+child.on('error', (err) => {
+  process.stderr.write(`amplitude-ai-instrument: could not start ${args[0]}: ${err.message}\n`);
+  process.exit(1);
+});
+
+child.on('exit', (code, signal) => {
+  if (signal) {
+    // Exit the same way the child did, so callers see the signal.
+    for (const s of [...FORWARDED_SIGNALS, 'SIGINT']) process.removeAllListeners(s);
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exit(code ?? 1);
+});

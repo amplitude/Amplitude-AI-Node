@@ -16,6 +16,7 @@ import { InstrumentFileInputError, instrumentFile } from './instrument-file.js';
 import {
   type ScanResult,
   defaultScanRoots,
+  isBroadScanRoot,
   resolveScanRoot,
   scanProject,
 } from './scan-project.js';
@@ -195,8 +196,17 @@ const resolveAllowedScanRoots = async (server: McpServer): Promise<string[]> => 
   }
   roots.push(...clientRoots);
   if (clientRoots.length === 0) roots.push(...defaultScanRoots());
-  return roots;
+  return roots.filter((root) => !isBroadScanRoot(root));
 };
+
+// Upper bounds for free-form tool arguments (source inputs keep their own
+// limits in the analyzers).
+const MAX_SHORT_ARG_CHARS = 256;
+const MAX_PATH_ARG_CHARS = 4096;
+const MAX_QUERY_CHARS = 1024;
+const MAX_DESCRIPTION_CHARS = 2000;
+const MAX_SCAN_RESULT_CHARS = 5_000_000;
+const MAX_PROVIDERS = 32;
 
 const createServer = (): McpServer => {
   const server = new McpServer({
@@ -211,7 +221,7 @@ const createServer = (): McpServer => {
       description:
         'Return Amplitude AI event schema and event-property definitions.',
       inputSchema: {
-        event_type: z.string().optional(),
+        event_type: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
@@ -249,7 +259,7 @@ const createServer = (): McpServer => {
       description:
         'Return canonical instrumentation patterns for @amplitude/ai.',
       inputSchema: {
-        id: z.string().optional(),
+        id: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
@@ -306,8 +316,8 @@ const createServer = (): McpServer => {
       description:
         'Suggest practical next instrumentation steps from minimal hints.',
       inputSchema: {
-        framework: z.string().optional(),
-        provider: z.string().optional(),
+        framework: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
+        provider: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
         content_tier: z
           .enum(['full', 'metadata_only', 'customer_enriched'])
           .optional()
@@ -370,7 +380,10 @@ const createServer = (): McpServer => {
       description:
         'Search README.md, llms-full.txt, and amplitude-ai.md for a keyword or phrase. Returns matching sections with surrounding context.',
       inputSchema: {
-        query: z.string().describe('Keyword or phrase to search for'),
+        query: z
+          .string()
+          .max(MAX_QUERY_CHARS)
+          .describe('Keyword or phrase to search for'),
         max_results: z
           .number()
           .optional()
@@ -512,6 +525,7 @@ const createServer = (): McpServer => {
       inputSchema: {
         scan_result: z
           .string()
+          .max(MAX_SCAN_RESULT_CHARS)
           .describe('JSON string of the scan_project result'),
       },
     },
@@ -535,18 +549,24 @@ const createServer = (): McpServer => {
         'Apply instrumentation transforms to a source file. Returns the instrumented source code.',
       inputSchema: {
         source: z.string().describe('Source code of the file'),
-        file_path: z.string().describe('Path to the file (for context)'),
+        file_path: z
+          .string()
+          .max(MAX_PATH_ARG_CHARS)
+          .describe('Path to the file (for context)'),
         tier: z.enum(['quick_start', 'standard', 'advanced']),
         bootstrap_import_path: z
           .string()
+          .max(MAX_PATH_ARG_CHARS)
           .describe('Import path for the amplitude bootstrap module'),
-        agent_id: z.string().describe('Agent ID to use'),
+        agent_id: z.string().max(MAX_SHORT_ARG_CHARS).describe('Agent ID to use'),
         description: z
           .string()
+          .max(MAX_DESCRIPTION_CHARS)
           .optional()
           .describe('Agent description'),
         providers: z
-          .array(z.string())
+          .array(z.string().max(MAX_SHORT_ARG_CHARS))
+          .max(MAX_PROVIDERS)
           .describe('Provider names used in this file'),
       },
     },
@@ -645,8 +665,8 @@ const createServer = (): McpServer => {
       description:
         'Full guided instrumentation of a JS/TS AI app with @amplitude/ai. Includes the complete 4-phase workflow: Detect environment, Discover agents, Instrument code, Verify correctness.',
       argsSchema: {
-        framework: z.string().optional(),
-        provider: z.string().optional(),
+        framework: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
+        provider: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.

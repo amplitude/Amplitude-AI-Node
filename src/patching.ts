@@ -7,6 +7,7 @@
 
 import type { AmplitudeAI } from './client.js';
 import { getActiveContext, isTrackerManaged } from './context.js';
+import { resolveTrackingAI } from './tracking-registry.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
@@ -28,6 +29,7 @@ import { warnIfProviderMismatch } from './utils/provider-detect.js';
 import { resolveOpenAIProvider } from './utils/openai-provider.js';
 import {
   extractBodyResponseId,
+  extractHeaderRequestId,
   extractProviderRequestId,
   resolveProviderResponse,
 } from './utils/provider-request-id.js';
@@ -239,17 +241,18 @@ export function patchGemini(options: {
     innerOriginal: (...a: unknown[]) => unknown,
     ...innerArgs: unknown[]
   ): unknown => {
+    const tracker = resolveTrackingAI(amplitudeAI);
     const startTime = performance.now();
     const result = innerOriginal(...innerArgs);
     if (result instanceof Promise) {
       return result
         .then((response) => {
-          _trackGeminiResponse(amplitudeAI, response, startTime, innerArgs[0]);
+          _trackGeminiResponse(tracker, response, startTime, innerArgs[0]);
           return response;
         })
         .catch((err) => {
           _trackCompletionError(
-            amplitudeAI,
+            tracker,
             err,
             startTime,
             innerArgs[0],
@@ -264,6 +267,7 @@ export function patchGemini(options: {
     innerOriginal: (...a: unknown[]) => unknown,
     ...innerArgs: unknown[]
   ): unknown => {
+    const tracker = resolveTrackingAI(amplitudeAI);
     const startTime = performance.now();
     const result = innerOriginal(...innerArgs);
     if (result instanceof Promise) {
@@ -275,7 +279,7 @@ export function patchGemini(options: {
             return {
               ...streamResp,
               stream: _wrapPatchedStream(
-                amplitudeAI,
+                tracker,
                 stream as AsyncIterable<unknown>,
                 startTime,
                 innerArgs[0],
@@ -287,7 +291,7 @@ export function patchGemini(options: {
         })
         .catch((err) => {
           _trackCompletionError(
-            amplitudeAI,
+            tracker,
             err,
             startTime,
             innerArgs[0],
@@ -400,9 +404,10 @@ function _patchGoogleGenAIClient(
     modelsProto,
     'generateContent',
     (original, ...args) => {
+      const tracker = resolveTrackingAI(amplitudeAI);
       const startTime = performance.now();
       return _handleGenAIGenerate(
-        amplitudeAI,
+        tracker,
         original(...args),
         startTime,
         args[0],
@@ -415,9 +420,10 @@ function _patchGoogleGenAIClient(
     modelsProto,
     'generateContentStream',
     (original, ...args) => {
+      const tracker = resolveTrackingAI(amplitudeAI);
       const startTime = performance.now();
       return _handleGenAIGenerateStream(
-        amplitudeAI,
+        tracker,
         original(...args),
         startTime,
         args[0],
@@ -583,6 +589,7 @@ export function patchBedrock(options: {
     ClientClass.prototype as Record<string, unknown>,
     'send',
     (original, ...args) => {
+      const tracker = resolveTrackingAI(amplitudeAI);
       const command = args[0] as Record<string, unknown> | undefined;
       const commandName = String(command?.constructor?.name ?? '');
       // InvokeModelWithResponseStreamCommand is intentionally excluded: its
@@ -610,7 +617,7 @@ export function patchBedrock(options: {
                 return {
                   ...streamResp,
                   stream: _wrapPatchedBedrockStream(
-                    amplitudeAI,
+                    tracker,
                     stream as AsyncIterable<unknown>,
                     startTime,
                     args[0],
@@ -619,20 +626,20 @@ export function patchBedrock(options: {
               }
             } else if (isInvokeModel) {
               _trackBedrockInvokeModelResponse(
-                amplitudeAI,
+                tracker,
                 response,
                 startTime,
                 args[0],
               );
             } else {
-              _trackBedrockResponse(amplitudeAI, response, startTime, args[0]);
+              _trackBedrockResponse(tracker, response, startTime, args[0]);
             }
             return response;
           })
           .catch((err) => {
             if (shouldTrack) {
               _trackCompletionError(
-                amplitudeAI,
+                tracker,
                 err,
                 startTime,
                 args[0],
@@ -818,10 +825,11 @@ function _unpatchByProvider(providerName: string): void {
 // ---------------------------------------------------------------
 
 function _makeCompletionWrapper(
-  amplitudeAI: AmplitudeAI,
+  owner: AmplitudeAI,
   providerName: string,
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
+    const amplitudeAI = resolveTrackingAI(owner);
     const startTime = performance.now();
 
     // Intentionally emit user-message and tool-call events before the API call.
@@ -846,6 +854,57 @@ function _makeCompletionWrapper(
         providerName,
       );
       throw syncErr;
+    }
+    if (_canThenUnwrap(result)) {
+      const usesHeaderId =
+        providerName === 'openai' || providerName === 'fireworks';
+      return _observeAPIPromise(
+        result,
+        (response, headerId) => {
+          const headerRequestId = usesHeaderId ? headerId : undefined;
+          if (_isAsyncIterable(response)) {
+            return _instrumentStreamInPlace(response, (source) =>
+              providerName === 'anthropic'
+                ? _wrapPatchedAnthropicStream(
+                    amplitudeAI,
+                    source,
+                    startTime,
+                    args[0],
+                  )
+                : _wrapPatchedStream(
+                    amplitudeAI,
+                    source,
+                    startTime,
+                    args[0],
+                    providerName,
+                    headerRequestId,
+                  ),
+            );
+          }
+          if (providerName === 'anthropic') {
+            _trackAnthropicResponse(amplitudeAI, response, startTime, args[0]);
+          } else {
+            _trackCompletionResponse(
+              amplitudeAI,
+              response,
+              startTime,
+              args[0],
+              providerName,
+              headerRequestId,
+            );
+          }
+          return response;
+        },
+        (err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            args[0],
+            providerName,
+          );
+        },
+      );
     }
     if (result instanceof Promise) {
       return _resolvePatchedProviderResponse(result, providerName)
@@ -898,9 +957,10 @@ function _makeCompletionWrapper(
 }
 
 function _makeAnthropicStreamWrapper(
-  amplitudeAI: AmplitudeAI,
+  owner: AmplitudeAI,
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
+    const amplitudeAI = resolveTrackingAI(owner);
     const startTime = performance.now();
     const result = original(...args);
     if (!(result instanceof Promise)) return result;
@@ -940,6 +1000,79 @@ function _makeAnthropicStreamWrapper(
         throw err;
       });
   };
+}
+
+type ThenUnwrappable = Promise<unknown> & {
+  _thenUnwrap: (
+    transform: (data: unknown, props?: unknown) => unknown,
+  ) => Promise<unknown>;
+};
+
+/** OpenAI / Anthropic `APIPromise` (both expose `_thenUnwrap`). */
+function _canThenUnwrap(value: unknown): value is ThenUnwrappable {
+  return (
+    value instanceof Promise &&
+    typeof (value as { _thenUnwrap?: unknown })._thenUnwrap === 'function'
+  );
+}
+
+/**
+ * Observe an SDK `APIPromise` without replacing it. The caller still gets an
+ * `APIPromise` (`withResponse()`, `asResponse()`, ...) and the same data.
+ */
+function _observeAPIPromise(
+  result: ThenUnwrappable,
+  onData: (data: unknown, headerRequestId: string | undefined) => unknown,
+  onError: (err: unknown) => void,
+): unknown {
+  const observed = result._thenUnwrap((data, props) => {
+    try {
+      return onData(data, extractHeaderRequestId(props));
+    } catch {
+      return data;
+    }
+  });
+  observed.then(undefined, (err: unknown) => {
+    try {
+      onError(err);
+    } catch {
+      // Tracking must never surface to the caller.
+    }
+  });
+  return observed;
+}
+
+/**
+ * Track an SDK stream (OpenAI `Stream`, Anthropic `Stream`) on the same
+ * object, so `tee()`, `toReadableStream()` and `controller` stay available.
+ * Only the first iteration is observed; SDK streams can be consumed once.
+ */
+function _instrumentStreamInPlace<T extends AsyncIterable<unknown>>(
+  stream: T,
+  wrap: (source: AsyncIterable<unknown>) => AsyncIterable<unknown>,
+): T {
+  const target = stream as unknown as Record<symbol, unknown>;
+  const original = target[Symbol.asyncIterator];
+  if (typeof original !== 'function') return stream;
+  const iterate = (): AsyncIterator<unknown> =>
+    (original as () => AsyncIterator<unknown>).call(stream);
+  let observed = false;
+  try {
+    Object.defineProperty(stream, Symbol.asyncIterator, {
+      configurable: true,
+      writable: true,
+      value: (): AsyncIterator<unknown> => {
+        if (observed) return iterate();
+        observed = true;
+        return wrap({ [Symbol.asyncIterator]: iterate })[
+          Symbol.asyncIterator
+        ]();
+      },
+    });
+  } catch {
+    return stream;
+  }
+  return stream;
 }
 
 function _isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
@@ -1760,10 +1893,11 @@ function _patchInstanceCompletions(
 }
 
 function _makeResponsesWrapper(
-  amplitudeAI: AmplitudeAI,
+  owner: AmplitudeAI,
   providerName: string,
 ): (original: (...args: unknown[]) => unknown, ...args: unknown[]) => unknown {
   return (original, ...args) => {
+    const amplitudeAI = resolveTrackingAI(owner);
     const startTime = performance.now();
 
     // Intentionally emit user-message and tool-call events before the API call.
@@ -1788,6 +1922,46 @@ function _makeResponsesWrapper(
         providerName,
       );
       throw syncErr;
+    }
+    if (_canThenUnwrap(result)) {
+      const usesHeaderId =
+        providerName === 'openai' || providerName === 'fireworks';
+      return _observeAPIPromise(
+        result,
+        (response, headerId) => {
+          const headerRequestId = usesHeaderId ? headerId : undefined;
+          if (_isAsyncIterable(response)) {
+            return _instrumentStreamInPlace(response, (source) =>
+              _wrapPatchedResponsesStream(
+                amplitudeAI,
+                source,
+                startTime,
+                args[0],
+                providerName,
+                headerRequestId,
+              ),
+            );
+          }
+          _trackResponsesResponse(
+            amplitudeAI,
+            response,
+            startTime,
+            args[0],
+            providerName,
+            headerRequestId,
+          );
+          return response;
+        },
+        (err) => {
+          _trackCompletionError(
+            amplitudeAI,
+            err,
+            startTime,
+            args[0],
+            providerName,
+          );
+        },
+      );
     }
     if (result instanceof Promise) {
       return _resolvePatchedProviderResponse(result, providerName)

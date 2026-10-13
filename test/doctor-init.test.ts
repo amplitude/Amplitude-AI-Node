@@ -32,6 +32,26 @@ describe('doctor', (): void => {
     expect(result.checks.some((check) => check.name.includes('provider'))).toBe(true);
   });
 
+  it('reports a malformed package.json as a failed check instead of throwing', (): void => {
+    const cwd = mkdtempSync(join(tmpdir(), 'amp-ai-doctor-bad-pkg-'));
+    writeFileSync(join(cwd, 'package.json'), '{ "name": "x", bad json');
+    const result = runDoctor(cwd, { includeMockCheck: false });
+    const check = result.checks.find((c) => c.name === 'package.json');
+    expect(result.ok).toBe(false);
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toMatch(/^invalid JSON: /);
+    expect(check?.fix).toContain('package.json');
+  });
+
+  it('reports a package.json that is not an object as invalid', (): void => {
+    const cwd = mkdtempSync(join(tmpdir(), 'amp-ai-doctor-array-pkg-'));
+    writeFileSync(join(cwd, 'package.json'), '[]');
+    const check = runDoctor(cwd, { includeMockCheck: false }).checks.find(
+      (c) => c.name === 'package.json',
+    );
+    expect(check).toMatchObject({ ok: false, detail: 'invalid JSON: not a JSON object' });
+  });
+
   it('can skip mock checks when requested', (): void => {
     const cwd = mkdtempSync(join(tmpdir(), 'amp-ai-doctor-no-mock-'));
     const result = runDoctor(cwd, { includeMockCheck: false });

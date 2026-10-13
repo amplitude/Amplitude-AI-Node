@@ -1,5 +1,5 @@
 import { BoundAgent, type AgentOptions } from './bound-agent.js';
-import { AIConfig } from './config.js';
+import { AIConfig, normalizeFlushTimeoutMs } from './config.js';
 import type { MessageLabel, SessionEnrichments } from './core/enrichments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import {
@@ -29,6 +29,7 @@ import type { OtelSpanFilter, SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
 import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
+import { registerTrackingClient } from './tracking-registry.js';
 import type {
   AmplitudeClientLike,
   AmplitudeEvent,
@@ -105,6 +106,57 @@ class TrackingProxy implements AmplitudeClientLike {
 
   get configuration(): Record<string, unknown> | undefined {
     return this._original.configuration;
+  }
+}
+
+/** Options for {@link AmplitudeAI.flush}. */
+export interface FlushOptions {
+  /**
+   * Stop waiting after this many milliseconds. Values above 300000 are
+   * clamped; non-positive or non-numeric values mean "no timeout".
+   */
+  timeoutMs?: number;
+}
+
+function _flushAwaitable(result: unknown): Promise<unknown> | null {
+  if (result == null) return null;
+  const promise = (result as { promise?: unknown }).promise;
+  if (promise != null && typeof (promise as Promise<unknown>).then === 'function') {
+    return promise as Promise<unknown>;
+  }
+  if (typeof (result as Promise<unknown>).then === 'function') {
+    return result as Promise<unknown>;
+  }
+  return null;
+}
+
+async function _settleWithin(result: unknown, timeoutMs: number): Promise<void> {
+  const awaitable = _flushAwaitable(result);
+  if (awaitable == null) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+    (timer as { unref?: () => void }).unref?.();
+  });
+  try {
+    const outcome = await Promise.race([
+      Promise.resolve(awaitable).then(
+        () => 'done' as const,
+        (e: unknown) => {
+          getLogger().warn(`Flush failed (${e instanceof Error ? e.name : typeof e}).`);
+          return 'done' as const;
+        },
+      ),
+      timedOut,
+    ]);
+    if (outcome === 'timeout') {
+      Promise.resolve(awaitable).catch(() => {});
+      getLogger().warn(
+        `flush() did not complete within ${timeoutMs}ms; continuing without waiting. Pending events may be delivered later or lost if the process exits.`,
+      );
+    }
+  } finally {
+    if (timer != null) clearTimeout(timer);
   }
 }
 
@@ -254,6 +306,7 @@ export class AmplitudeAI {
     // Wrap in a mutable proxy so we never mutate the caller's object
     // (which may be a frozen ES module namespace).
     this._amplitude = new TrackingProxy(rawAmplitude);
+    registerTrackingClient(this, this._amplitude);
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();
@@ -1204,10 +1257,28 @@ export class AmplitudeAI {
     };
   }
 
-  flush(): unknown {
+  /**
+   * Flush queued events.
+   *
+   * Without options, returns the underlying client's flush result unchanged.
+   * With `timeoutMs`, returns a promise that resolves when the flush settles
+   * or when the timeout elapses (whichever comes first). It never rejects.
+   */
+  flush(options?: FlushOptions): unknown {
     _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
-    return this._amplitude.flush();
+    const timeoutMs = normalizeFlushTimeoutMs(options?.timeoutMs);
+    if (timeoutMs == null) {
+      return this._amplitude.flush();
+    }
+    let result: unknown;
+    try {
+      result = this._amplitude.flush();
+    } catch (e) {
+      getLogger().warn(`Flush failed (${e instanceof Error ? e.name : typeof e}).`);
+      return Promise.resolve();
+    }
+    return _settleWithin(result, timeoutMs);
   }
 
   shutdown(): void {

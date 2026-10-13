@@ -175,23 +175,50 @@ const SECRET_TOKEN_PATTERNS: RegExp[] = [
   /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/g,
+  /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{0,8192}?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
 ];
 const SECRET_ASSIGNMENT_RE =
-  /((?:api[_-]?key|secret|token|password|passwd|credential|auth)[\w-]{0,32}['"]?\s*[:=]\s*)(['"`])[^'"`\n]{6,512}?\2/gi;
+  /((?:api[_-]?key|secret|token|password|passwd|credential|auth|\w{0,32}key)[\w-]{0,32}['"]?\s*[:=]\s*)(['"`])[^'"`\n]{6,512}?\2/gi;
+// A quoted 32-character hex string has the shape of an Amplitude API key.
+const HEX_KEY_LITERAL_RE = /(['"`])[0-9a-fA-F]{32}\1/g;
+const PEM_BEGIN_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const PEM_END_RE = /-----END [A-Z ]*PRIVATE KEY-----/;
+const MAX_PEM_LOOKBACK_LINES = 200;
 
 export function redactSecrets(text: string): string {
   let out = text.replace(SECRET_ASSIGNMENT_RE, (_m, head: string, q: string) => `${head}${q}[REDACTED]${q}`);
   for (const re of SECRET_TOKEN_PATTERNS) out = out.replace(re, '[REDACTED]');
+  out = out.replace(HEX_KEY_LITERAL_RE, (_m, q: string) => `${q}[REDACTED]${q}`);
   return out;
+}
+
+/** Index of each line that sits inside a PEM private-key block. */
+function pemBodyLines(sourceLines: string[], start: number, end: number): Set<number> {
+  const inside = new Set<number>();
+  let open = false;
+  for (let i = Math.max(0, start - MAX_PEM_LOOKBACK_LINES); i <= end; i++) {
+    const line = sourceLines[i] ?? '';
+    if (PEM_BEGIN_RE.test(line) && !PEM_END_RE.test(line)) {
+      open = true;
+    } else if (open && PEM_END_RE.test(line)) {
+      open = false;
+    } else if (open && i >= start) {
+      inside.add(i);
+    }
+  }
+  return inside;
 }
 
 function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4): string {
   const idx = lineNum - 1;
   const start = Math.max(0, idx - radius);
   const end = Math.min(sourceLines.length - 1, idx + radius);
+  const pemLines = pemBodyLines(sourceLines, start, end);
   return sourceLines.slice(start, end + 1).map((l, i) => {
     const ln = start + i + 1;
     const marker = ln === lineNum ? '>>>' : '   ';
+    if (pemLines.has(start + i)) return `${marker} ${ln}: [REDACTED]`;
     // Redact before truncating so a credential straddling the cut is still caught.
     const redacted = redactSecrets(l.slice(0, MAX_CONTEXT_LINE_CHARS * 4));
     const line = redacted.length > MAX_CONTEXT_LINE_CHARS ? `${redacted.slice(0, MAX_CONTEXT_LINE_CHARS)}…` : redacted;

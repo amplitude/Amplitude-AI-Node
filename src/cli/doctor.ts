@@ -14,13 +14,28 @@ type DoctorOptions = {
   apiKeyEnv?: string;
 };
 
-const readPackageJson = (cwd: string): Record<string, unknown> | null => {
+type PackageJsonRead =
+  | { status: 'missing' }
+  | { status: 'invalid'; error: string }
+  | { status: 'found'; value: Record<string, unknown> };
+
+const readPackageJson = (cwd: string): PackageJsonRead => {
   const path = join(cwd, 'package.json');
   if (!existsSync(path)) {
-    return null;
+    return { status: 'missing' };
   }
-  const raw = readFileSync(path, 'utf8');
-  return JSON.parse(raw) as Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { status: 'invalid', error: 'not a JSON object' };
+    }
+    return { status: 'found', value: parsed as Record<string, unknown> };
+  } catch (e) {
+    return {
+      status: 'invalid',
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
 };
 
 const collectDependencyNames = (
@@ -123,12 +138,22 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
     }),
   });
 
-  const packageJson = readPackageJson(cwd);
+  const packageJsonRead = readPackageJson(cwd);
+  const packageJson =
+    packageJsonRead.status === 'found' ? packageJsonRead.value : null;
   checks.push({
     name: 'package.json',
     ok: packageJson !== null,
-    detail: packageJson ? 'found' : 'missing',
-    ...(!packageJson && { fix: 'npm init -y && npm install @amplitude/ai' }),
+    detail:
+      packageJsonRead.status === 'invalid'
+        ? `invalid JSON: ${packageJsonRead.error}`
+        : packageJsonRead.status,
+    ...(packageJsonRead.status === 'missing' && {
+      fix: 'npm init -y && npm install @amplitude/ai',
+    }),
+    ...(packageJsonRead.status === 'invalid' && {
+      fix: 'Fix the syntax error in package.json, then run doctor again.',
+    }),
   });
 
   const depNames = collectDependencyNames(packageJson);

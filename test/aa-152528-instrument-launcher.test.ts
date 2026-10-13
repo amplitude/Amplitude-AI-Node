@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -125,4 +125,71 @@ describe('amplitude-ai-instrument one-shot marker', (): void => {
     expect(res.status, String(res.stderr)).toBe(0);
     expect(JSON.parse(readFileSync(logPath, 'utf8'))).toEqual({});
   });
+});
+
+describe('amplitude-ai-instrument process handling', (): void => {
+  beforeEach((): void => {
+    writeFileSync(join(pkgDir, 'dist', 'register.js'), '');
+  });
+
+  function start(command: string[]): ChildProcess {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    delete env.NODE_OPTIONS;
+    return spawn(process.execPath, [join(pkgDir, 'bin', 'amplitude-ai-instrument.mjs'), ...command], {
+      env: { ...env, AMPLITUDE_AI_API_KEY: 'test-key', AMPLITUDE_AI_AUTO_PATCH: 'true', AA_TEST_LOG: logPath },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  function exited(proc: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+    return new Promise((resolveExit) => {
+      proc.on('exit', (code, signal) => resolveExit({ code, signal }));
+    });
+  }
+
+  async function waitForLog(line: string): Promise<void> {
+    const deadline = Date.now() + 15_000;
+    while (!readLog().includes(line)) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${line}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  it('exits with the child exit code', async (): Promise<void> => {
+    const proc = start([process.execPath, '-e', 'process.exit(7)']);
+    expect(await exited(proc)).toEqual({ code: 7, signal: null });
+  }, 30_000);
+
+  it('exits non-zero when the command cannot be started', async (): Promise<void> => {
+    const proc = start([join(root, 'no-such-command')]);
+    expect((await exited(proc)).code).toBe(1);
+  }, 30_000);
+
+  it.skipIf(process.platform === 'win32')(
+    'forwards SIGTERM to the child instead of orphaning it',
+    async (): Promise<void> => {
+      const childScript = [
+        "const fs = require('fs');",
+        "process.on('SIGTERM', () => { fs.appendFileSync(process.env.AA_TEST_LOG, 'CHILD_GOT_SIGTERM\\n'); process.exit(0); });",
+        "fs.appendFileSync(process.env.AA_TEST_LOG, 'CHILD_READY\\n');",
+        'setInterval(() => {}, 1000);',
+      ].join('\n');
+      const proc = start([process.execPath, '-e', childScript]);
+      const done = exited(proc);
+      await waitForLog('CHILD_READY');
+      proc.kill('SIGTERM');
+      expect(await done).toEqual({ code: 0, signal: null });
+      expect(readLog()).toContain('CHILD_GOT_SIGTERM');
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'exits by the same signal that ended the child',
+    async (): Promise<void> => {
+      const proc = start([process.execPath, '-e', "process.kill(process.pid, 'SIGTERM')"]);
+      expect(await exited(proc)).toEqual({ code: null, signal: 'SIGTERM' });
+    },
+    30_000,
+  );
 });

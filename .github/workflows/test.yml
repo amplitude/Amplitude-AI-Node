@@ -149,7 +149,7 @@ jobs:
             echo "::error::Use 'npx -y -p @amplitude/ai <bin>' instead of an unscoped npx command"
             status=1
           fi
-          if git grep -nE 'raw\.githubusercontent\.com/[^[:space:]]*/main/' -- ':!CHANGELOG.md' ':!test/**' ':!docs/unreleased/**'; then
+          if git grep -nE 'raw\.githubusercontent\.com/[^[:space:]]*/main/' -- ':!CHANGELOG.md' ':!test/**'; then
             echo "::error::Pin raw.githubusercontent.com URLs to a release tag, not main"
             status=1
           fi
