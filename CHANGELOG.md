@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`amplitude-ai-instrument`** forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to
+  the launched app instead of leaving it running when the wrapper is stopped,
+  and exits with the app's exit code or signal.
+- **`amplitude-ai-doctor`** reports a malformed `package.json` as a failed
+  check instead of crashing.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.

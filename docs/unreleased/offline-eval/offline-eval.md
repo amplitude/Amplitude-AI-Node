@@ -1,6 +1,6 @@
 # Offline eval runs + Amplitude Agent Analytics: run upload
 
-> **Not released.** Offline eval upload isn't rolled out yet. This guide, its checker, and its schema move back to `docs/integrations/` when it is.
+> **Not released.** Offline eval upload isn't rolled out yet. This guide, its checker, and its schema move back to `docs/integrations/` when it is. When they do, replace `vX.Y.Z` in the checker URLs with the release tag that ships the checker.
 
 **Amplitude Agent Analytics can store an offline eval run (a model bake-off over a fixed dataset) in your project, from any eval runner, over one authenticated HTTP call.**
 
@@ -147,7 +147,7 @@ Copy that harness's field map. Build the document for one real run. Show the map
 Run the checker and fix every line it prints before any post:
 
 ```bash
-curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-offline-eval.mjs
+curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/vX.Y.Z/docs/integrations/check-offline-eval.mjs
 node check-offline-eval.mjs run.json
 ```
 
@@ -215,7 +215,7 @@ if [ "$bytes" -gt 8000000 ]; then
   exit 1
 fi
 if command -v node >/dev/null 2>&1; then
-  curl -fsSL -o check-offline-eval.mjs https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-offline-eval.mjs
+  curl -fsSL -o check-offline-eval.mjs https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/vX.Y.Z/docs/integrations/check-offline-eval.mjs
   node check-offline-eval.mjs "$file"
 fi
 attempt=0

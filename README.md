@@ -1605,6 +1605,9 @@ Environment variables:
 | `AMPLITUDE_AI_AUTO_PATCH`   | Must be `"true"` to enable                      |
 | `AMPLITUDE_AI_CONTENT_MODE` | `full`, `metadata_only`, or `customer_enriched` |
 | `AMPLITUDE_AI_DEBUG`        | `"true"` for debug output to stderr             |
+| `AMPLITUDE_AI_INSTRUMENT_CHILDREN` | `"true"` to also instrument child Node processes (default: only the launched process) |
+
+`amplitude-ai-instrument` forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to your app and exits with its exit code or signal. Like any environment variable, `AMPLITUDE_AI_API_KEY` is inherited by every process your app starts, even ones that are not instrumented. If your app runs untrusted child processes, start them with an environment that leaves it out.
 
 ### Doctor CLI
 
