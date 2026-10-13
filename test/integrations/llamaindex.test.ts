@@ -123,7 +123,7 @@ describe('AmplitudeLlamaIndexHandler', () => {
       expect(call?.model).toBe('unknown');
     });
 
-    it('falls back to llamaindex-session when no sessionId', (): void => {
+    it('falls back to an anonymous per-event identity when none is provided (AA-152528 M7)', (): void => {
       const ai = createMockAmplitudeAI();
       const handler = new AmplitudeLlamaIndexHandler({
         amplitudeAI: ai as never,
@@ -131,12 +131,17 @@ describe('AmplitudeLlamaIndexHandler', () => {
 
       handler.onLLMStart('llm-3');
       handler.onLLMEnd('llm-3', { content: 'hi' });
+      handler.onLLMStart('llm-4');
+      handler.onLLMEnd('llm-4', { content: 'hi' });
 
-      const call = ai.trackAiMessage.mock.calls[0]![0] as Record<
-        string,
-        unknown
-      >;
-      expect(call.sessionId).toBe('llamaindex-session');
+      const [a, b] = ai.trackAiMessage.mock.calls.map(
+        (c) => c[0] as Record<string, unknown>,
+      );
+      expect(a!.userId).toBeUndefined();
+      expect(a!.sessionId).not.toBe('llamaindex-session');
+      expect(typeof a!.deviceId).toBe('string');
+      expect(b!.sessionId).not.toBe(a!.sessionId);
+      expect(b!.deviceId).not.toBe(a!.deviceId);
     });
 
     it('computes latency even without a matching start call', (): void => {

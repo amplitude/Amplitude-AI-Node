@@ -108,7 +108,7 @@ Both recipes remove a job when `syncFin` takes it, before it is forwarded. A job
 
 ### Phase 4: Verify
 
-1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning lines: how many conversations had no user ID, how many had no messages to send, and how many failed (each logged with its error). Those are skipped, not sent. A second line counts conversations sent with `parts_truncated`. Optionally save them as JSON and run Amplitude's checker: `curl -sSLO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs && node check-agent-events.mjs events.json`.
+1. Run the dry-run over a narrow window and show the user the exact events, plus the job's warning lines: how many conversations had no user ID, how many had no messages to send, and how many failed (each logged with its error). Those are skipped, not sent. A second line counts conversations sent with `parts_truncated`. Optionally save them as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub).
 2. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session, and the opening message is its first turn
@@ -123,7 +123,7 @@ Both recipes remove a job when `syncFin` takes it, before it is forwarded. A job
 
 - Intercom allows 10,000 API calls per minute per app and 25,000 per workspace, shared by every private app in the workspace and spread over 10-second windows. The adapter makes one search call per 150 conversations plus one retrieve per conversation. It waits for `X-RateLimit-Reset` on `429` (at most a minute per wait) and backs off exponentially on `5xx`, up to 6 retries per request, then throws.
 - For backfill, set the first watermark to the earliest date wanted and let the job page forward (see Backfill).
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

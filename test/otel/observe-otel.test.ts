@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _setOtelOwner } from '../../src/client.js';
+import { PrivacyConfig } from '../../src/core/privacy.js';
 import { observe, ToolCallTracker } from '../../src/decorators.js';
 import { AMP_INPUT_STATE, AMP_OUTPUT_STATE, AMP_SPAN_KIND } from '../../src/otel/conventions.js';
 import type { AmplitudeLike } from '../../src/types.js';
@@ -78,7 +79,13 @@ describe('observe() with OTEL integration', () => {
   it('sets AMP_INPUT_STATE and AMP_OUTPUT_STATE on OTEL span', async (): Promise<void> => {
     const myFn = observe(
       async (input: { query: string }): Promise<{ answer: string }> => ({ answer: `result for ${input.query}` }),
-      { name: 'search', type: 'agent', amplitude: mockAmplitude, userId: 'u1' },
+      {
+        name: 'search',
+        type: 'agent',
+        amplitude: mockAmplitude,
+        userId: 'u1',
+        privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+      },
     );
 
     await myFn({ query: 'test' });
@@ -91,7 +98,13 @@ describe('observe() with OTEL integration', () => {
   it('sets error status on span when function throws', async (): Promise<void> => {
     const failing = observe(
       async (): Promise<never> => { throw new Error('boom'); },
-      { name: 'failFn', type: 'llm', amplitude: mockAmplitude, userId: 'u1' },
+      {
+        name: 'failFn',
+        type: 'llm',
+        amplitude: mockAmplitude,
+        userId: 'u1',
+        privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+      },
     );
 
     await expect(failing()).rejects.toThrow('boom');

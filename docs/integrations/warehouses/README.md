@@ -117,8 +117,9 @@ Open the format page and copy the query for the user's warehouse. Then:
 2. Export the result as CSV or JSON and run the checker:
 
    ```bash
-   curl -sO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs
-   node check-agent-events.mjs results.csv
+   # The checker ships in the npm package; run that copy rather than one from GitHub.
+   npm install --no-save --ignore-scripts @amplitude/ai
+   node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs results.csv
    ```
 
 3. Fix every error. The most common: an agent row with no text mapped to `assistant` (map it to `span`), a missing identity column, or a `message_id` that is not stable across runs.
@@ -142,7 +143,7 @@ Open the format page and copy the query for the user's warehouse. Then:
 
 - After the sample looks right, remove the sample-conversation filter. The same source keeps importing. Widen history only by how far the query looks back, not by running a second job.
 - For history, the first sync imports every settled conversation the query returns. Import a week first and check it before widening.
-- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx amplitude-ai-register-catalog` prints the Taxonomy API calls.
+- Optionally register the `[Agent]` event schema in the Amplitude data catalog: `npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh` writes the Taxonomy API calls to a script; review it, then run it with `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` exported.
 
 ---
 

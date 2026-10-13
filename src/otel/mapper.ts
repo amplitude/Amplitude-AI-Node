@@ -11,11 +11,8 @@ import {
   PROP_AGENT_ID,
   PROP_AGENT_VERSION,
   PROP_COMPONENT_TYPE,
-  PROP_CONTEXT,
   PROP_CUSTOMER_ORG_ID,
   PROP_ENV,
-  PROP_INPUT_STATE,
-  PROP_OUTPUT_STATE,
   PROP_PARENT_AGENT_ID,
   PROP_PARENT_SPAN_ID,
   PROP_SPAN_ID,
@@ -29,7 +26,7 @@ import {
   PROP_ERROR_SOURCE as CONST_PROP_ERROR_SOURCE,
   PROP_SPAN_KIND as CONST_PROP_SPAN_KIND,
 } from '../core/constants.js';
-import type { PrivacyConfig } from '../core/privacy.js';
+import { PrivacyConfig, redactPiiPatterns } from '../core/privacy.js';
 import { getGitMetadata } from '../utils/git_metadata.js';
 import {
   trackAiMessage,
@@ -138,24 +135,37 @@ export interface OtelSpan {
   events?: OtelSpanEvent[];
 }
 
+/**
+ * Which spans become events. `'genai'` (default) maps only spans carrying a
+ * `gen_ai.*` or `amplitude.*` attribute; `'all'` also maps every other span
+ * in the process (HTTP, DB, ...) as `[Agent] Span`.
+ */
+export type OtelSpanFilter = 'genai' | 'all';
+
 export interface SpanEventMapperOptions {
   amplitude: AmplitudeClientLike;
   defaultUserId?: string | null;
   defaultDeviceId?: string | null;
   privacyConfig?: PrivacyConfig | null;
+  otelSpanFilter?: OtelSpanFilter;
 }
 
 export class SpanEventMapper {
   private readonly _amplitude: AmplitudeClientLike;
   private readonly _defaultUserId: string | null;
   private readonly _defaultDeviceId: string | null;
-  private readonly _privacyConfig: PrivacyConfig | null;
+  private readonly _privacyConfig: PrivacyConfig;
+  private readonly _spanFilter: OtelSpanFilter;
 
   constructor(options: SpanEventMapperOptions) {
     this._amplitude = options.amplitude;
     this._defaultUserId = options.defaultUserId ?? null;
     this._defaultDeviceId = options.defaultDeviceId ?? null;
-    this._privacyConfig = options.privacyConfig ?? null;
+    // No config means no consent to capture content.
+    this._spanFilter = options.otelSpanFilter === 'all' ? 'all' : 'genai';
+    this._privacyConfig =
+      options.privacyConfig ??
+      new PrivacyConfig({ privacyMode: true, contentMode: 'metadata_only' });
   }
 
   mapAndTrack(span: OtelSpan): void {
@@ -168,6 +178,14 @@ export class SpanEventMapper {
 
   private _mapAndTrackInner(span: OtelSpan): void {
     const attrs: Record<string, unknown> = { ...(span.attributes ?? {}) };
+    if (
+      this._spanFilter === 'genai' &&
+      !Object.keys(attrs).some(
+        (k) => k.startsWith('gen_ai.') || k.startsWith('amplitude.'),
+      )
+    ) {
+      return;
+    }
     const ctx = getActiveContext();
 
     if (ctx?.trackerManaged) {
@@ -545,12 +563,11 @@ export class SpanEventMapper {
       } as never);
     } else if (spanKind === SPAN_KIND_AGENT) {
       if (extraProps[PROP_COMPONENT_TYPE] == null) extraProps[PROP_COMPONENT_TYPE] = 'agent';
-      if (toolInput != null) extraProps[PROP_INPUT_STATE] = serializeToJson(toolInput);
-      if (toolOutput != null) extraProps[PROP_OUTPUT_STATE] = serializeToJson(toolOutput);
       trackSpan({
         ...shared, spanName, latencyMs: fields.latencyMs,
         isError: fields.isError, errorMessage: fields.errorMessage,
         errorType: fields.errorType, turnId: fields.turnId, parentSpanId,
+        inputState: asStateRecord(toolInput), outputState: asStateRecord(toolOutput),
         eventProperties: Object.keys(extraProps).length > 0 ? extraProps : undefined,
       } as never);
     } else if (spanKind === SPAN_KIND_LLM) {
@@ -572,12 +589,11 @@ export class SpanEventMapper {
       trackSessionEnd({ ...shared, turnId: fields.turnId, eventProperties: ep } as never);
     } else {
       if (extraProps[PROP_COMPONENT_TYPE] == null) extraProps[PROP_COMPONENT_TYPE] = 'span';
-      if (toolInput != null) extraProps[PROP_INPUT_STATE] = serializeToJson(toolInput);
-      if (toolOutput != null) extraProps[PROP_OUTPUT_STATE] = serializeToJson(toolOutput);
       trackSpan({
         ...shared, spanName, latencyMs: fields.latencyMs,
         isError: fields.isError, errorMessage: fields.errorMessage,
         errorType: fields.errorType, turnId: fields.turnId, parentSpanId,
+        inputState: asStateRecord(toolInput), outputState: asStateRecord(toolOutput),
         eventProperties: Object.keys(extraProps).length > 0 ? extraProps : undefined,
       } as never);
     }
@@ -608,7 +624,6 @@ export class SpanEventMapper {
     if (opts.env) extra[PROP_ENV] = opts.env;
     if (opts.customerOrgId) extra[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
     if (opts.agentVersion) extra[PROP_AGENT_VERSION] = opts.agentVersion;
-    if (opts.contextDict) extra[PROP_CONTEXT] = JSON.stringify(opts.contextDict);
     if (opts.otelAgentName) extra['[Agent] Agent Name'] = opts.otelAgentName;
 
     const tags = attrs[AMP_TAGS];
@@ -633,16 +648,22 @@ export class SpanEventMapper {
       if (!extra[PROP_GIT_REF] && gitMeta.gitRef) extra[PROP_GIT_REF] = gitMeta.gitRef;
       if (!extra[PROP_GIT_REPO] && gitMeta.gitRepo) extra[PROP_GIT_REPO] = gitMeta.gitRepo;
     }
-    if (attrs[AMP_STACK_TRACE]) {
-      extra[PROP_STACK_TRACE] = String(attrs[AMP_STACK_TRACE]);
-    } else if (opts.span.events?.length) {
+    // Stack traces quote exception messages, so they follow the same
+    // contentMode gate and redaction as other content channels; exception
+    // events are only read when captureStackTrace is on.
+    const pc = this._privacyConfig;
+    let stackTrace: unknown = attrs[AMP_STACK_TRACE];
+    if (!stackTrace && pc.captureStackTrace === true && opts.span.events?.length) {
       const exceptionEvent = opts.span.events.find(
         (e) => e.name === 'exception',
       );
-      if (exceptionEvent?.attributes) {
-        const stacktrace = exceptionEvent.attributes['exception.stacktrace'];
-        if (stacktrace) extra[PROP_STACK_TRACE] = String(stacktrace);
-      }
+      stackTrace = exceptionEvent?.attributes?.['exception.stacktrace'];
+    }
+    if (stackTrace && isFullMode(pc)) {
+      const st = String(stackTrace);
+      extra[PROP_STACK_TRACE] = pc.applyCustomRedaction(
+        pc.redactPii ? redactPiiPatterns(st) : st,
+      );
     }
     if (attrs[AMP_ERROR_SOURCE]) extra[PROP_ERROR_SOURCE_PROP] = String(attrs[AMP_ERROR_SOURCE]);
     if (attrs[AMP_TOOL_TYPE]) extra[PROP_TOOL_TYPE] = String(attrs[AMP_TOOL_TYPE]);
@@ -737,9 +758,8 @@ export class SpanEventMapper {
   }
 
   private _extractOtelTraceId(span: OtelSpan): string | null {
-    const spanCtxFn = span.spanContext;
-    if (typeof spanCtxFn === 'function') {
-      const ctx = spanCtxFn();
+    if (typeof span.spanContext === 'function') {
+      const ctx = span.spanContext();
       if (ctx?.traceId) return ctx.traceId;
     }
     const ctx = span.context;
@@ -753,9 +773,8 @@ export class SpanEventMapper {
   }
 
   private _extractOtelSpanId(span: OtelSpan): string | null {
-    const spanCtxFn = span.spanContext;
-    if (typeof spanCtxFn === 'function') {
-      const ctx = spanCtxFn();
+    if (typeof span.spanContext === 'function') {
+      const ctx = span.spanContext();
       if (ctx?.spanId) return ctx.spanId;
     }
     const ctx = span.context;
@@ -926,10 +945,14 @@ function extractTextFromParts(msg: Record<string, unknown>): string | null {
   return textParts.length > 0 ? textParts.join('\n') : null;
 }
 
-function serializeToJson(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
+function asStateRecord(value: unknown): Record<string, unknown> | null {
+  if (value == null) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
   }
+  return { value };
+}
+
+function isFullMode(pc: PrivacyConfig): boolean {
+  return pc.contentMode === 'full' || (pc.contentMode == null && !pc.privacyMode);
 }

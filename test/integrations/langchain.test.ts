@@ -368,20 +368,31 @@ describe('AmplitudeCallbackHandler', () => {
       expect(call.content).toBe('');
     });
 
-    it('falls back to langchain-session when no sessionId provided', (): void => {
+    it('falls back to an anonymous per-run identity when none is provided (AA-152528 M7)', (): void => {
       const ai = createMockAmplitudeAI();
       const handler = new AmplitudeCallbackHandler({
         amplitudeAI: ai as never,
       });
 
-      handler.handleLLMStart({}, [], 'run-4');
+      handler.handleLLMStart({}, ['q1'], 'run-4');
       handler.handleLLMEnd({ generations: [[{ text: 'hi' }]] }, 'run-4');
+      handler.handleLLMStart({}, ['q2'], 'run-5');
+      handler.handleLLMEnd({ generations: [[{ text: 'hi' }]] }, 'run-5');
 
-      const call = ai.trackAiMessage.mock.calls[0]![0] as Record<
-        string,
-        unknown
-      >;
-      expect(call.sessionId).toBe('langchain-session');
+      const [user4, user5] = ai.trackUserMessage.mock.calls.map(
+        (c) => c[0] as Record<string, unknown>,
+      );
+      const [ai4, ai5] = ai.trackAiMessage.mock.calls.map(
+        (c) => c[0] as Record<string, unknown>,
+      );
+      expect(ai4!.userId).toBeUndefined();
+      expect(ai4!.sessionId).not.toBe('langchain-session');
+      expect(typeof ai4!.deviceId).toBe('string');
+      expect(user4!.sessionId).toBe(ai4!.sessionId);
+      expect(user4!.deviceId).toBe(ai4!.deviceId);
+      expect(ai5!.sessionId).not.toBe(ai4!.sessionId);
+      expect(ai5!.deviceId).not.toBe(ai4!.deviceId);
+      expect(user5!.sessionId).toBe(ai5!.sessionId);
     });
   });
 

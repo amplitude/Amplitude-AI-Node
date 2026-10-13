@@ -128,7 +128,7 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
     name: 'package.json',
     ok: packageJson !== null,
     detail: packageJson ? 'found' : 'missing',
-    ...(!packageJson && { fix: 'npm init -y && npx amplitude-ai init' }),
+    ...(!packageJson && { fix: 'npm init -y && npm install @amplitude/ai' }),
   });
 
   const depNames = collectDependencyNames(packageJson);

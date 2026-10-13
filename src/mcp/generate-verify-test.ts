@@ -1,7 +1,8 @@
 import type { ScanResult } from './scan-project.js';
 
+/** Body of a single-quoted JS string literal; escapes quotes, backslashes and control characters. */
 function escapeStr(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return JSON.stringify(String(s)).slice(1, -1).replace(/\\"/g, '"').replace(/'/g, "\\'");
 }
 
 export function generateVerifyTest(scanResult: ScanResult): string {

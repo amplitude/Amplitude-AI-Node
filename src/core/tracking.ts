@@ -315,13 +315,19 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
     // The full body (including any `content` field) is a content channel —
     // gate on full (AA-151933).
     if (effectiveMode === 'full')
-      properties[PROP_ATTACHMENTS] = serializeToJsonString(opts.attachments);
+      properties[PROP_ATTACHMENTS] = serializeToJsonString(
+        sanitizeStructuredContent(opts.attachments, pc.redactPii, pc),
+      );
   }
 
   // Labels can carry free-text values — treat as a content channel.
   if (opts.labels?.length && effectiveMode === 'full') {
     properties[PROP_MESSAGE_LABELS] = serializeToJsonString(
-      opts.labels.map((lbl) => lbl.toDict()),
+      sanitizeStructuredContent(
+        opts.labels.map((lbl) => lbl.toDict()),
+        pc.redactPii,
+        pc,
+      ),
     );
   }
 
@@ -575,13 +581,19 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
     );
     if (totalSize > 0) properties[PROP_TOTAL_ATTACHMENT_SIZE] = totalSize;
     if (effectiveMode === 'full')
-      properties[PROP_ATTACHMENTS] = serializeToJsonString(opts.attachments);
+      properties[PROP_ATTACHMENTS] = serializeToJsonString(
+        sanitizeStructuredContent(opts.attachments, pc.redactPii, pc),
+      );
   }
 
   // Labels can carry free-text values — treat as a content channel.
   if (opts.labels?.length && effectiveMode === 'full') {
     properties[PROP_MESSAGE_LABELS] = serializeToJsonString(
-      opts.labels.map((lbl) => lbl.toDict()),
+      sanitizeStructuredContent(
+        opts.labels.map((lbl) => lbl.toDict()),
+        pc.redactPii,
+        pc,
+      ),
     );
   }
 

@@ -61,6 +61,43 @@ describe('extractContext', () => {
     expect(result.agentId).toBe('agent-1');
     expect(result.userId).toBe('user-1');
   });
+
+  describe('input validation (AA-152528 M27)', () => {
+    it('ignores malformed traceparent and falls back to a valid x-trace-id', () => {
+      const result = extractContext({
+        traceparent: `00-${'x'.repeat(32)}-1234567890abcdef-01`,
+        'x-trace-id': 'fallback-trace',
+      });
+      expect(result.traceId).toBe('fallback-trace');
+    });
+
+    it('drops an oversized x-trace-id', () => {
+      expect(extractContext({ 'x-trace-id': 'a'.repeat(65) }).traceId).toBeUndefined();
+      expect(extractContext({ 'x-trace-id': 'a'.repeat(64) }).traceId).toBe('a'.repeat(64));
+    });
+
+    it('rejects an all-zero or oversized traceparent', () => {
+      expect(
+        extractContext({ traceparent: '00-00000000000000000000000000000000-1234567890abcdef-01' }).traceId,
+      ).toBeUndefined();
+      expect(
+        extractContext({
+          traceparent: `00-abcdef1234567890abcdef1234567890-1234567890abcdef-01-${'a'.repeat(600)}`,
+        }).traceId,
+      ).toBeUndefined();
+    });
+
+    it('drops identity headers that are too long or contain control characters', () => {
+      const result = extractContext({
+        'x-amplitude-session-id': 's'.repeat(257),
+        'x-amplitude-agent-id': 'agent\u0000x',
+        'x-amplitude-user-id': 'ok-user-1',
+      });
+      expect(result.sessionId).toBeUndefined();
+      expect(result.agentId).toBeUndefined();
+      expect(result.userId).toBe('ok-user-1');
+    });
+  });
 });
 
 describe('default propagate context setting', () => {

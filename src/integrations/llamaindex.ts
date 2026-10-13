@@ -6,8 +6,8 @@
  */
 
 import type { AmplitudeAI } from '../client.js';
-import { getActiveContext } from '../context.js';
 import { calculateCost, inferProvider } from '../utils/costs.js';
+import { RunIdentities } from './identity.js';
 
 export interface LlamaIndexHandlerOptions {
   amplitudeAI: AmplitudeAI;
@@ -19,33 +19,32 @@ export interface LlamaIndexHandlerOptions {
 
 export class AmplitudeLlamaIndexHandler {
   private _ai: AmplitudeAI;
-  private _userId: string | null;
-  private _sessionId: string | null;
-  private _agentId: string | null;
-  private _env: string | null;
+  private _identities: RunIdentities;
   private _startTimes: Map<string, number> = new Map();
 
   constructor(options: LlamaIndexHandlerOptions) {
     this._ai = options.amplitudeAI;
-    this._userId = options.userId ?? null;
-    this._sessionId = options.sessionId ?? null;
-    this._agentId = options.agentId ?? null;
-    this._env = options.env ?? null;
+    this._identities = new RunIdentities({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      env: options.env,
+    });
   }
 
-  private _getContext() {
-    const ctx = getActiveContext();
-    return {
-      userId: this._userId ?? ctx?.userId ?? 'unknown',
-      sessionId: this._sessionId ?? ctx?.sessionId ?? undefined,
-      agentId: this._agentId ?? ctx?.agentId ?? undefined,
-      env: this._env ?? ctx?.env ?? undefined,
-      traceId: ctx?.traceId ?? undefined,
-    };
+  private _start(eventId: string): void {
+    this._startTimes.set(eventId, performance.now());
+    this._identities.resolve(eventId);
+  }
+
+  private _endIdentity(eventId: string) {
+    const ctx = this._identities.resolve(eventId);
+    this._identities.end(eventId);
+    return ctx;
   }
 
   onLLMStart(eventId: string): void {
-    this._startTimes.set(eventId, performance.now());
+    this._start(eventId);
   }
 
   onLLMEnd(
@@ -61,7 +60,7 @@ export class AmplitudeLlamaIndexHandler {
     this._startTimes.delete(eventId);
     const latencyMs = performance.now() - startTime;
 
-    const ctx = this._getContext();
+    const ctx = this._endIdentity(eventId);
     const normalized = _normalizeLlamaLlmResponse(response as unknown);
 
     let costUsd: number | undefined;
@@ -87,8 +86,9 @@ export class AmplitudeLlamaIndexHandler {
 
     this._ai.trackAiMessage({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       content: normalized.content,
-      sessionId: ctx.sessionId ?? 'llamaindex-session',
+      sessionId: ctx.sessionId,
       model: normalized.model,
       provider: 'llamaindex',
       latencyMs,
@@ -102,7 +102,7 @@ export class AmplitudeLlamaIndexHandler {
   }
 
   onEmbeddingStart(eventId: string): void {
-    this._startTimes.set(eventId, performance.now());
+    this._start(eventId);
   }
 
   onEmbeddingEnd(
@@ -113,10 +113,11 @@ export class AmplitudeLlamaIndexHandler {
     this._startTimes.delete(eventId);
     const latencyMs = performance.now() - startTime;
 
-    const ctx = this._getContext();
+    const ctx = this._endIdentity(eventId);
     const normalized = _normalizeLlamaEmbeddingResponse(response as unknown);
     this._ai.trackEmbedding({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       model: normalized.model,
       provider: 'llamaindex',
       latencyMs,
@@ -130,7 +131,7 @@ export class AmplitudeLlamaIndexHandler {
   }
 
   onToolStart(eventId: string): void {
-    this._startTimes.set(eventId, performance.now());
+    this._start(eventId);
   }
 
   onToolEnd(
@@ -141,10 +142,11 @@ export class AmplitudeLlamaIndexHandler {
     this._startTimes.delete(eventId);
     const latencyMs = performance.now() - startTime;
 
-    const ctx = this._getContext();
+    const ctx = this._endIdentity(eventId);
     const normalized = _normalizeLlamaToolResponse(response as unknown);
     this._ai.trackToolCall({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       toolName: normalized.toolName,
       latencyMs,
       success: normalized.success,

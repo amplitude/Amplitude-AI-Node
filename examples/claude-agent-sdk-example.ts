@@ -9,7 +9,8 @@
  *   npm install @amplitude/ai @anthropic-ai/claude-agent-sdk
  *
  * Usage:
- *   AMPLITUDE_API_KEY=your-key npx tsx examples/claude-agent-sdk-example.ts
+ *   # with AMPLITUDE_API_KEY exported in your shell:
+ *   npx tsx examples/claude-agent-sdk-example.ts
  */
 
 import { AmplitudeAI } from '@amplitude/ai';

@@ -1,43 +1,52 @@
 # Releasing @amplitude/ai
 
-## First-Time Setup (one-time bootstrap)
+## Publishing setup
 
-Trusted Publishing (OIDC) cannot be used for the very first publish of a new package.
-You must bootstrap the package on npm first.
+`@amplitude/ai` is published only by `.github/workflows/publish.yml` through npm
+Trusted Publishing (OIDC). There are no npm tokens; don't create any.
 
-### Option A: Use setup-npm-trusted-publish (recommended)
+### npm package settings
 
-```bash
-npx --yes setup-npm-trusted-publish @amplitude/ai
-```
+At https://www.npmjs.com/package/@amplitude/ai/access:
 
-This creates a dummy placeholder version on npm, allowing you to then configure
-Trusted Publishing.
+- **Trusted Publisher** (case-sensitive):
+  - **Repository owner**: `amplitude`
+  - **Repository name**: `Amplitude-AI-Node`
+  - **Workflow filename**: `publish.yml`
+  - **Environment**: `npm`
+- **Publishing access**: **"Require two-factor authentication and disallow tokens"**.
+  Trusted Publishing still works with this setting; automation and granular
+  tokens do not.
 
-### Option B: Manual first publish with 2FA
+### GitHub settings
 
-1. Log in to npm with an account that has publish access to the `@amplitude` scope
-2. From the repo root:
-   ```bash
-   pnpm install
-   pnpm run build
-   npm publish --access public
-   ```
-3. You'll be prompted for a 2FA OTP code
+- **`npm` environment** (Settings → Environments): required reviewers from
+  `@amplitude/agent-analytics`, and a deployment rule limited to `v*` tags and
+  `main`. The publish job is the only job that runs in this environment and the
+  only job with `id-token: write`.
+- **Tag ruleset** restricting who can create `v*` tags.
+- **CODEOWNERS** (`.github/CODEOWNERS`) covers `.github/workflows/` and `src/`.
 
-### Configure Trusted Publishing on npm
+### Release guard
 
-After the first version exists on npm:
+The workflow's `verify` job runs an inline check before anything from the repo
+is executed. It fails the release unless:
 
-1. Go to https://www.npmjs.com/package/@amplitude/ai/access
-2. Add a **Trusted Publisher** with these settings (case-sensitive):
-   - **Repository owner**: `amplitude`
-   - **Repository name**: `Amplitude-AI-Node`
-   - **Workflow filename**: `publish.yml`
-   - **Environment**: *(leave blank)*
-3. Set publishing access to: **"Require two-factor authentication or an automation or granular access token"**
+- the commit is on `main` (GitHub compare `main...<sha>` is `identical` or `behind`);
+- for tag pushes, the tag is exactly `v<version>` where `<version>` is
+  `package.json`'s `version` at that commit;
+- for manual runs, the workflow was dispatched from `main`.
 
-After this, all future publishes go through GitHub Actions OIDC -- no npm tokens needed.
+It then builds, type-checks and runs the tests. The `publish` job only runs
+after `verify` passes, installs with `--ignore-scripts` and no dependency cache,
+and publishes with provenance.
+
+### Bootstrapping a new package
+
+Trusted Publishing can't create a package. For a brand-new package, a maintainer
+with 2FA publishes the first version manually from a clean checkout of `main`
+(`pnpm install --frozen-lockfile && pnpm run build && npm publish --access public`),
+then configures the settings above. Don't use third-party bootstrap tools.
 
 ## Automated Release (after setup)
 
@@ -64,7 +73,8 @@ After this, all future publishes go through GitHub Actions OIDC -- no npm tokens
    git push origin v0.2.0
    ```
 
-5. The GitHub Actions workflow (`.github/workflows/publish.yml`) triggers automatically
+5. The GitHub Actions workflow (`.github/workflows/publish.yml`) triggers automatically,
+   runs the release guard and tests, waits for approval on the `npm` environment,
    and publishes to npm with provenance via Trusted Publishing (OIDC). It then
    creates a GitHub Release from the version's `CHANGELOG.md` section, so add
    a `## X.Y.Z` section before tagging or the release job fails.

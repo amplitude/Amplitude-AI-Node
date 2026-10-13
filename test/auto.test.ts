@@ -142,6 +142,46 @@ describe('register.ts auto-instrumentation', (): void => {
     expect(stderrOutput).toContain('metadata_only');
   });
 
+  it.each(['metadata-only', 'metadataonly', 'nope'])(
+    'AA-152528 M4: invalid content mode %s skips patching with a warning',
+    async (mode): Promise<void> => {
+      process.env.AMPLITUDE_AI_API_KEY = 'test-key';
+      process.env.AMPLITUDE_AI_AUTO_PATCH = 'true';
+      process.env.AMPLITUDE_AI_CONTENT_MODE = mode;
+      await import('../src/register.js');
+
+      expect(mockAmplitudeAI).not.toHaveBeenCalled();
+      expect(mockPatch).not.toHaveBeenCalled();
+      expect(stderrOutput).toContain('invalid AMPLITUDE_AI_CONTENT_MODE');
+      expect(stderrOutput).toContain('Skipping auto-patch');
+      expect(stderrOutput).not.toContain('auto-patched providers');
+    },
+  );
+
+  it('AA-152528 M4: content mode is trimmed and case-insensitive', async (): Promise<void> => {
+    process.env.AMPLITUDE_AI_API_KEY = 'test-key';
+    process.env.AMPLITUDE_AI_AUTO_PATCH = 'true';
+    process.env.AMPLITUDE_AI_CONTENT_MODE = '  METADATA_ONLY \n';
+    await import('../src/register.js');
+
+    expect(mockPatch).toHaveBeenCalled();
+    const opts = mockAmplitudeAI.mock.calls[0]![0] as Record<string, unknown>;
+    expect((opts.config as { contentMode: string }).contentMode).toBe(
+      'metadata_only',
+    );
+    expect(stderrOutput).toContain('content_mode=metadata_only');
+  });
+
+  it('AA-152528 M4: empty content mode defaults to full', async (): Promise<void> => {
+    process.env.AMPLITUDE_AI_API_KEY = 'test-key';
+    process.env.AMPLITUDE_AI_AUTO_PATCH = 'true';
+    process.env.AMPLITUDE_AI_CONTENT_MODE = '  ';
+    await import('../src/register.js');
+
+    expect(mockPatch).toHaveBeenCalled();
+    expect(stderrOutput).not.toContain('invalid');
+  });
+
   it('does nothing when auto patch is not "true"', async (): Promise<void> => {
     process.env.AMPLITUDE_AI_API_KEY = 'test-key';
     process.env.AMPLITUDE_AI_AUTO_PATCH = 'yes';

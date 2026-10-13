@@ -4,12 +4,20 @@
  * Tracks LLM calls, tool calls, and chain events via LangChain's
  * callback system. Duck-typed compatible with LangChain's BaseCallbackHandler
  * (no hard dependency on @langchain/core) — pass the handler in `callbacks`.
+ *
+ * Identity is resolved per callback (constructor options, then the active
+ * session context, then the run's own identity), so one handler can be shared
+ * across requests. Runs with no identity get an anonymous per-run session and
+ * device ID. If LangChain dispatches callbacks in the background
+ * (`LANGCHAIN_CALLBACKS_BACKGROUND=true`) on a concurrent server, the active
+ * context may belong to another request: pass `userId`/`sessionId` explicitly
+ * on a per-request handler instead.
  */
 
 import type { AmplitudeAI } from '../client.js';
-import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { calculateCost, inferProvider } from '../utils/costs.js';
+import { type ResolvedIdentity, RunIdentities } from './identity.js';
 
 export interface CallbackHandlerOptions {
   amplitudeAI: AmplitudeAI;
@@ -20,12 +28,15 @@ export interface CallbackHandlerOptions {
   privacyConfig?: PrivacyConfig | null;
 }
 
+/**
+ * Runs that start but never end or error (cancelled chains, dropped
+ * callbacks) are evicted oldest-first beyond this many open runs.
+ */
+const MAX_OPEN_RUNS = 10_000;
+
 export class AmplitudeCallbackHandler {
   private _ai: AmplitudeAI;
-  private _userId: string | null;
-  private _sessionId: string | null;
-  private _agentId: string | null;
-  private _env: string | null;
+  private _identities: RunIdentities;
   private _privacyConfig: PrivacyConfig | null;
   private _runStartTimes: Map<string, number> = new Map();
   private _runModelNames: Map<string, string> = new Map();
@@ -34,22 +45,29 @@ export class AmplitudeCallbackHandler {
 
   constructor(options: CallbackHandlerOptions) {
     this._ai = options.amplitudeAI;
-    this._userId = options.userId ?? null;
-    this._sessionId = options.sessionId ?? null;
-    this._agentId = options.agentId ?? null;
-    this._env = options.env ?? null;
+    this._identities = new RunIdentities({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      env: options.env,
+    });
     this._privacyConfig = options.privacyConfig ?? null;
   }
 
-  private _getContext() {
-    const ctx = getActiveContext();
-    return {
-      userId: this._userId ?? ctx?.userId ?? 'unknown',
-      sessionId: this._sessionId ?? ctx?.sessionId ?? undefined,
-      agentId: this._agentId ?? ctx?.agentId ?? undefined,
-      env: this._env ?? ctx?.env ?? undefined,
-      traceId: ctx?.traceId ?? undefined,
-    };
+  private _startRun(runId: string): void {
+    while (this._runStartTimes.size >= MAX_OPEN_RUNS) {
+      const oldest = this._runStartTimes.keys().next().value;
+      if (oldest === undefined) break;
+      this._forgetRun(oldest);
+    }
+    this._runStartTimes.set(runId, performance.now());
+  }
+
+  private _forgetRun(runId: string): void {
+    this._runStartTimes.delete(runId);
+    this._runModelNames.delete(runId);
+    this._toolInputs.delete(runId);
+    this._toolNames.delete(runId);
   }
 
   private _rememberModelName(
@@ -73,14 +91,14 @@ export class AmplitudeCallbackHandler {
     if (modelName) this._runModelNames.set(runId, modelName);
   }
 
-  private _trackUserContents(contents: string[]): void {
-    const ctx = this._getContext();
+  private _trackUserContents(contents: string[], ctx: ResolvedIdentity): void {
     for (const content of contents) {
       if (!content) continue;
       this._ai.trackUserMessage({
         userId: ctx.userId,
+        deviceId: ctx.deviceId,
         content,
-        sessionId: ctx.sessionId ?? 'langchain-session',
+        sessionId: ctx.sessionId,
         traceId: ctx.traceId,
         agentId: ctx.agentId,
         env: ctx.env,
@@ -93,10 +111,11 @@ export class AmplitudeCallbackHandler {
     serialized: Record<string, unknown>,
     prompts: string[],
     runId: string,
+    parentRunId?: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
+    this._startRun(runId);
     this._rememberModelName(serialized, runId);
-    this._trackUserContents(prompts);
+    this._trackUserContents(prompts, this._identities.resolve(runId, parentRunId));
   }
 
   /**
@@ -108,8 +127,9 @@ export class AmplitudeCallbackHandler {
     serialized: Record<string, unknown>,
     messages: unknown[][],
     runId: string,
+    parentRunId?: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
+    this._startRun(runId);
     this._rememberModelName(serialized, runId);
 
     const userContents: string[] = [];
@@ -120,10 +140,17 @@ export class AmplitudeCallbackHandler {
         if (text) userContents.push(text);
       }
     }
-    this._trackUserContents(userContents);
+    this._trackUserContents(
+      userContents,
+      this._identities.resolve(runId, parentRunId),
+    );
   }
 
-  handleLLMEnd(output: Record<string, unknown>, runId: string): void {
+  handleLLMEnd(
+    output: Record<string, unknown>,
+    runId: string,
+    parentRunId?: string,
+  ): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
     this._runStartTimes.delete(runId);
     const latencyMs = performance.now() - startTime;
@@ -141,7 +168,8 @@ export class AmplitudeCallbackHandler {
     const modelFromStart = this._runModelNames.get(runId);
     this._runModelNames.delete(runId);
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     const modelName = String(
       llmOutput?.modelName ?? modelFromStart ?? 'unknown',
     );
@@ -171,8 +199,9 @@ export class AmplitudeCallbackHandler {
 
     this._ai.trackAiMessage({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       content,
-      sessionId: ctx.sessionId ?? 'langchain-session',
+      sessionId: ctx.sessionId,
       model: modelName,
       provider: 'langchain',
       latencyMs,
@@ -191,8 +220,10 @@ export class AmplitudeCallbackHandler {
     serialized: Record<string, unknown>,
     input: string,
     runId: string,
+    parentRunId?: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
+    this._identities.resolve(runId, parentRunId);
+    this._startRun(runId);
     this._toolInputs.set(runId, input);
     const name = String(
       serialized.name ??
@@ -202,7 +233,7 @@ export class AmplitudeCallbackHandler {
     this._toolNames.set(runId, name);
   }
 
-  handleToolEnd(output: string, runId: string): void {
+  handleToolEnd(output: string, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
     this._runStartTimes.delete(runId);
     const latencyMs = performance.now() - startTime;
@@ -211,9 +242,11 @@ export class AmplitudeCallbackHandler {
     const toolName = this._toolNames.get(runId) ?? 'langchain-tool';
     this._toolNames.delete(runId);
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     this._ai.trackToolCall({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       toolName,
       latencyMs,
       success: true,
@@ -227,7 +260,7 @@ export class AmplitudeCallbackHandler {
     });
   }
 
-  handleToolError(error: unknown, runId: string): void {
+  handleToolError(error: unknown, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
     this._runStartTimes.delete(runId);
     const latencyMs = performance.now() - startTime;
@@ -236,9 +269,11 @@ export class AmplitudeCallbackHandler {
     const toolName = this._toolNames.get(runId) ?? 'langchain-tool';
     this._toolNames.delete(runId);
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     this._ai.trackToolCall({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       toolName,
       latencyMs,
       success: false,
@@ -252,17 +287,37 @@ export class AmplitudeCallbackHandler {
     });
   }
 
-  handleLLMError(error: unknown, runId: string): void {
+  handleChainStart(
+    _serialized: Record<string, unknown>,
+    _inputs: unknown,
+    runId: string,
+    parentRunId?: string,
+  ): void {
+    this._identities.resolve(runId, parentRunId);
+  }
+
+  handleChainEnd(_outputs: unknown, runId: string): void {
+    this._identities.end(runId);
+  }
+
+  handleChainError(_error: unknown, runId: string): void {
+    this._identities.end(runId);
+  }
+
+  handleLLMError(error: unknown, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
-    this._runStartTimes.delete(runId);
+    const modelName = this._runModelNames.get(runId) ?? 'unknown';
+    this._forgetRun(runId);
     const latencyMs = performance.now() - startTime;
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     this._ai.trackAiMessage({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       content: '',
-      sessionId: ctx.sessionId ?? 'langchain-session',
-      model: 'unknown',
+      sessionId: ctx.sessionId,
+      model: modelName,
       provider: 'langchain',
       latencyMs,
       traceId: ctx.traceId,

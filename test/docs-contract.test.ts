@@ -9,6 +9,9 @@ import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
+const PACKAGE_VERSION = (JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { version: string })
+  .version;
+const RELEASE_RAW_PREFIX = `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v${PACKAGE_VERSION}/docs/integrations/`;
 const PLATFORM_PAGES = [
   'sierra.md',
   'decagon.md',
@@ -209,7 +212,7 @@ describe('docs/integrations contract', () => {
       warehouses: { raw_url: string; formats: { id: string }[] };
       tools: { raw_url: string }[];
     };
-    const prefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/';
+    const prefix = RELEASE_RAW_PREFIX;
     const pages = readdirSync(join(DOCS_DIR, 'warehouses')).filter((f) => f.endsWith('.md') && f !== 'README.md');
     expect(manifest.warehouses.formats.map((f) => `${f.id}.md`).sort()).toEqual(pages.sort());
     for (const url of [manifest.warehouses.raw_url, ...manifest.tools.map((t) => t.raw_url)]) {
@@ -223,7 +226,7 @@ describe('docs/integrations contract', () => {
       routers: { url: string; raw_url: string };
       schemas: { raw_url: string }[];
     };
-    const prefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/';
+    const prefix = RELEASE_RAW_PREFIX;
     expect(manifest.routers.url.endsWith('/docs/integrations/routers.md')).toBe(true);
     for (const url of [manifest.routers.raw_url, ...manifest.schemas.map((s) => s.raw_url)]) {
       expect(url.startsWith(prefix)).toBe(true);

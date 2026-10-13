@@ -53,9 +53,11 @@ Ask the user before running:
 ## Run it
 
 ```bash
-curl -sO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs
-node otlp-replay.mjs traces.ndjson --format mlflow --agent-id my-agent --dry-run > payload.json
-AMPLITUDE_API_KEY=<project API key> node otlp-replay.mjs traces.ndjson --format mlflow --agent-id my-agent
+# The script ships in the npm package; run that copy rather than one from GitHub.
+npm install --no-save --ignore-scripts @amplitude/ai
+node node_modules/@amplitude/ai/docs/integrations/warehouses/otlp-replay.mjs traces.ndjson --format mlflow --agent-id my-agent --dry-run > payload.json
+# Reads the project API key from AMPLITUDE_API_KEY; export it from your secret store first.
+node node_modules/@amplitude/ai/docs/integrations/warehouses/otlp-replay.mjs traces.ndjson --format mlflow --agent-id my-agent
 ```
 
 Check the dry-run output and fix any warning before sending. Add `--region eu` for the EU data center.

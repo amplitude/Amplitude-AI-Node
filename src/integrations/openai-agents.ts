@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from '../client.js';
-import { getActiveContext } from '../context.js';
 import { calculateCost, inferProvider } from '../utils/costs.js';
+import { type ResolvedIdentity, RunIdentities } from './identity.js';
 
 export interface TracingProcessorOptions {
   amplitudeAI: AmplitudeAI;
@@ -12,67 +12,71 @@ export interface TracingProcessorOptions {
   env?: string;
 }
 
+/**
+ * Tracing processor for the OpenAI Agents SDK.
+ *
+ * A processor is typically registered once per process, so identity is
+ * resolved per span — constructor options, then the active session context,
+ * then the identity already seen for the same agent trace — and never
+ * captured at construction. Traces with no identity get an anonymous
+ * per-trace session and device ID.
+ */
 export class AmplitudeTracingProcessor {
   private _ai: AmplitudeAI;
-  private _defaults: {
-    userId: string;
-    sessionId: string;
-    traceId: string;
-    agentId: string | null;
-    env: string | null;
-  };
-  private _turnId = 1;
+  private _explicitTraceId: string | null;
+  private _identities: RunIdentities;
 
   constructor(options: TracingProcessorOptions) {
-    const ctx = getActiveContext();
     this._ai = options.amplitudeAI;
-    this._defaults = {
-      userId: options.userId ?? ctx?.userId ?? 'openai-agents-user',
-      sessionId: options.sessionId ?? ctx?.sessionId ?? randomUUID(),
-      traceId: options.traceId ?? ctx?.traceId ?? randomUUID(),
-      agentId: options.agentId ?? ctx?.agentId ?? null,
-      env: options.env ?? ctx?.env ?? null,
-    };
+    this._explicitTraceId = options.traceId ?? null;
+    this._identities = new RunIdentities({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      env: options.env,
+    });
   }
 
-  onSpanStart(_span: Record<string, unknown>): void {
-    // compatibility hook with tracing processors
+  onSpanStart(span: Record<string, unknown>): void {
+    this._identities.resolve(this._rawTraceId(span));
   }
 
-  onTraceStart(_trace: Record<string, unknown>): void {
-    // compatibility hook with tracing processors
+  onTraceStart(trace: Record<string, unknown>): void {
+    this._identities.resolve(this._rawTraceId(trace));
   }
 
-  onTraceEnd(_trace: Record<string, unknown>): void {
-    // compatibility hook with tracing processors
+  onTraceEnd(trace: Record<string, unknown>): void {
+    this._identities.end(this._rawTraceId(trace));
   }
 
   onSpanEnd(span: Record<string, unknown>): void {
     const spanData = this._getSpanData(span);
     if (spanData == null) return;
 
-    const traceId = this._getTraceId(span);
+    const id = this._identities.resolve(this._rawTraceId(span));
+    const traceId = this._getTraceId(span, id);
     const latencyMs = this._getLatencyMs(span);
     const kind = this._inferKind(spanData);
     if (kind === 'generation') {
-      this._handleGeneration(spanData, traceId, latencyMs);
+      this._handleGeneration(spanData, traceId, latencyMs, id);
       return;
     }
     if (kind === 'function') {
-      this._handleFunction(spanData, traceId, latencyMs);
+      this._handleFunction(spanData, traceId, latencyMs, id);
       return;
     }
     if (kind === 'handoff') {
       const fromAgent = String(spanData.from_agent ?? 'unknown');
       const toAgent = String(spanData.to_agent ?? 'unknown');
       this._ai.trackSpan({
-        userId: this._defaults.userId,
+        userId: id.userId,
+        deviceId: id.deviceId,
         spanName: `handoff:${fromAgent}->${toAgent}`,
         traceId,
         latencyMs,
-        sessionId: this._defaults.sessionId,
-        agentId: this._defaults.agentId,
-        env: this._defaults.env,
+        sessionId: id.sessionId,
+        agentId: id.agentId,
+        env: id.env,
         inputState: { from_agent: fromAgent },
         outputState: { to_agent: toAgent },
       });
@@ -82,13 +86,14 @@ export class AmplitudeTracingProcessor {
       const guardrail = String(spanData.name ?? 'guardrail');
       const triggered = Boolean(spanData.triggered);
       this._ai.trackSpan({
-        userId: this._defaults.userId,
+        userId: id.userId,
+        deviceId: id.deviceId,
         spanName: `guardrail:${guardrail}`,
         traceId,
         latencyMs,
-        sessionId: this._defaults.sessionId,
-        agentId: this._defaults.agentId,
-        env: this._defaults.env,
+        sessionId: id.sessionId,
+        agentId: id.agentId,
+        env: id.env,
         outputState: { triggered },
         isError: triggered,
       });
@@ -97,13 +102,14 @@ export class AmplitudeTracingProcessor {
 
     const name = String(spanData.name ?? 'agent');
     this._ai.trackSpan({
-      userId: this._defaults.userId,
+      userId: id.userId,
+      deviceId: id.deviceId,
       spanName: `agent:${name}`,
       traceId,
       latencyMs,
-      sessionId: this._defaults.sessionId,
-      agentId: this._defaults.agentId ?? name,
-      env: this._defaults.env,
+      sessionId: id.sessionId,
+      agentId: id.agentId ?? name,
+      env: id.env,
       outputState:
         spanData.output != null
           ? { output: String(spanData.output) }
@@ -119,6 +125,7 @@ export class AmplitudeTracingProcessor {
     data: Record<string, unknown>,
     traceId: string,
     latencyMs: number,
+    id: ResolvedIdentity,
   ): void {
     const input = this._normalizeMessagesArray(data.input);
     for (const message of input) {
@@ -131,15 +138,14 @@ export class AmplitudeTracingProcessor {
       )
         continue;
       this._ai.trackUserMessage({
-        userId: this._defaults.userId,
+        userId: id.userId,
+        deviceId: id.deviceId,
         content,
-        sessionId: this._defaults.sessionId,
+        sessionId: id.sessionId,
         traceId,
-        turnId: this._turnId,
-        agentId: this._defaults.agentId,
-        env: this._defaults.env,
+        agentId: id.agentId,
+        env: id.env,
       });
-      this._turnId += 1;
     }
 
     const output = this._normalizeMessagesArray(data.output);
@@ -175,11 +181,11 @@ export class AmplitudeTracingProcessor {
     }
 
     this._ai.trackAiMessage({
-      userId: this._defaults.userId,
+      userId: id.userId,
+      deviceId: id.deviceId,
       content: responseText,
-      sessionId: this._defaults.sessionId,
+      sessionId: id.sessionId,
       traceId,
-      turnId: this._turnId,
       model,
       provider: inferProvider(model),
       latencyMs,
@@ -188,16 +194,16 @@ export class AmplitudeTracingProcessor {
       totalTokens,
       totalCostUsd: costUsd,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      agentId: this._defaults.agentId,
-      env: this._defaults.env,
+      agentId: id.agentId,
+      env: id.env,
     });
-    this._turnId += 1;
   }
 
   private _handleFunction(
     data: Record<string, unknown>,
     traceId: string,
     latencyMs: number,
+    id: ResolvedIdentity,
   ): void {
     const toolName = String(data.name ?? 'unknown');
     const errorMessage =
@@ -212,20 +218,19 @@ export class AmplitudeTracingProcessor {
       data.output == null ? undefined : String(data.output ?? undefined);
 
     this._ai.trackToolCall({
-      userId: this._defaults.userId,
+      userId: id.userId,
+      deviceId: id.deviceId,
       toolName,
       success: errorMessage == null,
       latencyMs,
-      sessionId: this._defaults.sessionId,
+      sessionId: id.sessionId,
       traceId,
-      turnId: this._turnId,
       input: toolInput,
       output: toolOutput,
       errorMessage,
-      agentId: this._defaults.agentId,
-      env: this._defaults.env,
+      agentId: id.agentId,
+      env: id.env,
     });
-    this._turnId += 1;
   }
 
   private _inferKind(
@@ -251,9 +256,15 @@ export class AmplitudeTracingProcessor {
     return data as Record<string, unknown>;
   }
 
-  private _getTraceId(span: Record<string, unknown>): string {
-    const traceId = span.trace_id ?? span.traceId ?? this._defaults.traceId;
-    return traceId == null ? randomUUID() : String(traceId);
+  private _rawTraceId(item: Record<string, unknown> | null | undefined): string | null {
+    const raw = item?.trace_id ?? item?.traceId;
+    return raw == null ? null : String(raw);
+  }
+
+  private _getTraceId(span: Record<string, unknown>, id: ResolvedIdentity): string {
+    return (
+      this._rawTraceId(span) ?? this._explicitTraceId ?? id.traceId ?? randomUUID()
+    );
   }
 
   private _getLatencyMs(span: Record<string, unknown>): number {

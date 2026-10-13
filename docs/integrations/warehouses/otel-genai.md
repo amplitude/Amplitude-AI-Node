@@ -48,8 +48,9 @@ Ask the user before running:
 2. Check the conversion without sending anything:
 
    ```bash
-   curl -sO https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs
-   node otlp-replay.mjs spans.json --format otel --dry-run > payload.json
+   # The script ships in the npm package; run that copy rather than one from GitHub.
+   npm install --no-save --ignore-scripts @amplitude/ai
+   node node_modules/@amplitude/ai/docs/integrations/warehouses/otlp-replay.mjs spans.json --format otel --dry-run > payload.json
    ```
 
    Fix any warning, then look at one span in `payload.json` and confirm its session, user, and agent attributes.
@@ -57,7 +58,8 @@ Ask the user before running:
 3. Send it (`--region eu` for the EU data center):
 
    ```bash
-   AMPLITUDE_API_KEY=<project API key> node otlp-replay.mjs spans.json --format otel
+   # Reads the project API key from AMPLITUDE_API_KEY; export it from your secret store first.
+   node node_modules/@amplitude/ai/docs/integrations/warehouses/otlp-replay.mjs spans.json --format otel
    ```
 
    The script retries `429` and `5xx` responses, splits a batch on `413`, stops on any other error, and exits non-zero if the endpoint reports rejected spans.

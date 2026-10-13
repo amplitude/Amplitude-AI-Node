@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { ConfigurationError } from '../exceptions.js';
 import { getLogger } from '../utils/logger.js';
 import {
   PROP_HAS_REASONING,
@@ -26,7 +27,23 @@ const VALID_CONTENT_MODES = new Set([
 ]);
 
 // PII regex patterns
-const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+//
+// Email: every quantifier is bounded and a match may only start where the
+// preceding character can't belong to a local part, so matching is linear
+// in input length (an unbounded `[...]+@` is quadratic on long runs such as
+// "a.a.a..."). Latin/Greek/Cyrillic letters are accepted so local parts like
+// "josé" match; Han/Kana/Hangul are excluded so CJK text written without
+// spaces before an address isn't swallowed into the match.
+const EMAIL_LETTER = '\\p{Script=Latin}\\p{Script=Greek}\\p{Script=Cyrillic}';
+const EMAIL_LOCAL = `${EMAIL_LETTER}\\p{M}\\p{N}._%+\\-`;
+const EMAIL_LABEL = `${EMAIL_LETTER}\\p{M}\\p{N}\\-`;
+const EMAIL_RE = new RegExp(
+  `(?<![${EMAIL_LOCAL}])[${EMAIL_LOCAL}]{1,64}@(?:[${EMAIL_LABEL}]{1,63}\\.){1,8}[${EMAIL_LETTER}]{2,63}(?![${EMAIL_LETTER}\\p{M}\\p{N}_])`,
+  'gu',
+);
+// Text-length cap for prompt-like channels; applied before redaction so
+// regex cost is bounded by what is actually sent.
+const MAX_TEXT_LENGTH = 100_000;
 const PHONE_RE = /\b\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\b/g;
 const CREDIT_CARD_RE = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
@@ -39,7 +56,7 @@ const IPV4_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 const IPV6_RE =
   /(?:(?<=\/\/)\[::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\]|(?<=\/\/)\[::1\]|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b|\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\b|(?<![^\s])::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b|(?<![^\s])::1\b)/g;
 const INTL_PHONE_RE = /(?<!\w)\+[1-9]\d{6,14}\b/g;
-const BASE64_DATA_URL_RE = /^data:([^;]+);base64,/;
+const BASE64_DATA_URL_RE = /^data:[^;,]*(?:;[^;,]+)*?;base64,/;
 const RAW_BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
 
 export function isBase64DataUrl(text: string): boolean {
@@ -71,9 +88,19 @@ export function isRawBase64(text: string): boolean {
   return RAW_BASE64_RE.test(text);
 }
 
+// String() throws for null-prototype objects and objects whose toString is
+// not callable; content from providers and callers can be either.
+function toTextSafe(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
 export function createContentHash(content: unknown): string {
   if (content == null) return '';
-  const contentStr = typeof content === 'string' ? content : String(content);
+  const contentStr = typeof content === 'string' ? content : toTextSafe(content);
   return crypto.createHash('sha256').update(contentStr, 'utf8').digest('hex');
 }
 
@@ -112,7 +139,7 @@ function extractTextFromStructuredContent(content: unknown): string {
     for (const field of ['content', 'text', 'message']) {
       if (field in dict) return extractTextFromStructuredContent(dict[field]);
     }
-    return String(content);
+    return toTextSafe(content);
   }
 
   if (Array.isArray(content)) {
@@ -126,7 +153,7 @@ function extractTextFromStructuredContent(content: unknown): string {
     return parts.join('');
   }
 
-  return String(content);
+  return toTextSafe(content);
 }
 
 /**
@@ -202,7 +229,8 @@ export function sanitizeStructuredContent(
   pc?: PrivacyConfig | null,
 ): unknown {
   if (typeof content === 'string') {
-    let text = content;
+    // Anything past the cap is cut by serializeToJsonString() anyway.
+    let text = capText(content);
     if (redactPii) text = redactPiiPatterns(text);
     if (pc != null) {
       text = pc.applyCustomRedaction(text);
@@ -303,6 +331,49 @@ export function normalizeToolDefinitions(
   return normalized;
 }
 
+export type CustomRedactionPattern =
+  | string
+  | { pattern: string; replacement: string };
+
+/**
+ * Compile caller-supplied redaction patterns. Throws `ConfigurationError`
+ * on an invalid entry so a typo is caught at configuration time instead of
+ * silently disabling that rule.
+ */
+export function compileCustomRedactionPatterns(
+  patterns: readonly CustomRedactionPattern[],
+): Array<{ regex: RegExp; replacement: string }> {
+  if (!Array.isArray(patterns)) {
+    throw new ConfigurationError(
+      'customRedactionPatterns must be an array of strings or { pattern, replacement } objects',
+    );
+  }
+  return patterns.map((entry, index) => {
+    const isObject = entry != null && typeof entry === 'object';
+    const source = isObject
+      ? (entry as { pattern: unknown }).pattern
+      : (entry as unknown);
+    const replacement = isObject
+      ? (entry as { replacement: unknown }).replacement
+      : '[REDACTED]';
+    if (
+      (typeof source !== 'string' && !(source instanceof RegExp)) ||
+      typeof replacement !== 'string'
+    ) {
+      throw new ConfigurationError(
+        `customRedactionPatterns[${index}] must be a string or { pattern: string, replacement: string }`,
+      );
+    }
+    try {
+      return { regex: new RegExp(source, 'g'), replacement };
+    } catch (e) {
+      throw new ConfigurationError(
+        `customRedactionPatterns[${index}] is not a valid regular expression: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  });
+}
+
 export interface PrivacyConfigOptions {
   privacyMode?: boolean;
   redactPii?: boolean;
@@ -324,6 +395,7 @@ export class PrivacyConfig {
   private readonly _compiledCustomPatterns: Array<{ regex: RegExp; replacement: string }>;
   private readonly _customRedactionFn: ((text: string) => string) | null;
   private readonly _contentMode: string | null;
+  private _warnedCustomRedactionFailure = false;
 
   constructor(options: PrivacyConfigOptions = {}) {
     this.privacyMode = options.privacyMode ?? false;
@@ -332,29 +404,14 @@ export class PrivacyConfig {
     this.debug = options.debug ?? false;
     this.captureStackTrace = options.captureStackTrace ?? false;
     this.customPatterns = options.customRedactionPatterns ?? [];
-    this._compiledCustomPatterns = [];
-    this._customRedactionFn = options.customRedactionFn ?? null;
-
-    for (const pattern of this.customPatterns) {
-      try {
-        if (typeof pattern === 'string') {
-          this._compiledCustomPatterns.push({
-            regex: new RegExp(pattern, 'g'),
-            replacement: '[REDACTED]',
-          });
-        } else {
-          this._compiledCustomPatterns.push({
-            regex: new RegExp(pattern.pattern, 'g'),
-            replacement: pattern.replacement,
-          });
-        }
-      } catch (e) {
-        const raw = typeof pattern === 'string' ? pattern : pattern.pattern;
-        getLogger().warn(
-          `Invalid custom redaction regex "${raw}": ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
+    this._compiledCustomPatterns = compileCustomRedactionPatterns(
+      this.customPatterns,
+    );
+    const fn = options.customRedactionFn ?? null;
+    if (fn != null && typeof fn !== 'function') {
+      throw new ConfigurationError('customRedactionFn must be a function');
     }
+    this._customRedactionFn = fn;
 
     let modeStr: string | null = null;
     if (options.contentMode != null) {
@@ -393,9 +450,10 @@ export class PrivacyConfig {
       try {
         result = result.replace(regex, replacement);
       } catch (e) {
-        getLogger().warn(
-          `Custom redaction regex "${regex.source}" failed: ${e instanceof Error ? e.message : String(e)}`,
+        this._warnCustomRedactionFailure(
+          `customRedactionPatterns /${regex.source}/ failed (${e instanceof Error ? e.name : typeof e})`,
         );
+        return REDACTED_CONTENT_PLACEHOLDER;
       }
     }
     return result;
@@ -405,18 +463,25 @@ export class PrivacyConfig {
     if (this._customRedactionFn == null || typeof text !== 'string') {
       return text;
     }
+    let detail: string;
     try {
       const result = this._customRedactionFn(text);
       if (typeof result === 'string') return result;
-      getLogger().error(
-        `customRedactionFn returned ${typeof result} instead of string; skipping — PII may not be fully redacted for this event`,
-      );
+      detail = `customRedactionFn returned ${typeof result} instead of string`;
     } catch (e) {
-      getLogger().error(
-        `customRedactionFn raised an exception: ${e instanceof Error ? e.message : String(e)} — PII may not be fully redacted for this event`,
-      );
+      // The exception message may echo the input, so only its type is logged.
+      detail = `customRedactionFn threw ${e instanceof Error ? e.name : typeof e}`;
     }
-    return text;
+    this._warnCustomRedactionFailure(detail);
+    return REDACTED_CONTENT_PLACEHOLDER;
+  }
+
+  private _warnCustomRedactionFailure(detail: string): void {
+    if (this._warnedCustomRedactionFailure) return;
+    this._warnedCustomRedactionFailure = true;
+    getLogger().error(
+      `${detail}; content replaced with "${REDACTED_CONTENT_PLACEHOLDER}". Further failures from this config are not logged.`,
+    );
   }
 
   private _applyCustomPatternsToLlmMessage(
@@ -479,12 +544,7 @@ export class PrivacyConfig {
     if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
 
     if (mode === 'full') {
-      let sanitized = systemPrompt;
-      if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
-      sanitized = this._applyCustomPatterns(sanitized);
-      sanitized = this._applyCustomFn(sanitized);
-      result[PROP_SYSTEM_PROMPT] =
-        sanitized.length > 100_000 ? sanitized.slice(0, 100_000) : sanitized;
+      result[PROP_SYSTEM_PROMPT] = this._redactCappedText(systemPrompt);
     }
 
     return result;
@@ -510,12 +570,7 @@ export class PrivacyConfig {
     if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
 
     if (mode === 'full') {
-      let sanitized = reasoningContent;
-      if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
-      sanitized = this._applyCustomPatterns(sanitized);
-      sanitized = this._applyCustomFn(sanitized);
-      result[PROP_REASONING_CONTENT] =
-        sanitized.length > 100_000 ? sanitized.slice(0, 100_000) : sanitized;
+      result[PROP_REASONING_CONTENT] = this._redactCappedText(reasoningContent);
     }
 
     return result;
@@ -548,14 +603,23 @@ export class PrivacyConfig {
     if (mode == null) mode = this.privacyMode ? 'metadata_only' : 'full';
 
     if (mode === 'full') {
-      let serialized = JSON.stringify(normalized);
-      if (this.redactPii) serialized = redactPiiPatterns(serialized);
-      serialized = this._applyCustomPatterns(serialized);
-      serialized = this._applyCustomFn(serialized);
-      result[PROP_TOOL_DEFINITIONS] =
-        serialized.length > 100_000 ? serialized.slice(0, 100_000) : serialized;
+      result[PROP_TOOL_DEFINITIONS] = this._redactCappedText(
+        JSON.stringify(normalized),
+      );
     }
 
     return result;
   }
+
+  private _redactCappedText(text: string): string {
+    let sanitized = capText(text);
+    if (this.redactPii) sanitized = redactPiiPatterns(sanitized);
+    sanitized = this._applyCustomPatterns(sanitized);
+    sanitized = this._applyCustomFn(sanitized);
+    return capText(sanitized);
+  }
+}
+
+function capText(text: string): string {
+  return text.length > MAX_TEXT_LENGTH ? text.slice(0, MAX_TEXT_LENGTH) : text;
 }

@@ -1,10 +1,13 @@
 import {
   readFileSync,
   existsSync,
+  lstatSync,
   readdirSync,
+  realpathSync,
   statSync,
 } from 'node:fs';
-import { join, relative, basename, dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { join, relative, basename, dirname, isAbsolute, parse, resolve, sep } from 'node:path';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
 export interface ScanResult {
@@ -68,6 +71,9 @@ const SKIP_DIRS = new Set([
   'test',
 ]);
 const MAX_DEPTH = 5;
+export const MAX_SCAN_FILES = 5000;
+export const MAX_SCAN_FILE_BYTES = 1_000_000;
+const SKIP_FILE_RE = /\.d\.ts$|\.min\.[cm]?js$/;
 
 const FRAMEWORK_DEPS: Array<[string, string]> = [
   ['next', 'nextjs'],
@@ -144,12 +150,61 @@ const MULTI_AGENT_CODE_RE = /\.child\s*\(|\.runAs\s*\(|\.runAsSync\s*\(/;
 const ROUTE_HANDLER_RE =
   /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b|app\.\s*(?:get|post|put|delete)\s*\(|router\./;
 
+export function isPathInside(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function realpathOrNull(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve `rootPath` for scanning. Returns the real path when it lies inside
+ * one of `allowedRoots` (each resolved with realpath), otherwise null.
+ */
+export function resolveScanRoot(rootPath: string, allowedRoots: string[]): string | null {
+  if (!rootPath) return null;
+  const real = realpathOrNull(resolve(rootPath));
+  if (!real) return null;
+  for (const allowed of allowedRoots) {
+    const realAllowed = realpathOrNull(resolve(allowed));
+    if (realAllowed && isPathInside(real, realAllowed)) return real;
+  }
+  return null;
+}
+
+/**
+ * Roots a scan may target when the MCP client does not provide any: the
+ * server's working directory, unless that is the filesystem root or home.
+ */
+export function defaultScanRoots(cwd: string = process.cwd()): string[] {
+  const real = realpathOrNull(cwd);
+  if (!real) return [];
+  const home = realpathOrNull(homedir());
+  if (real === parse(real).root || real === home) return [];
+  return [real];
+}
+
+/**
+ * Walks `dir` without following directory symlinks. File symlinks are only
+ * included when their target stays inside `realRoot`.
+ */
 function collectSourceFiles(
   dir: string,
-  rootPath: string,
+  realRoot: string,
   depth: number,
+  visited: Set<string>,
+  budget: { files: number },
 ): string[] {
-  if (depth > MAX_DEPTH) return [];
+  if (depth > MAX_DEPTH || budget.files >= MAX_SCAN_FILES) return [];
+  const realDir = realpathOrNull(dir);
+  if (!realDir || visited.has(realDir) || !isPathInside(realDir, realRoot)) return [];
+  visited.add(realDir);
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -158,22 +213,36 @@ function collectSourceFiles(
   }
 
   const files: string[] = [];
+  const take = (path: string, size: number): void => {
+    if (size > MAX_SCAN_FILE_BYTES || budget.files >= MAX_SCAN_FILES) return;
+    budget.files++;
+    files.push(path);
+  };
   for (const entry of entries) {
-    if (SKIP_DIRS.has(entry)) continue;
+    if (budget.files >= MAX_SCAN_FILES) break;
+    if (SKIP_DIRS.has(entry) || SKIP_FILE_RE.test(entry)) continue;
     const fullPath = join(dir, entry);
-    let stat: ReturnType<typeof statSync> | undefined;
+    let stat: ReturnType<typeof lstatSync> | undefined;
     try {
-      stat = statSync(fullPath);
+      stat = lstatSync(fullPath);
     } catch {
       continue;
     }
-    if (stat.isDirectory()) {
-      files.push(...collectSourceFiles(fullPath, rootPath, depth + 1));
-    } else if (stat.isFile()) {
-      const ext = entry.slice(entry.lastIndexOf('.'));
-      if (SOURCE_EXTENSIONS.has(ext)) {
-        files.push(fullPath);
+    const ext = entry.slice(entry.lastIndexOf('.'));
+    if (stat.isSymbolicLink()) {
+      if (!SOURCE_EXTENSIONS.has(ext)) continue;
+      const target = realpathOrNull(fullPath);
+      if (!target || !isPathInside(target, realRoot)) continue;
+      try {
+        const targetStat = statSync(target);
+        if (targetStat.isFile()) take(target, targetStat.size);
+      } catch {
+        // dangling or unreadable
       }
+    } else if (stat.isDirectory()) {
+      files.push(...collectSourceFiles(fullPath, realRoot, depth + 1, visited, budget));
+    } else if (stat.isFile() && SOURCE_EXTENSIONS.has(ext)) {
+      take(fullPath, stat.size);
     }
   }
   return files;
@@ -181,11 +250,13 @@ function collectSourceFiles(
 
 function inferAgentId(filePath: string): string {
   const base = basename(filePath).replace(/\.[^.]+$/, '');
+  let id = base;
   if (base === 'route' || base === 'index') {
-    const parentDir = basename(dirname(filePath));
-    return parentDir || base;
+    id = basename(dirname(filePath)) || base;
   }
-  return base;
+  // Ids flow into instrument_file's generated code; keep them to a safe charset.
+  const safe = id.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 128);
+  return safe || 'agent';
 }
 
 function inferDescription(
@@ -209,7 +280,8 @@ function readPackageJson(
   allDeps: Set<string>;
 } {
   const pkgPath = join(rootPath, 'package.json');
-  if (!existsSync(pkgPath)) {
+  const realPkg = realpathOrNull(pkgPath);
+  if (!realPkg || !isPathInside(realPkg, rootPath)) {
     return { name: null, allDeps: new Set() };
   }
   try {
@@ -225,7 +297,8 @@ function readPackageJson(
   }
 }
 
-export function scanProject(rootPath: string): ScanResult {
+export function scanProject(requestedRoot: string): ScanResult {
+  const rootPath = realpathOrNull(resolve(requestedRoot)) ?? resolve(requestedRoot);
   const { name: projectName, allDeps } = readPackageJson(rootPath);
 
   // Detect framework
@@ -262,7 +335,7 @@ export function scanProject(rootPath: string): ScanResult {
   const hasAmplitudeAiDep = allDeps.has('@amplitude/ai');
 
   // Walk source files and analyze
-  const sourceFiles = collectSourceFiles(rootPath, rootPath, 0);
+  const sourceFiles = [...new Set(collectSourceFiles(rootPath, rootPath, 0, new Set(), { files: 0 }))];
 
   let totalCallSites = 0;
   let instrumentedCallSites = 0;

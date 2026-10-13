@@ -3,9 +3,9 @@
  */
 
 import type { PrivacyConfig } from '../core/privacy.js';
-import { getDefaultPropagateContext } from '../propagation.js';
+import { resolvePropagateContext } from '../propagation.js';
 import type { AmplitudeOrAI } from '../types.js';
-import { BaseAIProvider, type ProviderTrackOptions } from './base.js';
+import { BaseAIProvider, type ProviderCallOptions } from './base.js';
 import {
   _OpenAIModule,
   OPENAI_AVAILABLE,
@@ -23,6 +23,11 @@ export interface AzureOpenAIOptions {
   propagateContext?: boolean;
   /** Pass the `openai` module directly to bypass `tryRequire` (required in bundler environments). */
   openaiModule?: unknown;
+  /**
+   * Existing `AzureOpenAI` client to instrument instead of constructing a new one.
+   * Its endpoint, deployment, API version and Azure AD token provider are kept.
+   */
+  client?: unknown;
 }
 
 export class AzureOpenAI extends BaseAIProvider {
@@ -30,8 +35,16 @@ export class AzureOpenAI extends BaseAIProvider {
   private _propagateContext: boolean;
   readonly chat: {
     completions: {
-      create: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions) => Promise<unknown>;
-      parse: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions) => Promise<unknown>;
+      create: (
+        params: Record<string, unknown>,
+        options?: ProviderCallOptions,
+        requestOptions?: Record<string, unknown>,
+      ) => Promise<unknown>;
+      parse: (
+        params: Record<string, unknown>,
+        options?: ProviderCallOptions,
+        requestOptions?: Record<string, unknown>,
+      ) => Promise<unknown>;
     };
   };
 
@@ -42,28 +55,34 @@ export class AzureOpenAI extends BaseAIProvider {
       providerName: 'azure-openai',
     });
 
-    const mod =
-      (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
-    if (mod == null) {
-      throw new Error(
-        'openai package is required for Azure OpenAI. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
-      );
+    if (options.client != null) {
+      this._client = options.client;
+    } else {
+      const mod =
+        (options.openaiModule as Record<string, unknown> | null) ?? _OpenAIModule;
+      if (mod == null) {
+        throw new Error(
+          'openai package is required for Azure OpenAI. Install it with: npm install openai — or pass the module directly via the openaiModule option.',
+        );
+      }
+
+      const AzureOpenAISDK = mod.AzureOpenAI as new (
+        opts: Record<string, unknown>,
+      ) => unknown;
+
+      const clientOpts: Record<string, unknown> = {};
+      if (options.apiKey) clientOpts.apiKey = options.apiKey;
+      if (options.azureEndpoint) clientOpts.baseURL = options.azureEndpoint;
+      if (options.apiVersion) {
+        clientOpts.defaultQuery = { 'api-version': options.apiVersion };
+      }
+
+      this._client = new AzureOpenAISDK(clientOpts);
     }
-
-    const AzureOpenAISDK = mod.AzureOpenAI as new (
-      opts: Record<string, unknown>,
-    ) => unknown;
-
-    const clientOpts: Record<string, unknown> = {};
-    if (options.apiKey) clientOpts.apiKey = options.apiKey;
-    if (options.azureEndpoint) clientOpts.baseURL = options.azureEndpoint;
-    if (options.apiVersion) {
-      clientOpts.defaultQuery = { 'api-version': options.apiVersion };
-    }
-
-    this._client = new AzureOpenAISDK(clientOpts);
-    this._propagateContext =
-      options.propagateContext ?? getDefaultPropagateContext();
+    this._propagateContext = resolvePropagateContext(
+      options.propagateContext,
+      options.amplitude,
+    );
     const clientObj = this._client as Record<string, unknown>;
     const originalChat = clientObj.chat as Record<string, unknown>;
     const originalCompletions = originalChat.completions as Record<
@@ -81,10 +100,18 @@ export class AzureOpenAI extends BaseAIProvider {
 
     this.chat = {
       completions: {
-        create: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions): Promise<unknown> =>
-          wrappedCompletions.create(params, amplitudeOverrides),
-        parse: (params: Record<string, unknown>, amplitudeOverrides?: ProviderTrackOptions): Promise<unknown> =>
-          wrappedCompletions.parse(params, amplitudeOverrides),
+        create: (
+          params: Record<string, unknown>,
+          options?: ProviderCallOptions,
+          requestOptions?: Record<string, unknown>,
+        ): Promise<unknown> =>
+          wrappedCompletions.create(params, options, requestOptions),
+        parse: (
+          params: Record<string, unknown>,
+          options?: ProviderCallOptions,
+          requestOptions?: Record<string, unknown>,
+        ): Promise<unknown> =>
+          wrappedCompletions.parse(params, options, requestOptions),
       },
     };
   }
