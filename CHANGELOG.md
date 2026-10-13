@@ -2,29 +2,26 @@
 
 ## Unreleased
 
-### Fixed
-- **`amplitude-ai-instrument`** forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to
-  the launched app instead of leaving it running when the wrapper is stopped,
-  and exits with the app's exit code or signal.
-- **`amplitude-ai-doctor`** reports a malformed `package.json` as a failed
-  check instead of crashing.
-
 ### Added
 - `ai.flush({ timeoutMs })` (and `agent.flush({ timeoutMs })`) stop waiting
   after `timeoutMs` and resolve without rejecting. `ai.flush()` without
   options is unchanged.
 
-- Patched provider calls made inside a session are recorded by the
-  `AmplitudeAI` that owns the session, including when a different instance
-  called `patch()`. Calls outside a session are unchanged.
-
+### Fixed
 - With `patch()`, OpenAI and Anthropic calls return the SDK's own types again:
   `create()` returns an `APIPromise` (so `.withResponse()` and `.asResponse()`
   work), and `stream: true` resolves to the SDK `Stream` (so `.tee()`,
   `.toReadableStream()` and `.controller` work). Events are tracked as before.
-
+- Patched provider calls made inside a session are recorded by the
+  `AmplitudeAI` that owns the session, including when a different instance
+  called `patch()`. Calls outside a session are unchanged.
 - A span seen by both `enableOtel()` and `AmplitudeAgentExporter` on the same
   `AmplitudeAI` (or exported twice) is recorded once instead of twice.
+- **`amplitude-ai-instrument`** forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to
+  the launched app instead of leaving it running when the wrapper is stopped,
+  and exits with the app's exit code or signal.
+- **`amplitude-ai-doctor`** reports a malformed `package.json` as a failed
+  check instead of crashing.
 
 ### Changed
 - MCP server:
