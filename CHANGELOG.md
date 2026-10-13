@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- MCP server:
+  - `validate_file` code context also masks `sk_live_`/`sk_test_`-style keys,
+    `*Key`/`*_KEY` assignments, quoted 32-character hex strings, and PEM
+    private-key blocks.
+  - Tool arguments have upper bounds: `search_docs` query, `generate_verify_test`
+    scan result, and `instrument_file` paths, agent ID, description and
+    providers.
+  - `scan_project` reads each file through a single descriptor (regular files
+    only, size checked on the open file).
+  - `scan_project` ignores configured roots that are the filesystem root or
+    contain the home directory.
+- `amplitude-ai-instrument` treats `node_modules/.bin/<launcher>` (tsx,
+  nodemon, npm, ...) like the launcher itself.
+
 ## 0.21.0
 
 Hardening release. Upgrading is recommended for all users.

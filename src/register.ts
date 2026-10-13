@@ -32,7 +32,12 @@ function consumeBootstrapMarker(): boolean {
   const base = entry[entry.length - 1] ?? '';
   const launchers = ['npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'corepack', 'tsx', 'nodemon'];
   const isLauncher =
-    entry.some((seg, i) => i > 0 && entry[i - 1] === 'node_modules' && launchers.includes(seg)) ||
+    entry.some(
+      (seg, i) =>
+        launchers.includes(seg) &&
+        (entry[i - 1] === 'node_modules' ||
+          (entry[i - 1] === '.bin' && entry[i - 2] === 'node_modules')),
+    ) ||
     /^(npm-cli|npx-cli|pnpm|pnpx|yarn(-[\d.]+)?)\.[cm]?js$/.test(base);
   if (marker === '1' && isLauncher) return false;
   const original = process.env._AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS;

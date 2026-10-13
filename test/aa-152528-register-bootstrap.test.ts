@@ -89,6 +89,8 @@ describe('register one-shot bootstrap marker', (): void => {
     '/repo/.yarn/releases/yarn-4.1.0.cjs',
     '/repo/node_modules/.pnpm/tsx@4.7.0/node_modules/tsx/dist/cli.mjs',
     '/repo/node_modules/nodemon/bin/nodemon.js',
+    '/repo/node_modules/.bin/tsx',
+    '/repo/node_modules/.bin/nodemon',
   ])('passes the marker through launcher %s', async (entry): Promise<void> => {
     await loadRegister(
       {
@@ -103,6 +105,21 @@ describe('register one-shot bootstrap marker', (): void => {
     expect(mockPatch).not.toHaveBeenCalled();
     expect(process.env._AMPLITUDE_AI_BOOTSTRAP).toBe('1');
     expect(process.env.NODE_OPTIONS).toBe(IMPORT_FLAG);
+  });
+
+  it('instruments a non-launcher started from node_modules/.bin', async (): Promise<void> => {
+    await loadRegister(
+      {
+        ...BASE,
+        NODE_OPTIONS: IMPORT_FLAG,
+        _AMPLITUDE_AI_BOOTSTRAP: '1',
+        _AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS: '',
+      },
+      '/repo/node_modules/.bin/next',
+    );
+
+    expect(mockPatch).toHaveBeenCalledOnce();
+    expect(process.env._AMPLITUDE_AI_BOOTSTRAP).toBeUndefined();
   });
 
   it('keeps direct --import usage (no marker) unchanged', async (): Promise<void> => {
