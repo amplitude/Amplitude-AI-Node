@@ -141,7 +141,8 @@ jobs:
             }
           ' "$RUNNER_TEMP/pack.json"
 
-      # npx must name the scoped package, and agent-facing URLs must not track a branch.
+      # npx must name the scoped package. Guide URLs track main or a release tag.
+      # A feature-branch ref 404s once that branch is deleted.
       - name: Lint docs commands and URLs
         run: |
           status=0
@@ -149,8 +150,9 @@ jobs:
             echo "::error::Use 'npx -y -p @amplitude/ai <bin>' instead of an unscoped npx command"
             status=1
           fi
-          if git grep -nE 'raw\.githubusercontent\.com/[^[:space:]]*/main/' -- ':!CHANGELOG.md' ':!test/**'; then
-            echo "::error::Pin raw.githubusercontent.com URLs to a release tag, not main"
+          if git grep -nE 'raw\.githubusercontent\.com/amplitude/Amplitude-AI-Node/' -- ':!CHANGELOG.md' ':!test/**' ':!docs/unreleased/**' \
+            | grep -vE '/Amplitude-AI-Node/(main|v[0-9][^/]*)/'; then
+            echo "::error::Point raw.githubusercontent.com guide URLs at main or a release tag"
             status=1
           fi
           exit $status
