@@ -56,6 +56,7 @@ function typeCheck(files: string[]): string[] {
     types: [],
     noEmit: true,
     skipLibCheck: true,
+    allowJs: true,
   });
   return ts
     .getPreEmitDiagnostics(program)
@@ -143,6 +144,7 @@ describe('Sierra guide', () => {
     writeFileSync(join(dir, 'amplitude-agent-forwarder.ts'), coreSource);
     writeFileSync(join(dir, 'sierra.ts'), skeletonSource);
     writeFileSync(join(dir, 'sierra-mapped.ts'), mappedSource);
+    writeFileSync(join(dir, 'redact-pii.mjs'), readFileSync(join(DOCS_DIR, 'redact-pii.mjs')));
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     const diagnostics = typeCheck(
       ['amplitude-agent-forwarder.ts', 'sierra.ts', 'sierra-mapped.ts', 'env.d.ts'].map((f) => join(dir, f)),
