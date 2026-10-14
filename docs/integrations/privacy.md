@@ -14,7 +14,7 @@ These match the SDK's content controls.
 | Metadata only | No message text, tool input or output, comments, or system instructions. Sessions, users, tool names, model, tokens, and timing still send | You cannot show prompt or completion text |
 | Your own callback, SQL, or Collector processor | Whatever that function emits, after the built-in patterns when you use `redact-pii.mjs` | You have domain-specific identifiers the built-in patterns do not cover |
 
-Copy [redact-pii.mjs](./redact-pii.mjs) beside the forwarder, Collector processor, or job that sends data. It has no dependencies.
+For JavaScript pipelines, copy [redact-pii.mjs](./redact-pii.mjs) beside the forwarder or job that sends data. It has no dependencies.
 
 ```ts
 import { redactAgentContent } from './redact-pii.mjs';
@@ -62,35 +62,24 @@ Batch API and S3 import accept the same events as the HTTP API. Scrub before tho
 
 ## OpenTelemetry
 
-Amplitude reads message text from span attributes. It does not read span events. A Collector transform only sees attributes, so text that exists only on events cannot be scrubbed in the Collector and does not arrive as message text.
+Amplitude extracts conversation text from span attributes rather than span events. `gen_ai_span_attributes_only` puts Strands text in the supported attributes. A Collector can transform both span attributes and span events (OTTL's `spanevent` context). Content that Amplitude does not use for transcripts can still cross the network: sanitize or remove it before export.
 
-Scrub these attributes when they are present:
+The five common GenAI content attributes are a starting inventory, **not a complete metadata-only policy**:
 
-- `gen_ai.input.messages`
-- `gen_ai.output.messages`
-- `gen_ai.tool.call.arguments`
-- `gen_ai.tool.call.result`
-- `gen_ai.system_instructions`
+| Location | Content to review |
+|---|---|
+| `gen_ai.input.messages`, `gen_ai.output.messages` | Prompts, history, completions and nested image blocks |
+| `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` | Tool input/output, including nested objects |
+| `gen_ai.system_instructions` | System text, which may repeat retrieved memory |
+| Strands `content` | Memory search query/results and memory writes, including nested metadata |
+| Status description and exception span events | Error text and stack traces |
+| Other span/resource/scope attributes, names and links | Caller-defined text, tool definitions, identifiers and metadata |
 
-Dropping those attributes is metadata only: identity, model, and token counts can still arrive.
+For Python Strands, use the runnable [privacy exporter setup](./strands-privacy.md). It defaults to an explicit metadata allowlist, drops events and error descriptions, and optionally sanitizes structured content with your callback before the OTLP exporter receives it. It includes omission behavior and outbound-payload tests. Review allowed metadata values too: `user.id` must be an approved opaque identifier, not an email address.
 
-For the same output as the SDK, run `redact-pii.mjs` in a custom Collector processor. An OpenTelemetry Collector transform processor can approximate the simpler patterns (US phone, dashed and spaced SSN, credit card, IPv4) with `replace_pattern`. It cannot reproduce the IPv6 lookbehinds or the whole-value base64 rule. The email pattern uses a lookbehind and Unicode scripts, so a Collector email rule is an approximation of the SDK pattern.
+`redact-pii.mjs` is a JavaScript string helper, not a Python module or an installable Collector processor. Calling it on a nested object leaves that object unchanged; parse structured content and sanitize its leaves, or remove it. Embedding it in a custom runtime requires your own integration.
 
-```yaml
-processors:
-  transform:
-    error_mode: ignore
-    trace_statements:
-      - context: span
-        statements:
-          - replace_pattern(span.attributes["gen_ai.input.messages"], "\\b\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\\b", "[phone]")
-          - replace_pattern(span.attributes["gen_ai.output.messages"], "\\b\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\\b", "[phone]")
-          - replace_pattern(span.attributes["gen_ai.tool.call.arguments"], "\\b\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\\b", "[phone]")
-          - replace_pattern(span.attributes["gen_ai.tool.call.result"], "\\b\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\\b", "[phone]")
-          - replace_pattern(span.attributes["gen_ai.system_instructions"], "\\b\\(?([0-9]{3})\\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\\b", "[phone]")
-```
-
-Repeat `replace_pattern` for each attribute and each pattern you need. Apply the same statements to tool arguments, tool results, and system instructions. System instructions are stored with the AI Response and are not covered by a scrubber that only walks message text.
+If you use a Collector instead, configure and test a complete policy in that pipeline. OTTL `replace_pattern` can approximate some regex rules, but its regex engine does not reproduce the JavaScript helper's lookbehinds and base64 logic. A phone-only replacement is not a PII policy. `error_mode: ignore` permits subsequent processing after an error; it does not guarantee content was scrubbed. Suppress affected content or reject the export on processing failure, and monitor failures without logging the original payload. Validate span events and the rest of the OTLP envelope as well as message attributes. See the [Collector transform processor documentation](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/v0.137.0/processor/transformprocessor).
 
 ## Warehouses
 

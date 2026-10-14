@@ -109,7 +109,13 @@ type OtlpAttribute = { key: string; value: { stringValue?: string; intValue?: st
 type OtlpExport = {
   resourceSpans: {
     resource?: { attributes?: OtlpAttribute[] };
-    scopeSpans: { spans: { attributes?: OtlpAttribute[] }[] }[];
+    scopeSpans: { spans: {
+      attributes?: OtlpAttribute[];
+      traceId?: string;
+      spanId?: string;
+      startTimeUnixNano?: string;
+      endTimeUnixNano?: string;
+    }[] }[];
   }[];
 };
 
@@ -1508,13 +1514,22 @@ describe('forwarder core and adapters', () => {
     expect(page).not.toMatch(/gen_ai\.[a-z0-9_.]*idle|amplitude\.idle/i);
   });
 
-  it('parses the Strands model and tool spans as one conversation', () => {
+  it('validates the Strands OTLP fixture envelope and shared conversation identity', () => {
     const page = readPage('strands.md');
     const fixture = JSON.parse(
       extractFencedBlockAfter(page, '### Example: one model span and one tool span', 'json'),
     ) as OtlpExport;
     const spans = fixture.resourceSpans[0]?.scopeSpans[0]?.spans ?? [];
     expect(spans).toHaveLength(2);
+    expect(new Set(spans.map((span) => span.spanId)).size).toBe(2);
+    for (const span of spans) {
+      expect(span.traceId).toMatch(/^[0-9a-f]{32}$/);
+      expect(span.traceId).not.toBe('0'.repeat(32));
+      expect(span.spanId).toMatch(/^[0-9a-f]{16}$/);
+      expect(span.spanId).not.toBe('0'.repeat(16));
+      expect(BigInt(span.startTimeUnixNano ?? '0')).toBeGreaterThan(0n);
+      expect(BigInt(span.endTimeUnixNano ?? '0')).toBeGreaterThan(BigInt(span.startTimeUnixNano ?? '0'));
+    }
     const attributes = spans.map((span) => {
       const attrs = new Map<string, string | undefined>();
       for (const { key, value } of span.attributes ?? []) attrs.set(key, value.stringValue ?? value.intValue);

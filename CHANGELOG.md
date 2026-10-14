@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.1
+
+### Fixed
+
+- Complete the Strands OTLP privacy guide with memory/error coverage, an executable Python exporter example, and tests of serialized outbound payloads. Metadata-only is the default; sending sanitized content requires a customer redactor.
+- Clarify ingestion sampling and Collector responsibilities, and include IDs/timestamps in the Strands fixture.
+- Regenerate release-pinned discovery links for the release containing the Strands and privacy guides.
+
 ## 0.22.0
 
 ### Added
