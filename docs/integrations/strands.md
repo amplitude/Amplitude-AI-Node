@@ -90,6 +90,12 @@ Tool spans carry `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.call.ar
 
 Model and both token counts come from `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`.
 
+## When the session is ready for enrichment
+
+`[Agent] Session End` is optional and recommended. A native Strands export does not send it. Amplitude closes the session with its lifecycle rules: 30 minutes without a qualifying agent event by default, and 24 hours from the session start when no per-session override is set. The first close is the one that counts. Enrichment, including the Session Record and content-based signals, runs once after that close. The record typically arrives 15–20 minutes after the ingestion batch processes the close, and can take longer during a backlog. Events that arrive after the close are stored and do not recompute that record.
+
+When you know the unit of work is finished, you can also send one `[Agent] Session End` over the HTTP API. Use the same `session.id` as `[Agent] Session ID`. A pure Strands export uses the server defaults. The OpenTelemetry translator does not read an idle-timeout attribute from a span. To change the idle window, send the HTTP `[Agent] Context` key `idle_timeout_minutes`, or set `[Agent] Session Idle Timeout Minutes` on the Session End event. The values and the tradeoffs are in [How sessions close](https://amplitude.com/docs/amplitude-ai/agent-analytics/sessions#how-sessions-close).
+
 ## Privacy
 
 Strands exports prompt and completion text when the `gen_ai_unredacted_attributes` opt-in is absent. That switch belongs to Strands. It is not Amplitude scrubbing.

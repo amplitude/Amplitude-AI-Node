@@ -511,7 +511,7 @@ You're not inventing a new identifier — use the thread, ticket, call, or run I
 
 ##### When does an agent session end?
 
-**Close explicitly when the job is done (recommended).** Call `trackSessionEnd()` or let `session.run()` complete when the unit of work is finished (ticket resolved, call ended, run completed). This marks the session as complete and makes it **eligible for server-side enrichment immediately**.
+**Close explicitly when the job is done (recommended).** Call `trackSessionEnd()` or let `session.run()` complete when the unit of work is finished (ticket resolved, call ended, run completed). `[Agent] Session End` is optional. Sending it is the explicit close. If it never arrives, the server closes the session after 30 idle minutes by default, and after 24 hours from the session start when no per-session override is set. Enrichment runs once after the first close. The Session Record typically arrives 15–20 minutes after the ingestion batch processes that close, and can take longer during a backlog.
 
 Closing does not block later events with the same `sessionId` — it is a completion marker, not a hard lock. If the user continues the **same job** (same thread or ticket), reusing the same `sessionId` is fine.
 
@@ -2795,7 +2795,7 @@ If your conversations are already traced in an LLM tracing tool, a scheduled job
 - [LangSmith](docs/integrations/langsmith.md)
 - [Braintrust](docs/integrations/braintrust.md)
 
-If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
+If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). Python Strands Agents exports native OTLP/HTTP: follow [docs/integrations/strands.md](docs/integrations/strands.md). Scrub content before it leaves your infrastructure with [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub after receipt.
 
 ### Data warehouses (Snowflake, BigQuery, Databricks)
 
@@ -2811,7 +2811,7 @@ When you use this SDK, the following are managed automatically. If you send even
 | **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set an `insert_id` per event derived from your source IDs (not a fresh UUID per send), so retries and re-imports deduplicate                  |
 | **Property prefixing**       | All properties are prefixed with `[Agent]`                                                                                                                                | You must include the `[Agent] ` prefix in every property name                                                                                 |
 | **Cost / token calculation** | Auto-computed from model and token counts                                                                                                                                 | Compute and send `[Agent] Cost USD`, `[Agent] Input Tokens`, etc. yourself                                                                    |
-| **Server-side enrichment**   | `[Agent] Session Record` and `[Agent] Evaluator Result` events are emitted by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Send `[Agent] Score` yourself when you have feedback; Amplitude never emits it. |
+| **Server-side enrichment**   | `[Agent] Session Record` and `[Agent] Evaluator Result` are emitted after the session closes, whether the close is an explicit `[Agent] Session End` or the idle-timeout fallback | These fire automatically — you do **not** need to send them. Send `[Agent] Score` yourself when you have feedback; Amplitude never emits it. |
 
 ### Ingestion methods
 
