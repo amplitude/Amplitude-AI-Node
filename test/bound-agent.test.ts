@@ -13,6 +13,7 @@ import {
   PROP_TOOL_NAME,
   PROP_TOOL_SUCCESS,
 } from '../src/core/constants.js';
+import { deriveSessionIdFromAgentSessionId } from '../src/core/tracking.js';
 import { MockAmplitudeAI } from '../src/testing.js';
 
 function createMock() {
@@ -346,15 +347,17 @@ describe('BoundAgent', () => {
       }
     });
 
-    it('does not set session_id when browserSessionId is absent', (): void => {
+    it('derives session_id from the agent session ID when browserSessionId is absent', (): void => {
       const mock = createMock();
       const agent = mock.agent('bot', { userId: 'u1' });
       agent.trackUserMessage('Hello', { sessionId: 's1' });
 
-      expect((mock.events[0] as Record<string, unknown>).session_id).toBeUndefined();
+      expect((mock.events[0] as Record<string, unknown>).session_id).toBe(
+        deriveSessionIdFromAgentSessionId('s1'),
+      );
     });
 
-    it('does not set session_id for non-numeric browserSessionId', (): void => {
+    it('falls back to the derived session_id for non-numeric browserSessionId', (): void => {
       const mock = createMock();
       const agent = mock.agent('bot', {
         userId: 'u1',
@@ -363,7 +366,9 @@ describe('BoundAgent', () => {
       });
       agent.trackUserMessage('Hello', { sessionId: 's1' });
 
-      expect((mock.events[0] as Record<string, unknown>).session_id).toBeUndefined();
+      expect((mock.events[0] as Record<string, unknown>).session_id).toBe(
+        deriveSessionIdFromAgentSessionId('s1'),
+      );
     });
 
     it('child inherits browserSessionId and sets session_id', (): void => {

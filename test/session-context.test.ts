@@ -17,6 +17,7 @@ import {
   PROP_TURN_ID,
 } from '../src/core/constants.js';
 import { SessionEnrichments } from '../src/core/enrichments.js';
+import { deriveSessionIdFromAgentSessionId } from '../src/core/tracking.js';
 import { MockAmplitudeAI } from '../src/testing.js';
 
 type Props = Record<string, unknown>;
@@ -546,20 +547,23 @@ describe('Browser session_id propagation via Session', () => {
     }
   });
 
-  it('does not set session_id when browserSessionId is not provided', async (): Promise<void> => {
+  it('derives session_id from the agent session ID when browserSessionId is not provided', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
     const agent = mock.agent('bot', { userId: 'u1' });
     const session = agent.session({ sessionId: 's1' });
 
     await session.run(async (s) => {
       s.trackUserMessage('Hello');
+      s.trackAiMessage('Hi', 'gpt-4', 'openai', 100);
     });
 
-    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
-    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+    const expected = deriveSessionIdFromAgentSessionId('s1');
+    for (const event of mock.eventsForSession('s1')) {
+      expect((event as Record<string, unknown>).session_id).toBe(expected);
+    }
   });
 
-  it('does not set session_id for invalid non-numeric browserSessionId', async (): Promise<void> => {
+  it('falls back to the derived session_id for invalid non-numeric browserSessionId', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
     const agent = mock.agent('bot', {
       userId: 'u1',
@@ -573,10 +577,12 @@ describe('Browser session_id propagation via Session', () => {
     });
 
     const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
-    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+    expect((userMsg as Record<string, unknown>).session_id).toBe(
+      deriveSessionIdFromAgentSessionId('s1'),
+    );
   });
 
-  it('does not set session_id for zero browserSessionId', async (): Promise<void> => {
+  it('falls back to the derived session_id for zero or negative browserSessionId', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
     const agent = mock.agent('bot', {
       userId: 'u1',
@@ -590,24 +596,29 @@ describe('Browser session_id propagation via Session', () => {
     });
 
     const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
-    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+    expect((userMsg as Record<string, unknown>).session_id).toBe(
+      deriveSessionIdFromAgentSessionId('s1'),
+    );
   });
 
-  it('does not set session_id for negative browserSessionId', async (): Promise<void> => {
-    const mock = new MockAmplitudeAI();
-    const agent = mock.agent('bot', {
-      userId: 'u1',
-      deviceId: 'dev1',
-      browserSessionId: '-100',
-    });
-    const session = agent.session({ sessionId: 's1' });
-
-    await session.run(async (s) => {
-      s.trackUserMessage('Hello');
-    });
-
-    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
-    expect((userMsg as Record<string, unknown>).session_id).toBeUndefined();
+  it('derived session_id is deterministic per agent session and distinct across sessions', async (): Promise<void> => {
+    const a1 = deriveSessionIdFromAgentSessionId(
+      '550e8400-e29b-41d4-a716-446655440000',
+    );
+    const a2 = deriveSessionIdFromAgentSessionId(
+      '550e8400-e29b-41d4-a716-446655440000',
+    );
+    const b = deriveSessionIdFromAgentSessionId('another-session');
+    expect(a1).toBe(a2);
+    expect(a1).not.toBe(b);
+    // Must be positive (never -1/0, which mean "out of session") and a safe
+    // integer so it survives JSON round-trips unchanged.
+    expect(a1).toBeGreaterThan(0);
+    expect(b).toBeGreaterThan(0);
+    expect(Number.isSafeInteger(a1)).toBe(true);
+    // Pinned value: the Python SDK and the Langley enrichment pipeline must
+    // derive this exact number for the same UUID or events split sessions.
+    expect(a1).toBe(179950035244850);
   });
 
   it('session_id propagates to session end event', async (): Promise<void> => {
