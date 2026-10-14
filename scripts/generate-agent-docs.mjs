@@ -67,8 +67,10 @@ const mcpJsonCursor = `{ "mcpServers": { ${mcpServerJson} } }`;
 const claudeAddCommand = `claude mcp add --scope project amplitude-ai -- npx -y -p ${packageJson.name} amplitude-ai mcp`;
 const codexToml = `[mcp_servers.amplitude-ai]\ncommand = "npx"\nargs = ${mcpArgs}`;
 
-// Raw GitHub URLs handed to agents are pinned to this release's tag, never a branch.
-const releaseRawPrefix = `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v${packageJson.version}/`;
+// Public guide URLs track main. Search already indexes that ref, and a version tag
+// would need a docs edit on every release. The published package still matches the
+// guide that was on main when the tag was cut.
+const releaseRawPrefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/';
 const rawRefPattern = /https:\/\/raw\.githubusercontent\.com\/amplitude\/Amplitude-AI-Node\/[^/\s"'`]+\//g;
 const pinnedRawUrlFiles = [
   join('docs', 'integrations', 'manifest.json'),
@@ -202,7 +204,12 @@ Prompt:
 
 ## Instrumentation Guide
 
-- \`amplitude-ai.md\` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+Fetch the public guide for the job. These URLs track \`main\`.
+
+- Node app: fetch \`${releaseRawPrefix}amplitude-ai.md\` and follow it, then install \`${packageJson.name}\` as that guide says.
+- Python app: \`python3 -m pip install amplitude-ai\`, then run \`amplitude-ai --print-guide\`.
+- Hosted platform, tracing tool, warehouse, gateway, or AWS Strands: start at \`${releaseRawPrefix}docs/integrations/README.md\` and follow the linked page, including privacy.
+- \`amplitude-ai.md\` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is \`node_modules/@amplitude/ai/amplitude-ai.md\`.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
 ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
@@ -219,6 +226,11 @@ const llmsTxt = `${generatedHeader}
 # llms.txt
 package=${packageJson.name}
 version=${packageJson.version}
+
+[routing]
+instrument-node=${releaseRawPrefix}amplitude-ai.md
+instrument-python=python3 -m pip install amplitude-ai && amplitude-ai --print-guide
+other-sources=${releaseRawPrefix}docs/integrations/README.md
 
 [mcp.tools]
 ${toolNames.join('\n')}

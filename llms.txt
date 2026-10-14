@@ -1,7 +1,12 @@
 <!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
-version=0.22.0
+version=0.23.0
+
+[routing]
+instrument-node=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md
+instrument-python=python3 -m pip install amplitude-ai && amplitude-ai --print-guide
+other-sources=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md
 
 [mcp.tools]
 get_event_schema
@@ -32,18 +37,18 @@ amplitude-ai://instrument-guide
 [Agent] User Message
 
 [integrations]
-sierra=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/sierra.md
-decagon=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/decagon.md
-fin=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/fin.md
-agentforce=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/agentforce.md
-langfuse=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/langfuse.md
-langsmith=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/langsmith.md
-braintrust=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/braintrust.md
-warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/warehouses/README.md
-routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/routers.md
-strands=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/strands.md
-privacy=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/privacy.md
-analytics-metadata-schema=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/analytics-metadata.schema.json
-check-agent-events=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/check-agent-events.mjs
-otlp-replay=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/warehouses/otlp-replay.mjs
-redact-pii=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/redact-pii.mjs
+sierra=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md
+decagon=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md
+fin=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md
+agentforce=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md
+langfuse=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md
+langsmith=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md
+braintrust=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md
+warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md
+routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md
+strands=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md
+privacy=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md
+analytics-metadata-schema=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json
+check-agent-events=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs
+otlp-replay=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs
+redact-pii=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/redact-pii.mjs

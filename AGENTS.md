@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.22.0
+Package: `@amplitude/ai` v0.23.0
 
 ## Install
 
@@ -134,7 +134,12 @@ Prompt:
 
 ## Instrumentation Guide
 
-- `amplitude-ai.md` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+Fetch the public guide for the job. These URLs track `main`.
+
+- Node app: fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md` and follow it, then install `@amplitude/ai` as that guide says.
+- Python app: `python3 -m pip install amplitude-ai`, then run `amplitude-ai --print-guide`.
+- Hosted platform, tracing tool, warehouse, gateway, or AWS Strands: start at `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md` and follow the linked page, including privacy.
+- `amplitude-ai.md` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is `node_modules/@amplitude/ai/amplitude-ai.md`.
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
 - `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
