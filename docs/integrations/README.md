@@ -69,20 +69,20 @@ Every platform and tracing-tool guide shares the same platform-neutral forwarder
 
 ## For coding agents
 
-Fetch the raw page for the source and follow "Part 2: Coding agent procedure". If `@amplitude/ai` is installed, read the same page from `node_modules/@amplitude/ai/docs/integrations/` instead. The URLs below are pinned to a release tag; don't substitute `main`.
+These URLs track `main`. Fetch the raw page for the source and follow "Part 2: Coding agent procedure". If `@amplitude/ai` is installed, the same file is under `node_modules/@amplitude/ai/docs/integrations/`. To instrument a Node app, fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md` and follow it. To instrument a Python app, install `amplitude-ai` and run `amplitude-ai --print-guide`. If your source is not listed, start at this page.
 
-- Sierra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/sierra.md`
-- Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/decagon.md`
-- Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/fin.md`
-- Agentforce: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/agentforce.md`
-- Langfuse: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/langfuse.md`
-- LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/langsmith.md`
-- Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/braintrust.md`
-- Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/warehouses/README.md`
-- Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/routers.md`
-- AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/strands.md`
-- Strands privacy setup: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/strands-privacy.md`
-- Privacy (non-SDK paths): `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.1/docs/integrations/privacy.md`
+- Sierra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md`
+- Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md`
+- Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md`
+- Agentforce: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md`
+- Langfuse: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md`
+- LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md`
+- Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`
+- Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
+- Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
+- AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md`
+- Strands privacy setup: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands-privacy.md`
+- Privacy (non-SDK paths): `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md`
 
 ## Your source is not listed
 

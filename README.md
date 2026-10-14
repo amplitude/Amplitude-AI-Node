@@ -40,6 +40,8 @@ app.post('/chat', async (req, res) => {
 
 ### Instrument with a coding agent (recommended)
 
+Fetch and follow [amplitude-ai.md](https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md), then install the SDK as that guide says:
+
 ```bash
 npm install @amplitude/ai
 npx -y -p @amplitude/ai amplitude-ai
@@ -68,7 +70,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.22.0                                                                                                                                                                           |
+| Version         | 0.23.0                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
@@ -2955,6 +2957,8 @@ See `src/core/tracking.ts` and `src/core/constants.ts` for the full list.
 This SDK is designed to be discovered and used by any AI coding agent — Cursor, Claude Code, Windsurf, Copilot, Codex, Cline, or any agent that can read files.
 
 **The fastest path:**
+
+Fetch and follow https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md, then install the SDK as that guide says:
 
 ```bash
 npm install @amplitude/ai

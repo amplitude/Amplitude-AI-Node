@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.0
+
+### Added
+- **AWS Strands.** A public guide for native OTLP/HTTP export from Strands Agents 1.60.0, including identity, provider override, and client-side privacy.
+- **Privacy contract for non-SDK paths.** `docs/integrations/privacy.md` and `redact-pii.mjs` carry the SDK's PII patterns for HTTP, OTLP, Batch, S3, and warehouse imports. Amplitude does not scrub content after receipt.
+- **Public guide URLs track `main`.** Coding agents fetch `amplitude-ai.md` and `docs/integrations/README.md` from `main`, so a version bump no longer requires new links.
+
+### Changed
+- **`[Agent] Session End` is optional and recommended.** A native Strands export does not send one. Enrichment still runs after the server idle close.
+
 ## 0.22.1
 
 ### Fixed
