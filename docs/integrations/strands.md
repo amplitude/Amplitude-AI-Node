@@ -12,7 +12,9 @@ Amplitude reads the span attributes below and turns one Strands conversation int
 pip install 'strands-agents[otel]==1.60.0'
 ```
 
-Call `StrandsTelemetry().setup_otlp_exporter()` before you construct `Agent()`.
+For customer-side scrubbing, follow the [Python privacy exporter setup](./strands-privacy.md) instead of the direct exporter below. It defaults to metadata only and supports a customer redaction callback.
+
+Use this direct exporter only when an upstream policy already sanitizes the outgoing data or the content is approved for export. Call `StrandsTelemetry().setup_otlp_exporter()` before you construct `Agent()`.
 
 ```python
 from strands import Agent
@@ -48,7 +50,7 @@ EU data residency: `https://api.eu.amplitude.com/otlp/v1/traces`.
 
 `OTEL_SERVICE_NAME` is the agent name Amplitude uses when a span has no `gen_ai.agent.id`.
 
-`gen_ai_span_attributes_only` puts prompts, completions, and system instructions on span attributes. Without it, Strands records that text as span events. Amplitude does not read span events, so the session, user, model, and token counts still arrive, and the message text does not. A Collector scrubber also only sees attributes, so this flag is required both for message text and for scrubbing it.
+`gen_ai_span_attributes_only` puts prompts, completions, and system instructions on span attributes. Without it, Strands records that text as span events. Amplitude does not read span events, so the session, user, model, and token counts still arrive, and the message text does not. Collectors can also transform span events; configure their policy for every exported content location. This flag is required for Amplitude transcript extraction, not a universal requirement for Collector scrubbing.
 
 ## Identity on every agent
 
@@ -96,15 +98,21 @@ Model and both token counts come from `gen_ai.request.model`, `gen_ai.usage.inpu
 
 When you know the unit of work is finished, you can also send one `[Agent] Session End` over the HTTP API. Use the same `session.id` as `[Agent] Session ID`. A pure Strands export uses the server defaults. The OpenTelemetry translator does not read an idle-timeout attribute from a span. To change the idle window, send the HTTP `[Agent] Context` key `idle_timeout_minutes`, or set `[Agent] Session Idle Timeout Minutes` on the Session End event. The values and the tradeoffs are in [How sessions close](https://amplitude.com/docs/amplitude-ai/agent-analytics/sessions#how-sessions-close).
 
+## Sampling before ingestion
+
+Keep or discard an entire conversation using a stable `session.id`; do not independently sample each message, turn or trace. A conversation can span multiple traces, so trace-level sampling alone can still lose turns. Apply the same decision to all agent telemetry and any complementary HTTP lifecycle events.
+
+If you need to study repeat usage or conversion, consistently select users by a stable, opaque `user.id` and keep all their conversations. This preserves the observed journey for selected users only; it does not guarantee a representative population or complete product-analytics tracking. Confirm why sampling is needed and measure volume before choosing a rate. The evaluator's sample-rate control selects which ingested sessions to evaluate; it does not reduce ingestion. These examples do not install an ingestion sampler or a monthly quota counter.
+
 ## Privacy
 
 Strands exports prompt and completion text when the `gen_ai_unredacted_attributes` opt-in is absent. That switch belongs to Strands. It is not Amplitude scrubbing.
 
-Scrub the content attributes in a Collector, or drop them for metadata only, before the export reaches Amplitude. The attribute list, the shared pattern function, and the Collector limits are in [privacy.md](./privacy.md).
+Use the [Python privacy exporter](./strands-privacy.md), or implement a tested customer-side Collector policy, before export reaches Amplitude. Removing message attributes alone does not remove memory `content`, exception events or error descriptions. See the complete inventory in [privacy.md](./privacy.md). Neither setup is installed automatically.
 
 ## Example spans
 
-One model span and one tool span from a single turn. Both carry the same session, user, and agent. The provider is the model provider. Content uses Strands' parts shape. This fixture has no project API key.
+One model span and one tool span from a single turn. Both carry the same session, user, and agent. The provider is the model provider. Content uses Strands' parts shape. This fixture has no project API key. Its timestamps are illustrative; use current timestamps for a live ingestion check.
 
 ### Example: one model span and one tool span
 
@@ -122,6 +130,10 @@ One model span and one tool span from a single turn. Both carry the same session
           "spans": [
             {
               "name": "chat",
+              "traceId": "11111111111111111111111111111111",
+              "spanId": "1111111111111111",
+              "startTimeUnixNano": "1791972000000000000",
+              "endTimeUnixNano": "1791972002000000000",
               "attributes": [
                 { "key": "session.id", "value": { "stringValue": "conv_1" } },
                 { "key": "user.id", "value": { "stringValue": "user_12345" } },
@@ -147,6 +159,10 @@ One model span and one tool span from a single turn. Both carry the same session
             },
             {
               "name": "execute_tool lookup_order",
+              "traceId": "11111111111111111111111111111111",
+              "spanId": "2222222222222222",
+              "startTimeUnixNano": "1791972003000000000",
+              "endTimeUnixNano": "1791972004000000000",
               "attributes": [
                 { "key": "session.id", "value": { "stringValue": "conv_1" } },
                 { "key": "user.id", "value": { "stringValue": "user_12345" } },
@@ -178,8 +194,8 @@ One model span and one tool span from a single turn. Both carry the same session
 2. Set the environment block above. Use the project API key in `Authorization`, with `%20` between `Bearer` and the key.
 3. Set `OTEL_SEMCONV_STABILITY_OPT_IN` exactly as written, including `gen_ai_span_attributes_only`.
 4. Construct `Agent` with `trace_attributes`: stable `session.id`, product-analytics `user.id`, `gen_ai.agent.id`, and `gen_ai.provider.name` set to the model provider.
-5. Call `setup_otlp_exporter()` before `Agent()`. If a tracer provider is already installed, pass it in.
-6. Scrub `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, and `gen_ai.system_instructions` with [redact-pii.mjs](./redact-pii.mjs), or drop those attributes. Follow [privacy.md](./privacy.md).
+5. Install the [privacy exporter](./strands-privacy.md) before `Agent()`, or verify the customer-side policy protecting the direct export. Attach to an existing provider if present; avoid a duplicate raw exporter.
+6. Test the full outbound payload, including memory, errors, nested content and failure cases. Follow [privacy.md](./privacy.md); the JavaScript helper cannot be imported directly into Python.
 7. Run two turns with the same `session.id` and confirm the checklist below.
 
 ## Verify in Live Events
@@ -191,8 +207,8 @@ In Live Events:
 - Session ID is `session.id`, not a trace id.
 - User ID is the product-analytics user, not `unknown`.
 - Agent ID is `gen_ai.agent.id`.
-- The turn shows User Message text, Tool Call name and arguments, and AI Response text.
-- A canary of `ada@example.com` and `555-123-4567` is stored as `[email]` and `[phone]`. The raw values are absent. A parenthesized US number keeps the opening parenthesis: `Call (555) 123-4567` becomes `Call ([phone]`.
+- In scrubbed-content mode, the turn shows approved User Message text, Tool Call name and arguments, and AI Response text. In metadata-only mode, content is absent.
+- Synthetic canaries such as `ada@example.com` and `555-123-4567` are absent from the outgoing payload and stored events. Replacement text depends on your redactor. The JavaScript helper uses `[email]` and `[phone]`; its parenthesized US number rule leaves the opening parenthesis. Also test memory, system instructions, tools, exceptions and nested images before export.
 - The AI Response has the model name and both token counts.
 - The second turn does not duplicate the first user message.
 

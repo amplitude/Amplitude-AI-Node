@@ -81,6 +81,7 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
 - Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
 - AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md`
+- Strands privacy setup: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands-privacy.md`
 - Privacy (non-SDK paths): `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md`
 
 ## Your source is not listed

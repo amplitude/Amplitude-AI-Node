@@ -49,6 +49,7 @@ routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/
 strands=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md
 privacy=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md
 analytics-metadata-schema=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json
+strands-privacy=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands_privacy.py
 check-agent-events=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs
 otlp-replay=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs
 redact-pii=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/redact-pii.mjs
