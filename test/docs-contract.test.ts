@@ -1502,6 +1502,10 @@ describe('forwarder core and adapters', () => {
     expect(page).toContain('strands-agents[otel]==1.60.0');
     expect(page).toContain('Bearer%20');
     expect(page).toContain('gen_ai_span_attributes_only');
+    expect(page).toContain('[Agent] Session End` is optional and recommended');
+    expect(page).toContain('30 minutes');
+    expect(page).toContain('does not read an idle-timeout attribute');
+    expect(page).not.toMatch(/gen_ai\.[a-z0-9_.]*idle|amplitude\.idle/i);
   });
 
   it('parses the Strands model and tool spans as one conversation', () => {

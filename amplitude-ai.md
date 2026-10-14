@@ -218,7 +218,7 @@ export async function POST(req: Request) {
 ```
 
 - Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
-- Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
+- Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done. `[Agent] Session End` is optional and recommended. If it never arrives, the server closes the session after 30 idle minutes by default. Enrichment runs once after that close, and the Session Record typically arrives 15–20 minutes after the ingestion batch processes it. Set **`idleTimeoutMinutes`** if turns can be hours apart.
 - Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
 
 > **[Frontend: yes] Client-managed sessionId — required check.** If the browser client generates its own `sessionId` (common when the app doesn't use the Amplitude browser SDK), verify it is conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts, and do not persist it indefinitely across page loads. A sessionId stored in `localStorage` and never reset will silently route all new events under an old session — the server accepts and enriches them correctly, but they never appear as new sessions in Agent Analytics because the ID predates instrumentation. This is invisible at the server level: HTTP 200, events ingested, nothing in the logs. The fix must happen in the client. During verification (Step 4d-live), use an incognito window, which starts with empty storage and guarantees a fresh sessionId.
@@ -239,7 +239,7 @@ export async function POST(req: Request) {
 > ```
 > Without this, a failed LLM call produces no `[Agent] AI Response` event — the turn is invisible in Agent Analytics and latency/error-rate charts miss the failure entirely.
 
-> **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
+> **Multi-turn HTTP servers:** Close the session when the unit of work finishes, not after every request. `session.run()` emits `[Agent] Session End` on exit by default, and the first close is the one enrichment uses. For a conversation that continues across requests, open each request with `trackSessionEnd: false` and call `trackSessionEnd()` once when the job is done. Keep one stable `sessionId` on every request, and define the agent at module level so `[Agent] Agent ID` stays consistent. If either drifts, turns appear as separate sessions.
 >
 > **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Use `try/finally` so events are flushed even when `session.run()` throws — without it, an unhandled error silently drops all queued events:
 > ```typescript
@@ -635,14 +635,14 @@ For platform integrations where installing the SDK isn't practical (e.g., Sierra
 
 **Trace grouping:** Set `[Agent] Trace ID` on every event (see Step 3g-c). Events without it are grouped into a single turn.
 
-**Session lifecycle:** You must send an explicit `[Agent] Session End` event when the conversation ends — there is no session context manager to auto-close for you.
+**Session lifecycle:** Send `[Agent] Session End` when the unit of work finishes. It is optional and recommended. There is no session context manager on the HTTP path to close it for you. If it never arrives, the server closes the session after 30 idle minutes by default, and after 24 hours from the session start when no per-session override is set. Enrichment runs once after the first close.
 
 **Batching:** The HTTP V2 API accepts up to 2000 events per request and 20MB payload. For large sessions, batch events in groups (e.g., 10-50 per request). Event ordering is reconstructed from `[Agent] Turn ID` + `time` regardless of batch arrival order.
 
 **Event types to send** (minimum viable session):
 1. `[Agent] User Message` — one per user input
 2. `[Agent] AI Response` — one per AI output (never empty `$llm_message`)
-3. `[Agent] Session End` — one at session close
+3. `[Agent] Session End` — optional, one when the unit of work finishes. If you omit it, the idle timeout closes the session.
 4. `[Agent] Span` (optional) — for tool calls, UI components, or sub-operations
 5. `[Agent] Score` (optional) — for user feedback (thumbs up/down)
 
@@ -924,7 +924,7 @@ Common issues and fixes:
 | userId: 0% | Can't create cohorts or link to User Activity | Find where user identity is available in the request (auth token, header, session cookie) and pass it to `agent.session({ userId })` |
 | Session ID: 0% | Sessions page empty, signals don't run | Wrap the route handler in `agent.session({ sessionId })`. Use the app's existing conversation/thread/ticket ID. |
 | Agent ID: 0% | Agent filter on Monitor doesn't work | Create a named agent with `ai.agent('name')` and use it for sessions |
-| Session End missing | Signals never execute, no Session Record | Ensure `session.run()` completes (or call `trackSessionEnd()` explicitly) |
+| Session End missing | Signals and the Session Record wait for the idle close instead of an explicit close | Send `[Agent] Session End` when the job finishes (`session.run()` with the default `trackSessionEnd: true`, or `trackSessionEnd()`). A multi-request session should set `trackSessionEnd: false` on each request and close once at the end. |
 | Cost USD: 0% | Monitor cost coverage is incomplete | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
 | Tokens: 0% | Token consumption charts empty | For manual `trackAiMessage`: pass `inputTokens`/`outputTokens` from the `response.usage` object. For provider wrappers: verify the response has a `.usage` field. |
 | Latency: 0% | Latency trend charts empty | Wrap the LLM call in `performance.now()` and pass `latencyMs` |
