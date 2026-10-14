@@ -200,7 +200,7 @@ Two settings at the top of Stage 2 are safe to edit:
 | `include_content` | `TRUE` | `FALSE` sends metadata only: no message text, tool input or output, or span input or output. Sessions, turns, latency, model, tokens, and cost still import. |
 | `settle_hours` | `2` | How long a conversation must be idle before it imports. Longer than the longest pause a real conversation has, and longer than the delay before rows land in the table. |
 
-To redact rather than drop content, apply the redaction in Stage 1 (for example, a masking function on `content`), so it runs before data leaves the warehouse.
+To redact rather than drop content, apply the redaction in Stage 1 (for example, a masking function on `content`), so it runs before data leaves the warehouse. Use the same placeholders as [privacy.md](../privacy.md). Warehouse SQL cannot faithfully copy the IPv6 lookbehinds or the whole-value base64 rule from [redact-pii.mjs](../redact-pii.mjs); where the dialect cannot express a pattern, drop or hash that class of value in Stage 1.
 
 ### Set up the import
 

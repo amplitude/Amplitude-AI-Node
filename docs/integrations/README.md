@@ -1,6 +1,6 @@
 # Agent platforms, tracing tools, and warehouses + Amplitude Agent Analytics
 
-**Amplitude Agent Analytics can ingest agent conversations from hosted agent platforms, LLM tracing tools, and data warehouses, with no SDK required.**
+**Amplitude Agent Analytics can ingest agent conversations from hosted agent platforms, LLM tracing tools, agent frameworks that emit OpenTelemetry, and data warehouses, with no SDK required.**
 
 If you do not run the Amplitude AI SDK in your agent code, you can still get your conversations into Agent Analytics: a small forwarder in your infrastructure reads each finished conversation from where it already lives, turns it into `[Agent]` events, and posts them to Amplitude. Each guide below is a complete recipe for one source, written for both engineers and coding agents: hand a coding agent the page URL and it can build the integration.
 
@@ -37,6 +37,16 @@ The user ID must match the one used in product analytics. Conversations without 
 
 If your application already emits OpenTelemetry, you can skip the forwarder and add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
 
+## Agent frameworks
+
+The agent runs in your own code and already exports OpenTelemetry GenAI spans. Send those spans to Amplitude's OTLP endpoint. These are not HTTP forwarders.
+
+| Framework | Guide | How conversations are extracted | Last verified |
+|---|---|---|---|
+| AWS Strands (Python) | [strands.md](./strands.md) | Native OTLP/HTTP from Strands Agents 1.60.0 | 2026-10-14 |
+
+Scrub content before it leaves your infrastructure. Amplitude does not scrub after receipt. The shared contract for HTTP, OTLP, Batch, S3, and warehouse imports is [privacy.md](./privacy.md).
+
 ## Inference routers and AI gateways
 
 Requests go through a router or gateway that picks the model. Wrap the client with the SDK, have the router export OpenTelemetry GenAI spans with the identity your application passes on each request, or post events over the HTTP API. See [routers.md](./routers.md) and the identity contract in [analytics-metadata.schema.json](./analytics-metadata.schema.json).
@@ -51,6 +61,7 @@ As with tracing tools, the import brings in what the table already records, incl
 
 - [check-agent-events.mjs](./check-agent-events.mjs): checks a file of `[Agent]` events (CSV, JSON, or NDJSON) against the rules every guide shares, before you send or import it. No dependencies: `node check-agent-events.mjs events.json`.
 - [warehouses/otlp-replay.mjs](./warehouses/otlp-replay.mjs): converts exported spans to OTLP and sends them to Amplitude. No dependencies.
+- [redact-pii.mjs](./redact-pii.mjs): applies the SDK's PII patterns to one string. No dependencies. Pass it as `redact` on an HTTP forwarder, or call it from a Collector processor. See [privacy.md](./privacy.md).
 
 A machine-readable list of these guides is in [manifest.json](./manifest.json).
 
@@ -69,6 +80,8 @@ Fetch the raw page for the source and follow "Part 2: Coding agent procedure". I
 - Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/braintrust.md`
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/warehouses/README.md`
 - Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/routers.md`
+- AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/strands.md`
+- Privacy (non-SDK paths): `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/privacy.md`
 
 ## Your source is not listed
 

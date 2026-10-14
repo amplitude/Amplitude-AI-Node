@@ -685,7 +685,9 @@ async function fetchSierraConversations(_since: number): Promise<SierraPayload[]
   return todo('a fetch of finished conversations from the Sierra export API, honoring its rate limits');
 }
 
-const redact = (text: string): string => text; // replace with your PII redaction
+import { redactAgentContent } from './redact-pii.mjs';
+
+const redact = redactAgentContent;
 
 const amplitude = () => ({
   apiKey: process.env.AMPLITUDE_API_KEY ?? '',
@@ -771,7 +773,7 @@ export async function syncSierraExport(
 
 ### Privacy
 
-On the HTTP path you own redaction, and it must run before sending. Content travels in four places; gate all of them, not just message text:
+On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); this guide passes [redact-pii.mjs](./redact-pii.mjs) as `redact`. Content travels in four places; gate all of them, not just message text:
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call
