@@ -226,8 +226,18 @@ export type { MiddlewareOptions } from './middleware.js';
 export { wrap, AmplitudeAIWrapError } from './wrappers.js';
 
 // Decorators (tool/observe HOFs + ToolCallTracker)
-export { tool, observe, ToolCallTracker } from './decorators.js';
-export type { ToolWrapped, ObserveWrapped, ObserveSpanType } from './decorators.js';
+export {
+  tool,
+  observe,
+  ToolCallTracker,
+  setToolResultProperties,
+} from './decorators.js';
+export type {
+  ToolWrapped,
+  ObserveWrapped,
+  ObserveSpanType,
+  ResultPropertiesHook,
+} from './decorators.js';
 
 // Patching
 export {

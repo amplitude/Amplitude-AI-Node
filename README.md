@@ -1215,6 +1215,38 @@ track(
 
 The `journey_type` discriminator (`agent` / `web` / `mobile`) makes agent-driven and click-driven journeys comparable in the **same funnel** with no joining. This is the one case where the base SDK's `track()` is correct — it stays a non-`[Agent]` event so it lands in the standard product taxonomy. Only for actions with a click-driven equivalent (not read-only tools), and reuse the existing event name/properties — don't invent them. See Step 3e of `amplitude-ai.md`.
 
+#### Goals: record what a tool created
+
+Agent Analytics Goals measures whether sessions lead to outcomes. When a tool creates something (an order, booking, refund, ticket), attach its ID to the `[Agent] Tool Call`; a later event with the same ID, from any source, confirms it. No new events are involved:
+
+```typescript
+import { setToolResultProperties, tool } from '@amplitude/ai';
+
+const placeOrder = tool(async (cart: Cart) => shop.create(cart), {
+  name: 'place_order',
+  resultProperties: (order: Order) => ({ order_id: order.id, order_value: order.total }),
+});
+
+const bookSlot = tool(async (slotId: string) => {
+  const booking = await calendar.book(slotId);
+  setToolResultProperties({ booking_id: booking.id });
+  return 'Booked';
+}, { name: 'book_slot' });
+```
+
+- `resultProperties` runs once after the tool succeeds, never on failure. `setToolResultProperties()` works anywhere inside the tool body, across `await`s. Both add plain event properties to `[Agent] Tool Call`; the hook wins on conflicts.
+- Name the key exactly like the property on the confirming event (for example `order_id` on both `[Agent] Tool Call` and `Payment Settled`), and send that event with the same user ID where you can. Goals can then chart it as a normal funnel. Send confirmations and reversals (`Payment Settled`, `Refund Issued`) from your backend as ordinary events; they are billed like any other event.
+- **IDs only.** Event properties are not redacted, so never pass emails, names, or message content. Values must be strings (up to 512 characters), finite numbers, or booleans, with at most 5 keys per call and no `[Agent]`, `[Amplitude]`, or `$` prefixes; anything else is dropped. Reuse a few key names across tools.
+- Provider wrappers record which tools the model asked for, not whether they ran. Use `tool()` or `trackToolCall({ ..., eventProperties })` on tools that take actions.
+
+Other signals Goals reads, all with existing APIs:
+
+- **Exact session join:** add `'[Agent] Session ID': getActiveContext()?.sessionId` to your own product events. For in-app agents, also pass `deviceId` and `browserSessionId` to the session so Goals can match events from the same app session.
+- **User acceptance:** `s.score('accepted', 1, messageId, { source: 'user' })`, likewise `edited`, `undone`, `rejected` (value `1` or `0`).
+- **Experiment arms:** Amplitude Experiment flags need no SDK change. For model or prompt tests set `agentVersion` on the agent or `promptId` on AI responses; for your own splits, set `context: { experiment_key: 'planner-v2', experiment_variant: 'treatment' }`.
+- **Incrementality:** create an Amplitude Experiment flag `agent-holdout-<agentId>` (for example 5% held out) and hide the agent entry point when its variant is `off`.
+- **Handoffs to people:** track human-agent messages with `messageSource: 'human_agent'` so deflection goals can count escalations.
+
 ### observe()
 
 Wraps a function to track as `[Agent] Span`:
