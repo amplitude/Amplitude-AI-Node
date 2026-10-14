@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Tool result properties.** `tool(fn, { resultProperties })` maps a successful tool's return value to properties on its `[Agent] Tool Call`, and `setToolResultProperties()` sets them from inside the tool body. Use them for IDs of what the tool created (for example `order_id`) so Agent Analytics Goals can confirm the action against a later event with the same ID. Values are strings (up to 512 characters), finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. Nothing is added when the tool fails.
+
 ## 0.22.0
 
 ### Added

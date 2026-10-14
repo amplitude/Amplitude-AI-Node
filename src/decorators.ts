@@ -6,6 +6,7 @@
  * these are implemented as HOFs (higher-order functions) that wrap callables.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
@@ -25,6 +26,138 @@ import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
 
 const _require = createRequire(import.meta.url);
+
+// ---------------------------------------------------------------------------
+// Tool result properties (parity with Python)
+// ---------------------------------------------------------------------------
+
+export const RESULT_PROPERTIES_MAX_KEYS = 5;
+export const RESULT_PROPERTY_MAX_VALUE_LENGTH = 512;
+const _RESERVED_PROPERTY_PREFIXES = ['[Agent]', '[Amplitude]', '$'];
+
+const _toolResultStorage = new AsyncLocalStorage<Record<string, unknown>>();
+
+/**
+ * Attach properties to the `[Agent] Tool Call` event of the running `tool()`.
+ *
+ * Use this for values that are only known inside the tool body, such as the
+ * ID of the object the tool created:
+ *
+ * ```ts
+ * const placeOrder = tool(async (cart: Cart) => {
+ *   const order = await shop.create(cart);
+ *   setToolResultProperties({ order_id: order.id });
+ *   return 'Order placed';
+ * });
+ * ```
+ *
+ * The properties are sent only when the tool succeeds. They travel on
+ * `eventProperties`, which is not redacted, so pass IDs, never content or
+ * personal data. Values must be strings (up to 512 characters), finite
+ * numbers, or booleans, at most 5 keys per call, and keys must not start
+ * with `[Agent]`, `[Amplitude]`, or `$`. Invalid entries are dropped.
+ *
+ * Outside a `tool()` call this is a no-op.
+ */
+export function setToolResultProperties(
+  properties: Record<string, unknown>,
+): void {
+  const holder = _toolResultStorage.getStore();
+  if (holder == null) {
+    getLogger().debug(
+      'setToolResultProperties called outside a tool() call; ignored',
+    );
+    return;
+  }
+  if (!_isPlainRecord(properties)) {
+    getLogger().debug('setToolResultProperties expects an object; ignored');
+    return;
+  }
+  Object.assign(holder, properties);
+}
+
+function _isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value != null && !Array.isArray(value);
+}
+
+function _isValidResultValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string')
+    return value.length <= RESULT_PROPERTY_MAX_VALUE_LENGTH;
+  return false;
+}
+
+/** Return the valid subset of `properties`, in insertion order, capped at 5 keys. */
+export function sanitizeResultProperties(
+  properties: unknown,
+  toolName = '',
+): Record<string, unknown> {
+  if (!_isPlainRecord(properties)) {
+    if (properties != null) {
+      getLogger().debug(
+        `Tool '${toolName}': result properties must be an object; dropped`,
+      );
+    }
+    return {};
+  }
+  const clean: Record<string, unknown> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(properties)) {
+    if (
+      key === '' ||
+      _RESERVED_PROPERTY_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
+      getLogger().debug(
+        `Tool '${toolName}': dropped result property with reserved or invalid key`,
+      );
+      continue;
+    }
+    if (!_isValidResultValue(value)) {
+      getLogger().debug(
+        `Tool '${toolName}': dropped result property '${key}' (unsupported value)`,
+      );
+      continue;
+    }
+    if (count >= RESULT_PROPERTIES_MAX_KEYS) {
+      getLogger().debug(
+        `Tool '${toolName}': dropped result property '${key}' (more than ${RESULT_PROPERTIES_MAX_KEYS} keys)`,
+      );
+      continue;
+    }
+    clean[key] = value;
+    count += 1;
+  }
+  return clean;
+}
+
+function _collectResultProperties(
+  toolName: string,
+  result: unknown,
+  holder: Record<string, unknown>,
+  resultProperties: ResultPropertiesHook | null | undefined,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...holder };
+  if (resultProperties != null) {
+    let hookProps: unknown = null;
+    try {
+      hookProps = resultProperties(result);
+    } catch (e) {
+      const errorType = e instanceof Error ? e.name : typeof e;
+      getLogger().debug(
+        `Tool '${toolName}': resultProperties hook threw ${errorType}; ignored`,
+      );
+    }
+    if (_isPlainRecord(hookProps) && typeof hookProps.then !== 'function') {
+      Object.assign(merged, hookProps);
+    } else if (hookProps != null) {
+      getLogger().debug(
+        `Tool '${toolName}': resultProperties hook must synchronously return an object; ignored`,
+      );
+    }
+  }
+  return sanitizeResultProperties(merged, toolName);
+}
 
 // ---------------------------------------------------------------------------
 // ToolCallTracker — global config singleton (parity with Python)
@@ -149,6 +282,10 @@ function _resolvePrivacyConfig(
   );
 }
 
+/** Maps a successful tool's return value to properties for its `[Agent] Tool Call` event. */
+// biome-ignore lint/suspicious/noExplicitAny: receives any tool return value
+export type ResultPropertiesHook = (result: any) => Record<string, unknown> | null | undefined;
+
 interface ToolOptions {
   name?: string;
   toolType?: string | null;
@@ -171,6 +308,14 @@ interface ToolOptions {
   inputSchema?: Record<string, unknown> | null;
   timeoutMs?: number | null;
   onError?: ((error: Error, toolName: string) => void) | null;
+  /**
+   * Called once with the return value after the tool succeeds (never on
+   * failure). The returned object is added to the `[Agent] Tool Call`
+   * event, for example `{ order_id: order.id }`, and overrides values set
+   * with `setToolResultProperties()`. Same rules as that function: IDs
+   * only, scalar values, at most 5 keys. A hook that throws is ignored.
+   */
+  resultProperties?: ResultPropertiesHook | null;
 }
 
 interface ResolvedContext {
@@ -343,17 +488,18 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     let errorMsg: string | null = null;
     let errorStack: string | null = null;
     let result: unknown = undefined;
+    const resultHolder: Record<string, unknown> = {};
 
     try {
-      if (opts.timeoutMs != null) {
-        result = await _runWithTimeout(
-          fn.bind(this, ...args) as AsyncFn,
-          opts.timeoutMs,
-          toolName,
-        );
-      } else {
-        result = await fn.apply(this, args);
-      }
+      result = await _toolResultStorage.run(resultHolder, () =>
+        opts.timeoutMs != null
+          ? _runWithTimeout(
+              fn.bind(this, ...args) as AsyncFn,
+              opts.timeoutMs,
+              toolName,
+            )
+          : fn.apply(this, args),
+      );
       return result;
     } catch (e) {
       success = false;
@@ -376,7 +522,14 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     } finally {
       const latencyMs = performance.now() - startTime;
 
-      const extraProps: Record<string, unknown> = {};
+      const extraProps: Record<string, unknown> = success
+        ? _collectResultProperties(
+            toolName,
+            result,
+            resultHolder,
+            opts.resultProperties,
+          )
+        : {};
       if (schemaJson != null) {
         extraProps['[Agent] Tool Input Schema'] = schemaJson;
       }
