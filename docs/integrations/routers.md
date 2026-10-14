@@ -93,7 +93,7 @@ The router exports [OpenTelemetry GenAI](https://opentelemetry.io/docs/specs/sem
 your application  --request + analytics metadata-->  router  --GenAI spans (OTLP/HTTP)-->  Amplitude
 ```
 
-Agent frameworks that already emit GenAI spans, such as Strands, take the same path: export them with `AmplitudeAgentExporter` or `enableOtel()`. Cost needs at least `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens` on each span.
+Python Strands exports native OTLP/HTTP on its own. Follow [strands.md](./strands.md) for the endpoint, identity attributes, and content scrubbing. When the app already runs the Amplitude AI SDK, `AmplitudeAgentExporter` or `enableOtel()` can map those spans in process. Cost needs at least `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens` on each span.
 
 ### Analytics metadata (your application, on every request)
 

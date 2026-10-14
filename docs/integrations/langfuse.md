@@ -898,7 +898,9 @@ const SETTLE_MS = 2 * 60 * 60 * 1000;
 const SESSION_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const FIELDS = 'core,basic,io,model,usage';
 
-const redact = (text: string): string => text; // replace with your PII redaction
+import { redactAgentContent } from './redact-pii.mjs';
+
+const redact = redactAgentContent;
 
 const MAPPING: LangfuseMappingOptions = {
   agentId: 'TODO-confirmed-agent-id',
@@ -1019,7 +1021,7 @@ export async function syncLangfuse(
 
 ### Privacy
 
-On the HTTP path you own redaction, and it must run before sending. Content travels in four places; gate all of them, not just message text:
+On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); this guide passes [redact-pii.mjs](./redact-pii.mjs) as `redact`. Content travels in four places; gate all of them, not just message text:
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call

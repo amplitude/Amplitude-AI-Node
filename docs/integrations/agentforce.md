@@ -1371,7 +1371,9 @@ export const MAX_WAIT_MS = 72 * 60 * 60 * 1000;
 /** Each query covers at most this much end time, to bound row counts and Data Cloud credits. */
 const WINDOW_MS = 6 * 60 * 60 * 1000;
 
-const redact = (text: string): string => text; // replace with your PII redaction
+import { redactAgentContent } from './redact-pii.mjs';
+
+const redact = redactAgentContent;
 
 const MAPPING: AgentforceMappingOptions = {
   // TODO: confirm the agent ID, or leave unset to use the agent's API name.
@@ -1476,7 +1478,7 @@ export async function syncAgentforce(
 
 ### Privacy
 
-On the HTTP path you own redaction, and it must run before sending. Content travels in four places; gate all of them, not just message text:
+On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); this guide passes [redact-pii.mjs](./redact-pii.mjs) as `redact`. Content travels in four places; gate all of them, not just message text:
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call (action inputs and outputs, which often contain CRM records)

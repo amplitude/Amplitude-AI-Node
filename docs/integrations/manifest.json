@@ -1,5 +1,5 @@
 {
-  "description": "Agent platforms, LLM tracing tools, and data warehouses whose conversations can be ingested into Amplitude Agent Analytics without the SDK.",
+  "description": "Agent platforms, LLM tracing tools, agent frameworks, and data warehouses whose conversations can be ingested into Amplitude Agent Analytics without the SDK.",
   "index": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/README.md",
     "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/README.md"
@@ -97,6 +97,24 @@
     ],
     "last_verified": "2026-10-06"
   },
+  "frameworks": [
+    {
+      "id": "strands",
+      "name": "AWS Strands",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "1.60.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/strands.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/strands.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-14"
+    }
+  ],
+  "privacy": {
+    "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/privacy.md",
+    "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/privacy.md",
+    "last_verified": "2026-10-14"
+  },
   "routers": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/routers.md",
     "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/routers.md",
@@ -120,6 +138,11 @@
       "id": "otlp-replay",
       "description": "Converts exported OpenTelemetry GenAI, OpenInference, or MLflow spans to OTLP and sends them to Amplitude.",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/warehouses/otlp-replay.mjs"
+    },
+    {
+      "id": "redact-pii",
+      "description": "Applies the SDK PII patterns to one string for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v0.22.0/docs/integrations/redact-pii.mjs"
     }
   ]
 }

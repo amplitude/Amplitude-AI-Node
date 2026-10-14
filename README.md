@@ -708,7 +708,7 @@ OpenAI-compatible gateways and OTEL partners — no special SDK build required:
 | **OpenRouter** | SDK-through (`baseURL`) | Pass the **canonical** routed model id (e.g. `gpt-4o-mini`), not `openrouter/auto`. Align Amplitude `contentMode` with OpenRouter Privacy Mode. |
 | **LiteLLM** | SDK-through or OTLP | Set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on OTEL spans. |
 | **Requesty** | SDK-through only | No OTLP push today — point the OpenAI client at Requesty's base URL. |
-| **Strands → Nova** | OTLP | Export GenAI spans into Amplitude via `AmplitudeAgentExporter` / `enableOtel()`. |
+| **Strands** | OTLP | Python Strands Agents 1.60.0 exports native OTLP/HTTP. Follow [docs/integrations/strands.md](docs/integrations/strands.md). When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process. |
 
 Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
 
@@ -716,7 +716,7 @@ Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: 
 
 ## Privacy & Content Control
 
-Three content modes control what data is sent to Amplitude:
+Three content modes control what data is sent to Amplitude. `redactPii` runs in this SDK process. Paths that never load the SDK — HTTP forwarders, native OTLP, Batch, S3, and warehouse import — follow [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub content after receipt.
 
 | Mode                | Message Content           | Token/Cost/Latency | Session Grouping | Server Enrichments |
 | ------------------- | ------------------------- | ------------------ | ---------------- | ------------------ |
