@@ -54,6 +54,7 @@ import {
   AMP_GIT_SHA,
   AMP_INPUT_STATE,
   AMP_OUTPUT_STATE,
+  AMP_MESSAGE_SOURCE,
   AMP_PARENT_AGENT_ID,
   AMP_SKIP_AUTO_USER_TRACKING,
   AMP_SPAN_KIND,
@@ -401,7 +402,13 @@ export class SpanEventMapper {
 
     if (eventType === EVENT_TYPE_USER_MESSAGE) {
       if (!fields.skipAutoUser) {
-        trackUserMessage({ ...shared, messageContent: fields.userContent ?? '', turnId: fields.turnId ?? 1, eventProperties: ep } as never);
+        trackUserMessage({
+          ...shared,
+          messageContent: fields.userContent ?? '',
+          turnId: fields.turnId ?? 1,
+          messageSource: messageSourceFor(attrs, shared.parentAgentId),
+          eventProperties: ep,
+        } as never);
       }
     } else if (eventType === EVENT_TYPE_AI_RESPONSE) {
       trackAiMessage({
@@ -478,7 +485,7 @@ export class SpanEventMapper {
           ...shared,
           messageContent: fields.userContent,
           turnId: userTurn,
-          messageSource: shared.parentAgentId ? 'agent' : 'user',
+          messageSource: messageSourceFor(attrs, shared.parentAgentId),
           eventProperties: ep,
         } as never);
       }
@@ -877,6 +884,12 @@ interface RoutingFields {
   aiContent: string | null;
   systemPrompt: string | null;
   turnId: number | null;
+}
+
+function messageSourceFor(attrs: Record<string, unknown>, parentAgentId: unknown): string {
+  const explicit = strOrNull(attrs[AMP_MESSAGE_SOURCE]);
+  if (explicit) return explicit;
+  return parentAgentId ? 'agent' : 'user';
 }
 
 function strOrNull(value: unknown): string | null {
