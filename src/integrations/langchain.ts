@@ -136,14 +136,7 @@ export class AmplitudeCallbackHandler {
     this._startRun(runId);
     this._rememberModelName(serialized, runId);
 
-    const userContents: string[] = [];
-    for (const batch of messages) {
-      if (!Array.isArray(batch)) continue;
-      for (const msg of batch) {
-        const text = _extractChatMessageUserText(msg);
-        if (text) userContents.push(text);
-      }
-    }
+    const userContents = messages.flatMap((batch) => _newChatUserTexts(batch));
     this._trackUserContents(
       userContents,
       this._identities.resolve(runId, parentRunId),
@@ -393,6 +386,18 @@ function _extractLangchainText(generation: unknown): string {
       return typeof item.text === 'string' ? item.text : '';
     })
     .join('');
+}
+
+function _newChatUserTexts(batch: unknown): string[] {
+  if (!Array.isArray(batch)) return [];
+  const trailing: string[] = [];
+  for (let i = batch.length - 1; i >= 0; i--) {
+    const text = _extractChatMessageUserText(batch[i]);
+    if (!text) break;
+    trailing.push(text);
+  }
+  trailing.reverse();
+  return trailing;
 }
 
 function _extractChatMessageUserText(message: unknown): string | null {

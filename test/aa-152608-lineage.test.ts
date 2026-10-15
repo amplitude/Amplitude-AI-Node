@@ -46,7 +46,15 @@ describe('AA-152608 multi-agent lineage', () => {
     });
     expect(trackUserMessage).not.toHaveBeenCalled();
 
-    handler.handleChatModelStart({}, [[{ role: 'user', content: 'real prompt' }]], 'run-2');
+    handler.handleChatModelStart(
+      {},
+      [[
+        { role: 'user', content: 'earlier' },
+        { role: 'assistant', content: 'reply' },
+        { role: 'user', content: 'real prompt' },
+      ]],
+      'run-2',
+    );
     expect(trackUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({ content: 'real prompt', parentAgentId: undefined }),
     );
