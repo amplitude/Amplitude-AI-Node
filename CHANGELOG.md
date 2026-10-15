@@ -9,6 +9,7 @@
 
 ### Changed
 - **`[Agent] Session End` is optional and recommended.** A native Strands export does not send one. Enrichment still runs after the server idle close.
+- **Multi-agent lineage follows delegation.** Framework callbacks inherit `[Agent] Parent Agent ID` inside `runAs()`, delegated prompts are not recorded as end-user turns, and a user message with a parent agent is marked `[Agent] Message Source = agent` unless you set the source yourself. SDK spans and `injectContext()` carry `amplitude.parent.agent.id` / `x-amplitude-parent-agent-id`.
 
 ## 0.22.1
 

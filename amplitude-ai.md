@@ -1181,7 +1181,7 @@ Segment dashboards on `ingestion_path` / `gateway` to separate direct-provider t
 ## Ecosystem-Specific Guidance
 
 ### LangChain / LangGraph
-- Use `AmplitudeCallbackHandler` — duck-typed compatible with LangChain callbacks (no hard `@langchain/core` dependency). Pass it in `callbacks`.
+- Use `AmplitudeCallbackHandler` — duck-typed compatible with LangChain callbacks (no hard `@langchain/core` dependency). Pass it in `callbacks`. Inside `session.runAs()`, callbacks inherit the child agent and parent agent and do not record the delegated prompt as an end-user turn.
 - Chat models invoke `handleChatModelStart` (tracks `[Agent] User Message`); legacy LLMs use `handleLLMStart`. Both paths feed `handleLLMEnd` / tool callbacks.
 - Pass `privacyConfig` on the handler so AI responses and tool calls sanitize consistently.
 - LangGraph graph orchestration events (node transitions, checkpoints) are not yet instrumented

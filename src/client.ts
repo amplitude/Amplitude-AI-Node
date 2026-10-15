@@ -583,7 +583,7 @@ export class AmplitudeAI {
       traceId: opts.traceId,
       turnId: effectiveTurnId,
       messageId: opts.messageId,
-      messageSource: opts.messageSource ?? 'user',
+      messageSource: opts.messageSource ?? (opts.parentAgentId ? 'agent' : 'user'),
       agentId: opts.agentId,
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,

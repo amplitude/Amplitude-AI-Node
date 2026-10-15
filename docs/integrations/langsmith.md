@@ -39,6 +39,10 @@ scheduled job (for example, hourly)
 
 LangSmith feedback is not forwarded by this adapter. If the user wants it on a production conversation, map thread-level feedback to a `ForwarderScore`.
 
+### Agent lineage
+
+The forwarder stamps one configured `[Agent] Agent ID` on every event in the thread. Nested LangSmith runs stay tool calls or spans. They do not become child agents, and the job does not set `[Agent] Parent Agent ID`. For parent-child lineage, instrument the running agent with `runAs()` or send `amplitude.parent.agent.id` on OpenTelemetry spans. See [Instrument multi-agent systems](https://amplitude.com/docs/amplitude-ai/agent-analytics/multi-agent).
+
 ### What your traces must already contain
 
 This job forwards what is already in LangSmith; it cannot add what the application never logged.

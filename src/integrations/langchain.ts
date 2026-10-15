@@ -24,6 +24,7 @@ export interface CallbackHandlerOptions {
   userId?: string;
   sessionId?: string;
   agentId?: string;
+  parentAgentId?: string;
   env?: string;
   privacyConfig?: PrivacyConfig | null;
 }
@@ -49,6 +50,7 @@ export class AmplitudeCallbackHandler {
       userId: options.userId,
       sessionId: options.sessionId,
       agentId: options.agentId,
+      parentAgentId: options.parentAgentId,
       env: options.env,
     });
     this._privacyConfig = options.privacyConfig ?? null;
@@ -92,6 +94,7 @@ export class AmplitudeCallbackHandler {
   }
 
   private _trackUserContents(contents: string[], ctx: ResolvedIdentity): void {
+    if (ctx.skipAutoUserTracking) return;
     for (const content of contents) {
       if (!content) continue;
       this._ai.trackUserMessage({
@@ -101,6 +104,7 @@ export class AmplitudeCallbackHandler {
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
         agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
         env: ctx.env,
         privacyConfig: this._privacyConfig,
       });
@@ -132,14 +136,7 @@ export class AmplitudeCallbackHandler {
     this._startRun(runId);
     this._rememberModelName(serialized, runId);
 
-    const userContents: string[] = [];
-    for (const batch of messages) {
-      if (!Array.isArray(batch)) continue;
-      for (const msg of batch) {
-        const text = _extractChatMessageUserText(msg);
-        if (text) userContents.push(text);
-      }
-    }
+    const userContents = messages.flatMap((batch) => _newChatUserTexts(batch));
     this._trackUserContents(
       userContents,
       this._identities.resolve(runId, parentRunId),
@@ -207,6 +204,7 @@ export class AmplitudeCallbackHandler {
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       inputTokens,
       outputTokens,
@@ -253,6 +251,7 @@ export class AmplitudeCallbackHandler {
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       input: toolInput,
       output,
@@ -280,6 +279,7 @@ export class AmplitudeCallbackHandler {
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       input: toolInput,
       errorMessage: error instanceof Error ? error.message : String(error),
@@ -322,6 +322,7 @@ export class AmplitudeCallbackHandler {
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       isError: true,
       errorMessage: error instanceof Error ? error.message : String(error),
@@ -385,6 +386,18 @@ function _extractLangchainText(generation: unknown): string {
       return typeof item.text === 'string' ? item.text : '';
     })
     .join('');
+}
+
+function _newChatUserTexts(batch: unknown): string[] {
+  if (!Array.isArray(batch)) return [];
+  const trailing: string[] = [];
+  for (let i = batch.length - 1; i >= 0; i--) {
+    const text = _extractChatMessageUserText(batch[i]);
+    if (!text) break;
+    trailing.push(text);
+  }
+  trailing.reverse();
+  return trailing;
 }
 
 function _extractChatMessageUserText(message: unknown): string | null {

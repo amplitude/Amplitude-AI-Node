@@ -1723,6 +1723,8 @@ const handler = new AmplitudeCallbackHandler({
 chain.invoke(input, { callbacks: [handler] });
 ```
 
+A handler records one agent unless it runs inside `session.runAs()`. Delegation supplies `[Agent] Parent Agent ID` and suppresses the internal prompt so it is not recorded as an end-user turn.
+
 ### OpenTelemetry
 
 Two exporters add Amplitude as a destination alongside your existing trace backend (Datadog, Honeycomb, Jaeger, etc.):
@@ -2591,7 +2593,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Has Data Quality Issues` | boolean | Yes | Whether the AI output had data quality problems (wrong data, hallucinations, etc.). |
 | `[Agent] Models Used` | string[] | No | LLM models used in this session. JSON array of strings. |
 | `[Agent] Root Agent Name` | string | No | Entry-point agent in multi-agent flows. |
-| `[Agent] Agent Chain Depth` | number | No | Number of agents in the delegation chain. |
+| `[Agent] Agent Chain Depth` | number | No | Agents on the longest delegation path. 1 is a single agent, 2 is one hop, and 3 or more is deeper nesting. Depth greater than 1 still means multi-agent. |
 | `[Agent] Task Failure Type` | string | No | Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete'). |
 | `[Agent] Technical Error Count` | number | No | Count of technical errors that occurred during the session. |
 | `[Agent] Error Categories` | string[] | No | Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings. |
