@@ -19,6 +19,7 @@ export interface ExplicitIdentity {
   deviceId?: string | null;
   sessionId?: string | null;
   agentId?: string | null;
+  parentAgentId?: string | null;
   env?: string | null;
   traceId?: string | null;
 }
@@ -28,8 +29,11 @@ export interface ResolvedIdentity {
   deviceId: string | undefined;
   sessionId: string;
   agentId: string | undefined;
+  parentAgentId: string | undefined;
   env: string | undefined;
   traceId: string | undefined;
+  /** True only while the active session is inside `runAs` / `runAsSync`. */
+  skipAutoUserTracking: boolean;
 }
 
 const _MAX_TRACKED_RUNS = 10_000;
@@ -50,6 +54,10 @@ export function resolveIdentity(
   const ctx = getActiveContext();
   const base = prior ?? null;
   const userId = explicit.userId ?? ctx?.userId ?? base?.userId ?? undefined;
+  const parentAgentId =
+    explicit.parentAgentId !== undefined
+      ? (explicit.parentAgentId ?? undefined)
+      : (ctx?.parentAgentId ?? base?.parentAgentId ?? undefined);
   const sessionId = explicit.sessionId ?? ctx?.sessionId ?? base?.sessionId;
   let deviceId = explicit.deviceId ?? ctx?.deviceId ?? base?.deviceId ?? undefined;
   let resolvedSession = sessionId ?? undefined;
@@ -63,8 +71,10 @@ export function resolveIdentity(
     deviceId,
     sessionId: resolvedSession,
     agentId: explicit.agentId ?? ctx?.agentId ?? base?.agentId ?? undefined,
+    parentAgentId,
     env: explicit.env ?? ctx?.env ?? base?.env ?? undefined,
     traceId: explicit.traceId ?? ctx?.traceId ?? base?.traceId ?? undefined,
+    skipAutoUserTracking: ctx?.skipAutoUserTracking === true,
   };
 }
 

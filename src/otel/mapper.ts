@@ -474,7 +474,13 @@ export class SpanEventMapper {
         aiTurn = nxt ?? fields.turnId + 1;
       }
       if (emittedUser) {
-        trackUserMessage({ ...shared, messageContent: fields.userContent, turnId: userTurn, eventProperties: ep } as never);
+        trackUserMessage({
+          ...shared,
+          messageContent: fields.userContent,
+          turnId: userTurn,
+          messageSource: shared.parentAgentId ? 'agent' : 'user',
+          eventProperties: ep,
+        } as never);
       }
       trackAiMessage({
         ...shared, modelName: fields.model, provider: fields.provider,

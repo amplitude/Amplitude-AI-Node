@@ -24,6 +24,7 @@ export interface CallbackHandlerOptions {
   userId?: string;
   sessionId?: string;
   agentId?: string;
+  parentAgentId?: string;
   env?: string;
   privacyConfig?: PrivacyConfig | null;
 }
@@ -49,6 +50,7 @@ export class AmplitudeCallbackHandler {
       userId: options.userId,
       sessionId: options.sessionId,
       agentId: options.agentId,
+      parentAgentId: options.parentAgentId,
       env: options.env,
     });
     this._privacyConfig = options.privacyConfig ?? null;
@@ -92,6 +94,7 @@ export class AmplitudeCallbackHandler {
   }
 
   private _trackUserContents(contents: string[], ctx: ResolvedIdentity): void {
+    if (ctx.skipAutoUserTracking) return;
     for (const content of contents) {
       if (!content) continue;
       this._ai.trackUserMessage({
@@ -101,6 +104,7 @@ export class AmplitudeCallbackHandler {
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
         agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
         env: ctx.env,
         privacyConfig: this._privacyConfig,
       });
@@ -207,6 +211,7 @@ export class AmplitudeCallbackHandler {
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       inputTokens,
       outputTokens,
@@ -253,6 +258,7 @@ export class AmplitudeCallbackHandler {
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       input: toolInput,
       output,
@@ -280,6 +286,7 @@ export class AmplitudeCallbackHandler {
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       input: toolInput,
       errorMessage: error instanceof Error ? error.message : String(error),
@@ -322,6 +329,7 @@ export class AmplitudeCallbackHandler {
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       isError: true,
       errorMessage: error instanceof Error ? error.message : String(error),

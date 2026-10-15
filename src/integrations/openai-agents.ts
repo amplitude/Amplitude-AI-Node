@@ -9,6 +9,7 @@ export interface TracingProcessorOptions {
   sessionId?: string;
   traceId?: string;
   agentId?: string;
+  parentAgentId?: string;
   env?: string;
 }
 
@@ -33,6 +34,7 @@ export class AmplitudeTracingProcessor {
       userId: options.userId,
       sessionId: options.sessionId,
       agentId: options.agentId,
+      parentAgentId: options.parentAgentId,
       env: options.env,
     });
   }
@@ -76,6 +78,7 @@ export class AmplitudeTracingProcessor {
         latencyMs,
         sessionId: id.sessionId,
         agentId: id.agentId,
+        parentAgentId: id.parentAgentId,
         env: id.env,
         inputState: { from_agent: fromAgent },
         outputState: { to_agent: toAgent },
@@ -93,6 +96,7 @@ export class AmplitudeTracingProcessor {
         latencyMs,
         sessionId: id.sessionId,
         agentId: id.agentId,
+        parentAgentId: id.parentAgentId,
         env: id.env,
         outputState: { triggered },
         isError: triggered,
@@ -109,6 +113,7 @@ export class AmplitudeTracingProcessor {
       latencyMs,
       sessionId: id.sessionId,
       agentId: id.agentId ?? name,
+      parentAgentId: id.parentAgentId,
       env: id.env,
       outputState:
         spanData.output != null
@@ -128,6 +133,7 @@ export class AmplitudeTracingProcessor {
     id: ResolvedIdentity,
   ): void {
     const input = this._normalizeMessagesArray(data.input);
+    if (!id.skipAutoUserTracking) {
     for (const message of input) {
       const role = (message as Record<string, unknown>)?.role;
       const content = (message as Record<string, unknown>)?.content;
@@ -144,8 +150,10 @@ export class AmplitudeTracingProcessor {
         sessionId: id.sessionId,
         traceId,
         agentId: id.agentId,
+        parentAgentId: id.parentAgentId,
         env: id.env,
       });
+    }
     }
 
     const output = this._normalizeMessagesArray(data.output);
@@ -195,6 +203,7 @@ export class AmplitudeTracingProcessor {
       totalCostUsd: costUsd,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       agentId: id.agentId,
+        parentAgentId: id.parentAgentId,
       env: id.env,
     });
   }
@@ -229,6 +238,7 @@ export class AmplitudeTracingProcessor {
       output: toolOutput,
       errorMessage,
       agentId: id.agentId,
+        parentAgentId: id.parentAgentId,
       env: id.env,
     });
   }

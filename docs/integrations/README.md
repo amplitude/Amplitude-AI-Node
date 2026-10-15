@@ -35,7 +35,7 @@ These guides forward what the application already logged, including past convers
 
 The user ID must match the one used in product analytics. Conversations without a conversation ID or a user ID are skipped and counted, not sent.
 
-If your application already emits OpenTelemetry, you can skip the forwarder and add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
+If your application already emits OpenTelemetry, you can skip the forwarder and add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). Parent-child agent lineage uses [Instrument multi-agent systems](https://amplitude.com/docs/amplitude-ai/agent-analytics/multi-agent) and the attribute `amplitude.parent.agent.id`. Span parentage alone does not identify the parent agent.
 
 ## Agent frameworks
 

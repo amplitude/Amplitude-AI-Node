@@ -66,6 +66,7 @@ export function injectContext(
 
   _setHeader(result, 'x-amplitude-session-id', ctx.sessionId);
   _setHeader(result, 'x-amplitude-agent-id', ctx.agentId);
+  _setHeader(result, 'x-amplitude-parent-agent-id', ctx.parentAgentId);
   _setHeader(result, 'x-amplitude-user-id', ctx.userId);
 
   return result;
@@ -86,6 +87,7 @@ export function providerPropagationHeaders(): Record<string, string> | null {
     };
     _setHeader(result, 'x-amplitude-session-id', ctx.sessionId);
     _setHeader(result, 'x-amplitude-agent-id', ctx.agentId);
+    _setHeader(result, 'x-amplitude-parent-agent-id', ctx.parentAgentId);
     return result;
   } catch (e) {
     getLogger().debug(
@@ -217,6 +219,7 @@ export function extractContext(
   const headerMap: Array<[string, string]> = [
     ['x-amplitude-session-id', 'sessionId'],
     ['x-amplitude-agent-id', 'agentId'],
+    ['x-amplitude-parent-agent-id', 'parentAgentId'],
     ['x-amplitude-user-id', 'userId'],
   ];
 
