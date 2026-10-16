@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0
+
+### Added
+- Public `prepareArtifactContent`, `prepareArtifact`, and `validateArtifactHtml` helpers at `@amplitude/ai/artifacts`, usable without initializing an SDK client. HTML artifact preparation applies configured privacy rules to decoded markup and rejects unsupported static content, generated text, and oversized snapshots.
+- Static artifacts exclude form controls (`input`, `textarea`, `select`, `option`, and `optgroup`) and string-valued CSS `quotes`; producers must materialize their display labels and values as ordinary DOM text. Malformed or oversized JSON-looking strings containing the artifact marker or Unicode escapes are omitted conservatively; strings without either retain ordinary privacy behavior.
+
+### Fixed
+- Reject unsupported doctypes, sensitive markup names, hidden-content constructs, and SVG text assembly; verify final serialized markup is redaction-stable. Preserve large ordinary native JSON only after a complete bounded artifact-absence proof, and omit inconclusive channels atomically.
+- Tool input/output, AI/user attachments, and span input/output now protect recognized HTML artifacts automatically, including bounded JSON-serialized envelopes. Unsupported optional artifacts are omitted while sibling content and events are retained; non-artifact content keeps its existing privacy behavior. This is a bounded static-HTML policy, not a general artifact schema validator or browser-layout privacy guarantee.
+
 ## 0.23.0
 
 ### Added

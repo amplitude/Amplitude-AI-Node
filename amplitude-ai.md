@@ -270,6 +270,26 @@ s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
 
 **Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. **Do not call `s.trackUserMessage()` for the same user input you are also passing to a provider wrapper** — you will get two `[Agent] User Message` events for a single user turn. Choose one: either call `s.trackUserMessage()` manually and suppress auto-tracking, or rely on the provider wrapper and omit the manual call. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
+**Artifact content privacy (0.24.0+):** Tool input/output, span input/output (including SDK OTEL mapping), and AI/user message attachments automatically prepare recognized `$agent_artifact` envelopes, including bounded JSON-serialized envelopes. Content modes still apply: `metadata_only` and `customer_enriched` omit these content fields. In `full`, HTML v1 is parsed before configured PII/custom redaction, with a conservative static HTML/CSS policy and retained-text checks. Unsupported HTML, privacy failures, and oversized artifacts are omitted while sibling data and event metadata remain. Other artifact types receive ordinary configured redaction; this is not a full artifact schema validator or a browser-layout privacy guarantee.
+
+Form controls (`input`, `textarea`, `select`, `option`, and `optgroup`) are unsupported because their displayed values and labels are not reliably represented by DOM text. Producers must materialize the actual displayed labels and values as ordinary HTML/SVG text before preparing the snapshot. MathML is outside this static subset; materialize its displayed content as HTML text or inline SVG.
+
+Snapshots also exclude non-bare doctypes, hidden attributes, closed dialogs/details, templates/noscript, and hiding CSS such as `display:none`, nonopaque `opacity`, or dynamic display values. SVG `use`/`textPath` and text-bearing nonpainted definition containers are unsupported; geometry-only Plotly definitions remain supported. Tag/attribute names and final serialized markup must be stable under configured redaction; the helper omits an artifact rather than rewriting its syntax. Both DOM text and conservative visible-text views are checked, without claiming arbitrary CSS layout equivalence. For oversized/deep ordinary native JSON, a complete bounded absence proof can preserve legacy sanitization; if the proof is inconclusive, the whole content channel is omitted rather than emitting a partial object or array.
+
+For an HTTP, OTLP, warehouse, or other transport that does not use SDK tracking, prepare each content value before serialization:
+
+```typescript
+import { prepareArtifactContent } from '@amplitude/ai/artifacts';
+
+const prepared = prepareArtifactContent(toolOutput, {
+  contentMode: 'full',
+  redactPii: true,
+  // customRedactionPatterns and customRedactionFn use the same privacy options as AIConfig.
+});
+if (prepared !== undefined) eventProperties['[Agent] Tool Output'] = JSON.stringify(prepared);
+```
+
+The helper needs no SDK initialization or network client. `undefined` means omit the content field. It accepts objects, arrays, and bounded serialized JSON; preserve a returned string directly when the transport already expects serialized JSON. Malformed or oversized JSON-looking strings containing the literal artifact marker or Unicode escapes are omitted conservatively because artifact absence cannot be established within the bound. Strings containing neither retain ordinary privacy behavior, including ordinary truncation for large content. `prepareArtifact(envelope, config)` prepares one envelope. `validateArtifactHtml(html)` only validates static HTML and throws on unsupported input; it does **not** apply privacy redaction. Do not feed prepared content through another string sanitizer or call the helper manually before SDK tracking, which already prepares it. Custom callbacks must be idempotent because retained-text verification rechecks HTML after normalization; non-idempotent callbacks and conservative cross-block text matches can cause an artifact to be omitted. These APIs do not inspect arbitrary raw HTML strings or every field in an OTLP request; map the relevant content fields explicitly. See `docs/integrations/privacy.md` for transport adapters.
 <!-- llms-excerpt:content-shaping:end -->
 
 **Enrichment vs Agent Analytics UI:** A short **`content`** line plus structured data in **`context`** keeps session titles and segmentation readable. Amplitude’s **server-side LLM enrichment** builds eval input primarily from **turn text** stored on each session (`input_text` / `output_text` derived from `$llm_message`). If automated evaluators must reason over the **full** structured payload, keep essential facts in **`content`**, add **scalar event properties** for key fields, or coordinate a pipeline change to merge allowlisted **`context`** into enrichment input—do not assume enrichments automatically parse large JSON blobs only present in `[Agent] Context`.

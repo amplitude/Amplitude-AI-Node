@@ -130,6 +130,11 @@
   ],
   "tools": [
     {
+      "id": "prepare-artifacts",
+      "description": "Shared HTTP/Batch/S3/OTLP adapter: preserves supported structured mappings and omits HTML without the public SDK helper.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/prepare-artifacts.mjs"
+    },
+    {
       "id": "strands-privacy",
       "description": "Python OTLP exporter example: metadata only by default, optional customer redactor for structured content. See strands-privacy.md for setup and limits.",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands_privacy.py"

@@ -91,3 +91,8 @@ The forwarder core on any guide works for any source that can give you a convers
 ## Maintenance
 
 Owner: Amplitude Agent Analytics team. Vendor-specific details are reviewed quarterly and whenever a correction arrives; each page carries its last-verified date. These guides are Amplitude-authored; platform names are trademarks of their owners, and no affiliation or endorsement is implied. Corrections are welcome as pull requests.
+
+
+### Optional artifacts in copied ingestion jobs
+
+Copy [prepare-artifacts.mjs](./prepare-artifacts.mjs) alongside the updated forwarder/checker (and one directory above `warehouses/otlp-replay.mjs`). It has no package dependency and safely omits HTML and unsupported `$agent_artifact` declarations by default. To retain supported artifacts, explicitly bind the public helper from Node 0.24.0+ or Python 1.20.0+ using the job's approved privacy policy. See the [path matrix and pre-send examples](./privacy.md#artifact-preparation). SDK upgrades do not automatically protect copied jobs, SQL, Collector processors, or S3 imports.

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.23.0
+Package: `@amplitude/ai` v0.24.0
 
 ## Install
 
@@ -61,6 +61,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - LangChain / LangGraph: use `AmplitudeCallbackHandler` (duck-typed; implements `handleChatModelStart` for User Message).
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
+- Artifact content (0.24.0+): SDK tool/span input/output and message attachments automatically prepare recognized `$agent_artifact` envelopes. For other transports, import `prepareArtifactContent` from `@amplitude/ai/artifacts` and omit undefined results. The helper needs no client initialization; custom callbacks must be idempotent. See the artifact privacy section in `amplitude-ai.md`; do not prepare twice or treat static validation as PII redaction.
 - Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.

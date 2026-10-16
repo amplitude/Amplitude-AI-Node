@@ -85,3 +85,27 @@ To run the repository's local checks without a model or API key:
 ```bash
 python -m unittest discover -s test/integrations -p 'test_strands_privacy.py' -v
 ```
+
+
+## Retain supported artifacts
+
+Scrubbed mode now omits HTML `$agent_artifact` envelopes unless you provide the public artifact helper. Ordinary content still uses your existing redactor. To retain supported static HTML, install `amplitude-ai>=1.20.0` once released and bind its helper to the same policy:
+
+```python
+from amplitude_ai import AIConfig
+from amplitude_ai.artifacts import prepare_artifact_content
+from customer_privacy import redact_for_telemetry
+
+artifact_policy = AIConfig(
+    content_mode="full", redact_pii=False,
+    custom_redaction_fn=redact_for_telemetry,
+)
+privacy = PrivacyExporter(
+    OTLPSpanExporter(), mode="scrubbed", redact=redact_for_telemetry,
+    prepare_artifacts=lambda value: prepare_artifact_content(value, config=artifact_policy),
+)
+```
+
+`redact_pii=False` preserves this wrapper's existing customer-redactor-only policy; it does not turn off the helper's static-HTML guard. Set it to `True` only when built-in masking is part of your approved policy, or reuse your existing `AIConfig`. The helper applies that configured policy to artifact-bearing values. The redactor must be synchronous and idempotent because retained HTML text is checked again. It does not initialize tracking or create another export pipeline. If the package/version is unavailable, leave `prepare_artifacts` unset and omit HTML artifacts safely. Never substitute an identity/regex callback for the public helper.
+
+Unsupported artifacts, callback failures, malformed marked JSON and overly complex content cannot fall back to raw HTML. JSON-looking strings with Unicode escapes require bounded inspection; malformed or over-budget ambiguous strings are omitted rather than guessed safe. Nested strings with neither a literal `$agent_artifact` marker nor a raw `\u` escape keep the wrapper's existing string-redaction behavior. The exporter's original limits on structured content still apply. Rejected attachments are omitted; ordinary tool-result siblings remain where possible. The exporter still preserves its existing metadata allowlist and never fetches referenced resources. See [artifact preparation](./privacy.md#artifact-preparation) for supported paths, limits, and outbound verification.

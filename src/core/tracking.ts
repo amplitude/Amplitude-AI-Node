@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { prepareArtifactContent } from '../artifacts.js';
 import { ValidationError } from '../exceptions.js';
 import type {
   AmplitudeEvent,
@@ -314,10 +315,11 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
     if (totalSize > 0) properties[PROP_TOTAL_ATTACHMENT_SIZE] = totalSize;
     // The full body (including any `content` field) is a content channel —
     // gate on full (AA-151933).
-    if (effectiveMode === 'full')
-      properties[PROP_ATTACHMENTS] = serializeToJsonString(
-        sanitizeStructuredContent(opts.attachments, pc.redactPii, pc),
-      );
+    if (effectiveMode === 'full') {
+      const prepared = prepareArtifactContent(opts.attachments, pc);
+      if (Array.isArray(prepared) && prepared.length)
+        properties[PROP_ATTACHMENTS] = serializeToJsonString(prepared);
+    }
   }
 
   // Labels can carry free-text values — treat as a content channel.
@@ -580,10 +582,11 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
       0,
     );
     if (totalSize > 0) properties[PROP_TOTAL_ATTACHMENT_SIZE] = totalSize;
-    if (effectiveMode === 'full')
-      properties[PROP_ATTACHMENTS] = serializeToJsonString(
-        sanitizeStructuredContent(opts.attachments, pc.redactPii, pc),
-      );
+    if (effectiveMode === 'full') {
+      const prepared = prepareArtifactContent(opts.attachments, pc);
+      if (Array.isArray(prepared) && prepared.length)
+        properties[PROP_ATTACHMENTS] = serializeToJsonString(prepared);
+    }
   }
 
   // Labels can carry free-text values — treat as a content channel.
@@ -736,13 +739,13 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
   }
 
   if (opts.toolInput != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.toolInput, pc.redactPii, pc);
-    properties[PROP_TOOL_INPUT] = serializeToJsonString(sanitized);
+    const sanitized = prepareArtifactContent(opts.toolInput, pc);
+    if (sanitized !== undefined) properties[PROP_TOOL_INPUT] = serializeToJsonString(sanitized);
   }
 
   if (opts.toolOutput != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.toolOutput, pc.redactPii, pc);
-    properties[PROP_TOOL_OUTPUT] = serializeToJsonString(sanitized);
+    const sanitized = prepareArtifactContent(opts.toolOutput, pc);
+    if (sanitized !== undefined) properties[PROP_TOOL_OUTPUT] = serializeToJsonString(sanitized);
   }
 
   const event: AmplitudeEvent = {
@@ -1104,13 +1107,13 @@ export function trackSpan(opts: TrackSpanOptions): string {
   if (opts.env) properties[PROP_ENV] = opts.env;
 
   if (opts.inputState != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.inputState, pc.redactPii, pc);
-    properties[PROP_INPUT_STATE] = serializeToJsonString(sanitized);
+    const sanitized = prepareArtifactContent(opts.inputState, pc);
+    if (sanitized !== undefined) properties[PROP_INPUT_STATE] = serializeToJsonString(sanitized);
   }
 
   if (opts.outputState != null && effectiveMode === 'full') {
-    const sanitized = sanitizeStructuredContent(opts.outputState, pc.redactPii, pc);
-    properties[PROP_OUTPUT_STATE] = serializeToJsonString(sanitized);
+    const sanitized = prepareArtifactContent(opts.outputState, pc);
+    if (sanitized !== undefined) properties[PROP_OUTPUT_STATE] = serializeToJsonString(sanitized);
   }
 
   const event: AmplitudeEvent = {

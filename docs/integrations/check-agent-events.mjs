@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { hasAgentArtifact } from './prepare-artifacts.mjs';
 
 const CONVERSATIONAL = ['[Agent] User Message', '[Agent] Tool Call', '[Agent] AI Response'];
 const REPLY_TYPES = ['[Agent] User Message', '[Agent] AI Response'];
@@ -138,6 +139,7 @@ export function checkAgentEvents(rows, options = {}) {
 
   for (const event of events) {
     const { props } = event;
+    if (hasAgentArtifact(props)) warn(event, 'Artifact content requires pre-send preparation with the public artifact helper or omission; this checker does not certify HTML privacy.');
     if (!event.eventType?.startsWith('[Agent] ')) {
       error(event, `event_type ${JSON.stringify(event.eventType)} is not an [Agent] event`);
     }

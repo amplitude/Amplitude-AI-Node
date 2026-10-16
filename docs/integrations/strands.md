@@ -215,3 +215,5 @@ In Live Events:
 ## When the app already runs the SDK
 
 If the agent process already uses the Amplitude AI SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans to `[Agent]` events in that process. Native OTLP above is the path when the SDK is not loaded. SDK `redactPii` applies only on the in-process path.
+
+Supported `$agent_artifact` content requires explicit [artifact preparation in the privacy exporter](./strands-privacy.md#retain-supported-artifacts) with `amplitude-ai` 1.20.0+. Native Strands/OTLP export does not inherit another process's SDK policy; without the helper, omit HTML artifacts.

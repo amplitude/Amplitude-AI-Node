@@ -1,6 +1,6 @@
 # Scrub content before it reaches Amplitude
 
-Amplitude does not scrub personal data after it receives an event or a span. `redactPii` runs only inside a process that uses the Amplitude AI SDK. On every other path — an HTTP forwarder, native OTLP, the Batch API, S3 import, or a warehouse import — Amplitude stores what you send.
+Amplitude does not scrub personal data after it receives an event or a span. `redactPii` runs only when your process explicitly invokes the Amplitude AI SDK or its preparation helper. On every other path — an HTTP forwarder, native OTLP, the Batch API, S3 import, or a warehouse import — Amplitude stores what you send.
 
 You scrub before the data leaves your infrastructure.
 
@@ -54,7 +54,7 @@ The platform and tracing-tool guides call `redact` on the content fields they se
 - span input and output, where that guide sends them
 - system prompt text, where a guide sends it
 
-The shared forwarder core still defaults `redact` to the identity function. A deployment that already copied that core keeps sending content unchanged until its call site passes `redactAgentContent`. Omitting `redact` sends content unchanged.
+The shared forwarder core still defaults `redact` to the identity function. A deployment that already copied that core keeps sending content unchanged until its call site passes `redactAgentContent`. Omitting `redact` keeps ordinary text unchanged. The updated core separately omits HTML and unsupported artifact declarations unless a supported preparation helper is supplied.
 
 `contentMode: 'metadata_only'` sends none of those fields. Keep personal data out of `[Agent] Context`. That property is a filter dimension, not a content field, and `redact` does not run on it.
 
@@ -89,4 +89,57 @@ SQL cannot faithfully copy the IPv6 lookbehinds or the whole-value base64 rule. 
 
 ## SDK
 
-When the agent process runs the Amplitude AI SDK, use `redactPii` (on by default) and `customRedactionFn` in the SDK config. That path is documented in the SDK README. This page covers paths that never load the SDK.
+When the agent process runs the Amplitude AI SDK, use `redactPii` (on by default) and `customRedactionFn` in the SDK config. That path is documented in the SDK README. This page covers external ingestion jobs; they may explicitly use the standalone preparation helper without initializing an SDK client.
+
+
+## Artifact preparation
+
+Artifact preparation requires **`@amplitude/ai` 0.24.0+** or **`amplitude-ai` 1.20.0+** once those releases are available. A copied job does not acquire this behavior when an SDK elsewhere is upgraded. Upgrade the job and copy [prepare-artifacts.mjs](./prepare-artifacts.mjs), then configure its call site. If the helper is unavailable, omit HTML artifacts; never fall back to sending their raw HTML.
+
+Only explicit `$agent_artifact` envelopes are recognized, including supported nested JSON strings. The helper does not turn prose, arbitrary HTML, tool results, or referenced URLs into visuals, and does not fetch a referenced chart or dashboard. It applies bounded static-HTML validation and the selected existing privacy policy. Unsafe/unsupported optional artifacts are omitted, preserving ordinary siblings where possible. Materialize form labels and values as DOM text from the actual displayed state; never guess it. `input`, `textarea`, `select`, `option`, and `optgroup` are unsupported because their displayed content can differ from their DOM text. MathML is outside this static subset; materialize its displayed content as HTML text or inline SVG. This is not a guarantee against arbitrary CSS/SVG browser layout producing sensitive text.
+
+For a copied forwarder, bind the public helper to the same policy used for ordinary text:
+
+```typescript
+import { prepareArtifactContent } from '@amplitude/ai/artifacts';
+import { redactAgentContent } from './redact-pii.mjs';
+import { toAgentEvents, send } from './amplitude-agent-forwarder';
+
+const redact = (text: string) => redactAgentContent(text);
+// This keeps the forwarder's chosen redactor. The callback already includes
+// built-in masking, so the artifact helper must not add that step a second time.
+const prepareArtifacts = (value: unknown) => prepareArtifactContent(value, {
+  contentMode: 'full', redactPii: false, customRedactionFn: redact,
+});
+const events = toAgentEvents(conversation, { redact, prepareArtifacts });
+await send(events, { apiKey: process.env.AMPLITUDE_API_KEY! });
+// The same prepared events can be serialized for Batch API or an S3 import file.
+```
+
+An intentionally identity-only deployment can use `redactPii: false` with its existing identity callback; this keeps PII redaction disabled. Alternatively, pass the same `PrivacyConfig` used by your application. Do not replace the preparation callback with an identity function or a regex: the public helper supplies the HTML-aware protection. Callbacks must be synchronous and idempotent: retained HTML text is checked again to ensure no further redaction is needed. A failure or an artifact-bearing value that exceeds inspection limits omits the affected channel without a raw fallback. Metadata-only mode still omits content.
+
+JSON-looking content strings containing neither the literal `$agent_artifact` marker nor a raw `\u` escape keep their existing ordinary redaction behavior, even when large, deeply nested, or malformed. A marker or any Unicode escape requires bounded inspection: ambiguous malformed, oversized, or overly nested JSON is omitted even if its apparent content looks harmless. The adapter doesn't guess whether an escape hides a key. Valid inspected Unicode JSON without an artifact remains ordinary content. These content rules don't remove the transport's bounded `event_properties` parsing or the Strands exporter's existing structured-content limits.
+
+If the JavaScript adapter cannot finish inspecting a native content value within its limits, it passes the complete value to the configured supported SDK helper. The SDK preserves ordinary native JSON only after its own bounded marker-absence proof; otherwise it omits the entire content field. Without a helper, or if the helper fails or withholds content, the adapter omits the field. It never sends a partially inspected prefix or retries through an ordinary redactor.
+
+Custom CSS `quotes` strings or functions are unsupported because quotation marks can generate text outside the DOM. Only a single `auto`, `none`, or CSS-wide keyword is accepted. Materialize meaningful quotation text in the DOM instead.
+
+Only a bare HTML doctype is supported; PUBLIC/SYSTEM declarations are rejected. Sensitive tag/attribute names or remaining serialized markup cause omission. Hidden attributes, closed dialogs/details, hiding display/visibility/opacity controls, reusable SVG text, and SVG `use`/`textPath` references are outside this subset. Export the actual displayed labels as DOM text instead. These checks cover supported static representations, not arbitrary browser layout.
+
+If you construct HTTP/Batch/S3 events yourself, call `prepareAgentEvents(events, { prepareArtifacts })` from `prepare-artifacts.mjs` immediately before serialization/upload. It handles registered content properties, not identity or `[Agent] Context`. It does not supply ordinary PII masking; keep the job's existing ordinary-content policy. Do not process already-prepared forwarder output a second time with a custom callback. With no `prepareArtifacts`, HTML and unsupported declarations are removed. `event_properties` may be an object or valid bounded JSON; malformed property JSON stops upload.
+
+| Path | Preparation boundary | When unavailable |
+|---|---|---|
+| Updated HTTP forwarders, Batch, S3 event files | Shared `toAgentEvents` before events leave the mapper; or explicit `prepareAgentEvents` for custom jobs | Omit HTML/unsupported envelopes and their attachment wrappers; keep ordinary siblings |
+| OTLP replay library | `sendRequests(requests, { apiKey, prepareArtifacts })` before gzip/send | Default send and CLI dry-run omit HTML artifacts |
+| Raw OTLP JSON upload | `prepareOtlpRequest(request, { prepareArtifacts })` before writing/uploading | Omit HTML/unsupported declarations; retain structured mappings, IDs and timing |
+| Native Python Strands | `PrivacyExporter(..., prepare_artifacts=...)` before its OTLP delegate | Default metadata-only omits content; scrubbed mode omits HTML without the helper |
+| Direct warehouse SQL, Collector OTTL, legacy copied jobs, edge runtimes without a supported helper | No automatic HTML-aware preparation | Remove artifact-bearing content or route it through a supported preprocessor before export |
+
+`toOtlpRequests` is a conversion function; its return value has **not** been prepared for upload. Use `sendRequests`, or explicitly call `prepareOtlpRequest` before another transport. Raw `resourceSpans` are not covered by replay's converted-row `--metadata-only` filter; use an envelope-wide metadata allowlist for that policy. Artifact preparation covers OTLP string and structured AnyValues, including resources/events/links, but does not certify unrelated metadata as PII-free. Do not attach raw artifacts in span names, IDs, or other metadata strings.
+
+SQL regex replacements and Collector string transforms are not substitutes for HTML parsing, entity decoding, rendered-text checks, or the static-content guard. Removing only the `$agent_artifact` key with a text regex is insufficient for serialized/nested data. If those systems cannot reliably parse and remove the complete affected content field, drop that field entirely. Test synthetic prohibited values against the **complete serialized outbound payload**, including gzip-decoded OTLP or the S3 file. The event checker warns about artifacts but does not validate their privacy.
+
+Supported v1 `chart`, `table`, `summary`, and `options` declarations with object payloads keep their existing structured mapping and ordinary redaction behavior without the HTML helper. This adapter does not validate their full viewer schema. HTML and malformed/unknown declarations require supported preparation or omission.
+
+The JavaScript examples target Node.js (standalone adapters: Node 18+; the public helper requires the runtime supported by its installed SDK release). They are not a tested edge/Worker integration. `prepareAgentEvents` does not recursively redact arbitrary native object properties: its optional ordinary `redact` callback handles string content and `$llm_message.text`, matching the copied forwarder, which serializes tool/span values first. Native OTLP preparation isolates declarations so unrelated int64/bytes values retain their exact wire representation; retain your existing policy for those siblings.

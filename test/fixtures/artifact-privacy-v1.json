@@ -1,0 +1,385 @@
+{
+  "policy": "artifact-html-privacy-v1",
+  "cases": [
+    {
+      "id": "plain-report",
+      "html": "<h1>Report</h1><p>Alpha: 12</p>",
+      "outcome": "retain",
+      "contains": [
+        "Report",
+        "Alpha: 12"
+      ]
+    },
+    {
+      "id": "plain-pii",
+      "html": "<p>owner@example.com</p>",
+      "outcome": "retain",
+      "contains": [
+        "[email]"
+      ],
+      "absent": [
+        "owner@example.com"
+      ]
+    },
+    {
+      "id": "encoded-pii",
+      "html": "<p>owner&#64;example.com</p>",
+      "outcome": "retain",
+      "contains": [
+        "[email]"
+      ],
+      "absent": [
+        "owner@example.com",
+        "&#64;"
+      ]
+    },
+    {
+      "id": "attribute-pii",
+      "html": "<p title=\"owner@example.com\">Report</p>",
+      "outcome": "retain",
+      "contains": [
+        "[email]",
+        "Report"
+      ],
+      "absent": [
+        "owner@example.com"
+      ]
+    },
+    {
+      "id": "inline-split-email",
+      "html": "<span>owner@</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "inline-split-phone",
+      "html": "<span>555-123-</span><span>4567</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "inline-split-ssn",
+      "html": "<span>123-45-</span><span>6789</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-adjacent-strings",
+      "html": "<style>p::before{content:\"owner@\" \"example.com\"}</style><p>Label</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-plus-dom",
+      "html": "<style>p::before{content:\"owner@\"}</style><p>example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-after",
+      "html": "<style>p::after{content:\"4567\"}</style><p>555-123-</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-attr-content",
+      "html": "<style>p::before{content:attr(data-prefix)}</style><p data-prefix=\"owner@\">example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-counter",
+      "html": "<style>p{counter-reset:x 12344}p::before{content:counter(x)}</style><p>6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "custom-counter-style",
+      "html": "<style>@counter-style x{system:fixed;symbols:\"owner@\"}p{display:list-item;list-style:x}</style><p>example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "html-list-counter",
+      "html": "<ol start=\"12344\"><li value=\"12345\">6789</li></ol>",
+      "outcome": "omit"
+    },
+    {
+      "id": "custom-list-marker",
+      "html": "<p style=\"display:list-item;list-style-type:'owner@'\">example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "custom-ellipsis",
+      "html": "<p style=\"text-overflow:'owner@'\">example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "empty-decoration",
+      "html": "<style>p::before{content:\"\";background:red}</style><p>Label</p>",
+      "outcome": "retain",
+      "contains": [
+        "Label"
+      ]
+    },
+    {
+      "id": "ordinary-lists",
+      "html": "<ol><li>Alpha</li><li>Beta</li></ol>",
+      "outcome": "retain",
+      "contains": [
+        "Alpha",
+        "Beta"
+      ]
+    },
+    {
+      "id": "static-svg-with-background",
+      "html": "<svg width=\"700\" height=\"500\" viewBox=\"0 0 700 500\" style=\"background:rgb(255,255,255)\"><defs><clipPath id=\"plot\"><rect width=\"500\" height=\"300\"/></clipPath></defs><g clip-path=\"url(#plot)\"><text>Alpha 12</text></g></svg><p>Summary</p><p>Synthetic source</p>",
+      "outcome": "retain",
+      "contains": [
+        "Alpha 12",
+        "Summary",
+        "Synthetic source"
+      ]
+    },
+    {
+      "id": "external-css",
+      "html": "<p style=\"background:url(https://example.invalid/a)\">Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "external-font",
+      "html": "<style>@import \"https://example.invalid/font\";</style><p>Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "script",
+      "html": "<script>alert(1)</script><p>Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "event-handler",
+      "html": "<p onclick=\"alert(1)\">Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "external-image",
+      "html": "<img src=\"https://example.invalid/a\">",
+      "outcome": "omit"
+    },
+    {
+      "id": "redaction-disabled",
+      "html": "<p>owner@example.com</p>",
+      "outcome": "retain",
+      "contains": [
+        "owner@example.com"
+      ],
+      "redactPii": false
+    },
+    {
+      "id": "disabled-split-email",
+      "html": "<span>owner@</span><span>example.com</span>",
+      "outcome": "retain",
+      "contains": [
+        "owner@",
+        "example.com"
+      ],
+      "redactPii": false
+    },
+    {
+      "id": "input-value-split-email",
+      "html": "<input value=\"owner@\" size=\"6\"><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "input-placeholder-split-email",
+      "html": "<input placeholder=\"owner@\"><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "input-values-split-email",
+      "html": "<input value=\"owner@\"><input value=\"example.com\">",
+      "outcome": "omit"
+    },
+    {
+      "id": "textarea-placeholder-split-email",
+      "html": "<textarea placeholder=\"owner@\"></textarea><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "option-label-split-email",
+      "html": "<select size=\"2\"><option label=\"owner@\"></option><option label=\"example.com\"></option></select>",
+      "outcome": "omit"
+    },
+    {
+      "id": "optgroup-label-split-email",
+      "html": "<select size=\"2\"><optgroup label=\"owner@\"><option>example.com</option></optgroup></select>",
+      "outcome": "omit"
+    },
+    {
+      "id": "input-contiguous-email",
+      "html": "<input value=\"owner@example.com\">",
+      "outcome": "omit"
+    },
+    {
+      "id": "static-control-labels",
+      "html": "<input value=\"Alpha\"><textarea placeholder=\"Details\"></textarea><select><optgroup label=\"Region\"><option label=\"West\"></option></optgroup></select>",
+      "outcome": "omit"
+    },
+    {
+      "id": "materialized-control-labels",
+      "html": "<p>Selection: West</p><p>Owner: owner@example.com</p>",
+      "outcome": "retain",
+      "contains": [
+        "Selection: West",
+        "[email]"
+      ],
+      "absent": [
+        "owner@example.com"
+      ]
+    },
+    {
+      "id": "unsupported-mathml",
+      "html": "<math><mi>Alpha</mi></math>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-quotes-pii",
+      "html": "<style>q { quotes: \"owner@\" \"example.com\"; }</style><q></q>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-quotes-and-dom-pii",
+      "html": "<style>q { quotes: \"owner@\" \"\"; }</style><q>example.com</q>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-quotes-none",
+      "html": "<style>q { quotes: none; }</style><q>Finding</q>",
+      "outcome": "retain",
+      "contains": [
+        "Finding"
+      ]
+    },
+    {
+      "id": "css-quotes-auto",
+      "html": "<style>q { quotes: auto; }</style><q>Finding</q>",
+      "outcome": "retain",
+      "contains": [
+        "Finding"
+      ]
+    },
+    {
+      "id": "doctype-public-pii",
+      "html": "<!DOCTYPE html PUBLIC \"owner@example.com\"><p>Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "doctype-system-pii",
+      "html": "<!DOCTYPE html SYSTEM \"555-123-4567\"><p>Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "attribute-name-pii",
+      "html": "<p owner@example.com=\"1\">Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "tag-name-pii",
+      "html": "<owner@example.com>Report</owner@example.com>",
+      "outcome": "omit"
+    },
+    {
+      "id": "attribute-name-ssn",
+      "html": "<div data-123-45-6789=\"x\">Report</div>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-separator-email",
+      "html": "<span>owner@</span><span hidden>!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-separator-phone",
+      "html": "<span>555-123-</span><span hidden>x</span><span>4567</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "closed-dialog-separator",
+      "html": "<span>owner@</span><dialog>!</dialog><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "display-none-inline",
+      "html": "<span>owner@</span><span style=\"display:none\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "display-none-stylesheet",
+      "html": "<style>.separator { display: none; }</style><span>owner@</span><span class=\"separator\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "display-variable",
+      "html": "<style>.separator { --mode:none; display:var(--mode); }</style><span>owner@</span><span class=\"separator\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "visibility-hidden",
+      "html": "<span>owner@</span><span style=\"visibility:hidden\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "opacity-hidden",
+      "html": "<span>owner@</span><span style=\"opacity:0\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "template-separator",
+      "html": "<span>owner@</span><template>!</template><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "bare-doctype-visible-layout",
+      "html": "<!DOCTYPE html><style>p { display:block; visibility:visible; opacity:1; }</style><p>Report</p>",
+      "outcome": "retain",
+      "contains": [
+        "Report"
+      ]
+    },
+    {
+      "id": "svg-title-separator",
+      "html": "<svg><text>owner@</text><title>!</title><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-defs-separator",
+      "html": "<svg><text>owner@</text><defs><text>!</text></defs><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-display-separator",
+      "html": "<svg><text>owner@</text><text display=\"none\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-opacity-separator",
+      "html": "<svg><text>555-123-</text><text opacity=\"0\">x</text><text>4567</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-geometry-defs",
+      "html": "<svg><title>Chart</title><defs><clipPath id=\"area\"><rect width=\"100\" height=\"100\"/></clipPath></defs><g clip-path=\"url(#area)\"><text>Alpha: 12</text></g></svg>",
+      "outcome": "retain",
+      "contains": [
+        "Chart",
+        "Alpha: 12"
+      ]
+    },
+    {
+      "id": "hidden-table-column",
+      "html": "<span>owner@</span><span style=\"display:table-column\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-table-column-group",
+      "html": "<span>owner@</span><span style=\"display:table-column-group\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-opacity-filter",
+      "html": "<span>owner@</span><span style=\"filter:opacity(0)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    }
+  ]
+}
