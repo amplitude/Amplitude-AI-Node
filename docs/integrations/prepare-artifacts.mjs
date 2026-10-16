@@ -8,6 +8,13 @@ const MAX_DEPTH = 20;
 const MAX_VISITS = 10000;
 const MAX_JSON_LENGTH = 256 * 1024;
 const STRUCTURED_TYPES = new Set(['chart', 'table', 'summary', 'options']);
+const AMBIGUOUS_UNICODE_ESCAPE = /\\u(?:00[0-7][0-9a-fA-F]|(?![0-9a-fA-F]{4}))/u;
+
+function mayContainArtifactKey(value) {
+  // This is a negative proof, not escape decoding. Non-ASCII code units
+  // cannot manufacture the reserved ASCII key at any nested JSON layer.
+  return value.includes('$agent_artifact') || AMBIGUOUS_UNICODE_ESCAPE.test(value);
+}
 
 function inspect(value) {
   let visits = 0;
@@ -17,9 +24,9 @@ function inspect(value) {
     if (typeof item === 'string') {
       if (!/^[\s]*[\[{"]/.test(item)) return item;
       // JSON cannot manufacture the reserved ASCII key without its literal
-      // spelling or a Unicode escape. Preserve provably ordinary strings,
+      // spelling or an ASCII Unicode escape. Preserve provably ordinary strings,
       // including oversized/deep JSON, without changing their existing policy.
-      if (!item.includes('$agent_artifact') && !item.includes('\\u')) return item;
+      if (!mayContainArtifactKey(item)) return item;
       if (item.length > MAX_JSON_LENGTH) throw new Error('Content exceeds preparation limits');
       let parsed;
       try { parsed = JSON.parse(item); } catch {

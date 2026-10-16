@@ -41,6 +41,7 @@ JSON_CONTENT = frozenset({
 })
 STRUCTURED_TYPES = frozenset({"chart", "table", "summary", "options"})
 IMAGE_TYPES = frozenset({"image", "image_url", "input_image", "document"})
+AMBIGUOUS_UNICODE_ESCAPE = re.compile(r"\\u(?:00[0-7][0-9a-fA-F]|(?![0-9a-fA-F]{4}))")
 
 
 def _context(context):
@@ -48,6 +49,12 @@ def _context(context):
     if context is None:
         return None
     return SpanContext(context.trace_id, context.span_id, context.is_remote, context.trace_flags)
+
+
+def _may_contain_artifact_key(value: str) -> bool:
+    # Inspect every raw occurrence, including escaped backslashes. No decoding
+    # is attempted: non-ASCII escapes cannot manufacture the reserved ASCII key.
+    return "$agent_artifact" in value or AMBIGUOUS_UNICODE_ESCAPE.search(value) is not None
 
 
 def _content(value: str, redact: Callable[[str], str], require_json: bool, prepare_artifacts=None) -> str:
@@ -66,7 +73,7 @@ def _content(value: str, redact: Callable[[str], str], require_json: bool, prepa
         if isinstance(item, list):
             return any(has_artifact(child, depth + 1) for child in item)
         if isinstance(item, str) and item.lstrip().startswith(("{", "[", '"')):
-            if "$agent_artifact" not in item and "\\u" not in item:
+            if not _may_contain_artifact_key(item):
                 return False
             if len(item) > 1_000_000:
                 raise ValueError("unsupported content")

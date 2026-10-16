@@ -380,6 +380,65 @@
       "id": "hidden-opacity-filter",
       "html": "<span>owner@</span><span style=\"filter:opacity(0)\">!</span><span>example.com</span>",
       "outcome": "omit"
+    },
+    {
+      "id": "popover-empty",
+      "html": "<span>owner@</span><span popover>!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "popover-auto",
+      "html": "<span>owner@</span><span popover=\"auto\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "popover-manual-phone",
+      "html": "<span>555-123-</span><span popover=\"manual\">x</span><span>4567</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-fill-opacity-attribute",
+      "html": "<svg><text>owner@</text><text fill-opacity=\"0\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-stroke-opacity-attribute",
+      "html": "<svg><text>owner@</text><text fill=\"none\" stroke=\"black\" stroke-opacity=\"0\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-fill-opacity-inline",
+      "html": "<svg><text>owner@</text><text style=\"fill-opacity:0\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-stroke-opacity-inline",
+      "html": "<svg><text>owner@</text><text style=\"fill:none;stroke:black;stroke-opacity:0\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-fill-opacity-stylesheet",
+      "html": "<style>.separator { fill-opacity: 0; }</style><svg><text>owner@</text><text class=\"separator\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-stroke-opacity-stylesheet",
+      "html": "<style>.separator { fill:none; stroke:black; stroke-opacity:0; }</style><svg><text>owner@</text><text class=\"separator\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-paint-opacity-variable",
+      "html": "<svg><text style=\"--paint:0;fill-opacity:var(--paint)\">Report</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-opaque-paint-values",
+      "html": "<svg><text fill-opacity=\"1\" stroke-opacity=\"100%\">Alpha: 12</text><text style=\"fill-opacity:100%;stroke-opacity:1\">Beta: 8</text></svg>",
+      "outcome": "retain",
+      "contains": [
+        "Alpha: 12",
+        "Beta: 8"
+      ]
     }
   ]
 }

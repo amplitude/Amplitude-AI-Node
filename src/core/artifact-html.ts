@@ -188,7 +188,7 @@ function validateCss(source: string, context: 'stylesheet' | 'declarationList' |
     if (node.value.type !== 'Value') return unsupported();
     const name = lower(node.property);
     const values = node.value.children.toArray();
-    if (name === 'opacity') {
+    if (['opacity', 'fill-opacity', 'stroke-opacity'].includes(name)) {
       const value = values[0];
       if (
         values.length !== 1 ||
@@ -270,6 +270,7 @@ function validateDocument(root: Html.Document): void {
       (tag === 'li' && has('value')) ||
       (tag === 'meta' && has('http-equiv')) ||
       has('hidden') ||
+      has('popover') ||
       (['dialog', 'details'].includes(tag) && !has('open'))
     )
       unsupported();
@@ -285,7 +286,16 @@ function validateDocument(root: Html.Document): void {
         if (!attr.value.startsWith('#')) unsupported();
       }
       if (resourceAttributes.has(name)) validateCss(attr.value, 'value');
-      if (['display', 'visibility', 'content-visibility', 'opacity'].includes(name))
+      if (
+        [
+          'display',
+          'visibility',
+          'content-visibility',
+          'opacity',
+          'fill-opacity',
+          'stroke-opacity',
+        ].includes(name)
+      )
         validateCss(`${name}:${attr.value}`, 'declarationList');
       if (name === 'style') validateCss(attr.value, 'declarationList');
       return true;

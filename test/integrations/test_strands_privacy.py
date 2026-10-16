@@ -201,6 +201,21 @@ class PrivacyTests(unittest.TestCase):
 
 
 class ArtifactFallbackTests(unittest.TestCase):
+    def test_non_ascii_unicode_nested_json_keeps_existing_outbound_policy(self):
+        for raw in (
+            '{"text":"' + r"\u4f60\u597d" * 25000 + '","email":"' + CANARY + '"}',
+            '{"text":"\\u00e9","email":"' + CANARY + '",',
+            json.dumps(json.dumps('{"text":"\\u00e9","email":"' + CANARY + '"}')),
+        ):
+            with self.subTest(length=len(raw)):
+                capture = Capture()
+                exporter = PrivacyExporter(capture, mode="scrubbed", redact=redact)
+                exporter.export([make_span({"content": json.dumps({"nested": raw})})])
+                prepared = json.loads(capture.spans[0].attributes["content"])
+                self.assertEqual(prepared["nested"], raw.replace(CANARY, "[redacted]"))
+                self.assertEqual(exporter.omitted_content_fields, 0)
+                self.assertNotIn(CANARY.encode(), encode_spans(capture.spans).SerializeToString())
+
     def test_marker_free_nested_json_keeps_existing_string_redaction(self):
         raw = "[" * 30 + json.dumps(CANARY) + "]" * 30
         capture = Capture()

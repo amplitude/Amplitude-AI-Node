@@ -125,6 +125,9 @@ describe('non-SDK outbound artifact preparation', () => {
     ['deep', `${'['.repeat(30)}"owner@example.com"${']'.repeat(30)}`],
     ['large', JSON.stringify({ prose: 'x'.repeat(300000), email: 'owner@example.com' })],
     ['malformed ordinary', '{"email":"owner@example.com",'],
+    ['large non-ASCII Unicode', `{"text":"${'\\u4f60\\u597d'.repeat(25000)}","email":"owner@example.com"}`],
+    ['malformed non-ASCII Unicode', '{"text":"\\u00e9","email":"owner@example.com",'],
+    ['nested non-ASCII Unicode', JSON.stringify(JSON.stringify('{"text":"\\u00e9","email":"owner@example.com"}'))],
   ] as const) {
     it(`preserves ${name} marker-free JSON through HTTP and OTLP`, async () => {
       const prepareArtifacts = vi.fn(sdk);
@@ -144,7 +147,7 @@ describe('non-SDK outbound artifact preparation', () => {
   }
 
   it('omits ambiguous malformed or over-budget Unicode JSON without a raw fallback', () => {
-    for (const raw of ['{"text":"\\u', `{"text":"\\u0061","large":"${'x'.repeat(300000)}"}`]) {
+    for (const raw of ['{"text":"\\u', '{"text":"\\u00e9","bad":"\\u0024agent_artifact":broken', `{"text":"\\u0061","large":"${'x'.repeat(300000)}"}`]) {
       expect(prepareArtifactValue(raw)).toBeUndefined();
       expect(prepareArtifactValue(raw, sdk)).toBeUndefined();
       expect(prepareAgentEvents([event(raw)])[0]?.event_properties).not.toHaveProperty('[Agent] Tool Output');

@@ -1,6 +1,7 @@
 import { types as utilTypes } from 'node:util';
 import { MAX_ARTIFACT_HTML_LENGTH, prepareHtml, validateHtml } from './core/artifact-html.js';
 import { MAX_SERIALIZED_LENGTH } from './core/constants.js';
+import { getLogger } from './utils/logger.js';
 import {
   PrivacyConfig,
   type PrivacyConfigOptions,
@@ -15,8 +16,43 @@ const MAX_INPUT_LENGTH = 256 * 1024;
 const MAX_NODES = 10_000;
 const MAX_DEPTH = 32;
 const MAX_JSON_DEPTH = 4;
+const AMBIGUOUS_UNICODE_ESCAPE = /\\u(?:00[0-7][0-9a-fA-F]|(?![0-9a-fA-F]{4}))/u;
 type RecordValue = Record<string, unknown>;
 type Prepared = { value: unknown; artifact: boolean };
+type OmissionReason =
+  | 'unsupported_or_sensitive_artifact'
+  | 'ambiguous_json'
+  | 'traversal_limit'
+  | 'artifact_size_limit'
+  | 'preparation_failed';
+const reportedOmissions = new Set<OmissionReason>();
+const configOmissions = new WeakMap<object, Set<OmissionReason>>();
+type OmissionReporter = (reason: OmissionReason) => void;
+class ArtifactTraversalLimit extends Error {}
+
+function omissionReporter(config?: ArtifactPrivacyConfig): OmissionReporter {
+  let reported = reportedOmissions;
+  if (config !== null && typeof config === 'object') {
+    reported = configOmissions.get(config) ?? new Set<OmissionReason>();
+    configOmissions.set(config, reported);
+  }
+  const current = new Set<OmissionReason>();
+  return (reason) => {
+    if (current.has(reason)) return;
+    current.add(reason);
+    try {
+      const logger = getLogger();
+      const message = `Artifact preparation omitted content (${reason}).`;
+      if (reported.has(reason)) logger.debug(message);
+      else {
+        reported.add(reason);
+        logger.warn(`${message} Further occurrences are logged at debug level.`);
+      }
+    } catch {
+      // Diagnostics must never affect the host application or expose thrown details.
+    }
+  };
+}
 
 function record(value: unknown): value is RecordValue {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -37,9 +73,9 @@ function jsonValue(value: string): unknown {
 }
 
 function mayContainArtifactKey(value: string): boolean {
-  // Only Unicode escapes can manufacture a missing reserved-key character through JSON decoding.
-  // Keep every Unicode escape ambiguous, including nested escape-of-escape encodings.
-  return value.includes('$agent_artifact') || value.includes('\\u');
+  // Non-ASCII escapes cannot manufacture any character of the reserved ASCII key.
+  // Inspect every raw occurrence, including escaped backslashes; never decode/rewrite the source.
+  return value.includes('$agent_artifact') || AMBIGUOUS_UNICODE_ESCAPE.test(value);
 }
 
 function markedJson(value: string): boolean {
@@ -49,7 +85,7 @@ function markedJson(value: string): boolean {
 
 function containsArtifact(value: unknown, depth = 0, budget = { nodes: 0 }): boolean {
   if (++budget.nodes > MAX_NODES || depth > MAX_DEPTH)
-    throw new Error('Artifact traversal exceeds bounds');
+    throw new ArtifactTraversalLimit('Artifact traversal exceeds bounds');
   if (record(value)) {
     if (Object.hasOwn(value, '$agent_artifact')) return true;
     return Object.values(value).some((v) => containsArtifact(v, depth + 1, budget));
@@ -151,6 +187,7 @@ function fullContent(pc: PrivacyConfig): boolean {
 function prepare(
   value: unknown,
   pc: PrivacyConfig,
+  reportOmission: OmissionReporter,
   strip = false,
   alreadySanitized = false,
 ): Prepared {
@@ -169,13 +206,16 @@ function prepare(
   };
   function walk(input: unknown, depth = 0, jsonDepth = 0): Prepared {
     if (++nodes > MAX_NODES || depth > MAX_DEPTH)
-      throw new Error('Artifact traversal exceeds bounds');
+      throw new ArtifactTraversalLimit('Artifact traversal exceeds bounds');
     if (typeof input === 'string') {
       if (!mayContainArtifactKey(input))
         return { value: alreadySanitized ? input : redact(input), artifact: false };
       const parsed = jsonValue(input);
       if (parsed !== undefined && containsArtifact(parsed)) {
-        if (jsonDepth >= MAX_JSON_DEPTH) return { value: undefined, artifact: true };
+        if (jsonDepth >= MAX_JSON_DEPTH) {
+          reportOmission('traversal_limit');
+          return { value: undefined, artifact: true };
+        }
         const result = walk(parsed, depth + 1, jsonDepth + 1);
         return {
           value: result.value === undefined ? undefined : JSON.stringify(result.value),
@@ -183,7 +223,10 @@ function prepare(
         };
       }
       // A truncated/malformed serialized envelope cannot safely fall back to raw markup.
-      if (parsed === undefined && markedJson(input)) return { value: undefined, artifact: true };
+      if (parsed === undefined && markedJson(input)) {
+        reportOmission('ambiguous_json');
+        return { value: undefined, artifact: true };
+      }
       return { value: alreadySanitized ? input : redact(input), artifact: false };
     }
     if (!input || typeof input !== 'object') return { value: input, artifact: false };
@@ -208,6 +251,7 @@ function prepare(
         ) {
           artifact = true;
           omitted = true;
+          reportOmission(strip ? 'artifact_size_limit' : 'unsupported_or_sensitive_artifact');
         } else if (key === '$agent_artifact' && record(entry) && entry.type === 'html') {
           artifact = true;
           try {
@@ -240,6 +284,7 @@ function prepare(
             entries.push([key, { ...body, v: 1, type: 'html', payload: { ...payload, html } }]);
           } catch {
             omitted = true;
+            reportOmission('unsupported_or_sensitive_artifact');
           }
         } else if (
           key === 'type' &&
@@ -277,20 +322,22 @@ export function prepareArtifactContent(
 ): unknown | undefined {
   const pc = resolved(config);
   if (!fullContent(pc)) return undefined;
+  const reportOmission = omissionReporter(config);
   try {
     let contains: boolean;
     try {
       contains = containsArtifact(value);
-    } catch {
-      return ordinaryJsonProven(value)
-        ? sanitizeStructuredContent(value, pc.redactPii, pc)
-        : undefined;
+    } catch (error) {
+      if (!(error instanceof ArtifactTraversalLimit)) throw error;
+      if (ordinaryJsonProven(value)) return sanitizeStructuredContent(value, pc.redactPii, pc);
+      reportOmission('traversal_limit');
+      return undefined;
     }
     if (!contains) return sanitizeStructuredContent(value, pc.redactPii, pc);
     const input = typeof value === 'string' ? value : JSON.stringify(value);
     const overInputLimit =
       input.length > MAX_INPUT_LENGTH || new TextEncoder().encode(input).length > MAX_INPUT_LENGTH;
-    const result = prepare(value, pc, overInputLimit);
+    const result = prepare(value, pc, reportOmission, overInputLimit);
     if (result.value === undefined) return undefined;
     const serialized =
       typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
@@ -299,9 +346,12 @@ export function prepareArtifactContent(
       (serialized.length > MAX_SERIALIZED_LENGTH ||
         new TextEncoder().encode(serialized).length > MAX_INPUT_LENGTH)
     )
-      return prepare(result.value, pc, true, true).value;
+      return prepare(result.value, pc, reportOmission, true, true).value;
     return result.value;
-  } catch {
+  } catch (error) {
+    reportOmission(
+      error instanceof ArtifactTraversalLimit ? 'traversal_limit' : 'preparation_failed',
+    );
     return undefined;
   }
 }
@@ -311,7 +361,11 @@ export function prepareArtifact(
   envelope: unknown,
   config?: ArtifactPrivacyConfig,
 ): RecordValue | undefined {
-  if (!record(envelope) || !Object.hasOwn(envelope, '$agent_artifact')) return undefined;
+  if (!record(envelope) || !Object.hasOwn(envelope, '$agent_artifact')) {
+    if (fullContent(resolved(config)))
+      omissionReporter(config)('unsupported_or_sensitive_artifact');
+    return undefined;
+  }
   const result = prepareArtifactContent(envelope, config);
   return record(result) && Object.hasOwn(result, '$agent_artifact') ? result : undefined;
 }

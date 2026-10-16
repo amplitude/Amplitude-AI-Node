@@ -108,9 +108,10 @@ import { toAgentEvents, send } from './amplitude-agent-forwarder';
 const redact = (text: string) => redactAgentContent(text);
 // This keeps the forwarder's chosen redactor. The callback already includes
 // built-in masking, so the artifact helper must not add that step a second time.
-const prepareArtifacts = (value: unknown) => prepareArtifactContent(value, {
-  contentMode: 'full', redactPii: false, customRedactionFn: redact,
-});
+const artifactPolicy = {
+  contentMode: 'full' as const, redactPii: false, customRedactionFn: redact,
+};
+const prepareArtifacts = (value: unknown) => prepareArtifactContent(value, artifactPolicy);
 const events = toAgentEvents(conversation, { redact, prepareArtifacts });
 await send(events, { apiKey: process.env.AMPLITUDE_API_KEY! });
 // The same prepared events can be serialized for Batch API or an S3 import file.
@@ -118,13 +119,15 @@ await send(events, { apiKey: process.env.AMPLITUDE_API_KEY! });
 
 An intentionally identity-only deployment can use `redactPii: false` with its existing identity callback; this keeps PII redaction disabled. Alternatively, pass the same `PrivacyConfig` used by your application. Do not replace the preparation callback with an identity function or a regex: the public helper supplies the HTML-aware protection. Callbacks must be synchronous and idempotent: retained HTML text is checked again to ensure no further redaction is needed. A failure or an artifact-bearing value that exceeds inspection limits omits the affected channel without a raw fallback. Metadata-only mode still omits content.
 
-JSON-looking content strings containing neither the literal `$agent_artifact` marker nor a raw `\u` escape keep their existing ordinary redaction behavior, even when large, deeply nested, or malformed. A marker or any Unicode escape requires bounded inspection: ambiguous malformed, oversized, or overly nested JSON is omitted even if its apparent content looks harmless. The adapter doesn't guess whether an escape hides a key. Valid inspected Unicode JSON without an artifact remains ordinary content. These content rules don't remove the transport's bounded `event_properties` parsing or the Strands exporter's existing structured-content limits.
+JSON-looking content strings keep their existing ordinary redaction behavior when they contain no literal `$agent_artifact` marker and every raw `\u` occurrence consists of four hexadecimal digits encoding a non-ASCII character (or there are no Unicode escapes). This also covers large, deeply nested, and malformed ordinary strings: non-ASCII characters cannot manufacture the reserved ASCII key through nested JSON decoding. A literal marker, ASCII Unicode escape, or incomplete/invalid escape still requires bounded inspection. Ambiguous malformed, oversized, or overly nested JSON is omitted; it never falls back to raw content. The adapter proves absence without decoding escape sequences. Valid inspected Unicode JSON without an artifact remains ordinary content. These rules don't remove the transport's bounded `event_properties` parsing or the Strands exporter's existing structured-content limits.
 
 If the JavaScript adapter cannot finish inspecting a native content value within its limits, it passes the complete value to the configured supported SDK helper. The SDK preserves ordinary native JSON only after its own bounded marker-absence proof; otherwise it omits the entire content field. Without a helper, or if the helper fails or withholds content, the adapter omits the field. It never sends a partially inspected prefix or retries through an ordinary redactor.
 
+Supported SDK helpers report unexpected omissions with fixed reason codes, including rejected attachments when other content survives. Each reason warns once per supplied configuration (or the shared default); later occurrences use debug logging. Messages contain no payload or exception details, and logging failures do not change preparation. Intentional metadata-only/customer-enriched withholding stays silent. Reuse the same configuration object to retain warning deduplication. The standalone adapter without a helper does not add SDK diagnostics; the Strands wrapper separately exposes `omitted_content_fields` for entire-attribute omissions.
+
 Custom CSS `quotes` strings or functions are unsupported because quotation marks can generate text outside the DOM. Only a single `auto`, `none`, or CSS-wide keyword is accepted. Materialize meaningful quotation text in the DOM instead.
 
-Only a bare HTML doctype is supported; PUBLIC/SYSTEM declarations are rejected. Sensitive tag/attribute names or remaining serialized markup cause omission. Hidden attributes, closed dialogs/details, hiding display/visibility/opacity controls, reusable SVG text, and SVG `use`/`textPath` references are outside this subset. Export the actual displayed labels as DOM text instead. These checks cover supported static representations, not arbitrary browser layout.
+Only a bare HTML doctype is supported; PUBLIC/SYSTEM declarations are rejected. Sensitive tag/attribute names or remaining serialized markup cause omission. Hidden/popover attributes, closed dialogs/details, hiding display/visibility/opacity controls (including SVG fill/stroke opacity), reusable SVG text, and SVG `use`/`textPath` references are outside this subset. Export the actual displayed labels as DOM text instead. These checks cover supported static representations, not arbitrary browser layout.
 
 If you construct HTTP/Batch/S3 events yourself, call `prepareAgentEvents(events, { prepareArtifacts })` from `prepare-artifacts.mjs` immediately before serialization/upload. It handles registered content properties, not identity or `[Agent] Context`. It does not supply ordinary PII masking; keep the job's existing ordinary-content policy. Do not process already-prepared forwarder output a second time with a custom callback. With no `prepareArtifacts`, HTML and unsupported declarations are removed. `event_properties` may be an object or valid bounded JSON; malformed property JSON stops upload.
 

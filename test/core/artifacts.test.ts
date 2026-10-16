@@ -36,6 +36,38 @@ describe('shared artifact privacy policy', () => {
 });
 
 describe('artifact content preparation', () => {
+  it.each(['', 'auto', 'manual', 'hint', 'invalid'])(
+    'omits popovers regardless of authored state: %s',
+    (state) => {
+      expect(
+        prepareArtifact(envelope(`owner<span popover="${state}"> ! </span>@example.com`)),
+      ).toBeUndefined();
+    },
+  );
+
+  for (const property of ['fill-opacity', 'stroke-opacity']) {
+    it.each(['0', '0%', '0.5', 'inherit', 'var(--paint)', 'calc(1 - 1)'])(
+      `rejects ambiguous or nonopaque ${property} across markup contexts: %s`,
+      (value) => {
+        const sources = [
+          `<svg><text>owner</text><text ${property}="${value}"> ! </text><text>@example.com</text></svg>`,
+          `<svg><text style="${property}:${value}">Safe</text></svg>`,
+          `<style>text{${property}:/**/${value}!important}</style><svg><text>Safe</text></svg>`,
+        ];
+        for (const source of sources) expect(prepareArtifact(envelope(source))).toBeUndefined();
+      },
+    );
+    it.each(['1', '100%'])(`retains opaque ${property} in attributes and CSS: %s`, (value) => {
+      const source = `<style>text{${property}:${value}}</style><svg><text ${property}="${value}" style="${property}:${value}">Alpha</text></svg>`;
+      expect(htmlOf(prepareArtifact(envelope(source)))).toContain('Alpha');
+    });
+  }
+
+  it('rejects escaped paint-opacity property spellings', () => {
+    expect(
+      prepareArtifact(envelope('<svg><text style="fill-\\6f pacity:0">Safe</text></svg>')),
+    ).toBeUndefined();
+  });
   it.each([
     'display:/**/none',
     'display:var(--hide)',
@@ -202,6 +234,9 @@ describe('artifact content preparation', () => {
     JSON.stringify({ text: '😀'.repeat(70_000) }),
     '['.repeat(40) + '0' + ']'.repeat(40),
     '{"message":"unfinished',
+    '{"message":"\\u00e9"}' + ' '.repeat(300_000),
+    '{"message":"\\u4e2d',
+    '{"message":"\\\\u00e9"}' + ' '.repeat(300_000),
   ])(
     'preserves ordinary string privacy when no JSON layer can contain an artifact key',
     (source) => {
@@ -226,6 +261,20 @@ describe('artifact content preparation', () => {
     const escapeOfEscape = JSON.stringify(source).replaceAll('\\\\', '\\u005c');
     expect(prepareArtifactContent(escapeOfEscape.slice(0, -1))).toBeUndefined();
     expect(prepareArtifactContent(escapeOfEscape + ' '.repeat(300_000))).toBeUndefined();
+  });
+
+  it.each(['\\u0024', '\\u005c', '\\u007f', '\\u0', '\\uZZZZ'])(
+    'keeps ASCII or malformed Unicode escapes ambiguous: %s',
+    (escape) => {
+      expect(prepareArtifactContent(`{"message":"${escape}`)).toBeUndefined();
+    },
+  );
+
+  it('preserves proven ordinary native Unicode payloads beyond the traversal budget', () => {
+    const values = Array(10_001).fill('\\u00e9');
+    const customRedactionFn = vi.fn((text: string) => text);
+    expect(prepareArtifactContent(values, { redactPii: false, customRedactionFn })).toEqual(values);
+    expect(customRedactionFn).toHaveBeenCalledTimes(values.length);
   });
 
   it('retains valid JSON Unicode prose with no artifact', () => {
