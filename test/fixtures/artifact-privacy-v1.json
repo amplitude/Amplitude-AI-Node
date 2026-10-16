@@ -232,6 +232,32 @@
       "id": "unsupported-mathml",
       "html": "<math><mi>Alpha</mi></math>",
       "outcome": "omit"
+    },
+    {
+      "id": "css-quotes-pii",
+      "html": "<style>q { quotes: \"owner@\" \"example.com\"; }</style><q></q>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-quotes-and-dom-pii",
+      "html": "<style>q { quotes: \"owner@\" \"\"; }</style><q>example.com</q>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-quotes-none",
+      "html": "<style>q { quotes: none; }</style><q>Finding</q>",
+      "outcome": "retain",
+      "contains": [
+        "Finding"
+      ]
+    },
+    {
+      "id": "css-quotes-auto",
+      "html": "<style>q { quotes: auto; }</style><q>Finding</q>",
+      "outcome": "retain",
+      "contains": [
+        "Finding"
+      ]
     }
   ]
 }

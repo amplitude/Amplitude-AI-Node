@@ -35,15 +35,15 @@ function jsonValue(value: string): unknown {
   }
 }
 
+function mayContainArtifactKey(value: string): boolean {
+  // Only Unicode escapes can manufacture a missing reserved-key character through JSON decoding.
+  // Keep every Unicode escape ambiguous, including nested escape-of-escape encodings.
+  return value.includes('$agent_artifact') || value.includes('\\u');
+}
+
 function markedJson(value: string): boolean {
   if (!['{', '[', '"'].includes(value.trimStart()[0] ?? '')) return false;
-  return (
-    value.includes('$agent_artifact') ||
-    // Undecodable JSON with Unicode escapes can conceal a marker through escape-of-escape layers.
-    value.includes('\\u') ||
-    value.length > MAX_INPUT_LENGTH ||
-    new TextEncoder().encode(value).length > MAX_INPUT_LENGTH
-  );
+  return mayContainArtifactKey(value);
 }
 
 function containsArtifact(value: unknown, depth = 0, budget = { nodes: 0 }): boolean {
@@ -55,6 +55,7 @@ function containsArtifact(value: unknown, depth = 0, budget = { nodes: 0 }): boo
   }
   if (Array.isArray(value)) return value.some((v) => containsArtifact(v, depth + 1, budget));
   if (typeof value === 'string') {
+    if (!mayContainArtifactKey(value)) return false;
     const parsed = jsonValue(value);
     if (parsed !== undefined && parsed !== value)
       return containsArtifact(parsed, depth + 1, budget);
@@ -94,6 +95,8 @@ function prepare(
     if (++nodes > MAX_NODES || depth > MAX_DEPTH)
       throw new Error('Artifact traversal exceeds bounds');
     if (typeof input === 'string') {
+      if (!mayContainArtifactKey(input))
+        return { value: alreadySanitized ? input : redact(input), artifact: false };
       const parsed = jsonValue(input);
       if (parsed !== undefined && containsArtifact(parsed)) {
         if (jsonDepth >= MAX_JSON_DEPTH) return { value: undefined, artifact: true };

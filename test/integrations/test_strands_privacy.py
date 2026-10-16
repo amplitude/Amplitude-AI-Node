@@ -201,6 +201,15 @@ class PrivacyTests(unittest.TestCase):
 
 
 class ArtifactFallbackTests(unittest.TestCase):
+    def test_marker_free_nested_json_keeps_existing_string_redaction(self):
+        raw = "[" * 30 + json.dumps(CANARY) + "]" * 30
+        capture = Capture()
+        PrivacyExporter(capture, mode="scrubbed", redact=redact).export([
+            make_span({"content": json.dumps({"nested": raw})}),
+        ])
+        prepared = json.loads(capture.spans[0].attributes["content"])
+        self.assertEqual(prepared["nested"], raw.replace(CANARY, "[redacted]"))
+
     def test_html_omission_preserves_ordinary_and_structured_siblings(self):
         html = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": "<p>owner&#64;example.com</p>"}}}
         chart = {"$agent_artifact": {"v": 1, "type": "chart", "title": CANARY, "payload": {"data": [1, 2]}}}

@@ -13,7 +13,9 @@ const MAX_HTML_NODES = 10_000;
 const MAX_HTML_DEPTH = 32;
 const MAX_HTML_BYTES = 256 * 1024;
 const forbiddenTags = new Set(
-  'script math canvas iframe object embed img image video audio link base animate set input textarea select option optgroup'.split(' '),
+  'script math canvas iframe object embed img image video audio link base animate set input textarea select option optgroup'.split(
+    ' ',
+  ),
 );
 const resourceAttributes = new Set(
   'clip-path color-profile cursor fill filter marker marker-end marker-mid marker-start mask mask-image shape-inside shape-outside stroke'.split(
@@ -35,6 +37,7 @@ const markers =
     ' ',
   );
 const generatedKeywords: Record<string, Set<string>> = {
+  quotes: new Set(['auto', 'none', 'inherit', 'initial', 'revert', 'revert-layer', 'unset']),
   'list-style': new Set([...markers, 'inside', 'outside']),
   'list-style-type': new Set(markers),
   'text-overflow': new Set(['clip', 'ellipsis']),
@@ -169,6 +172,7 @@ function validateCss(source: string, context: 'stylesheet' | 'declarationList' |
         unsupported();
     }
     const allowed = generatedKeywords[name];
+    if (name === 'quotes' && values.length !== 1) unsupported();
     if (
       allowed &&
       (!values.length || values.some((v) => v.type !== 'Identifier' || !allowed.has(lower(v.name))))

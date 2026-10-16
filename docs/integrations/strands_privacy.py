@@ -66,6 +66,8 @@ def _content(value: str, redact: Callable[[str], str], require_json: bool, prepa
         if isinstance(item, list):
             return any(has_artifact(child, depth + 1) for child in item)
         if isinstance(item, str) and item.lstrip().startswith(("{", "[", '"')):
+            if "$agent_artifact" not in item and "\\u" not in item:
+                return False
             if len(item) > 1_000_000:
                 raise ValueError("unsupported content")
             try:

@@ -121,6 +121,38 @@ describe('non-SDK outbound artifact preparation', () => {
     expect(prepareArtifactValue(JSON.stringify({ result: 42, ...unsafe }))).toBe('{"result":42}');
   });
 
+  for (const [name, raw] of [
+    ['deep', `${'['.repeat(30)}"owner@example.com"${']'.repeat(30)}`],
+    ['large', JSON.stringify({ prose: 'x'.repeat(300000), email: 'owner@example.com' })],
+    ['malformed ordinary', '{"email":"owner@example.com",'],
+  ] as const) {
+    it(`preserves ${name} marker-free JSON through HTTP and OTLP`, async () => {
+      const prepareArtifacts = vi.fn(sdk);
+      const redact = vi.fn((text: string) => text.replaceAll('owner@example.com', '[custom]'));
+      const events = prepareAgentEvents([event(raw)], { prepareArtifacts, redact });
+      const httpFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 200 }));
+      await core.send(events, { apiKey: 'test', fetchImpl: httpFetch });
+      const sent = JSON.parse(httpFetch.mock.calls[0]?.[1].body as string);
+      expect(sent.events[0].event_properties['[Agent] Tool Output']).toBe(raw.replaceAll('owner@example.com', '[custom]'));
+      expect(redact).toHaveBeenCalledTimes(1);
+      const original = request({ stringValue: raw });
+      const otlpFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 200 }));
+      await sendRequests([original], { apiKey: 'test', prepareArtifacts, fetchImpl: otlpFetch });
+      expect(JSON.parse(gunzipSync(otlpFetch.mock.calls[0]?.[1].body as Buffer).toString())).toEqual(original);
+      expect(prepareArtifacts).not.toHaveBeenCalled();
+    });
+  }
+
+  it('omits ambiguous malformed or over-budget Unicode JSON without a raw fallback', () => {
+    for (const raw of ['{"text":"\\u', `{"text":"\\u0061","large":"${'x'.repeat(300000)}"}`]) {
+      expect(prepareArtifactValue(raw)).toBeUndefined();
+      expect(prepareArtifactValue(raw, sdk)).toBeUndefined();
+      expect(prepareAgentEvents([event(raw)])[0]?.event_properties).not.toHaveProperty('[Agent] Tool Output');
+    }
+    const ordinaryUnicode = '{"text":"\\u0061"}';
+    expect(prepareArtifactValue(ordinaryUnicode, sdk)).toBe(ordinaryUnicode);
+  });
+
   it('preserves unrelated native OTLP int64 and bytes alongside a rejected artifact', () => {
     const siblings = [{ key: 'counter', value: { intValue: '9223372036854775807' } }, { key: 'bytes', value: { bytesValue: 'AQID' } }];
     const ordinary = request({ kvlistValue: { values: siblings } });

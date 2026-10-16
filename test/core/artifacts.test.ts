@@ -37,6 +37,24 @@ describe('shared artifact privacy policy', () => {
 
 describe('artifact content preparation', () => {
   it.each([
+    '<style>q{quotes:"owner@" ""}</style><q>example.com</q>',
+    '<q style="quotes: &quot;owner@&quot; &quot;&quot;">example.com</q>',
+    '<style>@media screen{q{QuOtEs:/**/"owner@" ""!important}}</style><q>example.com</q>',
+    '<style>q{--opening:"owner@";quotes:var(--opening) ""}</style><q>example.com</q>',
+  ])('omits CSS-generated quotes outside DOM text: %s', (source) => {
+    expect(prepareArtifact(envelope(source))).toBeUndefined();
+    expect(() => validateArtifactHtml(source)).toThrow('Unsupported artifact HTML');
+  });
+
+  it.each(['auto', 'none', 'inherit', 'initial', 'revert', 'revert-layer', 'unset'])(
+    'retains non-text-generating quotes keyword %s',
+    (keyword) => {
+      expect(
+        htmlOf(prepareArtifact(envelope(`<q style="quotes:${keyword}">Safe quotation</q>`))),
+      ).toContain('Safe quotation');
+    },
+  );
+  it.each([
     '<div/>',
     '<svg><foreignObject><g/></foreignObject></svg>',
     '<svg><title><g/></title></svg>',
@@ -89,9 +107,24 @@ describe('artifact content preparation', () => {
   it('fails closed on malformed or oversized marked JSON', () => {
     expect(prepareArtifactContent('{"$agent_artifact":')).toBeUndefined();
     expect(prepareArtifactContent('{"$agent_artifact":' + 'x'.repeat(300_000))).toBeUndefined();
-    expect(prepareArtifactContent(JSON.stringify({ text: 'x'.repeat(300_000) }))).toBeUndefined();
-    expect(prepareArtifactContent(JSON.stringify({ text: '😀'.repeat(70_000) }))).toBeUndefined();
+    expect(prepareArtifactContent('{"text":"\\u0061"}' + ' '.repeat(300_000))).toBeUndefined();
   });
+
+  it.each([
+    JSON.stringify({ text: 'x'.repeat(300_000) }),
+    JSON.stringify({ text: '😀'.repeat(70_000) }),
+    '['.repeat(40) + '0' + ']'.repeat(40),
+    '{"message":"unfinished',
+  ])(
+    'preserves ordinary string privacy when no JSON layer can contain an artifact key',
+    (source) => {
+      const customRedactionFn = vi.fn((text: string) => text);
+      const pc = new PrivacyConfig({ redactPii: false, customRedactionFn });
+      const result = prepareArtifactContent(source, pc);
+      expect(customRedactionFn).toHaveBeenCalledTimes(1);
+      expect(result).toBe(sanitizeStructuredContent(source, false));
+    },
+  );
 
   it.each([0, 1, 2])('recognizes fully escaped markers through %s JSON wrappers', (wrappers) => {
     let source = JSON.stringify(envelope('<p>owner&#64;example.com</p>')).replace(

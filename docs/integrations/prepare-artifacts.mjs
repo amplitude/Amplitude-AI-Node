@@ -16,17 +16,15 @@ function inspect(value) {
     if (++visits > MAX_VISITS || depth > MAX_DEPTH) throw new Error('Content exceeds preparation limits');
     if (typeof item === 'string') {
       if (!/^[\s]*[\[{"]/.test(item)) return item;
-      if (item.length > MAX_JSON_LENGTH) {
-        // Preserve ordinary oversized JSON strings without parsing them. An
-        // encoded marker is ambiguous and must not take the raw fallback.
-        if (item.includes('$agent_artifact') || /\\u[0-9a-f]{4}/i.test(item)) throw new Error('Content exceeds preparation limits');
-        return item;
-      }
+      // JSON cannot manufacture the reserved ASCII key without its literal
+      // spelling or a Unicode escape. Preserve provably ordinary strings,
+      // including oversized/deep JSON, without changing their existing policy.
+      if (!item.includes('$agent_artifact') && !item.includes('\\u')) return item;
+      if (item.length > MAX_JSON_LENGTH) throw new Error('Content exceeds preparation limits');
       let parsed;
       try { parsed = JSON.parse(item); } catch {
-        // A marked but malformed envelope cannot safely take the raw fallback.
-        if (item.includes('$agent_artifact') || item.includes('agent_artifact') || /\\u[0-9a-f]{4}/i.test(item)) throw new Error('Malformed artifact JSON');
-        return item;
+        // Marker/Unicode-bearing malformed JSON cannot safely fall back to raw content.
+        throw new Error('Malformed possible artifact JSON');
       }
       const before = found;
       const cleaned = walk(parsed, depth + 1);
