@@ -1,7 +1,7 @@
 <!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
-version=0.23.0
+version=0.24.0
 
 [routing]
 instrument-node=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md
@@ -49,6 +49,7 @@ routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/
 strands=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md
 privacy=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md
 analytics-metadata-schema=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/analytics-metadata.schema.json
+prepare-artifacts=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/prepare-artifacts.mjs
 strands-privacy=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands_privacy.py
 check-agent-events=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/check-agent-events.mjs
 otlp-replay=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/otlp-replay.mjs

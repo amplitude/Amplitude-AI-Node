@@ -199,5 +199,85 @@ class PrivacyTests(unittest.TestCase):
         self.assertTrue(capture.closed)
 
 
+
+class ArtifactFallbackTests(unittest.TestCase):
+    def test_html_omission_preserves_ordinary_and_structured_siblings(self):
+        html = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": "<p>owner&#64;example.com</p>"}}}
+        chart = {"$agent_artifact": {"v": 1, "type": "chart", "title": CANARY, "payload": {"data": [1, 2]}}}
+        payload = {"result": CANARY, "attachments": [{"type": "artifact", "metadata": "private", **html}], "chart": chart}
+        capture = Capture()
+        PrivacyExporter(capture, mode="scrubbed", redact=redact).export([make_span({"content": json.dumps(payload)})])
+        prepared = json.loads(capture.spans[0].attributes["content"])
+        self.assertEqual(prepared["result"], "[redacted]")
+        self.assertEqual(prepared["attachments"], [])
+        self.assertEqual(prepared["chart"]["$agent_artifact"]["title"], "[redacted]")
+        wire = encode_spans(capture.spans).SerializeToString()
+        self.assertNotIn(b"&#64;", wire)
+        self.assertNotIn(b"private", wire)
+
+    def test_nested_serialized_artifacts_and_failures_never_reach_wire(self):
+        html = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": "<p>owner&#64;example.com</p>"}}}
+        for callback in (None, lambda value: (_ for _ in ()).throw(ValueError("secret"))):
+            capture = Capture()
+            PrivacyExporter(capture, mode="scrubbed", redact=redact, prepare_artifacts=callback).export([
+                make_span({"content": json.dumps({"nested": json.dumps(html)})}),
+            ])
+            self.assertNotIn(b"$agent_artifact", encode_spans(capture.spans).SerializeToString())
+        capture = Capture()
+        PrivacyExporter(capture, mode="scrubbed", redact=redact).export([make_span({"content": json.dumps(json.dumps(html))})])
+        self.assertNotIn(b"$agent_artifact", encode_spans(capture.spans).SerializeToString())
+        capture = Capture()
+        PrivacyExporter(capture, mode="scrubbed", redact=redact).export([make_span({"content": "Explain $agent_artifact please"})])
+        self.assertEqual(capture.spans[0].attributes["content"], "Explain $agent_artifact please")
+
+
+try:
+    from amplitude_ai import AIConfig
+    from amplitude_ai.artifacts import prepare_artifact_content
+except ImportError:
+    prepare_artifact_content = None
+
+
+@unittest.skipIf(prepare_artifact_content is None, "Optional amplitude-ai 1.20.0+ needed for helper parity tests")
+class ArtifactSdkParityTests(unittest.TestCase):
+    def test_shared_policy_fixtures_on_actual_outbound_protobuf(self):
+        fixture_path = Path(__file__).resolve().parents[1] / "fixtures/artifact-privacy-v1.json"
+        for fixture in json.loads(fixture_path.read_text())["cases"]:
+            with self.subTest(case=fixture["id"]):
+                config = AIConfig(content_mode="full", redact_pii=fixture.get("redactPii", True))
+                def prepare(value):
+                    return prepare_artifact_content(value, config=config)
+                artifact = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": fixture["html"]}}}
+                capture = Capture()
+                payload = {"result": "ordinary sibling", "attachments": [artifact]}
+                original = make_span({"gen_ai.tool.call.result": json.dumps(payload)})
+                PrivacyExporter(capture, mode="scrubbed", redact=redact, prepare_artifacts=prepare).export([original])
+                wire = encode_spans(capture.spans).SerializeToString()
+                self.assertIn(b"ordinary sibling", wire)
+                if fixture["outcome"] == "omit":
+                    self.assertNotIn(b"$agent_artifact", wire)
+                else:
+                    self.assertIn(b"$agent_artifact", wire)
+                    for text in fixture.get("contains", []):
+                        self.assertIn(text.encode(), wire)
+                    for text in fixture.get("absent", []):
+                        self.assertNotIn(text.encode(), wire)
+                self.assertEqual(capture.spans[0].context.trace_id, original.context.trace_id)
+                self.assertEqual(capture.spans[0].start_time, original.start_time)
+
+    def test_customer_policy_is_bound_without_second_string_redaction(self):
+        config = AIConfig(content_mode="full", redact_pii=False, custom_redaction_fn=lambda text: text.replace("Alpha", "[custom]"))
+        artifact = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": "<p>Alpha</p>"}}}
+        capture = Capture()
+        calls = []
+        def prepare(value):
+            calls.append(value)
+            return prepare_artifact_content(value, config=config)
+        PrivacyExporter(capture, mode="scrubbed", redact=redact, prepare_artifacts=prepare).export([
+            make_span({"gen_ai.tool.call.result": json.dumps(artifact)}),
+        ])
+        self.assertEqual(len(calls), 1)
+        self.assertIn(b"[custom]", encode_spans(capture.spans).SerializeToString())
+
 if __name__ == "__main__":
     unittest.main()

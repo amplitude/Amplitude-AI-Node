@@ -1,5 +1,5 @@
 # llms-full.txt
-# @amplitude/ai 0.23.0 — Complete API Reference for AI Coding Agents
+# @amplitude/ai 0.24.0 — Complete API Reference for AI Coding Agents
 #
 # This file is the definitive guide for any coding agent instrumenting
 # a JavaScript/TypeScript AI application with @amplitude/ai.
@@ -455,3 +455,21 @@ s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
 
 **Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. **Do not call `s.trackUserMessage()` for the same user input you are also passing to a provider wrapper** — you will get two `[Agent] User Message` events for a single user turn. Choose one: either call `s.trackUserMessage()` manually and suppress auto-tracking, or rely on the provider wrapper and omit the manual call. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
+**Artifact content privacy (0.24.0+):** Tool input/output, span input/output (including SDK OTEL mapping), and AI/user message attachments automatically prepare recognized `$agent_artifact` envelopes, including bounded JSON-serialized envelopes. Content modes still apply: `metadata_only` and `customer_enriched` omit these content fields. In `full`, HTML v1 is parsed before configured PII/custom redaction, with a conservative static HTML/CSS policy and retained-text checks. Unsupported HTML, privacy failures, and oversized artifacts are omitted while sibling data and event metadata remain. Other artifact types receive ordinary configured redaction; this is not a full artifact schema validator or a browser-layout privacy guarantee.
+
+Form controls (`input`, `textarea`, `select`, `option`, and `optgroup`) are unsupported because their displayed values and labels are not reliably represented by DOM text. Producers must materialize the intended display labels and values as ordinary HTML/SVG text before preparing the snapshot.
+
+For an HTTP, OTLP, warehouse, or other transport that does not use SDK tracking, prepare each content value before serialization:
+
+```typescript
+import { prepareArtifactContent } from '@amplitude/ai/artifacts';
+
+const prepared = prepareArtifactContent(toolOutput, {
+  contentMode: 'full',
+  redactPii: true,
+  // customRedactionPatterns and customRedactionFn use the same privacy options as AIConfig.
+});
+if (prepared !== undefined) eventProperties['[Agent] Tool Output'] = JSON.stringify(prepared);
+```
+
+The helper needs no SDK initialization or network client. `undefined` means omit the content field. It accepts objects, arrays, and bounded serialized JSON; preserve a returned string directly when the transport already expects serialized JSON. JSON-looking strings above 256 KiB and malformed serialized JSON with Unicode escapes are omitted conservatively because artifact absence cannot be established within the bound. `prepareArtifact(envelope, config)` prepares one envelope. `validateArtifactHtml(html)` only validates static HTML and throws on unsupported input; it does **not** apply privacy redaction. Do not feed prepared content through another string sanitizer or call the helper manually before SDK tracking, which already prepares it. Custom callbacks must be idempotent because retained-text verification rechecks HTML after normalization; non-idempotent callbacks and conservative cross-block text matches can cause an artifact to be omitted. These APIs do not inspect arbitrary raw HTML strings or every field in an OTLP request; map the relevant content fields explicitly. See `docs/integrations/privacy.md` for transport adapters.
