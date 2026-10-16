@@ -227,6 +227,11 @@
       "absent": [
         "owner@example.com"
       ]
+    },
+    {
+      "id": "unsupported-mathml",
+      "html": "<math><mi>Alpha</mi></math>",
+      "outcome": "omit"
     }
   ]
 }

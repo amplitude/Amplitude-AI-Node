@@ -13,7 +13,7 @@ const MAX_HTML_NODES = 10_000;
 const MAX_HTML_DEPTH = 32;
 const MAX_HTML_BYTES = 256 * 1024;
 const forbiddenTags = new Set(
-  'script canvas iframe object embed img image video audio link base animate set input textarea select option optgroup'.split(' '),
+  'script math canvas iframe object embed img image video audio link base animate set input textarea select option optgroup'.split(' '),
 );
 const resourceAttributes = new Set(
   'clip-path color-profile cursor fill filter marker marker-end marker-mid marker-start mask mask-image shape-inside shape-outside stroke'.split(
