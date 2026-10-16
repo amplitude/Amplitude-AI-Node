@@ -13,7 +13,7 @@ const MAX_HTML_NODES = 10_000;
 const MAX_HTML_DEPTH = 32;
 const MAX_HTML_BYTES = 256 * 1024;
 const forbiddenTags = new Set(
-  'script math canvas iframe object embed img image video audio link base animate set input textarea select option optgroup'.split(
+  'script math canvas iframe object embed img image video audio link base animate set input textarea select option optgroup template noscript use textpath'.split(
     ' ',
   ),
 );
@@ -37,6 +37,13 @@ const markers =
     ' ',
   );
 const generatedKeywords: Record<string, Set<string>> = {
+  display: new Set(
+    'block inline inline-block flex inline-flex grid inline-grid table inline-table table-row-group table-header-group table-footer-group table-row table-cell table-caption flow flow-root contents list-item'.split(
+      ' ',
+    ),
+  ),
+  visibility: new Set(['visible']),
+  'content-visibility': new Set(['visible']),
   quotes: new Set(['auto', 'none', 'inherit', 'initial', 'revert', 'revert-layer', 'unset']),
   'list-style': new Set([...markers, 'inside', 'outside']),
   'list-style-type': new Set(markers),
@@ -78,7 +85,16 @@ function preflightHtml(source: string): void {
     {},
     {
       onComment: token,
-      onDoctype: token,
+      onDoctype(doctype) {
+        token();
+        if (
+          doctype.name !== 'html' ||
+          doctype.publicId !== null ||
+          doctype.systemId !== null ||
+          doctype.forceQuirks
+        )
+          unsupported();
+      },
       onEof: () => {},
       onCharacter: token,
       onNullCharacter: token,
@@ -155,10 +171,35 @@ function validateCss(source: string, context: 'stylesheet' | 'declarationList' |
       unsupported();
     if (node.type === 'Url' && !node.value.startsWith('#')) unsupported();
     if (node.type === 'Function' && !functions.has(lower(node.name))) unsupported();
+    if (node.type === 'Function' && lower(node.name) === 'opacity') {
+      const values = node.children.toArray();
+      const value = values[0];
+      if (
+        values.length !== 1 ||
+        !value ||
+        !(
+          (value.type === 'Number' && Number(value.value) === 1) ||
+          (value.type === 'Percentage' && Number(value.value) === 100)
+        )
+      )
+        unsupported();
+    }
     if (node.type !== 'Declaration') return;
     if (node.value.type !== 'Value') return unsupported();
     const name = lower(node.property);
     const values = node.value.children.toArray();
+    if (name === 'opacity') {
+      const value = values[0];
+      if (
+        values.length !== 1 ||
+        !value ||
+        !(
+          (value.type === 'Number' && Number(value.value) === 1) ||
+          (value.type === 'Percentage' && Number(value.value) === 100)
+        )
+      )
+        unsupported();
+    }
     if (name === 'content') {
       const first = values[0];
       if (
@@ -218,11 +259,18 @@ function validateDocument(root: Html.Document): void {
     if (!('tagName' in node)) return;
     const tag = node.tagName.toLowerCase();
     if (forbiddenTags.has(tag)) unsupported();
+    if (['defs', 'symbol', 'clippath', 'mask', 'metadata'].includes(tag)) {
+      visit(node, (child) => {
+        if (child.nodeName === '#text' && (child as Html.TextNode).value.trim()) unsupported();
+      });
+    }
     const has = (name: string): boolean => node.attrs.some((a) => a.name.toLowerCase() === name);
     if (
       (tag === 'ol' && has('start')) ||
       (tag === 'li' && has('value')) ||
-      (tag === 'meta' && has('http-equiv'))
+      (tag === 'meta' && has('http-equiv')) ||
+      has('hidden') ||
+      (['dialog', 'details'].includes(tag) && !has('open'))
     )
       unsupported();
     node.attrs = node.attrs.filter((attr) => {
@@ -237,6 +285,8 @@ function validateDocument(root: Html.Document): void {
         if (!attr.value.startsWith('#')) unsupported();
       }
       if (resourceAttributes.has(name)) validateCss(attr.value, 'value');
+      if (['display', 'visibility', 'content-visibility', 'opacity'].includes(name))
+        validateCss(`${name}:${attr.value}`, 'declarationList');
       if (name === 'style') validateCss(attr.value, 'declarationList');
       return true;
     });
@@ -250,14 +300,22 @@ function validateDocument(root: Html.Document): void {
   });
 }
 
-function retainedText(node: Html.Node, separate: boolean): string {
+function retainedText(node: Html.Node, separate: boolean, visible = false): string {
   if (node.nodeName === '#text') return (node as Html.TextNode).value;
   if ('tagName' in node && ['style', 'script'].includes(node.tagName)) return '';
+  if (
+    visible &&
+    'tagName' in node &&
+    ['head', 'title', 'desc', 'defs', 'symbol', 'clippath', 'mask', 'metadata'].includes(
+      node.tagName.toLowerCase(),
+    )
+  )
+    return '';
   const boundary = separate && 'tagName' in node && boundaries.has(node.tagName) ? '\n' : '';
   return (
     boundary +
     children(node)
-      .map((child) => retainedText(child, separate))
+      .map((child) => retainedText(child, separate, visible))
       .join('') +
     boundary
   );
@@ -290,6 +348,12 @@ export function prepareHtml(source: string, redact: (value: string) => string): 
   const document = parseBounded(source);
   validateDocument(document);
   visit(document, (node) => {
+    if ('tagName' in node && redact(node.tagName) !== node.tagName) unsupported();
+    if ('attrs' in node)
+      for (const attr of node.attrs) {
+        const name = attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name;
+        if (redact(name) !== name) unsupported();
+      }
     if ('childNodes' in node)
       node.childNodes = node.childNodes.filter((child) => child.nodeName !== '#comment');
     if ('tagName' in node && node.tagName === 'template') {
@@ -311,13 +375,18 @@ export function prepareHtml(source: string, redact: (value: string) => string): 
     new TextEncoder().encode(result).length > MAX_HTML_BYTES
   )
     unsupported();
+  if (redact(result) !== result) unsupported();
   const normalized = parseBounded(result);
   validateDocument(normalized);
-  const joined = retainedText(normalized, false);
-  const separated = retainedText(normalized, true);
-  const views = new Set([joined, separated]);
-  for (const view of [joined, separated, ...separated.split('\n')])
-    views.add(view.replace(/\s+/gu, ' ').trim());
+  const views = new Set<string>();
+  for (const visible of [false, true]) {
+    const joined = retainedText(normalized, false, visible);
+    const separated = retainedText(normalized, true, visible);
+    views.add(joined);
+    views.add(separated);
+    for (const view of [joined, separated, ...separated.split('\n')])
+      views.add(view.replace(/\s+/gu, ' ').trim());
+  }
   for (const view of views) if (view && redact(view) !== view) unsupported();
   return result;
 }

@@ -37,6 +37,93 @@ describe('shared artifact privacy policy', () => {
 
 describe('artifact content preparation', () => {
   it.each([
+    'display:/**/none',
+    'display:var(--hide)',
+    'display:\\6e one',
+    'display:table-column',
+    'display:table-column-group',
+    'visibility:hidden',
+    'content-visibility:auto',
+    'opacity:0',
+    'opacity:0%',
+    'opacity:var(--fade)',
+    'filter:opacity(0)',
+    'filter:opacity(var(--fade))',
+  ])('rejects hiding CSS in inline and stylesheet contexts: %s', (declaration) => {
+    for (const source of [
+      `owner<span style="${declaration}"> break </span>@example.com`,
+      `<style>span{${declaration}}</style>owner<span> break </span>@example.com`,
+    ])
+      expect(prepareArtifact(envelope(source))).toBeUndefined();
+  });
+
+  it.each([
+    'filter:opacity(1)',
+    'filter:opacity(100%)',
+    'display:inline-flex;visibility:visible;content-visibility:visible;opacity:1',
+  ])('preserves explicitly visible static CSS: %s', (declaration) => {
+    expect(htmlOf(prepareArtifact(envelope(`<span style="${declaration}">Safe</span>`)))).toContain(
+      'Safe',
+    );
+  });
+
+  it.each(['title', 'desc', 'defs', 'symbol', 'clipPath', 'mask', 'metadata'])(
+    'checks displayed text around nonpainted %s content',
+    (tag) => {
+      const source =
+        tag === 'title'
+          ? `owner<${tag}> break </${tag}>@example.com`
+          : `<svg><text>owner</text><${tag}><text> break </text></${tag}><text>@example.com</text></svg>`;
+      expect(prepareArtifact(envelope(source))).toBeUndefined();
+    },
+  );
+
+  it.each(['<secret-label>Safe</secret-label>', '<p secret-label="safe">Safe</p>'])(
+    'omits names requiring custom redaction without rewriting markup: %s',
+    (source) => {
+      expect(
+        prepareArtifact(envelope(source), {
+          redactPii: false,
+          customRedactionFn: (text) => text.replaceAll('secret-label', '[hidden]'),
+        }),
+      ).toBeUndefined();
+    },
+  );
+
+  it('preserves proven ordinary native lists, dictionaries, and deep structures completely', () => {
+    const list = Array(10_001).fill('safe');
+    const dict = Object.fromEntries(list.map((value, index) => [String(index), value]));
+    let deep: unknown = 'safe';
+    for (let i = 0; i < 40; i++) deep = { child: deep };
+    for (const source of [list, dict, deep])
+      expect(prepareArtifactContent(source, identity)).toEqual(source);
+    const customRedactionFn = vi.fn((text: string) => text);
+    prepareArtifactContent(list, { redactPii: false, customRedactionFn });
+    expect(customRedactionFn).toHaveBeenCalledTimes(list.length);
+  });
+
+  it('omits over-budget content atomically when a buried artifact cannot be safely prepared', () => {
+    const values = [...Array(10_001).fill('safe'), envelope('<p>owner<b>@</b>example.com</p>')];
+    expect(prepareArtifactContent(values)).toBeUndefined();
+    const ai = new MockAmplitudeAI(new AIConfig());
+    ai.agent('reporter', { userId: 'synthetic-user' }).trackToolCall('report', 10, true, {
+      output: values,
+    });
+    expect(ai.getEvents()).toHaveLength(1);
+    expect(ai.getEvents()[0]!.event_properties!['[Agent] Tool Output']).toBeUndefined();
+  });
+
+  it('does not invoke serialization hooks to prove over-budget native content safe', () => {
+    const toJSON = vi.fn(() => ({ safe: true }));
+    const source = {
+      values: Array(10_001).fill('safe'),
+      toJSON,
+      secret: envelope('<p>owner<b>@</b>example.com</p>'),
+    };
+    expect(prepareArtifactContent(source)).toBeUndefined();
+    expect(toJSON).not.toHaveBeenCalled();
+  });
+  it.each([
     '<style>q{quotes:"owner@" ""}</style><q>example.com</q>',
     '<q style="quotes: &quot;owner@&quot; &quot;&quot;">example.com</q>',
     '<style>@media screen{q{QuOtEs:/**/"owner@" ""!important}}</style><q>example.com</q>',
@@ -239,11 +326,11 @@ describe('artifact content preparation', () => {
     );
   });
 
-  it('does not redact serialized HTML a second time', () => {
+  it('omits when serialized HTML is not redaction-stable instead of rewriting syntax', () => {
     const fn = vi.fn((text: string) => (text.startsWith('<html>') ? 'CORRUPTED' : text));
     const result = prepareArtifact(envelope('<p>Safe</p>'), { customRedactionFn: fn });
-    expect(htmlOf(result)).toContain('<p>Safe</p>');
-    expect(fn.mock.calls.some(([text]) => text.startsWith('<html>'))).toBe(false);
+    expect(result).toBeUndefined();
+    expect(fn.mock.calls.some(([text]) => text.startsWith('<html>'))).toBe(true);
   });
 
   it.each([
@@ -321,17 +408,12 @@ describe('artifact content preparation', () => {
     expect(() => validateArtifactHtml('<script>unsafe()</script>')).toThrow();
   });
 
-  it.each(['noscript', 'template'])(
-    'redacts decoded content inside %s and removes hidden comments',
-    (tag) => {
-      const result = prepareArtifact(
-        envelope(`<${tag}><p>owner&#64;example.com</p><!-- hidden-secret --></${tag}>`),
-      );
-      expect(result).toBeDefined();
-      expect(htmlOf(result)).not.toContain('owner');
-      expect(htmlOf(result)).not.toContain('hidden-secret');
-    },
-  );
+  it.each(['noscript', 'template'])('omits nonpainted %s containers', (tag) => {
+    const result = prepareArtifact(
+      envelope(`<${tag}><p>owner&#64;example.com</p><!-- hidden-secret --></${tag}>`),
+    );
+    expect(result).toBeUndefined();
+  });
 });
 
 describe('actual SDK content boundaries', () => {

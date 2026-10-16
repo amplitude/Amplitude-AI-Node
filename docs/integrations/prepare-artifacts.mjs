@@ -71,10 +71,12 @@ export function hasAgentArtifact(value) {
  */
 export function prepareArtifactValue(value, prepareArtifacts) {
   const checked = inspect(value);
-  if (checked.failed) return undefined;
   if (!checked.found) return value;
   if (typeof prepareArtifacts !== 'function') return checked.omitted;
   try {
+    // An inconclusive local inspection must not truncate content or bypass
+    // privacy. Delegate the complete channel to the supported SDK preparer,
+    // which owns its bounded ordinary-payload proof and artifact policy.
     const result = prepareArtifacts(value);
     if (result && typeof result.then === 'function') return undefined;
     return result;

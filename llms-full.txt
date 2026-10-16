@@ -459,6 +459,8 @@ s.trackUserMessage(JSON.stringify(payloadRecord));
 
 Form controls (`input`, `textarea`, `select`, `option`, and `optgroup`) are unsupported because their displayed values and labels are not reliably represented by DOM text. Producers must materialize the actual displayed labels and values as ordinary HTML/SVG text before preparing the snapshot. MathML is outside this static subset; materialize its displayed content as HTML text or inline SVG.
 
+Snapshots also exclude non-bare doctypes, hidden attributes, closed dialogs/details, templates/noscript, and hiding CSS such as `display:none`, nonopaque `opacity`, or dynamic display values. SVG `use`/`textPath` and text-bearing nonpainted definition containers are unsupported; geometry-only Plotly definitions remain supported. Tag/attribute names and final serialized markup must be stable under configured redaction; the helper omits an artifact rather than rewriting its syntax. Both DOM text and conservative visible-text views are checked, without claiming arbitrary CSS layout equivalence. For oversized/deep ordinary native JSON, a complete bounded absence proof can preserve legacy sanitization; if the proof is inconclusive, the whole content channel is omitted rather than emitting a partial object or array.
+
 For an HTTP, OTLP, warehouse, or other transport that does not use SDK tracking, prepare each content value before serialization:
 
 ```typescript

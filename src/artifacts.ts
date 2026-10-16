@@ -1,3 +1,4 @@
+import { types as utilTypes } from 'node:util';
 import { MAX_ARTIFACT_HTML_LENGTH, prepareHtml, validateHtml } from './core/artifact-html.js';
 import { MAX_SERIALIZED_LENGTH } from './core/constants.js';
 import {
@@ -62,6 +63,81 @@ function containsArtifact(value: unknown, depth = 0, budget = { nodes: 0 }): boo
     if (markedJson(value)) return true;
   }
   return false;
+}
+
+/** Complete bounded absence proof for native JSON only; never invoke user serialization hooks. */
+function ordinaryJsonProven(value: unknown): boolean {
+  type Frame = { iterator: Iterator<unknown>; object?: object };
+  const stack: Frame[] = [{ iterator: [value][Symbol.iterator]() }];
+  const ancestors = new Set<object>();
+  let nodes = 0;
+  let bytes = 0;
+  const encoder = new TextEncoder();
+  const chunk = (text: string): boolean => {
+    bytes += encoder.encode(text).length;
+    return bytes <= MAX_INPUT_LENGTH && !mayContainArtifactKey(text);
+  };
+  while (stack.length) {
+    if (stack.length > 256 || ++nodes > MAX_INPUT_LENGTH) return false;
+    const frame = stack[stack.length - 1];
+    if (!frame) return false;
+    const next = frame.iterator.next();
+    if (next.done) {
+      stack.pop();
+      if (frame.object) ancestors.delete(frame.object);
+      continue;
+    }
+    const current = next.value;
+    if (current === null || ['string', 'number', 'boolean'].includes(typeof current)) {
+      if (!chunk(JSON.stringify(current))) return false;
+      continue;
+    }
+    if (typeof current !== 'object' || utilTypes.isProxy(current)) return false;
+    const array = Array.isArray(current);
+    const prototype = Object.getPrototypeOf(current);
+    if (
+      (array
+        ? prototype !== Array.prototype
+        : prototype !== Object.prototype && prototype !== null) ||
+      'toJSON' in current ||
+      ancestors.has(current)
+    )
+      return false;
+    const descriptors = Object.getOwnPropertyDescriptors(current);
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.length > MAX_INPUT_LENGTH || keys.some((key) => typeof key !== 'string')) return false;
+    const values: unknown[] = [];
+    if (array) {
+      const length = descriptors.length?.value as unknown;
+      if (typeof length !== 'number' || length > MAX_INPUT_LENGTH || !chunk('[]')) return false;
+      for (const key of keys as string[]) {
+        if (key !== 'length' && (!/^(0|[1-9]\d*)$/u.test(key) || Number(key) >= length))
+          return false;
+      }
+      for (let i = 0; i < length; i++) {
+        const descriptor = descriptors[String(i)];
+        if (descriptor && (!('value' in descriptor) || !descriptor.enumerable)) return false;
+        if (!chunk(',')) return false;
+        values.push(descriptor ? descriptor.value : null);
+      }
+    } else {
+      if (!chunk('{}')) return false;
+      for (const key of keys as string[]) {
+        const descriptor = descriptors[key];
+        if (
+          !descriptor ||
+          !('value' in descriptor) ||
+          !descriptor.enumerable ||
+          !chunk(`${JSON.stringify(key)}:,`)
+        )
+          return false;
+        values.push(descriptor.value);
+      }
+    }
+    ancestors.add(current);
+    stack.push({ iterator: values[Symbol.iterator](), object: current });
+  }
+  return true;
 }
 
 function resolved(config?: ArtifactPrivacyConfig): PrivacyConfig {
@@ -202,7 +278,15 @@ export function prepareArtifactContent(
   const pc = resolved(config);
   if (!fullContent(pc)) return undefined;
   try {
-    if (!containsArtifact(value)) return sanitizeStructuredContent(value, pc.redactPii, pc);
+    let contains: boolean;
+    try {
+      contains = containsArtifact(value);
+    } catch {
+      return ordinaryJsonProven(value)
+        ? sanitizeStructuredContent(value, pc.redactPii, pc)
+        : undefined;
+    }
+    if (!contains) return sanitizeStructuredContent(value, pc.redactPii, pc);
     const input = typeof value === 'string' ? value : JSON.stringify(value);
     const overInputLimit =
       input.length > MAX_INPUT_LENGTH || new TextEncoder().encode(input).length > MAX_INPUT_LENGTH;

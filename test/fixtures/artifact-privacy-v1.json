@@ -258,6 +258,128 @@
       "contains": [
         "Finding"
       ]
+    },
+    {
+      "id": "doctype-public-pii",
+      "html": "<!DOCTYPE html PUBLIC \"owner@example.com\"><p>Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "doctype-system-pii",
+      "html": "<!DOCTYPE html SYSTEM \"555-123-4567\"><p>Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "attribute-name-pii",
+      "html": "<p owner@example.com=\"1\">Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "tag-name-pii",
+      "html": "<owner@example.com>Report</owner@example.com>",
+      "outcome": "omit"
+    },
+    {
+      "id": "attribute-name-ssn",
+      "html": "<div data-123-45-6789=\"x\">Report</div>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-separator-email",
+      "html": "<span>owner@</span><span hidden>!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-separator-phone",
+      "html": "<span>555-123-</span><span hidden>x</span><span>4567</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "closed-dialog-separator",
+      "html": "<span>owner@</span><dialog>!</dialog><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "display-none-inline",
+      "html": "<span>owner@</span><span style=\"display:none\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "display-none-stylesheet",
+      "html": "<style>.separator { display: none; }</style><span>owner@</span><span class=\"separator\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "display-variable",
+      "html": "<style>.separator { --mode:none; display:var(--mode); }</style><span>owner@</span><span class=\"separator\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "visibility-hidden",
+      "html": "<span>owner@</span><span style=\"visibility:hidden\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "opacity-hidden",
+      "html": "<span>owner@</span><span style=\"opacity:0\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "template-separator",
+      "html": "<span>owner@</span><template>!</template><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "bare-doctype-visible-layout",
+      "html": "<!DOCTYPE html><style>p { display:block; visibility:visible; opacity:1; }</style><p>Report</p>",
+      "outcome": "retain",
+      "contains": [
+        "Report"
+      ]
+    },
+    {
+      "id": "svg-title-separator",
+      "html": "<svg><text>owner@</text><title>!</title><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-defs-separator",
+      "html": "<svg><text>owner@</text><defs><text>!</text></defs><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-display-separator",
+      "html": "<svg><text>owner@</text><text display=\"none\">!</text><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-opacity-separator",
+      "html": "<svg><text>555-123-</text><text opacity=\"0\">x</text><text>4567</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-geometry-defs",
+      "html": "<svg><title>Chart</title><defs><clipPath id=\"area\"><rect width=\"100\" height=\"100\"/></clipPath></defs><g clip-path=\"url(#area)\"><text>Alpha: 12</text></g></svg>",
+      "outcome": "retain",
+      "contains": [
+        "Chart",
+        "Alpha: 12"
+      ]
+    },
+    {
+      "id": "hidden-table-column",
+      "html": "<span>owner@</span><span style=\"display:table-column\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-table-column-group",
+      "html": "<span>owner@</span><span style=\"display:table-column-group\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "hidden-opacity-filter",
+      "html": "<span>owner@</span><span style=\"filter:opacity(0)\">!</span><span>example.com</span>",
+      "outcome": "omit"
     }
   ]
 }

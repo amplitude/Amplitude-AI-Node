@@ -112,7 +112,7 @@ describe('non-SDK outbound artifact preparation', () => {
     expect(prepareArtifactValue(nested)).toBeUndefined();
     expect(prepareArtifactValue('{"$agent_artifact": broken')).toBeUndefined();
     expect(prepareArtifactValue('{"\\u0024agent_artifact": broken')).toBeUndefined();
-    const deep = Array.from({ length: 25 }).reduce<unknown>(value => [value], unsafe);
+    const deep = Array.from({ length: 40 }).reduce<unknown>(value => [value], unsafe);
     expect(prepareArtifactValue(deep, sdk)).toBeUndefined();
     const ordinary = 'How does $agent_artifact work?';
     expect(prepareArtifactValue(ordinary, sdk)).toBe(ordinary);
@@ -151,6 +151,37 @@ describe('non-SDK outbound artifact preparation', () => {
     }
     const ordinaryUnicode = '{"text":"\\u0061"}';
     expect(prepareArtifactValue(ordinaryUnicode, sdk)).toBe(ordinaryUnicode);
+  });
+
+  it('delegates inconclusive native HTTP content to the supported helper without partial output', async () => {
+    const raw = [...Array.from({ length: 10005 }, () => 1), 'owner@example.com'];
+    const prepareArtifacts = vi.fn(sdk);
+    const prepared = prepareAgentEvents([event(raw)], { prepareArtifacts });
+    const value = prepared[0]?.event_properties['[Agent] Tool Output'];
+    expect(value).toEqual([...raw.slice(0, -1), '[email]']);
+    expect(prepareArtifacts).toHaveBeenCalledTimes(1);
+    expect(prepareArtifacts).toHaveBeenCalledWith(raw);
+    const serialized = prepared.map(item => ({ ...item, event_properties: {
+      ...item.event_properties, '[Agent] Tool Output': JSON.stringify(item.event_properties['[Agent] Tool Output']),
+    } }));
+    const fetchImpl = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 200 }));
+    await core.send(serialized, { apiKey: 'test', fetchImpl });
+    const sent = JSON.parse(fetchImpl.mock.calls[0]?.[1].body as string);
+    expect(JSON.parse(sent.events[0].event_properties['[Agent] Tool Output'])).toEqual(value);
+    for (const callback of [undefined, () => undefined, () => { throw Error('sensitive exception'); }]) {
+      expect(prepareArtifactValue(raw, callback)).toBeUndefined();
+    }
+    const buried = { large: raw, later: unsafe };
+    expect(prepareArtifactValue(buried, sdk)).toBeUndefined();
+  });
+
+  it('keeps every native OTLP array entry while removing a later unsafe artifact', async () => {
+    const values = Array.from({ length: 10005 }, () => ({ intValue: '1' }));
+    const raw = request({ arrayValue: { values: [...values, { stringValue: JSON.stringify(unsafe) }] } });
+    const fetchImpl = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 200 }));
+    await sendRequests([raw], { apiKey: 'test', prepareArtifacts: sdk, fetchImpl });
+    const sent = JSON.parse(gunzipSync(fetchImpl.mock.calls[0]?.[1].body as Buffer).toString());
+    expect(sent).toEqual(request({ arrayValue: { values } }));
   });
 
   it('preserves unrelated native OTLP int64 and bytes alongside a rejected artifact', () => {
