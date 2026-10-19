@@ -1,5 +1,3 @@
-// String masking only: use prepare-artifacts.mjs plus the public artifact helper
-// for recognized $agent_artifact HTML. Regex masking is not HTML preparation.
 // Shared client-side scrubber for paths that do not run the Amplitude AI SDK.
 // Patterns match src/core/privacy.ts. Amplitude does not scrub content after receipt.
 

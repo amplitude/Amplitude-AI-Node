@@ -21,8 +21,6 @@ export { isServerless } from './serverless.js';
 export { TenantHandle } from './tenant.js';
 
 // Config
-export { prepareArtifact, prepareArtifactContent, validateArtifactHtml } from './artifacts.js';
-export type { ArtifactPrivacyConfig } from './artifacts.js';
 export { AIConfig, ContentMode } from './config.js';
 export type { AIConfigOptions } from './config.js';
 export type { ReviewRequest } from './review.js';

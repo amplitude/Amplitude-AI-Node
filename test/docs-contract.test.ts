@@ -376,7 +376,6 @@ describe('forwarder core and adapters', () => {
     writeFileSync(join(dir, 'fin.ts'), finSource);
     writeFileSync(join(dir, 'agentforce.ts'), agentforceSource);
     writeFileSync(join(dir, 'redact-pii.mjs'), readFileSync(join(DOCS_DIR, 'redact-pii.mjs')));
-    writeFileSync(join(dir, 'prepare-artifacts.mjs'), readFileSync(join(DOCS_DIR, 'prepare-artifacts.mjs')));
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     const tracingSources = TRACING_ADAPTERS.map((a) => ({
       name: a.name,

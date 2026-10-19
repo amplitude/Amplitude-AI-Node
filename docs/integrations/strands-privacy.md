@@ -86,26 +86,8 @@ To run the repository's local checks without a model or API key:
 python -m unittest discover -s test/integrations -p 'test_strands_privacy.py' -v
 ```
 
+## Raw HTML content
 
-## Retain supported artifacts
+HTML inside `$agent_artifact` envelopes follows the same existing content policy as other structured tool results. Metadata-only mode omits content. Scrubbed mode applies your synchronous redactor to strings, including HTML, with the existing size, image and parse-failure rules. It does not interpret entities, CSS or rendered text, and it does not require the Amplitude SDK or an artifact helper.
 
-Scrubbed mode now omits HTML `$agent_artifact` envelopes unless you provide the public artifact helper. Ordinary content still uses your existing redactor. To retain supported static HTML, install `amplitude-ai>=1.20.0` once released and bind its helper to the same policy:
-
-```python
-from amplitude_ai import AIConfig
-from amplitude_ai.artifacts import prepare_artifact_content
-from customer_privacy import redact_for_telemetry
-
-artifact_policy = AIConfig(
-    content_mode="full", redact_pii=False,
-    custom_redaction_fn=redact_for_telemetry,
-)
-privacy = PrivacyExporter(
-    OTLPSpanExporter(), mode="scrubbed", redact=redact_for_telemetry,
-    prepare_artifacts=lambda value: prepare_artifact_content(value, config=artifact_policy),
-)
-```
-
-`redact_pii=False` preserves this wrapper's existing customer-redactor-only policy; it does not turn off the helper's static-HTML guard. Set it to `True` only when built-in masking is part of your approved policy, or reuse your existing `AIConfig`. The helper applies that configured policy to artifact-bearing values. The redactor must be synchronous and idempotent because retained HTML text is checked again. It does not initialize tracking or create another export pipeline. If the package/version is unavailable, leave `prepare_artifacts` unset and omit HTML artifacts safely. Never substitute an identity/regex callback for the public helper.
-
-Unsupported artifacts, callback failures, malformed marked JSON and overly complex content cannot fall back to raw HTML. Nested JSON-looking strings keep the wrapper's existing string-redaction behavior when there is no literal `$agent_artifact` marker and every raw `\u` occurrence encodes a non-ASCII character (or there are no Unicode escapes). This proves that JSON decoding cannot manufacture the reserved ASCII key. Literal markers, ASCII escapes and incomplete/invalid escapes still require bounded inspection; malformed or over-budget ambiguous strings are omitted. The exporter's original limits on structured content still apply. Rejected attachments are omitted; ordinary tool-result siblings remain where possible. The exporter still preserves its existing metadata allowlist and never fetches referenced resources. See [artifact preparation](./privacy.md#artifact-preparation) for supported paths, limits, and outbound verification.
+The producer owns which HTML may leave the application. Apply source permissions and content selection before export, preserve the envelope and trace/span IDs, and send through the existing exporter once. Inspect the final outbound attributes under your configured redactor; literal replacements do not guarantee rendered-text privacy. See [raw HTML content](./privacy.md#raw-html-content).

@@ -393,7 +393,7 @@ export interface ToolCallShape {
  */
 export interface Attachment {
   type: string;
-  /** Optional v1 artifact envelope; HTML receives artifact-aware privacy checks. */
+  /** Optional artifact data, captured with ordinary content settings and string redaction. */
   $agent_artifact?: Record<string, unknown>;
   name?: string;
   content?: string;

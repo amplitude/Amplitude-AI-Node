@@ -14,6 +14,7 @@
 //   --format otel|openinference|mlflow   input shape (default otel)
 //   --region us|eu                       Amplitude data center (default us)
 //   --metadata-only                      drop message text, prompts, tool input/output, retrieved documents, span input/output
+//                                        rejects raw resourceSpans envelopes; supply span rows for this filter
 //   --dry-run                            print the OTLP/JSON requests instead of sending
 //   --agent-id <id>                      [Agent] Agent ID for rows without an agent_id column
 //   --batch-spans <n>                    spans per request (default 500)
@@ -24,7 +25,6 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { prepareOtlpRequest } from '../prepare-artifacts.mjs';
 
 export const ENDPOINTS = {
   us: 'https://api.amplitude.com/otlp/v1/traces',
@@ -477,6 +477,9 @@ export function toOtlpRequests(rows, options = {}) {
   const items = [];
   rows.forEach((row, i) => {
     if (row.resourceSpans) {
+      if (opts.metadataOnly) {
+        throw new Error('metadataOnly does not support raw resourceSpans envelopes; provide span rows or apply your source policy before full-mode replay');
+      }
       passthrough.push(row);
       return;
     }
@@ -566,12 +569,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Posts requests with retries on 429, 5xx, and network errors; splits on 413;
  * stops on any other 4xx. Returns counts and any partial-success rejections.
  */
-export async function sendRequests(requests, { apiKey, region = 'us', maxAttempts = 5, fetchImpl = fetch, log = () => {}, prepareArtifacts }) {
+export async function sendRequests(requests, { apiKey, region = 'us', maxAttempts = 5, fetchImpl = fetch, log = () => {} }) {
   if (!apiKey) throw new Error('set AMPLITUDE_API_KEY to your project API key');
   const url = ENDPOINTS[region];
   if (!url) throw new Error(`unknown region ${region}`);
   const result = { requests: 0, rejectedSpans: 0, messages: [] };
-  const queue = requests.map(request => prepareOtlpRequest(request, { prepareArtifacts }));
+  const queue = [...requests];
   while (queue.length) {
     const request = queue.shift();
     for (let attempt = 1; ; attempt += 1) {
@@ -646,7 +649,7 @@ async function main(argv) {
   for (const warning of warnings) console.error(`WARNING ${warning}`);
   if (args.includes('--dry-run')) {
     // biome-ignore lint/suspicious/noConsoleLog: the dry-run request body is this CLI's stdout
-    console.log(JSON.stringify(requests.length === 1 ? prepareOtlpRequest(requests[0]) : requests.map(request => prepareOtlpRequest(request)), null, 2));
+    console.log(JSON.stringify(requests.length === 1 ? requests[0] : requests, null, 2));
     console.error(`Dry run: ${spans} spans in ${requests.length} requests.`);
     return 0;
   }

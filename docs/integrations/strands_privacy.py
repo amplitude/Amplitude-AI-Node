@@ -6,7 +6,6 @@ Only the wrapped exporter receives the sanitized copies. Other processors are
 unaffected and must have their own privacy policy.
 """
 
-import inspect
 import json
 import math
 import re
@@ -39,9 +38,7 @@ JSON_CONTENT = frozenset({
     "gen_ai.input.messages", "gen_ai.output.messages",
     "gen_ai.tool.call.arguments", "gen_ai.tool.call.result",
 })
-STRUCTURED_TYPES = frozenset({"chart", "table", "summary", "options"})
 IMAGE_TYPES = frozenset({"image", "image_url", "input_image", "document"})
-AMBIGUOUS_UNICODE_ESCAPE = re.compile(r"\\u(?:00[0-7][0-9a-fA-F]|(?![0-9a-fA-F]{4}))")
 
 
 def _context(context):
@@ -51,38 +48,10 @@ def _context(context):
     return SpanContext(context.trace_id, context.span_id, context.is_remote, context.trace_flags)
 
 
-def _may_contain_artifact_key(value: str) -> bool:
-    # Inspect every raw occurrence, including escaped backslashes. No decoding
-    # is attempted: non-ASCII escapes cannot manufacture the reserved ASCII key.
-    return "$agent_artifact" in value or AMBIGUOUS_UNICODE_ESCAPE.search(value) is not None
-
-
-def _content(value: str, redact: Callable[[str], str], require_json: bool, prepare_artifacts=None) -> str:
+def _content(value: str, redact: Callable[[str], str], require_json: bool) -> str:
     if not isinstance(value, str) or len(value) > 1_000_000:
         raise ValueError("unsupported content")
     visits = 0
-    omitted = object()
-
-    def has_artifact(item, depth=0):
-        nonlocal visits
-        visits += 1
-        if depth > 20 or visits > 10_000:
-            raise ValueError("content too complex")
-        if isinstance(item, dict):
-            return "$agent_artifact" in item or any(has_artifact(child, depth + 1) for child in item.values())
-        if isinstance(item, list):
-            return any(has_artifact(child, depth + 1) for child in item)
-        if isinstance(item, str) and item.lstrip().startswith(("{", "[", '"')):
-            if not _may_contain_artifact_key(item):
-                return False
-            if len(item) > 1_000_000:
-                raise ValueError("unsupported content")
-            try:
-                return has_artifact(json.loads(item), depth + 1)
-            except json.JSONDecodeError:
-                if "$agent_artifact" in item or "\\u" in item:
-                    raise ValueError("malformed artifact content") from None
-        return False
 
     def clean(text):
         if "data:" in text.lower() and ";base64," in text.lower():
@@ -100,37 +69,13 @@ def _content(value: str, redact: Callable[[str], str], require_json: bool, prepa
         if depth > 20 or visits > 10_000:
             raise ValueError("content too complex")
         if isinstance(item, str):
-            if item.lstrip().startswith(("{", "[", '"')) and has_artifact(item, depth):
-                prepared = walk(json.loads(item), depth + 1)
-                return omitted if prepared is omitted else json.dumps(prepared, ensure_ascii=False, allow_nan=False)
             return clean(item)
         if isinstance(item, list):
-            prepared = [walk(child, depth + 1) for child in item]
-            return [child for child in prepared if child is not omitted]
+            return [walk(child, depth + 1) for child in item]
         if isinstance(item, dict):
-            if "$agent_artifact" in item:
-                if callable(prepare_artifacts):
-                    # The public helper applies its bound policy; never run a
-                    # string redactor over the resulting HTML/serialized markup.
-                    prepared = prepare_artifacts(item)
-                    if inspect.isawaitable(prepared):
-                        if inspect.iscoroutine(prepared):
-                            prepared.close()
-                        raise ValueError("artifact preparation must be synchronous")
-                    return omitted if prepared is None else prepared
-                declaration = item["$agent_artifact"]
-                structured = (isinstance(declaration, dict) and declaration.get("v") == 1
-                              and declaration.get("type") in STRUCTURED_TYPES
-                              and isinstance(declaration.get("payload"), dict))
-                if not structured:
-                    siblings = {key: child for key, child in item.items() if key != "$agent_artifact"}
-                    if not siblings or siblings.get("type") == "artifact":
-                        return omitted
-                    item = siblings
             if isinstance(item.get("type"), str) and item["type"] in IMAGE_TYPES:
                 return {"type": "text", "content": "[image omitted]"}
-            prepared = {clean(key): walk(child, depth + 1) for key, child in item.items()}
-            return {key: child for key, child in prepared.items() if child is not omitted}
+            return {clean(key): walk(child, depth + 1) for key, child in item.items()}
         if item is None or isinstance(item, bool):
             return item
         if isinstance(item, (int, float)) and math.isfinite(item):
@@ -141,11 +86,8 @@ def _content(value: str, redact: Callable[[str], str], require_json: bool, prepa
         raise ValueError("unsupported content")
 
     # Never send malformed structured data through the raw-string fallback.
-    if require_json or value.lstrip().startswith(("{", "[")) or (value.lstrip().startswith('"') and has_artifact(value)):
-        prepared = walk(json.loads(value))
-        if prepared is omitted:
-            raise ValueError("artifact content omitted")
-        return json.dumps(prepared, ensure_ascii=False, allow_nan=False)
+    if require_json or value.lstrip().startswith(("{", "[")):
+        return json.dumps(walk(json.loads(value)), ensure_ascii=False, allow_nan=False)
     return clean(value)
 
 
@@ -158,7 +100,7 @@ class PrivacyExporter(SpanExporter):
     exceptions never log input. The customer owns the redactor's PII coverage.
     """
 
-    def __init__(self, delegate: SpanExporter, *, mode="metadata_only", redact=None, prepare_artifacts=None):
+    def __init__(self, delegate: SpanExporter, *, mode="metadata_only", redact=None):
         if mode not in ("metadata_only", "scrubbed"):
             raise ValueError("mode must be metadata_only or scrubbed")
         if mode == "scrubbed" and not callable(redact):
@@ -166,7 +108,6 @@ class PrivacyExporter(SpanExporter):
         self.delegate = delegate
         self.mode = mode
         self.redact = redact
-        self.prepare_artifacts = prepare_artifacts
         self.omitted_content_fields = 0
 
     def sanitize(self, span: ReadableSpan) -> ReadableSpan:
@@ -178,7 +119,7 @@ class PrivacyExporter(SpanExporter):
                 attributes[key] = value
             elif key in CONTENT and self.mode == "scrubbed":
                 try:
-                    attributes[key] = _content(value, self.redact, key in JSON_CONTENT, self.prepare_artifacts)
+                    attributes[key] = _content(value, self.redact, key in JSON_CONTENT)
                 except Exception:
                     self.omitted_content_fields += 1
         resource = {}

@@ -189,7 +189,6 @@ describe('message-rows query', () => {
         compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
       }).outputText;
       writeFileSync(join(dir, 'core.mjs'), js);
-      writeFileSync(join(dir, 'prepare-artifacts.mjs'), readFileSync(resolve(__dirname, '../docs/integrations/prepare-artifacts.mjs')));
       const core = await import(pathToFileURL(join(dir, 'core.mjs')).href);
 
       const at = (s: number) => Date.UTC(2026, 0, 15, 12, 0, s);

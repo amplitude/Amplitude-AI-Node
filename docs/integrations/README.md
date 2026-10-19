@@ -88,11 +88,10 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 
 The forwarder core on any guide works for any source that can give you a conversation transcript: write a `normalize` function for your source's payload and reuse the rest. For a warehouse table in another shape, see "Bring your own format" in the warehouse guide. If you are running your own agent code, the Amplitude AI SDK is the most complete option ([Node](../../README.md), [Python](https://pypi.org/project/amplitude-ai/)).
 
+## Raw HTML content
+
+Raw HTML and `$agent_artifact` content remain producer-owned. These SDK-free integrations keep their existing capture/redaction settings and do not require an artifact preprocessor. See [raw HTML content and export boundaries](./privacy.md#raw-html-content) before forwarding HTML.
+
 ## Maintenance
 
 Owner: Amplitude Agent Analytics team. Vendor-specific details are reviewed quarterly and whenever a correction arrives; each page carries its last-verified date. These guides are Amplitude-authored; platform names are trademarks of their owners, and no affiliation or endorsement is implied. Corrections are welcome as pull requests.
-
-
-### Optional artifacts in copied ingestion jobs
-
-Copy [prepare-artifacts.mjs](./prepare-artifacts.mjs) alongside the updated forwarder/checker (and one directory above `warehouses/otlp-replay.mjs`). It has no package dependency and safely omits HTML and unsupported `$agent_artifact` declarations by default. To retain supported artifacts, explicitly bind the public helper from Node 0.24.0+ or Python 1.20.0+ using the job's approved privacy policy. See the [path matrix and pre-send examples](./privacy.md#artifact-preparation). SDK upgrades do not automatically protect copied jobs, SQL, Collector processors, or S3 imports.

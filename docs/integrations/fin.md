@@ -356,12 +356,10 @@ A conversation in which Fin runs one action, with a Fin rating, as produced by `
 
 Copy verbatim. Identical on every Amplitude integration page.
 
-Copy [prepare-artifacts.mjs](./prepare-artifacts.mjs) beside this core. It omits HTML and unsupported `$agent_artifact` declarations by default. To retain supported artifacts, bind the public helper from `@amplitude/ai` 0.24.0+ to the same approved policy using `prepareArtifacts`; see [artifact preparation](./privacy.md#artifact-preparation). Ordinary text keeps the existing optional `redact` behavior.
+Raw HTML in tool or span content is producer-owned. This forwarder applies only its existing `contentMode` and optional `redact` callback; it does not inspect rendered HTML, require an SDK helper, or omit HTML artifacts automatically. Apply your source policy before forwarding, and keep the artifact envelope and event IDs intact. See [raw HTML content](./privacy.md#raw-html-content).
 
 <!-- forwarder-core:start -->
 ```ts
-import { prepareAgentEvents } from './prepare-artifacts.mjs';
-
 // amplitude-agent-forwarder.ts — platform-neutral core. Identical on every
 // integration page; only the normalize function differs per platform.
 
@@ -454,8 +452,6 @@ export interface ToAgentEventsOptions {
   contentMode?: 'full' | 'metadata_only';
   /** Runs on every piece of content before it leaves your infrastructure. */
   redact?: (text: string) => string;
-  /** Public artifact helper bound to the same approved privacy policy; otherwise HTML/unsupported declarations are omitted. */
-  prepareArtifacts?: (value: unknown) => unknown;
   /** Platform that produced the conversation. Becomes [Agent] Source. */
   source?: string;
 }
@@ -473,8 +469,9 @@ export function toAgentEvents(
   }
 
   const full = (options.contentMode ?? 'full') === 'full';
+  const redact = options.redact ?? ((text: string) => text);
   const serialize = (value: unknown) =>
-    typeof value === 'string' ? value : JSON.stringify(value);
+    redact(typeof value === 'string' ? value : JSON.stringify(value));
   const scoped = (id: string) => `${conversation.conversationId}:${id}`;
 
   const event = (
@@ -530,7 +527,7 @@ export function toAgentEvents(
           '[Agent] Turn ID': turnId,
           '[Agent] Message ID': userMessageId,
           '[Agent] Component Type': 'user_input',
-          ...(full ? { $llm_message: { text: message.text } } : {}),
+          ...(full ? { $llm_message: { text: redact(message.text) } } : {}),
         }),
       );
       continue;
@@ -581,7 +578,7 @@ export function toAgentEvents(
           ? { '[Agent] Output Tokens': message.outputTokens }
           : {}),
         ...(message.costUsd !== undefined ? { '[Agent] Cost USD': message.costUsd } : {}),
-        ...(full && text ? { $llm_message: { text: text } } : {}),
+        ...(full && text ? { $llm_message: { text: redact(text) } } : {}),
       }),
     );
 
@@ -617,7 +614,7 @@ export function toAgentEvents(
         '[Agent] Target ID': conversation.conversationId,
         '[Agent] Target Type': 'session',
         '[Agent] Evaluation Source': score.source ?? 'user',
-        ...(full && score.comment ? { '[Agent] Comment': score.comment } : {}),
+        ...(full && score.comment ? { '[Agent] Comment': redact(score.comment) } : {}),
       }),
     );
   }
@@ -630,7 +627,7 @@ export function toAgentEvents(
     );
   }
 
-  return prepareAgentEvents(events, { prepareArtifacts: options.prepareArtifacts, redact: options.redact });
+  return events;
 }
 
 export interface SendOptions {

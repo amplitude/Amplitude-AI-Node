@@ -2,16 +2,13 @@
 
 ## 0.24.0
 
-### Added
-- Public `prepareArtifactContent`, `prepareArtifact`, and `validateArtifactHtml` helpers at `@amplitude/ai/artifacts`, usable without initializing an SDK client. HTML artifact preparation applies configured privacy rules to decoded markup and rejects unsupported static content, generated text, and oversized snapshots.
-- Static artifacts exclude form controls (`input`, `textarea`, `select`, `option`, and `optgroup`) and string-valued CSS `quotes`; producers must materialize their display labels and values as ordinary DOM text. Malformed or oversized JSON-looking strings containing the artifact marker or ambiguous ASCII/malformed Unicode escapes are omitted conservatively; strings proven unable to form the marker retain ordinary privacy behavior.
+### Documentation and validation
+- Add optional `$agent_artifact` typing for inline message attachments. This improves TypeScript ergonomics without changing existing runtime capture or validating the artifact schema.
+- Clarify that producers own raw HTML artifact snapshots and their privacy. Existing content capture settings, ordinary best-effort string redaction, and size limits apply; the SDK does not parse HTML or promise rendered-content sanitization.
+- Verify artifact content across tool/span input/output and AI/user attachments, including content modes, one ordinary custom-redactor pass per string, and single-event emission. Artifact capture does not require a new preparation API or an artifact-specific minimum SDK version.
 
 ### Fixed
-- Reject UA-hidden markup and unsupported text-hiding CSS through an explicit text-style subset; check default-ignorable Unicode and soft hyphens in privacy views. Retain bounded SVG geometry styling and tested static Plotly labels without claiming arbitrary browser-layout equivalence.
-- Preserve ordinary serialized/native content when Unicode escapes provably cannot form an artifact key. Report artifact omissions through bounded, fixed-reason logger diagnostics without including content or exception details; repeated warnings are deduplicated per privacy configuration.
-- Reject popover markup in all states and nonopaque or dynamic `fill-opacity`/`stroke-opacity` in CSS and SVG attributes, closing hidden-separator privacy gaps while preserving opaque static SVG.
-- Reject unsupported doctypes, sensitive markup names, hidden-content constructs, and SVG text assembly; verify final serialized markup is redaction-stable. Preserve large ordinary native JSON only after a complete bounded artifact-absence proof, and omit inconclusive channels atomically.
-- Tool input/output, AI/user attachments, and span input/output now protect recognized HTML artifacts automatically, including bounded JSON-serialized envelopes. Unsupported optional artifacts are omitted while sibling content and events are retained; non-artifact content keeps its existing privacy behavior. This is a bounded static-HTML policy, not a general artifact schema validator or browser-layout privacy guarantee.
+- The copied raw OTLP replay script rejects `--metadata-only` with a raw `resourceSpans` envelope before sending, rather than silently forwarding content the flag cannot remove. This transport-script check does not change SDK tracking.
 
 ## 0.23.0
 
