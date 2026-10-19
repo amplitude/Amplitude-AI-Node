@@ -393,6 +393,8 @@ export interface ToolCallShape {
  */
 export interface Attachment {
   type: string;
+  /** Optional artifact data, captured with ordinary content settings and string redaction. */
+  $agent_artifact?: Record<string, unknown>;
   name?: string;
   content?: string;
   url?: string;

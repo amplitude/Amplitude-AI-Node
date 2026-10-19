@@ -301,6 +301,12 @@ If your format is public and others would use it, a pull request adding a format
 | Conversations never import | Rows land later than `settle_hours` after the last message | Raise `settle_hours` above the load delay |
 | Databricks sync imports nothing | Change data feed isn't enabled, or the MERGE job isn't running | Recreate the table with the generated statement and check the job |
 
+## Raw HTML content
+
+HTML inside `$agent_artifact` envelopes is producer-owned content. The SQL templates, OTLP replay and S3/Batch import paths do not inherit SDK privacy settings or require an artifact preprocessor. Apply the source job's permission, capture and redaction policy before export; ordinary string/SQL replacements do not inspect rendered HTML.
+
+Preserve the envelope and event or trace/span IDs, export through the existing path once, and inspect the complete serialized payload. Replay's `--metadata-only` option filters converted rows and rejects already-built `resourceSpans` envelopes before sending; it never silently ignores the requested capture mode. For raw envelopes, apply the source policy before full-mode replay. See [raw HTML content and policy boundaries](../privacy.md#raw-html-content).
+
 ## Maintenance
 
 Owner: Amplitude Agent Analytics team. The SQL blocks are generated from [`scripts/warehouse-sql/`](../../../scripts/warehouse-sql/) and the DuckDB rendering runs in CI on each page's sample rows. The Snowflake, BigQuery, and Databricks renderings come from the same templates but aren't executed in CI. Edit the templates, then run `pnpm docs:warehouse`. Corrections are welcome as pull requests.

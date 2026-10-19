@@ -85,3 +85,9 @@ To run the repository's local checks without a model or API key:
 ```bash
 python -m unittest discover -s test/integrations -p 'test_strands_privacy.py' -v
 ```
+
+## Raw HTML content
+
+HTML inside `$agent_artifact` envelopes follows the same existing content policy as other structured tool results. Metadata-only mode omits content. Scrubbed mode applies your synchronous redactor to strings, including HTML, with the existing size, image and parse-failure rules. It does not interpret entities, CSS or rendered text, and it does not require the Amplitude SDK or an artifact helper.
+
+The producer owns which HTML may leave the application. Apply source permissions and content selection before export, preserve the envelope and trace/span IDs, and send through the existing exporter once. Inspect the final outbound attributes under your configured redactor; literal replacements do not guarantee rendered-text privacy. See [raw HTML content](./privacy.md#raw-html-content).

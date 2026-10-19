@@ -73,6 +73,32 @@ def make_span(extra=None, number=1):
 
 
 class PrivacyTests(unittest.TestCase):
+    def test_raw_html_uses_existing_capture_and_string_redaction_policy(self):
+        html = '<p>ada@example.com</p><span>ada@</span><span>example.com</span><p>ada&#64;example.com</p>'
+        artifact = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": html}}}
+        for mode, callback in (("metadata_only", redact), ("scrubbed", lambda text: text), ("scrubbed", redact)):
+            with self.subTest(mode=mode, callback=callback):
+                capture = Capture()
+                original = make_span({"gen_ai.tool.call.result": json.dumps(artifact)})
+                exporter = PrivacyExporter(capture, mode=mode, redact=callback)
+                self.assertEqual(exporter.export([original]), SpanExportResult.SUCCESS)
+                self.assertEqual(len(capture.spans), 1)
+                safe = capture.spans[0]
+                self.assertEqual(safe.context.trace_id, original.context.trace_id)
+                self.assertEqual(safe.context.span_id, original.context.span_id)
+                self.assertEqual(safe.attributes["session.id"], "conv_1")
+                wire = encode_spans(capture.spans).SerializeToString()
+                if mode == "metadata_only":
+                    self.assertNotIn("gen_ai.tool.call.result", safe.attributes)
+                    self.assertNotIn(b"$agent_artifact", wire)
+                else:
+                    prepared = json.loads(safe.attributes["gen_ai.tool.call.result"])
+                    self.assertEqual(prepared["$agent_artifact"]["payload"]["html"], callback(html))
+                    self.assertIn(b"$agent_artifact", wire)
+                    self.assertIn(b"<span>ada@</span><span>example.com</span>", wire)
+                    self.assertIn(b"ada&#64;example.com", wire)
+                self.assertEqual(exporter.omitted_content_fields, 0)
+
     def test_metadata_only_omits_every_unreviewed_channel(self):
         capture = Capture()
         exporter = PrivacyExporter(capture)

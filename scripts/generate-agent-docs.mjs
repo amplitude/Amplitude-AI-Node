@@ -141,6 +141,7 @@ ${mcpJsonGeneric}
 - LangChain / LangGraph: use \`AmplitudeCallbackHandler\` (duck-typed; implements \`handleChatModelStart\` for User Message).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
+- HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
 - Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.

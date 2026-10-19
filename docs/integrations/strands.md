@@ -214,4 +214,6 @@ In Live Events:
 
 ## When the app already runs the SDK
 
+Raw HTML and `$agent_artifact` content remain producer-owned and use the source's existing capture/redaction policy. Native OTLP does not inherit SDK settings or require an artifact helper. Preserve the envelope and trace/span IDs in the existing export; see [raw HTML content](./privacy.md#raw-html-content).
+
 If the agent process already uses the Amplitude AI SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans to `[Agent]` events in that process. Native OTLP above is the path when the SDK is not loaded. SDK `redactPii` applies only on the in-process path.

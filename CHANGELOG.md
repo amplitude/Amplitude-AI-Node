@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0
+
+### Documentation and validation
+- Add optional `$agent_artifact` typing for inline message attachments. This improves TypeScript ergonomics without changing existing runtime capture or validating the artifact schema.
+- Clarify that producers own raw HTML artifact snapshots and their privacy. Existing content capture settings, ordinary best-effort string redaction, and size limits apply; the SDK does not parse HTML or promise rendered-content sanitization.
+- Verify artifact content across tool/span input/output and AI/user attachments, including content modes, one ordinary custom-redactor pass per string, and single-event emission. Artifact capture does not require a new preparation API or an artifact-specific minimum SDK version.
+
+### Fixed
+- The copied raw OTLP replay script rejects `--metadata-only` with a raw `resourceSpans` envelope before sending, rather than silently forwarding content the flag cannot remove. This transport-script check does not change SDK tracking.
+
 ## 0.23.0
 
 ### Added

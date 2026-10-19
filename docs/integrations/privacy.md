@@ -90,3 +90,20 @@ SQL cannot faithfully copy the IPv6 lookbehinds or the whole-value base64 rule. 
 ## SDK
 
 When the agent process runs the Amplitude AI SDK, use `redactPii` (on by default) and `customRedactionFn` in the SDK config. That path is documented in the SDK README. This page covers paths that never load the SDK.
+
+## Raw HTML content
+
+Raw HTML is producer-owned content, including HTML inside a `$agent_artifact` envelope. Decide what is permitted at the source before tracking or export, retaining the source's permission and content-selection rules. Existing content-capture and redaction settings still apply; there is no mandatory artifact preparation helper, additional SDK dependency, or HTML-specific omission step.
+
+Ordinary string redaction is best effort. It can replace a literal email in a string, but it does not decode HTML entities, join text across tags, evaluate CSS/SVG, or determine what a browser displays. For example, `<span>owner@</span><span>example.com</span>` can remain unchanged under a literal-email redactor. Neither a successful export nor a checker pass certifies HTML privacy. Apply any required HTML-specific policy in your producer before this content enters the integration.
+
+| Export path | Existing policy boundary |
+|---|---|
+| HTTP forwarders; their events serialized for Batch or S3 | `contentMode: 'metadata_only'` excludes content. In full mode, the optional `redact` callback runs on content strings; its default is identity. |
+| OTLP replay or raw OTLP upload | Full-mode replay preserves supplied OTLP content. The replay `--metadata-only` option filters converted rows and rejects already-built `resourceSpans` envelopes before sending. Apply the source's capture/redaction policy before raw export. |
+| Python Strands `PrivacyExporter` | Metadata-only remains the default. Scrubbed mode requires your synchronous redactor and applies its existing structured-content rules before the exporter receives spans. |
+| Warehouse SQL, Collector transforms, and custom ingestion jobs | Use that job's own capture and redaction settings. SQL/string transforms do not acquire HTML rendering semantics or SDK privacy settings. |
+
+External exporters do not inherit the privacy configuration of an SDK running elsewhere. Keep session, trace, span, message, and invocation IDs stable, preserve the `$agent_artifact` envelope, and send the existing event or span once. Adding an HTML artifact does not require a second tracking call, an SDK client, or a new exporter. Do not place raw content in identity fields or metadata that bypasses your content policy.
+
+Test the complete serialized outbound request or import file under your chosen policy, including metadata-only behavior and expected literal replacements. Verify the final exported event/span attributes. A producer that needs rendered-text privacy must enforce that separately; these integrations make no browser-semantic guarantee.

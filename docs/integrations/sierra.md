@@ -309,6 +309,8 @@ A two-exchange conversation with one tool call, as produced by `toAgentEvents(co
 
 Copy verbatim. Identical on every Amplitude integration page.
 
+Raw HTML in tool or span content is producer-owned. This forwarder applies only its existing `contentMode` and optional `redact` callback; it does not inspect rendered HTML, require an SDK helper, or omit HTML artifacts automatically. Apply your source policy before forwarding, and keep the artifact envelope and event IDs intact. See [raw HTML content](./privacy.md#raw-html-content).
+
 <!-- forwarder-core:start -->
 ```ts
 // amplitude-agent-forwarder.ts — platform-neutral core. Identical on every
