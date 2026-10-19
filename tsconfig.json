@@ -17,5 +17,5 @@
       "@amplitude/ai/src/*": ["./src/*"]
     }
   },
-  "include": ["src", "vitest.config.ts"]
+  "include": ["src", "vitest.config.ts", "test/fixtures/artifact-attachment-types.ts"]
 }
