@@ -18,12 +18,72 @@ const htmlOf = (value: unknown): string =>
   (value as ReturnType<typeof envelope>).$agent_artifact.payload.html;
 const identity = { redactPii: false };
 
+describe('explicit text CSS subset', () => {
+  it.each([
+    '#abc',
+    '#abcd',
+    '#abcdef',
+    '#abcdefee',
+    'transparent',
+    'rgba(1,2,3,0.5)',
+    'hsl(120 20% 30%)',
+    'var(--ink)',
+    'color-mix(in srgb, red, transparent)',
+  ])('accepts only opaque supported text colors: %s', (value) => {
+    const accepted = ['#abc', '#abcdef'].includes(value);
+    const result = prepareArtifact(envelope(`<p style="color:${value}">Safe</p>`));
+    expect(result !== undefined).toBe(accepted);
+  });
+  it.each([
+    '#abcf',
+    '#abcdefff',
+    'rgb(1,2,3)',
+    'rgba(1,2,3,1)',
+    'hsl(120,20%,30%)',
+    'hsla(120,20%,30%,1)',
+    'currentColor',
+    'navy',
+  ])('preserves supported opaque colors: %s', (value) => {
+    expect(prepareArtifact(envelope(`<p style="color:${value}">Safe</p>`))).toBeDefined();
+  });
+  it.each(['0.00001px', '0.5px', '1%', '1em', 'smaller', 'calc(12px)', 'var(--size)'])(
+    'rejects unproven font sizes: %s',
+    (value) => {
+      expect(
+        prepareArtifact(envelope(`<svg><text font-size="${value}">Safe</text></svg>`)),
+      ).toBeUndefined();
+    },
+  );
+  it.each(['1px', '12px', '0.75pt', 'small'])(
+    'retains supported readable font sizes: %s',
+    (value) => {
+      expect(
+        prepareArtifact(envelope(`<svg><text font-size="${value}">Safe</text></svg>`)),
+      ).toBeDefined();
+    },
+  );
+  it.each([
+    'translate(1,2,3)',
+    'rotate(1,2)',
+    'translate(1e999)',
+    'scale(1)',
+    'matrix(1,0,0,1,0,0)',
+  ])('rejects unsupported text transforms: %s', (value) => {
+    expect(
+      prepareArtifact(envelope(`<svg><text transform="${value}">Safe</text></svg>`)),
+    ).toBeUndefined();
+  });
+});
+
 describe('shared artifact privacy policy', () => {
   for (const fixture of fixtures.cases) {
     it(fixture.id, () => {
       const source = envelope(fixture.html);
       const original = JSON.stringify(source);
-      const result = prepareArtifact(source, { redactPii: fixture.redactPii ?? true });
+      const result = prepareArtifact(source, {
+        redactPii: fixture.redactPii ?? true,
+        customRedactionPatterns: fixture.customPattern ? [fixture.customPattern] : undefined,
+      });
       expect(JSON.stringify(source)).toBe(original);
       if (fixture.outcome === 'omit') expect(result).toBeUndefined();
       else {
@@ -530,7 +590,12 @@ describe('actual SDK content boundaries', () => {
   ] as const) {
     for (const fixture of fixtures.cases) {
       it(`${lane}: ${fixture.id}`, () => {
-        const ai = new MockAmplitudeAI(new AIConfig({ redactPii: fixture.redactPii ?? true }));
+        const ai = new MockAmplitudeAI(
+          new AIConfig({
+            redactPii: fixture.redactPii ?? true,
+            customRedactionPatterns: fixture.customPattern ? [fixture.customPattern] : undefined,
+          }),
+        );
         const agent = ai.agent('reporter', {
           userId: 'synthetic-user',
           sessionId: 'synthetic-session',

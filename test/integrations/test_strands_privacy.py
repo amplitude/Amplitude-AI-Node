@@ -268,7 +268,10 @@ class ArtifactSdkParityTests(unittest.TestCase):
         fixture_path = Path(__file__).resolve().parents[1] / "fixtures/artifact-privacy-v1.json"
         for fixture in json.loads(fixture_path.read_text())["cases"]:
             with self.subTest(case=fixture["id"]):
-                config = AIConfig(content_mode="full", redact_pii=fixture.get("redactPii", True))
+                config = AIConfig(
+                    content_mode="full", redact_pii=fixture.get("redactPii", True),
+                    custom_redaction_patterns=[fixture["customPattern"]] if fixture.get("customPattern") else [],
+                )
                 def prepare(value):
                     return prepare_artifact_content(value, config=config)
                 artifact = {"$agent_artifact": {"v": 1, "type": "html", "title": "Report", "payload": {"html": fixture["html"]}}}

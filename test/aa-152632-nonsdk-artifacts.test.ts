@@ -43,10 +43,15 @@ describe('non-SDK outbound artifact preparation', () => {
   });
   for (const fixture of fixtures.cases) {
     it(`uses the SDK policy for HTTP/Batch/S3 and OTLP: ${fixture.id}`, async () => {
-      const prepareArtifacts = (value: unknown) => prepareArtifactContent(value, { redactPii: fixture.redactPii ?? true });
+      const prepareArtifacts = (value: unknown) => prepareArtifactContent(value, {
+        redactPii: fixture.redactPii ?? true,
+        customRedactionPatterns: fixture.customPattern ? [fixture.customPattern] : [],
+      });
       const input = { result: 'ordinary sibling', attachments: [envelope(fixture.html)] };
       const events = prepareAgentEvents([event(JSON.stringify(input))], { prepareArtifacts });
-      const http = JSON.stringify({ api_key: 'test', events });
+      const httpFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 200 }));
+      await core.send(events, { apiKey: 'test', fetchImpl: httpFetch });
+      const http = httpFetch.mock.calls[0]?.[1].body as string;
       const batch = JSON.stringify({ api_key: 'test', events });
       const s3 = events.map(e => JSON.stringify(e)).join('\n');
       const fetchImpl = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 200 }));

@@ -7,6 +7,7 @@
 - Static artifacts exclude form controls (`input`, `textarea`, `select`, `option`, and `optgroup`) and string-valued CSS `quotes`; producers must materialize their display labels and values as ordinary DOM text. Malformed or oversized JSON-looking strings containing the artifact marker or ambiguous ASCII/malformed Unicode escapes are omitted conservatively; strings proven unable to form the marker retain ordinary privacy behavior.
 
 ### Fixed
+- Reject UA-hidden markup and unsupported text-hiding CSS through an explicit text-style subset; check default-ignorable Unicode and soft hyphens in privacy views. Retain bounded SVG geometry styling and tested static Plotly labels without claiming arbitrary browser-layout equivalence.
 - Preserve ordinary serialized/native content when Unicode escapes provably cannot form an artifact key. Report artifact omissions through bounded, fixed-reason logger diagnostics without including content or exception details; repeated warnings are deduplicated per privacy configuration.
 - Reject popover markup in all states and nonopaque or dynamic `fill-opacity`/`stroke-opacity` in CSS and SVG attributes, closing hidden-separator privacy gaps while preserving opaque static SVG.
 - Reject unsupported doctypes, sensitive markup names, hidden-content constructs, and SVG text assembly; verify final serialized markup is redaction-stable. Preserve large ordinary native JSON only after a complete bounded artifact-absence proof, and omit inconclusive channels atomically.

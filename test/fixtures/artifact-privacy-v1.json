@@ -124,7 +124,7 @@
     },
     {
       "id": "static-svg-with-background",
-      "html": "<svg width=\"700\" height=\"500\" viewBox=\"0 0 700 500\" style=\"background:rgb(255,255,255)\"><defs><clipPath id=\"plot\"><rect width=\"500\" height=\"300\"/></clipPath></defs><g clip-path=\"url(#plot)\"><text>Alpha 12</text></g></svg><p>Summary</p><p>Synthetic source</p>",
+      "html": "<svg width=\"700\" height=\"500\" viewBox=\"0 0 700 500\" style=\"background:rgb(255,255,255)\"><defs><clipPath id=\"plot\"><rect width=\"500\" height=\"300\"/></clipPath></defs><g clip-path=\"url(#plot)\"><path d=\"M0 0L100 100\" fill=\"none\" stroke=\"black\"/></g><text transform=\"translate(20,30)\">Alpha 12</text></svg><p>Summary</p><p>Synthetic source</p>",
       "outcome": "retain",
       "contains": [
         "Alpha 12",
@@ -359,7 +359,7 @@
     },
     {
       "id": "svg-geometry-defs",
-      "html": "<svg><title>Chart</title><defs><clipPath id=\"area\"><rect width=\"100\" height=\"100\"/></clipPath></defs><g clip-path=\"url(#area)\"><text>Alpha: 12</text></g></svg>",
+      "html": "<svg><title>Chart</title><defs><clipPath id=\"area\"><rect width=\"100\" height=\"100\"/></clipPath></defs><g clip-path=\"url(#area)\"><rect width=\"100\" height=\"100\" fill=\"none\" stroke=\"black\"/></g><text>Alpha: 12</text></svg>",
       "outcome": "retain",
       "contains": [
         "Chart",
@@ -439,6 +439,437 @@
         "Alpha: 12",
         "Beta: 8"
       ]
+    },
+    {
+      "id": "ua-hidden-datalist",
+      "html": "<span>owner@</span><datalist>!</datalist><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ua-hidden-noembed",
+      "html": "<span>owner@</span><noembed>!</noembed><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ua-hidden-noframes",
+      "html": "<span>owner@</span><noframes>!</noframes><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ua-hidden-rp",
+      "html": "<span>owner@</span><rp>!</rp><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ua-hidden-basefont",
+      "html": "<span>owner@</span><basefont>!</basefont><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-zwsp-email",
+      "html": "<p>owner@&#x200b;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-zwsp-phone",
+      "html": "<p>555-123-&#x200b;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-zwsp-ssn",
+      "html": "<p>123-45-&#x200b;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-soft-hyphen-email",
+      "html": "<p>owner@&shy;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-soft-hyphen-phone",
+      "html": "<p>555-123-&shy;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-soft-hyphen-ssn",
+      "html": "<p>123-45-&shy;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-bom-email",
+      "html": "<p>owner@&#xfeff;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-bom-phone",
+      "html": "<p>555-123-&#xfeff;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-bom-ssn",
+      "html": "<p>123-45-&#xfeff;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-word-joiner-email",
+      "html": "<p>owner@&#x2060;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-word-joiner-phone",
+      "html": "<p>555-123-&#x2060;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-word-joiner-ssn",
+      "html": "<p>123-45-&#x2060;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-variation-selector-email",
+      "html": "<p>owner@&#xfe0f;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-variation-selector-phone",
+      "html": "<p>555-123-&#xfe0f;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-variation-selector-ssn",
+      "html": "<p>123-45-&#xfe0f;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-bidi-control-email",
+      "html": "<p>owner@&#x202e;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-bidi-control-phone",
+      "html": "<p>555-123-&#x202e;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-bidi-control-ssn",
+      "html": "<p>123-45-&#x202e;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-supplementary-variation-email",
+      "html": "<p>owner@&#xe0100;example.com</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-supplementary-variation-phone",
+      "html": "<p>555-123-&#xe0100;4567</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-supplementary-variation-ssn",
+      "html": "<p>123-45-&#xe0100;6789</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-attribute",
+      "html": "<p title=\"owner@&#x200b;example.com\">Report</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-cross-node",
+      "html": "<span>owner@</span><span>&shy;</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-custom-text",
+      "html": "<p>ACCOUNT&#x200b;42</p>",
+      "outcome": "omit",
+      "redactPii": false,
+      "customPattern": "ACCOUNT42"
+    },
+    {
+      "id": "ignorable-custom-attribute",
+      "html": "<p title=\"ACCOUNT&#xad;42\">Report</p>",
+      "outcome": "omit",
+      "redactPii": false,
+      "customPattern": "ACCOUNT42"
+    },
+    {
+      "id": "css-suppressed-font-zero",
+      "html": "<span>owner@</span><span style=\"font-size:0\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-font-zero-px",
+      "html": "<span>owner@</span><span style=\"font-size:0px\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-font-zero-percent",
+      "html": "<span>owner@</span><span style=\"font-size:0%\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-font-calc-zero",
+      "html": "<span>owner@</span><span style=\"font-size:calc(0px)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-font-variable-zero",
+      "html": "<span>owner@</span><span style=\"--size:0px;font-size:var(--size)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-font-shorthand-zero",
+      "html": "<span>owner@</span><span style=\"font:0px serif\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-zero-overflow",
+      "html": "<span>owner@</span><span style=\"display:inline-block;width:0;height:0;overflow:hidden\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-absolute-offscreen",
+      "html": "<span>owner@</span><span style=\"position:absolute;left:-9999px\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-fixed-offscreen",
+      "html": "<span>owner@</span><span style=\"position:fixed;top:-9999px\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-float",
+      "html": "<span>owner@</span><span style=\"float:left\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-clip",
+      "html": "<span>owner@</span><span style=\"position:absolute;clip:rect(0px,0px,0px,0px)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-clip-path",
+      "html": "<span>owner@</span><span style=\"clip-path:inset(100%)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-transform-zero",
+      "html": "<span>owner@</span><span style=\"transform:scale(0)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-transform-offscreen",
+      "html": "<span>owner@</span><span style=\"transform:translateX(-9999px)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-transparent",
+      "html": "<span>owner@</span><span style=\"color:transparent\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-rgba-zero",
+      "html": "<span>owner@</span><span style=\"color:rgba(0,0,0,0)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-hsla-zero",
+      "html": "<span>owner@</span><span style=\"color:hsla(0,0%,0%,0)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-hex-alpha-zero",
+      "html": "<span>owner@</span><span style=\"color:#0000\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-hex-long-alpha-zero",
+      "html": "<span>owner@</span><span style=\"color:#00000000\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-modern-rgb-zero",
+      "html": "<span>owner@</span><span style=\"color:rgb(0 0 0 / 0)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-paint-variable",
+      "html": "<span>owner@</span><span style=\"--paint:transparent;color:var(--paint)\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-webkit-text-fill",
+      "html": "<span>owner@</span><span style=\"-webkit-text-fill-color:transparent\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-class",
+      "html": "<style>.separator{font-size:0}</style><span>owner@</span><span class=\"separator\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-phone",
+      "html": "<span>555-123-</span><span style=\"font-size:0\">x</span><span>4567</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-ssn",
+      "html": "<span>123-45-</span><span style=\"color:transparent\">x</span><span>6789</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-font-zero",
+      "html": "<svg><text>owner@<tspan font-size=\"0\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-fill-transparent",
+      "html": "<svg><text>owner@<tspan fill=\"transparent\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-fill-alpha",
+      "html": "<svg><text>owner@<tspan fill=\"rgba(0,0,0,0)\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-fill-none",
+      "html": "<svg><text>owner@<tspan fill=\"none\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-transform-zero",
+      "html": "<svg><text>owner@<tspan transform=\"scale(0)\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "ignorable-ordinary-label",
+      "html": "<p>Report: Al&#x200b;pha</p>",
+      "outcome": "retain",
+      "contains": [
+        "Report:"
+      ]
+    },
+    {
+      "id": "ignorable-redaction-disabled",
+      "html": "<p>owner@&#x200b;example.com</p>",
+      "outcome": "retain",
+      "redactPii": false,
+      "contains": [
+        "owner@",
+        "example.com"
+      ]
+    },
+    {
+      "id": "static-positive-typography",
+      "html": "<p style=\"font-size:14px;color:rgb(20,30,40)\">Alpha: 12</p>",
+      "outcome": "retain",
+      "contains": [
+        "Alpha: 12"
+      ]
+    },
+    {
+      "id": "svg-text-clipping-unsupported",
+      "html": "<svg width=\"700\" height=\"500\" viewBox=\"0 0 700 500\" style=\"background:rgb(255,255,255)\"><defs><clipPath id=\"plot\"><rect width=\"500\" height=\"300\"/></clipPath></defs><g clip-path=\"url(#plot)\"><text>Alpha 12</text></g></svg><p>Summary</p><p>Synthetic source</p>",
+      "outcome": "omit"
+    },
+    {
+      "id": "styled-static-report-table-grid",
+      "html": "<section style=\"font-size:14px;color:#202020;background:#ffffff;padding:8px\"><h1 style=\"font-size:24px;font-weight:bold\">Quarterly report</h1><div style=\"display:grid;grid-template-columns:1fr 1fr;gap:12px\"><p>Alpha: 12</p><p>Beta: 8</p></div><table style=\"border:1px solid #cccccc\"><tr><th style=\"padding:8px\">Category</th><th style=\"padding:8px\">Count</th></tr><tr><td style=\"padding:8px\">Alpha</td><td style=\"padding:8px\">12</td></tr></table></section>",
+      "outcome": "retain",
+      "contains": [
+        "Quarterly report",
+        "Alpha: 12",
+        "Beta: 8",
+        "Category"
+      ]
+    },
+    {
+      "id": "safe-report-custom-pattern",
+      "html": "<h2>Report</h2><p>Alpha: 12</p>",
+      "outcome": "retain",
+      "redactPii": false,
+      "customPattern": "ACCOUNT42",
+      "contains": [
+        "Report",
+        "Alpha: 12"
+      ]
+    },
+    {
+      "id": "svg-suppressed-font-calc-zero",
+      "html": "<svg><text>owner@<tspan font-size=\"calc(0px)\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-font-variable-zero",
+      "html": "<svg><text>owner@<tspan style=\"--size:0px;font-size:var(--size)\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-tiny-positive-font",
+      "html": "<span>owner@</span><span style=\"font-size:0.000001px\">!</span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "css-suppressed-relative-compound-font",
+      "html": "<span>owner@</span><span style=\"font-size:0.01em\"><span style=\"font-size:0.01em\">!</span></span><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-suppressed-tiny-positive-font",
+      "html": "<svg><text>owner@<tspan font-size=\"0.000001\">!</tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-whitespace-text-suppression",
+      "html": "<svg><text>owner@<tspan style=\"font-size:0\"> </tspan>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-whitespace-text-ancestor-suppression",
+      "html": "<svg><text>owner@</text><g style=\"font-size:0\"><text> </text></g><text>example.com</text></svg>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-zero-viewport-text",
+      "html": "<span>owner@</span><svg width=\"0\" height=\"0\"><text>!</text></svg><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-tiny-viewport-text",
+      "html": "<span>owner@</span><svg width=\"0.000001\" height=\"0.000001\"><text>!</text></svg><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-tiny-css-viewport-inline",
+      "html": "<span>owner@</span><svg style=\"width:0.000001px;height:0.000001px\"><text>!</text></svg><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-tiny-css-viewport-stylesheet",
+      "html": "<style>.tiny{width:0.000001%;height:0.000001%}</style><span>owner@</span><svg class=\"tiny\"><text>!</text></svg><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "static-absolute-auto-text-layout",
+      "html": "<section style=\"width:400px;height:auto;min-width:1px;max-width:none;max-height:none\"><p>Alpha: 12</p><p>Beta: 8</p></section>",
+      "outcome": "retain",
+      "contains": [
+        "Alpha: 12",
+        "Beta: 8"
+      ]
+    },
+    {
+      "id": "svg-zero-foreignobject-viewport-text",
+      "html": "<span>owner@</span><svg><foreignObject width=\"0\" height=\"0\"><span>!</span></foreignObject></svg><span>example.com</span>",
+      "outcome": "omit"
+    },
+    {
+      "id": "svg-default-foreignobject-viewport-text",
+      "html": "<span>owner@</span><svg><foreignObject><span>!</span></foreignObject></svg><span>example.com</span>",
+      "outcome": "omit"
     }
   ]
 }
