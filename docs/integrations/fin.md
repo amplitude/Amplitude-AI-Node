@@ -356,6 +356,8 @@ A conversation in which Fin runs one action, with a Fin rating, as produced by `
 
 Copy verbatim. Identical on every Amplitude integration page.
 
+Raw HTML in tool or span content is producer-owned. This forwarder applies only its existing `contentMode` and optional `redact` callback; it does not inspect rendered HTML, require an SDK helper, or omit HTML artifacts automatically. Apply your source policy before forwarding, and keep the artifact envelope and event IDs intact. See [raw HTML content](./privacy.md#raw-html-content).
+
 <!-- forwarder-core:start -->
 ```ts
 // amplitude-agent-forwarder.ts — platform-neutral core. Identical on every
@@ -1080,7 +1082,9 @@ export function normalizeFinConversation(
 /** Only conversations untouched for this long are forwarded, by the scheduled job and the webhook alike. */
 const SETTLE_SECONDS = 2 * 60 * 60;
 
-const redact = (text: string): string => text; // replace with your PII redaction
+import { redactAgentContent } from './redact-pii.mjs';
+
+const redact = redactAgentContent;
 
 const MAPPING: FinMappingOptions = {
   agentId: 'TODO-confirmed-agent-id',
@@ -1283,7 +1287,7 @@ export async function handleIntercomWebhook(
 
 ### Privacy
 
-On the HTTP path you own redaction, and it must run before sending. Content travels in four places; gate all of them, not just message text:
+On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); this guide passes [redact-pii.mjs](./redact-pii.mjs) as `redact`. Content travels in four places; gate all of them, not just message text:
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call (the Fin adapter sends neither)

@@ -40,6 +40,8 @@ app.post('/chat', async (req, res) => {
 
 ### Instrument with a coding agent (recommended)
 
+Fetch and follow [amplitude-ai.md](https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md), then install the SDK as that guide says:
+
 ```bash
 npm install @amplitude/ai
 npx -y -p @amplitude/ai amplitude-ai
@@ -68,7 +70,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.22.0                                                                                                                                                                           |
+| Version         | 0.23.0                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
@@ -511,7 +513,7 @@ You're not inventing a new identifier — use the thread, ticket, call, or run I
 
 ##### When does an agent session end?
 
-**Close explicitly when the job is done (recommended).** Call `trackSessionEnd()` or let `session.run()` complete when the unit of work is finished (ticket resolved, call ended, run completed). This marks the session as complete and makes it **eligible for server-side enrichment immediately**.
+**Close explicitly when the job is done (recommended).** Call `trackSessionEnd()` or let `session.run()` complete when the unit of work is finished (ticket resolved, call ended, run completed). `[Agent] Session End` is optional. Sending it is the explicit close. If it never arrives, the server closes the session after 30 idle minutes by default, and after 24 hours from the session start when no per-session override is set. Enrichment runs once after the first close. The Session Record typically arrives 15–20 minutes after the ingestion batch processes that close, and can take longer during a backlog.
 
 Closing does not block later events with the same `sessionId` — it is a completion marker, not a hard lock. If the user continues the **same job** (same thread or ticket), reusing the same `sessionId` is fine.
 
@@ -708,7 +710,7 @@ OpenAI-compatible gateways and OTEL partners — no special SDK build required:
 | **OpenRouter** | SDK-through (`baseURL`) | Pass the **canonical** routed model id (e.g. `gpt-4o-mini`), not `openrouter/auto`. Align Amplitude `contentMode` with OpenRouter Privacy Mode. |
 | **LiteLLM** | SDK-through or OTLP | Set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on OTEL spans. |
 | **Requesty** | SDK-through only | No OTLP push today — point the OpenAI client at Requesty's base URL. |
-| **Strands → Nova** | OTLP | Export GenAI spans into Amplitude via `AmplitudeAgentExporter` / `enableOtel()`. |
+| **Strands** | OTLP | Python Strands Agents 1.60.0 exports native OTLP/HTTP. Follow [docs/integrations/strands.md](docs/integrations/strands.md). When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process. |
 
 Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
 
@@ -716,7 +718,7 @@ Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: 
 
 ## Privacy & Content Control
 
-Three content modes control what data is sent to Amplitude:
+Three content modes control what data is sent to Amplitude. `redactPii` runs in this SDK process. Paths that never load the SDK — HTTP forwarders, native OTLP, Batch, S3, and warehouse import — follow [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub content after receipt.
 
 | Mode                | Message Content           | Token/Cost/Latency | Session Grouping | Server Enrichments |
 | ------------------- | ------------------------- | ------------------ | ---------------- | ------------------ |
@@ -1753,6 +1755,8 @@ const handler = new AmplitudeCallbackHandler({
 chain.invoke(input, { callbacks: [handler] });
 ```
 
+A handler records one agent unless it runs inside `session.runAs()`. Delegation supplies `[Agent] Parent Agent ID` and suppresses the internal prompt so it is not recorded as an end-user turn.
+
 ### OpenTelemetry
 
 Two exporters add Amplitude as a destination alongside your existing trace backend (Datadog, Honeycomb, Jaeger, etc.):
@@ -2621,7 +2625,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Has Data Quality Issues` | boolean | Yes | Whether the AI output had data quality problems (wrong data, hallucinations, etc.). |
 | `[Agent] Models Used` | string[] | No | LLM models used in this session. JSON array of strings. |
 | `[Agent] Root Agent Name` | string | No | Entry-point agent in multi-agent flows. |
-| `[Agent] Agent Chain Depth` | number | No | Number of agents in the delegation chain. |
+| `[Agent] Agent Chain Depth` | number | No | Agents on the longest delegation path. 1 is a single agent, 2 is one hop, and 3 or more is deeper nesting. Depth greater than 1 still means multi-agent. |
 | `[Agent] Task Failure Type` | string | No | Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete'). |
 | `[Agent] Technical Error Count` | number | No | Count of technical errors that occurred during the session. |
 | `[Agent] Error Categories` | string[] | No | Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings. |
@@ -2827,7 +2831,7 @@ If your conversations are already traced in an LLM tracing tool, a scheduled job
 - [LangSmith](docs/integrations/langsmith.md)
 - [Braintrust](docs/integrations/braintrust.md)
 
-If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly).
+If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). Python Strands Agents exports native OTLP/HTTP: follow [docs/integrations/strands.md](docs/integrations/strands.md). Scrub content before it leaves your infrastructure with [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub after receipt.
 
 ### Data warehouses (Snowflake, BigQuery, Databricks)
 
@@ -2843,7 +2847,7 @@ When you use this SDK, the following are managed automatically. If you send even
 | **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set an `insert_id` per event derived from your source IDs (not a fresh UUID per send), so retries and re-imports deduplicate                  |
 | **Property prefixing**       | All properties are prefixed with `[Agent]`                                                                                                                                | You must include the `[Agent] ` prefix in every property name                                                                                 |
 | **Cost / token calculation** | Auto-computed from model and token counts                                                                                                                                 | Compute and send `[Agent] Cost USD`, `[Agent] Input Tokens`, etc. yourself                                                                    |
-| **Server-side enrichment**   | `[Agent] Session Record` and `[Agent] Evaluator Result` events are emitted by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Send `[Agent] Score` yourself when you have feedback; Amplitude never emits it. |
+| **Server-side enrichment**   | `[Agent] Session Record` and `[Agent] Evaluator Result` are emitted after the session closes, whether the close is an explicit `[Agent] Session End` or the idle-timeout fallback | These fire automatically — you do **not** need to send them. Send `[Agent] Score` yourself when you have feedback; Amplitude never emits it. |
 
 ### Ingestion methods
 
@@ -2987,6 +2991,8 @@ See `src/core/tracking.ts` and `src/core/constants.ts` for the full list.
 This SDK is designed to be discovered and used by any AI coding agent — Cursor, Claude Code, Windsurf, Copilot, Codex, Cline, or any agent that can read files.
 
 **The fastest path:**
+
+Fetch and follow https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md, then install the SDK as that guide says:
 
 ```bash
 npm install @amplitude/ai

@@ -39,6 +39,10 @@ scheduled job (for example, hourly)
 
 LangSmith feedback is not forwarded by this adapter. If the user wants it on a production conversation, map thread-level feedback to a `ForwarderScore`.
 
+### Agent lineage
+
+The forwarder stamps one configured `[Agent] Agent ID` on every event in the thread. Nested LangSmith runs stay tool calls or spans. They do not become child agents, and the job does not set `[Agent] Parent Agent ID`. For parent-child lineage, instrument the running agent with `runAs()` or send `amplitude.parent.agent.id` on OpenTelemetry spans. See [Instrument multi-agent systems](https://amplitude.com/docs/amplitude-ai/agent-analytics/multi-agent).
+
 ### What your traces must already contain
 
 This job forwards what is already in LangSmith; it cannot add what the application never logged.
@@ -322,6 +326,8 @@ A two-exchange thread with a tool call, as `syncLangSmith` produces it from the 
 ### Forwarder core
 
 Copy verbatim. Identical on every Amplitude integration page.
+
+Raw HTML in tool or span content is producer-owned. This forwarder applies only its existing `contentMode` and optional `redact` callback; it does not inspect rendered HTML, require an SDK helper, or omit HTML artifacts automatically. Apply your source policy before forwarding, and keep the artifact envelope and event IDs intact. See [raw HTML content](./privacy.md#raw-html-content).
 
 <!-- forwarder-core:start -->
 ```ts
@@ -1005,7 +1011,9 @@ export function normalizeLangSmithThread(
 /** Only threads with no trace newer than this are treated as finished. */
 const SETTLE_MS = 2 * 60 * 60 * 1000;
 
-const redact = (text: string): string => text; // replace with your PII redaction
+import { redactAgentContent } from './redact-pii.mjs';
+
+const redact = redactAgentContent;
 
 const MAPPING: LangSmithMappingOptions = {
   agentId: 'TODO-confirmed-agent-id',
@@ -1112,7 +1120,7 @@ export async function syncLangSmith(
 
 ### Privacy
 
-On the HTTP path you own redaction, and it must run before sending. Content travels in four places; gate all of them, not just message text:
+On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); this guide passes [redact-pii.mjs](./redact-pii.mjs) as `redact`. Content travels in four places; gate all of them, not just message text:
 
 - `$llm_message.text` on User Message and AI Response
 - `[Agent] Tool Input` and `[Agent] Tool Output` on Tool Call

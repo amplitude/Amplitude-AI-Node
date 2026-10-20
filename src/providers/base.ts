@@ -36,6 +36,9 @@ import {
   GENAI_RESPONSE_MODEL,
   GENAI_RESPONSE_ID,
   GENAI_USAGE_COST,
+  AMP_AGENT_ID,
+  AMP_PARENT_AGENT_ID,
+  AMP_SKIP_AUTO_USER_TRACKING,
   OP_CHAT,
 } from '../otel/conventions.js';
 import { recordToolUsesFromResponse } from '../utils/tool-latency.js';
@@ -382,6 +385,15 @@ function _providerEffectiveMode(
  * `customRedactionFn` before attributes enter the OTEL pipeline —
  * matching the trackAiMessage / trackToolCall contract.
  */
+function _stampLineage(
+  attrs: Record<string, unknown>,
+  ctx: ReturnType<typeof getActiveContext>,
+): void {
+  if (ctx?.agentId) attrs[AMP_AGENT_ID] = ctx.agentId;
+  if (ctx?.parentAgentId) attrs[AMP_PARENT_AGENT_ID] = ctx.parentAgentId;
+  if (ctx?.skipAutoUserTracking) attrs[AMP_SKIP_AUTO_USER_TRACKING] = true;
+}
+
 function _sanitizeGenAiMessagesForSpan(
   messages: unknown,
   pc: PrivacyConfig | null,
@@ -517,6 +529,7 @@ export abstract class BaseAIProvider {
         if (opts.isError && opts.errorType != null) {
           spanAttrs[GENAI_ERROR_TYPE] = opts.errorType;
         }
+        _stampLineage(spanAttrs, getActiveContext());
 
         const span = tracer.startSpan(`${opts.provider}.${OP_CHAT}`, { attributes: spanAttrs });
         if (opts.isError) {
@@ -734,6 +747,7 @@ export class SimpleStreamingTracker {
         if (this.accumulator.elapsedMs > 0) {
           spanAttrs['amplitude.latency_ms'] = this.accumulator.elapsedMs;
         }
+        _stampLineage(spanAttrs, getActiveContext());
 
         const span = tracer.startSpan(`${this._providerName}.${OP_CHAT}`, { attributes: spanAttrs });
         span.end();

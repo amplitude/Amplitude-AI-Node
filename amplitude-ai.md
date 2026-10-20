@@ -218,7 +218,7 @@ export async function POST(req: Request) {
 ```
 
 - Pass **`sessionId`** from the request — use the thread, ticket, call, or run ID the app already tracks (not a random UUID in production).
-- Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done so enrichment can run immediately; set **`idleTimeoutMinutes`** if turns can be hours apart.
+- Let **`session.run()`** exit (or call `trackSessionEnd()`) when the job is done. `[Agent] Session End` is optional and recommended. If it never arrives, the server closes the session after 30 idle minutes by default. Enrichment runs once after that close, and the Session Record typically arrives 15–20 minutes after the ingestion batch processes it. Set **`idleTimeoutMinutes`** if turns can be hours apart.
 - Full semantics: see README [What is an agent session?](#what-is-an-agent-session).
 
 > **[Frontend: yes] Client-managed sessionId — required check.** If the browser client generates its own `sessionId` (common when the app doesn't use the Amplitude browser SDK), verify it is conversation-scoped: generate a fresh `crypto.randomUUID()` when a new conversation starts, and do not persist it indefinitely across page loads. A sessionId stored in `localStorage` and never reset will silently route all new events under an old session — the server accepts and enriches them correctly, but they never appear as new sessions in Agent Analytics because the ID predates instrumentation. This is invisible at the server level: HTTP 200, events ingested, nothing in the logs. The fix must happen in the client. During verification (Step 4d-live), use an incognito window, which starts with empty storage and guarantees a fresh sessionId.
@@ -239,7 +239,7 @@ export async function POST(req: Request) {
 > ```
 > Without this, a failed LLM call produces no `[Agent] AI Response` event — the turn is invisible in Agent Analytics and latency/error-rate charts miss the failure entirely.
 
-> **Multi-turn HTTP servers:** `session.run()` emits `[Agent] Session End` when it exits — this is correct and expected for HTTP request/response servers. Call `session.run()` once per request. Session grouping across requests works because all turns share the same `sessionId` — that is the identifier Agent Analytics uses to stitch turns into one conversation. Two things must hold: (1) `sessionId` is stable and passed on every request, and (2) the agent is defined at module level so `[Agent] Agent ID` is consistent. If either drifts, turns appear as separate sessions in the UI.
+> **Multi-turn HTTP servers:** Close the session when the unit of work finishes, not after every request. `session.run()` emits `[Agent] Session End` on exit by default, and the first close is the one enrichment uses. For a conversation that continues across requests, open each request with `trackSessionEnd: false` and call `trackSessionEnd()` once when the job is done. Keep one stable `sessionId` on every request, and define the agent at module level so `[Agent] Agent ID` stays consistent. If either drifts, turns appear as separate sessions.
 >
 > **Non-serverless flush:** `session.run()` auto-flushes only in serverless environments (Vercel, Lambda, Netlify). For long-lived servers (Express, Fastify, plain Node `http`), call `await ai.flush()` after each `session.run()`. Use `try/finally` so events are flushed even when `session.run()` throws — without it, an unhandled error silently drops all queued events:
 > ```typescript
@@ -270,6 +270,12 @@ s.trackUserMessage(JSON.stringify(payloadRecord));
 ```
 
 **Provider wrapper auto-tracking caution:** Wrapped providers automatically emit `[Agent] User Message` for every `role: "user"` message in the LLM request. **Do not call `s.trackUserMessage()` for the same user input you are also passing to a provider wrapper** — you will get two `[Agent] User Message` events for a single user turn. Choose one: either call `s.trackUserMessage()` manually and suppress auto-tracking, or rely on the provider wrapper and omit the manual call. If internal delegation calls include structured prompts as `role: "user"`, those will appear as duplicate user turns unless you use `runAs()` (which suppresses auto user-message tracking). See **Step 3g-b** for the canonical fan-out pattern.
+
+**HTML artifact capture:** HTML inside `$agent_artifact` envelopes uses the same content settings, ordinary string redaction, and serialization as other tool/span input/output and AI/user message attachments. `full` captures these fields; `metadata_only` and `customer_enriched` omit them. This runtime behavior does not require a new artifact-specific SDK API or a minimum SDK version beyond the tracking APIs you use. Version 0.24.0 adds optional `$agent_artifact` typing for inline attachment literals; it does not add schema validation or change capture.
+
+Select source data approved for analytics capture before constructing HTML. The producer owns the snapshot content. Ordinary redaction may retain text encoded in entities, split across elements, generated by CSS, or hidden by layout. The SDK does not parse HTML, inspect rendered output, enforce a CSS subset, or guarantee removal of every rendered identifier. Its configured PII patterns and custom redactor make one ordinary best-effort pass over each string value; they can change the HTML source and are not a browser-aware sanitizer. Do not add a second SDK redaction pass around these tracking calls. A custom callback should return the intended final string and can still fail closed through the existing ordinary sanitizer behavior.
+
+Preflight the completed snapshot and containing serialized field against the receiving artifact contract and existing SDK/event size limits before tracking. Ordinary serialization can truncate oversized values; it does not provide artifact-specific completeness guarantees. Omit an optional snapshot at the producer when it cannot fit intact. Keep the original event and useful metadata, and emit each event once. HTTP/OTLP/warehouse integrations have their own transport-specific capture and redaction configuration; see `docs/integrations/privacy.md`.
 <!-- llms-excerpt:content-shaping:end -->
 
 **Enrichment vs Agent Analytics UI:** A short **`content`** line plus structured data in **`context`** keeps session titles and segmentation readable. Amplitude’s **server-side LLM enrichment** builds eval input primarily from **turn text** stored on each session (`input_text` / `output_text` derived from `$llm_message`). If automated evaluators must reason over the **full** structured payload, keep essential facts in **`content`**, add **scalar event properties** for key fields, or coordinate a pipeline change to merge allowlisted **`context`** into enrichment input—do not assume enrichments automatically parse large JSON blobs only present in `[Agent] Context`.
@@ -635,14 +641,14 @@ For platform integrations where installing the SDK isn't practical (e.g., Sierra
 
 **Trace grouping:** Set `[Agent] Trace ID` on every event (see Step 3g-c). Events without it are grouped into a single turn.
 
-**Session lifecycle:** You must send an explicit `[Agent] Session End` event when the conversation ends — there is no session context manager to auto-close for you.
+**Session lifecycle:** Send `[Agent] Session End` when the unit of work finishes. It is optional and recommended. There is no session context manager on the HTTP path to close it for you. If it never arrives, the server closes the session after 30 idle minutes by default, and after 24 hours from the session start when no per-session override is set. Enrichment runs once after the first close.
 
 **Batching:** The HTTP V2 API accepts up to 2000 events per request and 20MB payload. For large sessions, batch events in groups (e.g., 10-50 per request). Event ordering is reconstructed from `[Agent] Turn ID` + `time` regardless of batch arrival order.
 
 **Event types to send** (minimum viable session):
 1. `[Agent] User Message` — one per user input
 2. `[Agent] AI Response` — one per AI output (never empty `$llm_message`)
-3. `[Agent] Session End` — one at session close
+3. `[Agent] Session End` — optional, one when the unit of work finishes. If you omit it, the idle timeout closes the session.
 4. `[Agent] Span` (optional) — for tool calls, UI components, or sub-operations
 5. `[Agent] Score` (optional) — for user feedback (thumbs up/down)
 
@@ -924,7 +930,7 @@ Common issues and fixes:
 | userId: 0% | Can't create cohorts or link to User Activity | Find where user identity is available in the request (auth token, header, session cookie) and pass it to `agent.session({ userId })` |
 | Session ID: 0% | Sessions page empty, signals don't run | Wrap the route handler in `agent.session({ sessionId })`. Use the app's existing conversation/thread/ticket ID. |
 | Agent ID: 0% | Agent filter on Monitor doesn't work | Create a named agent with `ai.agent('name')` and use it for sessions |
-| Session End missing | Signals never execute, no Session Record | Ensure `session.run()` completes (or call `trackSessionEnd()` explicitly) |
+| Session End missing | Signals and the Session Record wait for the idle close instead of an explicit close | Send `[Agent] Session End` when the job finishes (`session.run()` with the default `trackSessionEnd: true`, or `trackSessionEnd()`). A multi-request session should set `trackSessionEnd: false` on each request and close once at the end. |
 | Cost USD: 0% | Monitor cost coverage is incomplete | Use canonical provider model ID (e.g., `'gpt-4o'` not `'my-gateway/gpt4'`), or set `totalCostUsd` explicitly |
 | Tokens: 0% | Token consumption charts empty | For manual `trackAiMessage`: pass `inputTokens`/`outputTokens` from the `response.usage` object. For provider wrappers: verify the response has a `.usage` field. |
 | Latency: 0% | Latency trend charts empty | Wrap the LLM call in `performance.now()` and pass `latencyMs` |
@@ -1160,11 +1166,11 @@ OpenAI-compatible gateways and OTEL partners that `@amplitude/ai` already suppor
 | **SDK-through** | Your app constructs an OpenAI-compatible client (or uses an `@amplitude/ai` provider wrapper) | Full `[Agent]` taxonomy, sessions, tools, scores, cache-aware cost when the **canonical** model id is known |
 | **Gateway-only (OTLP)** | The gateway emits GenAI spans and you cannot instrument the app | Model / tokens / cost / latency when the exporter maps spans; thinner coverage than SDK-through |
 
-Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans (LiteLLM, Strands) or as a future OpenRouter webhook path.
+Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans (LiteLLM) or as a future OpenRouter webhook path. Python Strands exports native OTLP/HTTP: read `node_modules/@amplitude/ai/docs/integrations/strands.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map those spans in process.
 
 ### Recipes and partner notes
 
-Base URLs and `gateway` tags for Fireworks, OpenRouter, LiteLLM, and Requesty, the model ID rule, router pricing, and OTLP attributes for partners that export spans (LiteLLM, Strands) are in one place: read `node_modules/@amplitude/ai/docs/integrations/routers.md` (shipped in the package).
+Base URLs and `gateway` tags for Fireworks, OpenRouter, LiteLLM, and Requesty, the model ID rule, router pricing, and OTLP attributes for partners that export spans (LiteLLM) are in one place: read `node_modules/@amplitude/ai/docs/integrations/routers.md` (shipped in the package). Strands is in `node_modules/@amplitude/ai/docs/integrations/strands.md`.
 
 ### `ingestion_path` convention
 
@@ -1181,7 +1187,7 @@ Segment dashboards on `ingestion_path` / `gateway` to separate direct-provider t
 ## Ecosystem-Specific Guidance
 
 ### LangChain / LangGraph
-- Use `AmplitudeCallbackHandler` — duck-typed compatible with LangChain callbacks (no hard `@langchain/core` dependency). Pass it in `callbacks`.
+- Use `AmplitudeCallbackHandler` — duck-typed compatible with LangChain callbacks (no hard `@langchain/core` dependency). Pass it in `callbacks`. Inside `session.runAs()`, callbacks inherit the child agent and parent agent and do not record the delegated prompt as an end-user turn.
 - Chat models invoke `handleChatModelStart` (tracks `[Agent] User Message`); legacy LLMs use `handleLLMStart`. Both paths feed `handleLLMEnd` / tool callbacks.
 - Pass `privacyConfig` on the handler so AI responses and tool calls sanitize consistently.
 - LangGraph graph orchestration events (node transitions, checkpoints) are not yet instrumented

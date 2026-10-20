@@ -200,7 +200,7 @@ Two settings at the top of Stage 2 are safe to edit:
 | `include_content` | `TRUE` | `FALSE` sends metadata only: no message text, tool input or output, or span input or output. Sessions, turns, latency, model, tokens, and cost still import. |
 | `settle_hours` | `2` | How long a conversation must be idle before it imports. Longer than the longest pause a real conversation has, and longer than the delay before rows land in the table. |
 
-To redact rather than drop content, apply the redaction in Stage 1 (for example, a masking function on `content`), so it runs before data leaves the warehouse.
+To redact rather than drop content, apply the redaction in Stage 1 (for example, a masking function on `content`), so it runs before data leaves the warehouse. Use the same placeholders as [privacy.md](../privacy.md). Warehouse SQL cannot faithfully copy the IPv6 lookbehinds or the whole-value base64 rule from [redact-pii.mjs](../redact-pii.mjs); where the dialect cannot express a pattern, drop or hash that class of value in Stage 1.
 
 ### Set up the import
 
@@ -300,6 +300,12 @@ If your format is public and others would use it, a pull request adding a format
 | Events duplicate after a re-sync | `message_id` changed between runs | Use a stored ID or a stable position, never a random value |
 | Conversations never import | Rows land later than `settle_hours` after the last message | Raise `settle_hours` above the load delay |
 | Databricks sync imports nothing | Change data feed isn't enabled, or the MERGE job isn't running | Recreate the table with the generated statement and check the job |
+
+## Raw HTML content
+
+HTML inside `$agent_artifact` envelopes is producer-owned content. The SQL templates, OTLP replay and S3/Batch import paths do not inherit SDK privacy settings or require an artifact preprocessor. Apply the source job's permission, capture and redaction policy before export; ordinary string/SQL replacements do not inspect rendered HTML.
+
+Preserve the envelope and event or trace/span IDs, export through the existing path once, and inspect the complete serialized payload. Replay's `--metadata-only` option filters converted rows and rejects already-built `resourceSpans` envelopes before sending; it never silently ignores the requested capture mode. For raw envelopes, apply the source policy before full-mode replay. See [raw HTML content and policy boundaries](../privacy.md#raw-html-content).
 
 ## Maintenance
 

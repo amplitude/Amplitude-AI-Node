@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.22.0
+Package: `@amplitude/ai` v0.24.0
 
 ## Install
 
@@ -61,10 +61,12 @@ Codex auto-reads this `AGENTS.md` file for context.
 - LangChain / LangGraph: use `AmplitudeCallbackHandler` (duck-typed; implements `handleChatModelStart` for User Message).
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
+- HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
 - Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
-- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty) or a partner exporting GenAI spans (Strands): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
+- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
+- Agent runs on AWS Strands (Python): export native OTLP by following `docs/integrations/strands.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 
 ## MCP Surface
 
@@ -133,7 +135,12 @@ Prompt:
 
 ## Instrumentation Guide
 
-- `amplitude-ai.md` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+Fetch the public guide for the job. These URLs track `main`.
+
+- Node app: fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md` and follow it, then install `@amplitude/ai` as that guide says.
+- Python app: `python3 -m pip install amplitude-ai`, then run `amplitude-ai --print-guide`.
+- Hosted platform, tracing tool, warehouse, gateway, or AWS Strands: start at `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md` and follow the linked page, including privacy.
+- `amplitude-ai.md` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is `node_modules/@amplitude/ai/amplitude-ai.md`.
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
 - `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
@@ -144,6 +151,8 @@ Prompt:
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
 - `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
+- `docs/integrations/strands.md` — AWS Strands (Python) native OTLP export
+- `docs/integrations/privacy.md` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
 ## Event Schema (names)
 

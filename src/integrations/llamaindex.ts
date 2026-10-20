@@ -14,6 +14,7 @@ export interface LlamaIndexHandlerOptions {
   userId?: string;
   sessionId?: string;
   agentId?: string;
+  parentAgentId?: string;
   env?: string;
 }
 
@@ -28,6 +29,7 @@ export class AmplitudeLlamaIndexHandler {
       userId: options.userId,
       sessionId: options.sessionId,
       agentId: options.agentId,
+      parentAgentId: options.parentAgentId,
       env: options.env,
     });
   }
@@ -94,6 +96,7 @@ export class AmplitudeLlamaIndexHandler {
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       inputTokens: normalized.inputTokens,
       outputTokens: normalized.outputTokens,
@@ -124,6 +127,7 @@ export class AmplitudeLlamaIndexHandler {
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       inputTokens: normalized.inputTokens,
       dimensions: normalized.dimensions,
@@ -153,6 +157,7 @@ export class AmplitudeLlamaIndexHandler {
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       output: normalized.output,
     });

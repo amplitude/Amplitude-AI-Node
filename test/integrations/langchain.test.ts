@@ -41,8 +41,9 @@ describe('AmplitudeCallbackHandler', () => {
         [
           [
             { _getType: () => 'system', content: 'You are helpful.' },
-            { _getType: () => 'human', content: 'What is Amplitude?' },
+            { _getType: () => 'human', content: 'earlier question' },
             { role: 'assistant', content: 'prior reply' },
+            { _getType: () => 'human', content: 'What is Amplitude?' },
           ],
         ],
         'chat-run-1',
@@ -54,6 +55,9 @@ describe('AmplitudeCallbackHandler', () => {
         unknown
       >;
       expect(call.content).toBe('What is Amplitude?');
+      expect(ai.trackUserMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'earlier question' }),
+      );
       expect(call.userId).toBe('u1');
       expect(call.sessionId).toBe('s1');
     });

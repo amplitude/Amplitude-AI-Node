@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { SpanEventMapper, type OtelSpan } from '../../src/otel/mapper.js';
 import {
   AMP_EVENT_TYPE,
+  AMP_MESSAGE_SOURCE,
+  AMP_PARENT_AGENT_ID,
   AMP_SPAN_KIND,
   AMP_TOOL_TYPE,
   AMP_TOOL_OWNER,
@@ -77,6 +79,31 @@ describe('SpanEventMapper', () => {
     expect(amplitude.track).toHaveBeenCalled();
     const event = amplitude.track.mock.calls[0]?.[0];
     expect(event?.event_type).toBe('[Agent] User Message');
+    expect(event?.event_properties?.['[Agent] Message Source']).toBe('user');
+  });
+
+  it('explicit user span with a parent agent is an agent turn', () => {
+    const span = makeSpan({
+      [AMP_EVENT_TYPE]: EVENT_TYPE_USER_MESSAGE,
+      [AMP_PARENT_AGENT_ID]: 'orchestrator',
+      [GENAI_INPUT_MESSAGES]: JSON.stringify([{ role: 'user', content: 'hello' }]),
+    });
+    mapper.mapAndTrack(span);
+    const event = amplitude.track.mock.calls[0]?.[0];
+    expect(event?.event_properties?.['[Agent] Message Source']).toBe('agent');
+    expect(event?.event_properties?.['[Agent] Parent Agent ID']).toBe('orchestrator');
+  });
+
+  it('explicit amplitude.message.source wins over parent inference', () => {
+    const span = makeSpan({
+      [AMP_EVENT_TYPE]: EVENT_TYPE_USER_MESSAGE,
+      [AMP_PARENT_AGENT_ID]: 'orchestrator',
+      [AMP_MESSAGE_SOURCE]: 'user',
+      [GENAI_INPUT_MESSAGES]: JSON.stringify([{ role: 'user', content: 'hello' }]),
+    });
+    mapper.mapAndTrack(span);
+    const event = amplitude.track.mock.calls[0]?.[0];
+    expect(event?.event_properties?.['[Agent] Message Source']).toBe('user');
   });
 
   it('routes explicit type: ai_response', () => {

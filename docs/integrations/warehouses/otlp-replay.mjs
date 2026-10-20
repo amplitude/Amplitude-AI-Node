@@ -14,6 +14,7 @@
 //   --format otel|openinference|mlflow   input shape (default otel)
 //   --region us|eu                       Amplitude data center (default us)
 //   --metadata-only                      drop message text, prompts, tool input/output, retrieved documents, span input/output
+//                                        rejects raw resourceSpans envelopes; supply span rows for this filter
 //   --dry-run                            print the OTLP/JSON requests instead of sending
 //   --agent-id <id>                      [Agent] Agent ID for rows without an agent_id column
 //   --batch-spans <n>                    spans per request (default 500)
@@ -476,6 +477,9 @@ export function toOtlpRequests(rows, options = {}) {
   const items = [];
   rows.forEach((row, i) => {
     if (row.resourceSpans) {
+      if (opts.metadataOnly) {
+        throw new Error('metadataOnly does not support raw resourceSpans envelopes; provide span rows or apply your source policy before full-mode replay');
+      }
       passthrough.push(row);
       return;
     }

@@ -33,6 +33,7 @@ const platforms = integrations.platforms;
 const hostedPlatforms = platforms.filter((p) => p.category === 'hosted_agent_platform');
 const tracingTools = platforms.filter((p) => p.category === 'tracing_tool');
 const warehouses = integrations.warehouses;
+const frameworks = integrations.frameworks ?? [];
 const platformGuideLabel = (p) =>
   p.category === 'tracing_tool'
     ? `${p.name} trace forwarding over the HTTP API (no SDK)`
@@ -66,8 +67,10 @@ const mcpJsonCursor = `{ "mcpServers": { ${mcpServerJson} } }`;
 const claudeAddCommand = `claude mcp add --scope project amplitude-ai -- npx -y -p ${packageJson.name} amplitude-ai mcp`;
 const codexToml = `[mcp_servers.amplitude-ai]\ncommand = "npx"\nargs = ${mcpArgs}`;
 
-// Raw GitHub URLs handed to agents are pinned to this release's tag, never a branch.
-const releaseRawPrefix = `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v${packageJson.version}/`;
+// Public guide URLs track main. Search already indexes that ref, and a version tag
+// would need a docs edit on every release. The published package still matches the
+// guide that was on main when the tag was cut.
+const releaseRawPrefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/';
 const rawRefPattern = /https:\/\/raw\.githubusercontent\.com\/amplitude\/Amplitude-AI-Node\/[^/\s"'`]+\//g;
 const pinnedRawUrlFiles = [
   join('docs', 'integrations', 'manifest.json'),
@@ -138,10 +141,12 @@ ${mcpJsonGeneric}
 - LangChain / LangGraph: use \`AmplitudeCallbackHandler\` (duck-typed; implements \`handleChatModelStart\` for User Message).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
+- HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
 - Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
-- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty) or a partner exporting GenAI spans (Strands): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
+- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
+- Agent runs on AWS Strands (Python): export native OTLP by following \`docs/integrations/strands.md\`. Scrub content before export with \`docs/integrations/privacy.md\`. When the app already runs this SDK, \`AmplitudeAgentExporter\` / \`enableOtel()\` can map spans in process.
 
 ## MCP Surface
 
@@ -200,11 +205,18 @@ Prompt:
 
 ## Instrumentation Guide
 
-- \`amplitude-ai.md\` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+Fetch the public guide for the job. These URLs track \`main\`.
+
+- Node app: fetch \`${releaseRawPrefix}amplitude-ai.md\` and follow it, then install \`${packageJson.name}\` as that guide says.
+- Python app: \`python3 -m pip install amplitude-ai\`, then run \`amplitude-ai --print-guide\`.
+- Hosted platform, tracing tool, warehouse, gateway, or AWS Strands: start at \`${releaseRawPrefix}docs/integrations/README.md\` and follow the linked page, including privacy.
+- \`amplitude-ai.md\` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is \`node_modules/@amplitude/ai/amplitude-ai.md\`.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
 ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
 - \`docs/integrations/routers.md\` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
+- \`docs/integrations/strands.md\` — AWS Strands (Python) native OTLP export
+- \`docs/integrations/privacy.md\` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
 ## Event Schema (names)
 
@@ -215,6 +227,11 @@ const llmsTxt = `${generatedHeader}
 # llms.txt
 package=${packageJson.name}
 version=${packageJson.version}
+
+[routing]
+instrument-node=${releaseRawPrefix}amplitude-ai.md
+instrument-python=python3 -m pip install amplitude-ai && amplitude-ai --print-guide
+other-sources=${releaseRawPrefix}docs/integrations/README.md
 
 [mcp.tools]
 ${toolNames.join('\n')}
@@ -229,6 +246,8 @@ ${events.join('\n')}
 ${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
 warehouses=${warehouses.raw_url}
 routers=${integrations.routers.raw_url}
+${frameworks.map((f) => `${f.id}=${f.raw_url}`).join('\n')}
+privacy=${integrations.privacy.raw_url}
 ${integrations.schemas.map((s) => `${s.id}-schema=${s.raw_url}`).join('\n')}
 ${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
 `.replace(rawRefPattern, releaseRawPrefix);

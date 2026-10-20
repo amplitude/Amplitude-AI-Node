@@ -9,9 +9,7 @@ import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import * as constants from '../src/core/constants.js';
 
 const DOCS_DIR = resolve(__dirname, '../docs/integrations');
-const PACKAGE_VERSION = (JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { version: string })
-  .version;
-const RELEASE_RAW_PREFIX = `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/v${PACKAGE_VERSION}/docs/integrations/`;
+const RELEASE_RAW_PREFIX = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/';
 const PLATFORM_PAGES = [
   'sierra.md',
   'decagon.md',
@@ -109,7 +107,13 @@ type OtlpAttribute = { key: string; value: { stringValue?: string; intValue?: st
 type OtlpExport = {
   resourceSpans: {
     resource?: { attributes?: OtlpAttribute[] };
-    scopeSpans: { spans: { attributes?: OtlpAttribute[] }[] }[];
+    scopeSpans: { spans: {
+      attributes?: OtlpAttribute[];
+      traceId?: string;
+      spanId?: string;
+      startTimeUnixNano?: string;
+      endTimeUnixNano?: string;
+    }[] }[];
   }[];
 };
 
@@ -151,6 +155,7 @@ function typeCheck(files: string[]): string[] {
     types: [],
     noEmit: true,
     skipLibCheck: true,
+    allowJs: true,
   });
   return ts
     .getPreEmitDiagnostics(program)
@@ -370,6 +375,7 @@ describe('forwarder core and adapters', () => {
     writeFileSync(join(dir, 'sierra.ts'), sierraSource);
     writeFileSync(join(dir, 'fin.ts'), finSource);
     writeFileSync(join(dir, 'agentforce.ts'), agentforceSource);
+    writeFileSync(join(dir, 'redact-pii.mjs'), readFileSync(join(DOCS_DIR, 'redact-pii.mjs')));
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     const tracingSources = TRACING_ADAPTERS.map((a) => ({
       name: a.name,
@@ -1476,5 +1482,75 @@ describe('forwarder core and adapters', () => {
     expect(spans.map((r: { span_id: string }) => r.span_id)).toEqual(['a', 'b', 'c']);
     expect(JSON.parse(calls[0]?.body ?? '{}')).toEqual({ query: "SELECT * FROM project_logs('p1') LIMIT 1000", fmt: 'jsonl' });
     expect(JSON.parse(calls[1]?.body ?? '{}').query).toBe("SELECT * FROM project_logs('p1') LIMIT 1000 OFFSET 'cur1'");
+  });
+
+  it('lists Strands outside the HTTP forwarder platforms', () => {
+    const manifest = JSON.parse(readPage('manifest.json')) as {
+      platforms: { id: string }[];
+      frameworks: { id: string; pinned_version: string; ingestion_paths: string[]; raw_url: string; last_verified: string }[];
+      privacy: { raw_url: string };
+    };
+    expect(manifest.platforms.map((p) => p.id)).not.toContain('strands');
+    expect(manifest.frameworks).toEqual([
+      expect.objectContaining({
+        id: 'strands',
+        pinned_version: '1.60.0',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-14',
+      }),
+    ]);
+    expect(manifest.frameworks[0]?.raw_url.startsWith(RELEASE_RAW_PREFIX)).toBe(true);
+    expect(manifest.privacy.raw_url.startsWith(RELEASE_RAW_PREFIX)).toBe(true);
+    const page = readPage('strands.md');
+    expect(page).not.toContain(CORE_START);
+    expect(page).toContain('strands-agents[otel]==1.60.0');
+    expect(page).toContain('Bearer%20');
+    expect(page).toContain('gen_ai_span_attributes_only');
+    expect(page).toContain('[Agent] Session End` is optional and recommended');
+    expect(page).toContain('30 minutes');
+    expect(page).toContain('does not read an idle-timeout attribute');
+    expect(page).not.toMatch(/gen_ai\.[a-z0-9_.]*idle|amplitude\.idle/i);
+  });
+
+  it('validates the Strands OTLP fixture envelope and shared conversation identity', () => {
+    const page = readPage('strands.md');
+    const fixture = JSON.parse(
+      extractFencedBlockAfter(page, '### Example: one model span and one tool span', 'json'),
+    ) as OtlpExport;
+    const spans = fixture.resourceSpans[0]?.scopeSpans[0]?.spans ?? [];
+    expect(spans).toHaveLength(2);
+    expect(new Set(spans.map((span) => span.spanId)).size).toBe(2);
+    for (const span of spans) {
+      expect(span.traceId).toMatch(/^[0-9a-f]{32}$/);
+      expect(span.traceId).not.toBe('0'.repeat(32));
+      expect(span.spanId).toMatch(/^[0-9a-f]{16}$/);
+      expect(span.spanId).not.toBe('0'.repeat(16));
+      expect(BigInt(span.startTimeUnixNano ?? '0')).toBeGreaterThan(0n);
+      expect(BigInt(span.endTimeUnixNano ?? '0')).toBeGreaterThan(BigInt(span.startTimeUnixNano ?? '0'));
+    }
+    const attributes = spans.map((span) => {
+      const attrs = new Map<string, string | undefined>();
+      for (const { key, value } of span.attributes ?? []) attrs.set(key, value.stringValue ?? value.intValue);
+      return attrs;
+    });
+    for (const attrs of attributes) {
+      expect(attrs.get('session.id')).toBe('conv_1');
+      expect(attrs.get('user.id')).toBe('user_12345');
+      expect(attrs.get('gen_ai.agent.id')).toBe('order-support');
+    }
+    const model = attributes.find((attrs) => attrs.get('gen_ai.operation.name') === 'chat');
+    const tool = attributes.find((attrs) => attrs.get('gen_ai.operation.name') === 'execute_tool');
+    expect(model?.get('gen_ai.provider.name')).toBe('aws.bedrock');
+    expect(model?.get('gen_ai.request.model')).toBeTruthy();
+    expect(model?.get('gen_ai.usage.input_tokens')).toBe('120');
+    expect(model?.get('gen_ai.usage.output_tokens')).toBe('18');
+    expect(model?.get('gen_ai.input.messages')).toContain('Where is my order?');
+    expect(model?.get('gen_ai.output.messages')).toContain('It arrives Thursday.');
+    expect(JSON.parse(model?.get('gen_ai.input.messages') ?? '')[0].parts[0].type).toBe('text');
+    expect(tool?.get('gen_ai.tool.name')).toBe('lookup_order');
+    expect(tool?.get('gen_ai.tool.call.id')).toBe('call_1');
+    expect(tool?.get('gen_ai.tool.call.arguments')).toContain('order_id');
+    expect(tool?.get('gen_ai.tool.call.result')).toContain('shipped');
+    expect(page).not.toMatch(/Authorization=Bearer [^%<]/);
   });
 });

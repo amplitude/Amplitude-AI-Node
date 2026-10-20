@@ -5,6 +5,35 @@
 ### Added
 - **Tool result properties.** `tool(fn, { resultProperties })` maps a successful tool's return value to properties on its `[Agent] Tool Call`, and `setToolResultProperties()` sets them from inside the tool body. Use them for IDs of what the tool created (for example `order_id`) so Agent Analytics Goals can confirm the action against a later event with the same ID. Values are strings (up to 512 characters), finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. Nothing is added when the tool fails.
 
+## 0.24.0
+
+### Documentation and validation
+- Add optional `$agent_artifact` typing for inline message attachments. This improves TypeScript ergonomics without changing existing runtime capture or validating the artifact schema.
+- Clarify that producers own raw HTML artifact snapshots and their privacy. Existing content capture settings, ordinary best-effort string redaction, and size limits apply; the SDK does not parse HTML or promise rendered-content sanitization.
+- Verify artifact content across tool/span input/output and AI/user attachments, including content modes, one ordinary custom-redactor pass per string, and single-event emission. Artifact capture does not require a new preparation API or an artifact-specific minimum SDK version.
+
+### Fixed
+- The copied raw OTLP replay script rejects `--metadata-only` with a raw `resourceSpans` envelope before sending, rather than silently forwarding content the flag cannot remove. This transport-script check does not change SDK tracking.
+
+## 0.23.0
+
+### Added
+- **AWS Strands.** A public guide for native OTLP/HTTP export from Strands Agents 1.60.0, including identity, provider override, and client-side privacy.
+- **Privacy contract for non-SDK paths.** `docs/integrations/privacy.md` and `redact-pii.mjs` carry the SDK's PII patterns for HTTP, OTLP, Batch, S3, and warehouse imports. Amplitude does not scrub content after receipt.
+- **Public guide URLs track `main`.** Coding agents fetch `amplitude-ai.md` and `docs/integrations/README.md` from `main`, so a version bump no longer requires new links.
+
+### Changed
+- **`[Agent] Session End` is optional and recommended.** A native Strands export does not send one. Enrichment still runs after the server idle close.
+- **Multi-agent lineage follows delegation.** Framework callbacks inherit `[Agent] Parent Agent ID` inside `runAs()`, delegated prompts are not recorded as end-user turns, and a user message with a parent agent is marked `[Agent] Message Source = agent` unless you set the source yourself. SDK spans and `injectContext()` carry `amplitude.parent.agent.id` / `x-amplitude-parent-agent-id`.
+
+## 0.22.1
+
+### Fixed
+
+- Complete the Strands OTLP privacy guide with memory/error coverage, an executable Python exporter example, and tests of serialized outbound payloads. Metadata-only is the default; sending sanitized content requires a customer redactor.
+- Clarify ingestion sampling and Collector responsibilities, and include IDs/timestamps in the Strands fixture.
+- Regenerate release-pinned discovery links for the release containing the Strands and privacy guides.
+
 ## 0.22.0
 
 ### Added

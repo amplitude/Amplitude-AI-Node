@@ -18,8 +18,11 @@ import { _getOtelOwner } from './client.js';
 import { PrivacyConfig, redactPiiPatterns } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
+  AMP_AGENT_ID,
   AMP_INPUT_STATE,
   AMP_OUTPUT_STATE,
+  AMP_PARENT_AGENT_ID,
+  AMP_SKIP_AUTO_USER_TRACKING,
   AMP_SPAN_KIND,
 } from './otel/conventions.js';
 import type { AmplitudeLike } from './types.js';
@@ -808,6 +811,9 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
       if (tracer != null) {
         return tracer.startActiveSpan(spanName, async (span: OtelSpanHandle) => {
           span.setAttribute(AMP_SPAN_KIND, spanKind);
+          if (ctx?.agentId) span.setAttribute(AMP_AGENT_ID, ctx.agentId);
+          if (ctx?.parentAgentId) span.setAttribute(AMP_PARENT_AGENT_ID, ctx.parentAgentId);
+          if (ctx?.skipAutoUserTracking) span.setAttribute(AMP_SKIP_AUTO_USER_TRACKING, true);
           if (inputState != null && gateOpen) {
             span.setAttribute(AMP_INPUT_STATE, JSON.stringify(inputState));
           }

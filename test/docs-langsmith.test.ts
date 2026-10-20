@@ -52,6 +52,7 @@ function typeCheck(files: string[]): string[] {
     types: [],
     noEmit: true,
     skipLibCheck: true,
+    allowJs: true,
   });
   return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
 }
@@ -224,6 +225,7 @@ describe('LangSmith guide', () => {
     const adapterSource = extractFencedBlockAfter(page, '### LangSmith adapter', 'ts');
     writeFileSync(join(dir, 'amplitude-agent-forwarder.ts'), coreSource);
     writeFileSync(join(dir, 'langsmith.ts'), adapterSource);
+    writeFileSync(join(dir, 'redact-pii.mjs'), readFileSync(join(DOCS_DIR, 'redact-pii.mjs')));
     writeFileSync(join(dir, 'env.d.ts'), 'declare const process: { env: Record<string, string | undefined> };\n');
     expect(typeCheck(['amplitude-agent-forwarder.ts', 'langsmith.ts', 'env.d.ts'].map((f) => join(dir, f)))).toEqual([]);
     core = await import(pathToFileURL(transpileTo(dir, 'amplitude-agent-forwarder', coreSource)).href);
