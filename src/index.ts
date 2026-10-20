@@ -94,6 +94,8 @@ export {
   PROP_TOOL_CALLS,
   PROP_TOOL_NAME,
   PROP_TOOL_OWNER,
+  PROP_RESULT_ID,
+  PROP_RESULT_TYPE,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
   PROP_INVOCATION_ID,
@@ -230,13 +232,14 @@ export {
   tool,
   observe,
   ToolCallTracker,
-  setToolResultProperties,
+  setToolResult,
 } from './decorators.js';
+export type { ToolResult } from './core/tool-result.js';
 export type {
   ToolWrapped,
   ObserveWrapped,
   ObserveSpanType,
-  ResultPropertiesHook,
+  ToolResultHook,
 } from './decorators.js';
 
 // Patching

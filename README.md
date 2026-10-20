@@ -1219,27 +1219,28 @@ The `journey_type` discriminator (`agent` / `web` / `mobile`) makes agent-driven
 
 #### Goals: record what a tool created
 
-Agent Analytics Goals measures whether sessions lead to outcomes. When a tool creates something (an order, booking, refund, ticket), attach its ID to the `[Agent] Tool Call`; a later event with the same ID, from any source, confirms it. No new events are involved:
+Agent Analytics Goals measures whether sessions lead to outcomes. When a tool creates something (an order, booking, refund, ticket), record its ID on the `[Agent] Tool Call`; a later event carrying the same ID, from any source, confirms it. No new events are involved:
 
 ```typescript
-import { setToolResultProperties, tool } from '@amplitude/ai';
+import { setToolResult, tool } from '@amplitude/ai';
 
 const placeOrder = tool(async (cart: Cart) => shop.create(cart), {
   name: 'place_order',
-  resultProperties: (order: Order) => ({ order_id: order.id, order_value: order.total }),
+  result: (order: Order) => ({ id: order.id, type: 'order' }),
 });
 
 const bookSlot = tool(async (slotId: string) => {
   const booking = await calendar.book(slotId);
-  setToolResultProperties({ booking_id: booking.id });
+  setToolResult(booking.id, { type: 'booking' });
   return 'Booked';
 }, { name: 'book_slot' });
 ```
 
-- `resultProperties` runs once after the tool succeeds, never on failure. `setToolResultProperties()` works anywhere inside the tool body, across `await`s. Both add plain event properties to `[Agent] Tool Call`; the hook wins on conflicts.
-- Name the key exactly like the property on the confirming event (for example `order_id` on both `[Agent] Tool Call` and `Payment Settled`), and send that event with the same user ID where you can. Goals can then chart it as a normal funnel. Send confirmations and reversals (`Payment Settled`, `Refund Issued`) from your backend as ordinary events; they are billed like any other event.
-- **IDs only.** Event properties are not redacted, so never pass emails, names, or message content. Values must be strings (up to 512 characters), finite numbers, or booleans, with at most 5 keys per call and no `[Agent]`, `[Amplitude]`, or `$` prefixes; anything else is dropped. Reuse a few key names across tools.
-- Provider wrappers record which tools the model asked for, not whether they ran. Use `tool()` or `trackToolCall({ ..., eventProperties })` on tools that take actions.
+- The ID is sent as `[Agent] Result ID` and the type as `[Agent] Result Type`, only when the tool succeeds. The `result` hook runs once after success (it may be async) and wins over `setToolResult()`; the last `setToolResult()` call wins, across `await`s.
+- The ID must be a non-blank string of up to 512 characters (outer spaces, tabs, and newlines are trimmed) or a safe integer. The type is optional and must match `[a-z][a-z0-9_]{0,63}`. Invalid values are dropped.
+- Your confirming event (for example `Payment Settled`) carries the same ID in a property of your choosing, such as `order_id`. When you set up a confirmed goal you pick that property; send the event with the same user ID where you can. Send confirmations and reversals (`Payment Settled`, `Refund Issued`) from your backend as ordinary events; they are billed like any other event.
+- **IDs only.** The ID is sent in every content mode and is not redacted, so never pass emails, names, or message content.
+- Provider wrappers record which tools the model asked for, not whether they ran. Use `tool()` on tools that take actions. OTel tool spans can set `amplitude.tool.result_id` / `amplitude.tool.result_type` instead.
 
 Other signals Goals reads, all with existing APIs:
 
@@ -1955,7 +1956,7 @@ Your Application
 
 These rules match the Python `amplitude-ai` agent guide and affect how Agent Analytics labels sessions and computes costs:
 
-- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** (preferred — maps to the registered `[Agent] Context` property, always queryable in charts), not as the only `content`, or session titles and segmentation will show raw JSON. Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
+- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** (preferred — maps to the registered `[Agent] Context` property, always queryable in charts), not as the only `content`, or session titles and segmentation will show raw JSON. Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 - **Turn-level vs spans** — **`[Agent] User Message`** and **`[Agent] AI Response`** (with session + turn ids) drive **turn counts** and conversation views. **`observe()`** / **`trackSpan()`** add trace detail but **do not replace** those turn events; keep a user + AI pair for each user-visible cycle unless you intentionally document otherwise.
 - **Gateways / custom `baseURL`** — If you use stock `openai` (or another client) against a proxy, the SDK may not auto-wrap that path. Call **`trackAiMessage`** with **`usage`** token fields from the response (or stream end), pass the **actual routed model id** as the model argument, and set **`totalCostUsd`** if genai-prices cannot resolve the model string. The `@pydantic/genai-prices` package is included as a dependency for automatic USD estimates when model + tokens are known.
 

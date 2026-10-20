@@ -16,6 +16,11 @@ import {
 } from './context.js';
 import { _getOtelOwner } from './client.js';
 import { PrivacyConfig, redactPiiPatterns } from './core/privacy.js';
+import {
+  sanitizeToolResult,
+  type ToolResult,
+  withoutResultProps,
+} from './core/tool-result.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
   AMP_AGENT_ID,
@@ -31,144 +36,68 @@ import { getLogger } from './utils/logger.js';
 const _require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
-// Tool result properties (parity with Python)
+// Tool result (parity with Python)
 // ---------------------------------------------------------------------------
-
-export const RESULT_PROPERTIES_MAX_KEYS = 5;
-export const RESULT_PROPERTY_MAX_VALUE_LENGTH = 512;
-const _RESERVED_PROPERTY_PREFIXES = ['[Agent]', '[Amplitude]', '$'];
 
 const _toolResultStorage = new AsyncLocalStorage<Record<string, unknown>>();
 
 /**
- * Attach properties to the `[Agent] Tool Call` event of the running `tool()`.
+ * Record what the running `tool()` created, such as an order or a booking.
  *
- * Use this for values that are only known inside the tool body, such as the
- * ID of the object the tool created:
+ * Use this when the ID is only known inside the tool body:
  *
  * ```ts
  * const placeOrder = tool(async (cart: Cart) => {
  *   const order = await shop.create(cart);
- *   setToolResultProperties({ order_id: order.id });
+ *   setToolResult(order.id, { type: 'order' });
  *   return 'Order placed';
  * });
  * ```
  *
- * The properties are sent only when the tool succeeds. They travel on
- * `eventProperties`, which is not redacted, so pass IDs, never content or
- * personal data. Values must be strings (up to 512 characters), finite
- * numbers, or booleans, at most 5 keys per call, and keys must not start
- * with `[Agent]`, `[Amplitude]`, or `$`. Invalid entries are dropped.
+ * The ID is sent as `[Agent] Result ID` (and `type` as `[Agent] Result Type`)
+ * on the `[Agent] Tool Call` event, only when the tool succeeds. Goals
+ * matches it to a later event that carries the same ID to count confirmed
+ * outcomes. Pass an identifier, never content or personal data: it is sent
+ * in every content mode and is not redacted.
  *
- * Outside a `tool()` call this is a no-op.
+ * The last call wins. Outside a `tool()` call this is a no-op.
  */
-export function setToolResultProperties(
-  properties: Record<string, unknown>,
+export function setToolResult(
+  id: string | number,
+  options?: { type?: string | null },
 ): void {
   const holder = _toolResultStorage.getStore();
   if (holder == null) {
-    getLogger().debug(
-      'setToolResultProperties called outside a tool() call; ignored',
-    );
+    getLogger().debug('setToolResult called outside a tool() call; ignored');
     return;
   }
-  if (!_isPlainRecord(properties)) {
-    getLogger().debug('setToolResultProperties expects an object; ignored');
-    return;
-  }
-  Object.assign(holder, properties);
+  for (const key of Object.keys(holder)) delete holder[key];
+  Object.assign(holder, { id, type: options?.type ?? null });
 }
 
-function _isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value == null || Array.isArray(value)) {
-    return false;
-  }
-  const proto = Object.getPrototypeOf(value);
-  return proto === null || proto === Object.prototype;
-}
-
-function _isValidResultValue(value: unknown): boolean {
-  if (typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value === 'string')
-    return value.length <= RESULT_PROPERTY_MAX_VALUE_LENGTH;
-  return false;
-}
-
-/** Return the valid subset of `properties`, in insertion order, capped at 5 keys. */
-export function sanitizeResultProperties(
-  properties: unknown,
-  toolName = '',
-): Record<string, unknown> {
-  if (!_isPlainRecord(properties)) {
-    if (properties != null) {
-      getLogger().debug(
-        `Tool '${toolName}': result properties must be an object; dropped`,
-      );
-    }
-    return {};
-  }
-  const clean: Record<string, unknown> = {};
-  let count = 0;
-  for (const [key, value] of Object.entries(properties)) {
-    if (
-      key === '' ||
-      _RESERVED_PROPERTY_PREFIXES.some((prefix) => key.startsWith(prefix))
-    ) {
-      getLogger().debug(
-        `Tool '${toolName}': dropped result property with reserved or invalid key`,
-      );
-      continue;
-    }
-    if (!_isValidResultValue(value)) {
-      getLogger().debug(
-        `Tool '${toolName}': dropped result property '${key}' (unsupported value)`,
-      );
-      continue;
-    }
-    if (count >= RESULT_PROPERTIES_MAX_KEYS) {
-      getLogger().debug(
-        `Tool '${toolName}': dropped result property '${key}' (more than ${RESULT_PROPERTIES_MAX_KEYS} keys)`,
-      );
-      continue;
-    }
-    clean[key] = value;
-    count += 1;
-  }
-  return clean;
-}
-
-function _collectResultProperties(
+async function _collectToolResult(
   toolName: string,
   result: unknown,
   holder: Record<string, unknown>,
-  resultProperties: ResultPropertiesHook | null | undefined,
-): Record<string, unknown> {
-  let hookRecord: Record<string, unknown> = {};
-  if (resultProperties != null) {
-    let hookProps: unknown = null;
+  hook: ToolResultHook | null | undefined,
+): Promise<Record<string, string>> {
+  let hookOutput: unknown = null;
+  if (hook != null) {
     try {
-      hookProps = resultProperties(result);
+      hookOutput = await hook(result);
     } catch (e) {
       const errorType = e instanceof Error ? e.name : typeof e;
       getLogger().debug(
-        `Tool '${toolName}': resultProperties hook threw ${errorType}; ignored`,
+        `Tool '${toolName}': result hook threw ${errorType}; ignored`,
       );
-    }
-    if (_isPlainRecord(hookProps) && typeof hookProps.then !== 'function') {
-      hookRecord = hookProps;
-    } else if (hookProps != null) {
-      getLogger().debug(
-        `Tool '${toolName}': resultProperties hook must synchronously return an object; ignored`,
-      );
+      hookOutput = null;
     }
   }
-  // Hook keys go first so they win both conflicts and the key cap.
-  const merged: Record<string, unknown> = { ...hookRecord };
-  for (const [key, value] of Object.entries(holder)) {
-    if (!(key in merged)) merged[key] = value;
-  }
-  return sanitizeResultProperties(merged, toolName);
+  // The hook wins over setToolResult().
+  return sanitizeToolResult(
+    hookOutput ?? (Object.keys(holder).length > 0 ? holder : null),
+    toolName,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -294,9 +223,11 @@ function _resolvePrivacyConfig(
   );
 }
 
-/** Maps a successful tool's return value to properties for its `[Agent] Tool Call` event. */
-// biome-ignore lint/suspicious/noExplicitAny: receives any tool return value
-export type ResultPropertiesHook = (result: any) => Record<string, unknown> | null | undefined;
+/** Maps a successful tool's return value to the `{ id, type }` it created. */
+export type ToolResultHook = (
+  // biome-ignore lint/suspicious/noExplicitAny: the hook receives the tool's own return type
+  result: any,
+) => ToolResult | null | undefined | Promise<ToolResult | null | undefined>;
 
 interface ToolOptions {
   name?: string;
@@ -322,12 +253,16 @@ interface ToolOptions {
   onError?: ((error: Error, toolName: string) => void) | null;
   /**
    * Called once with the return value after the tool succeeds (never on
-   * failure). The returned object is added to the `[Agent] Tool Call`
-   * event, for example `{ order_id: order.id }`, and overrides values set
-   * with `setToolResultProperties()`. Same rules as that function: IDs
-   * only, scalar values, at most 5 keys. A hook that throws is ignored.
+   * failure), naming what the tool created, for example
+   * `(order) => ({ id: order.id, type: 'order' })`. Sent as
+   * `[Agent] Result ID` / `[Agent] Result Type`; may be async. The ID must
+   * be a non-blank string of up to 512 characters (outer ASCII whitespace
+   * is trimmed) or a safe integer; the type must match
+   * `[a-z][a-z0-9_]{0,63}`. Invalid values are dropped. Wins over
+   * `setToolResult()`. Pass an identifier, not content: it is sent in every
+   * content mode and is not redacted. A hook that throws is ignored.
    */
-  resultProperties?: ResultPropertiesHook | null;
+  result?: ToolResultHook | null;
 }
 
 interface ResolvedContext {
@@ -536,19 +471,15 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
       const latencyMs = performance.now() - startTime;
 
       const extraProps: Record<string, unknown> = success
-        ? _collectResultProperties(
-            toolName,
-            result,
-            resultHolder,
-            opts.resultProperties,
-          )
+        ? await _collectToolResult(toolName, result, resultHolder, opts.result)
         : {};
       if (schemaJson != null) {
         extraProps['[Agent] Tool Input Schema'] = schemaJson;
       }
 
+      const callerProps = withoutResultProps(r.eventProperties);
       const mergedEvtProps = {
-        ...(r.eventProperties ?? {}),
+        ...(callerProps ?? {}),
         ...extraProps,
       };
 
@@ -577,9 +508,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           agentVersion: r.agentVersion,
           context: r.context,
           eventProperties:
-            Object.keys(extraProps).length > 0
-              ? mergedEvtProps
-              : r.eventProperties,
+            Object.keys(extraProps).length > 0 ? mergedEvtProps : callerProps,
           userProperties: r.userProperties,
           groups: r.groups,
           privacyConfig: r.privacyConfig,

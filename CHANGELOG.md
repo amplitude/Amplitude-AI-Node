@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- **Tool result properties.** `tool(fn, { resultProperties })` maps a successful tool's return value to properties on its `[Agent] Tool Call`, and `setToolResultProperties()` sets them from inside the tool body. Use them for IDs of what the tool created (for example `order_id`) so Agent Analytics Goals can confirm the action against a later event with the same ID. Values are strings (up to 512 characters), finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. Nothing is added when the tool fails.
+- **Tool result.** `tool(fn, { result })` maps a successful tool's return value to `{ id, type }`, and `setToolResult(id, { type })` sets it from inside the tool body. They are sent as the new `[Agent] Result ID` and `[Agent] Result Type` properties on `[Agent] Tool Call`, so Agent Analytics Goals can confirm the action against a later event with the same ID. OTel tool spans can set `amplitude.tool.result_id` / `amplitude.tool.result_type`. The ID is a non-blank string of up to 512 characters or a safe integer; the type matches `[a-z][a-z0-9_]{0,63}`. Nothing is added when the tool fails.
 
 ## 0.24.0
 

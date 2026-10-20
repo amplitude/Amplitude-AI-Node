@@ -257,7 +257,7 @@ export async function POST(req: Request) {
 - `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
 - **Do not** pass large JSON blobs, RAG context packs, or internal pipeline state as the **only** user message body — the product will show that JSON as the session title and break down charts by raw JSON.
 - **Do** pass a **short natural-language** line (the real end-user prompt, or a canonical summary for headless jobs, e.g. `"Summarize the attached design doc and list open questions"`).
-- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
+- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 
 ```typescript
 // GOOD: readable user line + structured state in context
@@ -313,16 +313,16 @@ const result = await searchProducts(query);
 **Record what an action tool created (for Agent Analytics Goals):** when a tool creates something with an ID (an order, booking, refund, ticket), attach that ID to its `[Agent] Tool Call`. A later event carrying the same ID, from any source, confirms the action happened, so Goals can measure confirmed outcomes rather than attempted ones.
 
 ```typescript
-import { setToolResultProperties, tool } from '@amplitude/ai';
+import { setToolResult, tool } from '@amplitude/ai';
 
 const placeOrder = tool(async (cart: Cart) => shop.create(cart), {
   name: 'place_order',
-  resultProperties: (order: Order) => ({ order_id: order.id }), // runs only after success
+  result: (order: Order) => ({ id: order.id, type: 'order' }), // runs only after success
 });
 
 const bookSlot = tool(async (slotId: string) => {
   const booking = await calendar.book(slotId);
-  setToolResultProperties({ booking_id: booking.id }); // from inside the body, across awaits
+  setToolResult(booking.id, { type: 'booking' }); // from inside the body, across awaits
   return 'Booked';
 }, { name: 'book_slot' });
 ```
@@ -330,10 +330,11 @@ const bookSlot = tool(async (slotId: string) => {
 Rules (follow these, do not guess):
 
 - **Only on tools that create or change something with an ID.** Read-only tools get none.
-- **IDs only.** Event properties are not redacted: never pass emails, names, addresses, or message content. Values must be strings (up to 512 characters), finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. Nothing is added when the tool fails.
-- **Name the key exactly like the property on the confirming event** (for example `order_id` on both `[Agent] Tool Call` and `Payment Settled`). Find that event in the codebase; if there isn't one, **ask the developer** which event confirms the action instead of inventing one.
-- These keys are the exception to "avoid `eventProperties` for custom dimensions on `[Agent]` events": they are join keys, not dimensions, so `context` is not a substitute. If the project blocks unplanned properties, the developer must allow these keys on `[Agent] Tool Call`.
-- Provider wrappers record which tools the model asked for, not whether they ran: use `tool()` or `trackToolCall({ ..., eventProperties })` for action tools.
+- **IDs only.** `[Agent] Result ID` is sent in every content mode and is not redacted: never pass emails, names, addresses, or message content. The ID is a non-blank string of up to 512 characters or a safe integer; the type matches `[a-z][a-z0-9_]{0,63}`. Invalid values are dropped. Nothing is added when the tool fails.
+- **Use a stable type per kind of object** (`order`, `booking`, `refund`) so a goal can count one kind when a tool creates several.
+- **Find the confirming event** (the backend or webhook event that proves the action happened, such as `Payment Settled`) and note which of its properties carries the same ID. If there isn't one, **ask the developer** which event confirms the action instead of inventing one.
+- Do not put these IDs in `eventProperties` or `context`: `[Agent] Result ID` and `[Agent] Result Type` are SDK-managed and `eventProperties` can't set them.
+- Provider wrappers record which tools the model asked for, not whether they ran: use `tool()` for action tools.
 
 **Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
 

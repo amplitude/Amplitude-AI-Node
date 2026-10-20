@@ -144,7 +144,7 @@ await s.runAs(recipeAgent, async (cs) => {
 ```
 
 ### s.trackUserMessage(content, opts?) → eventId
-Track a user message. Returns the event ID. The `content` string becomes `$llm_message.text` in Amplitude — use a short natural-language line; put structured segmentation dimensions in `opts.context` (maps to the registered `[Agent] Context` property). Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may not be queryable.
+Track a user message. Returns the event ID. The `content` string becomes `$llm_message.text` in Amplitude — use a short natural-language line; put structured segmentation dimensions in `opts.context` (maps to the registered `[Agent] Context` property). Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 ```
 s.trackUserMessage('What recipes do you have for pancakes?');
 s.trackUserMessage('Summarize the design doc', { context: { outline: docOutline } });
@@ -197,14 +197,14 @@ const results = await searchProducts({ query: 'pancakes' });
 ```
 For tools that create something (an order, booking, refund), record its ID so Agent Analytics Goals can confirm the action against a later event with the same ID:
 ```
-import { setToolResultProperties, tool } from '@amplitude/ai';
+import { setToolResult, tool } from '@amplitude/ai';
 const placeOrder = tool(async (cart) => shop.create(cart), {
   name: 'place_order',
-  resultProperties: (order) => ({ order_id: order.id }), // runs only on success
+  result: (order) => ({ id: order.id, type: 'order' }), // runs only on success
 });
-// Or from inside the tool body: setToolResultProperties({ booking_id: booking.id });
+// Or from inside the tool body: setToolResult(booking.id, { type: 'booking' });
 ```
-IDs only (never emails, names, or message text): strings up to 512 characters, finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. The hook wins over `setToolResultProperties()` on conflicts. Name the key exactly like the property on the confirming event.
+Sent as `[Agent] Result ID` / `[Agent] Result Type`, in every content mode and unredacted, so IDs only (never emails, names, or message text). The ID is a non-blank string up to 512 characters or a safe integer; the type matches `[a-z][a-z0-9_]{0,63}`. The hook wins over `setToolResult()`.
 
 ### observe(fn, opts?) / observe(opts)(fn)
 Higher-order function that wraps a function to auto-emit [Agent] Span events.
@@ -452,7 +452,7 @@ Full guide: `amplitude-ai.md` or MCP resource `amplitude-ai://instrument-guide`.
 - `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
 - **Do not** pass large JSON blobs, RAG context packs, or internal pipeline state as the **only** user message body — the product will show that JSON as the session title and break down charts by raw JSON.
 - **Do** pass a **short natural-language** line (the real end-user prompt, or a canonical summary for headless jobs, e.g. `"Summarize the attached design doc and list open questions"`).
-- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
+- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 
 ```typescript
 // GOOD: readable user line + structured state in context

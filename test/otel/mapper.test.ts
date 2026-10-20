@@ -7,6 +7,8 @@ import {
   AMP_SPAN_KIND,
   AMP_TOOL_TYPE,
   AMP_TOOL_OWNER,
+  AMP_TOOL_RESULT_ID,
+  AMP_TOOL_RESULT_TYPE,
   AMP_INPUT_STATE,
   AMP_GIT_SHA,
   AMP_TAGS,
@@ -351,6 +353,50 @@ describe('SpanEventMapper', () => {
     const event = amplitude.track.mock.calls[0]?.[0];
     expect(event?.event_type).toBe('[Agent] Tool Call');
     expect(event?.event_properties?.['[Agent] Tool Type']).toBe('mcp');
+  });
+
+  it.each([
+    ['span kind', { [AMP_SPAN_KIND]: SPAN_KIND_TOOL }],
+    ['execute_tool', { [GENAI_OPERATION_NAME]: OP_EXECUTE_TOOL }],
+    ['event type', { [AMP_EVENT_TYPE]: EVENT_TYPE_TOOL_CALL }],
+  ])('maps tool result attributes on a %s tool span', (_route, routing) => {
+    mapper.mapAndTrack(
+      makeSpan({
+        ...routing,
+        [GENAI_TOOL_NAME]: 'place_order',
+        [AMP_TOOL_RESULT_ID]: '  ord_1 ',
+        [AMP_TOOL_RESULT_TYPE]: 'order',
+      }),
+    );
+    const props = amplitude.track.mock.calls[0]?.[0]?.event_properties;
+    expect(props?.['[Agent] Result ID']).toBe('ord_1');
+    expect(props?.['[Agent] Result Type']).toBe('order');
+  });
+
+  it('drops tool result attributes on failed or invalid spans', () => {
+    mapper.mapAndTrack(
+      makeSpan({
+        [AMP_SPAN_KIND]: SPAN_KIND_TOOL,
+        [GENAI_TOOL_NAME]: 'place_order',
+        'error.type': 'Error',
+        [AMP_TOOL_RESULT_ID]: 'ord_1',
+      }),
+    );
+    mapper.mapAndTrack({
+      ...makeSpan({
+        [AMP_SPAN_KIND]: SPAN_KIND_TOOL,
+        [GENAI_TOOL_NAME]: 'place_order',
+        [AMP_TOOL_RESULT_ID]: 1.5,
+        [AMP_TOOL_RESULT_TYPE]: 'order',
+      }),
+      spanContext: () => ({ traceId: 'trace-abc', spanId: 'span-456' }),
+    });
+    expect(amplitude.track).toHaveBeenCalledTimes(2);
+    for (const call of amplitude.track.mock.calls) {
+      const props = call[0]?.event_properties ?? {};
+      expect(props).not.toHaveProperty('[Agent] Result ID');
+      expect(props).not.toHaveProperty('[Agent] Result Type');
+    }
   });
 
   it('routes span kind: agent → Span with component_type=agent', () => {

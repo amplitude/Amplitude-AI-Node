@@ -1,0 +1,77 @@
+{
+  "description": "Shared validation cases for [Agent] Result ID / [Agent] Result Type. Mirrored byte-for-byte in Amplitude-AI-Node test/fixtures/tool-result-cases.json and as a table in nova ToolResultSanitizerTest. A case with id_repeat builds the id as char repeated count times.",
+  "cases": [
+    { "name": "string_id", "input": { "id": "ord_1" }, "expected": { "[Agent] Result ID": "ord_1" } },
+    {
+      "name": "string_id_with_type",
+      "input": { "id": "ord_1", "type": "order" },
+      "expected": { "[Agent] Result ID": "ord_1", "[Agent] Result Type": "order" }
+    },
+    {
+      "name": "ascii_whitespace_trimmed",
+      "input": { "id": " \t\n ord_1 \r\f\u000b", "type": "order" },
+      "expected": { "[Agent] Result ID": "ord_1", "[Agent] Result Type": "order" }
+    },
+    {
+      "name": "non_ascii_whitespace_kept",
+      "input": { "id": "\u00a0ord_1\u3000" },
+      "expected": { "[Agent] Result ID": "\u00a0ord_1\u3000" }
+    },
+    { "name": "blank_id_dropped", "input": { "id": " \t ", "type": "order" }, "expected": {} },
+    { "name": "empty_id_dropped", "input": { "id": "" }, "expected": {} },
+    { "name": "integer_id", "input": { "id": 12345 }, "expected": { "[Agent] Result ID": "12345" } },
+    { "name": "negative_integer_id", "input": { "id": -7 }, "expected": { "[Agent] Result ID": "-7" } },
+    {
+      "name": "max_safe_integer",
+      "input": { "id": 9007199254740991 },
+      "expected": { "[Agent] Result ID": "9007199254740991" }
+    },
+    { "name": "unsafe_integer_dropped", "input": { "id": 9007199254740992 }, "expected": {} },
+    { "name": "fractional_number_dropped", "input": { "id": 1.5 }, "expected": {} },
+    { "name": "boolean_id_dropped", "input": { "id": true }, "expected": {} },
+    { "name": "null_id_dropped", "input": { "id": null, "type": "order" }, "expected": {} },
+    { "name": "missing_id_dropped", "input": { "type": "order" }, "expected": {} },
+    { "name": "object_id_dropped", "input": { "id": { "v": 1 } }, "expected": {} },
+    { "name": "array_id_dropped", "input": { "id": ["ord_1"] }, "expected": {} },
+    { "name": "non_object_input_dropped", "input": "ord_1", "expected": {} },
+    {
+      "name": "id_512_code_points",
+      "input": { "id_repeat": { "char": "x", "count": 512 } },
+      "expected_repeat": { "char": "x", "count": 512 }
+    },
+    { "name": "id_513_code_points_dropped", "input": { "id_repeat": { "char": "x", "count": 513 } }, "expected": {} },
+    {
+      "name": "astral_id_counts_code_points",
+      "input": { "id_repeat": { "char": "\ud83d\ude00", "count": 512 } },
+      "expected_repeat": { "char": "\ud83d\ude00", "count": 512 }
+    },
+    {
+      "name": "astral_id_513_code_points_dropped",
+      "input": { "id_repeat": { "char": "\ud83d\ude00", "count": 513 } },
+      "expected": {}
+    },
+    {
+      "name": "type_with_digits_and_underscores",
+      "input": { "id": "b1", "type": "hotel_booking2" },
+      "expected": { "[Agent] Result ID": "b1", "[Agent] Result Type": "hotel_booking2" }
+    },
+    { "name": "uppercase_type_dropped", "input": { "id": "b1", "type": "Order" }, "expected": { "[Agent] Result ID": "b1" } },
+    { "name": "type_leading_digit_dropped", "input": { "id": "b1", "type": "2fa" }, "expected": { "[Agent] Result ID": "b1" } },
+    { "name": "type_with_space_dropped", "input": { "id": "b1", "type": "an order" }, "expected": { "[Agent] Result ID": "b1" } },
+    { "name": "empty_type_dropped", "input": { "id": "b1", "type": "" }, "expected": { "[Agent] Result ID": "b1" } },
+    {
+      "name": "type_64_chars",
+      "input": { "id": "b1", "type": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl" },
+      "expected": {
+        "[Agent] Result ID": "b1",
+        "[Agent] Result Type": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl"
+      }
+    },
+    {
+      "name": "type_65_chars_dropped",
+      "input": { "id": "b1", "type": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklm" },
+      "expected": { "[Agent] Result ID": "b1" }
+    },
+    { "name": "non_string_type_dropped", "input": { "id": "b1", "type": 3 }, "expected": { "[Agent] Result ID": "b1" } }
+  ]
+}

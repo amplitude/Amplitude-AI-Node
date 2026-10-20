@@ -27,6 +27,7 @@ import {
   PROP_SPAN_KIND as CONST_PROP_SPAN_KIND,
 } from '../core/constants.js';
 import { PrivacyConfig, redactPiiPatterns } from '../core/privacy.js';
+import { sanitizeToolResult } from '../core/tool-result.js';
 import { getGitMetadata } from '../utils/git_metadata.js';
 import {
   trackAiMessage,
@@ -61,6 +62,8 @@ import {
   AMP_STACK_TRACE,
   AMP_TAGS,
   AMP_TOOL_OWNER,
+  AMP_TOOL_RESULT_ID,
+  AMP_TOOL_RESULT_TYPE,
   AMP_TOOL_TYPE,
   EVENT_TYPE_AI_RESPONSE,
   EVENT_TYPE_EMBEDDING,
@@ -435,7 +438,7 @@ export class SpanEventMapper {
         success: !fields.isError, latencyMs: fields.latencyMs,
         turnId: fields.turnId ?? 1, toolInput, toolOutput,
         errorMessage: fields.errorMessage, errorType: fields.errorType,
-        eventProperties: ep,
+        eventProperties: withToolResult(ep, attrs, toolName, fields.isError),
       } as never);
     } else if (eventType === EVENT_TYPE_EMBEDDING) {
       const dimensions = safeInt(attrs[GENAI_EMBEDDING_DIMENSIONS]);
@@ -522,7 +525,8 @@ export class SpanEventMapper {
       trackToolCall({
         ...shared, toolName, success: !fields.isError,
         latencyMs: fields.latencyMs, turnId: fields.turnId ?? 1,
-        errorMessage: fields.errorMessage, eventProperties: ep,
+        errorMessage: fields.errorMessage,
+        eventProperties: withToolResult(ep, attrs, toolName, fields.isError),
       } as never);
     } else if (operation === OP_INVOKE_AGENT || operation === OP_CREATE_AGENT) {
       trackAiMessage({
@@ -582,7 +586,7 @@ export class SpanEventMapper {
         success: !fields.isError, latencyMs: fields.latencyMs,
         turnId: fields.turnId ?? 1, toolInput, toolOutput,
         errorMessage: fields.errorMessage, errorType: fields.errorType,
-        eventProperties: Object.keys(extraProps).length > 0 ? extraProps : undefined,
+        eventProperties: withToolResult(extraProps, attrs, toolName, fields.isError),
       } as never);
     } else if (spanKind === SPAN_KIND_AGENT) {
       if (extraProps[PROP_COMPONENT_TYPE] == null) extraProps[PROP_COMPONENT_TYPE] = 'agent';
@@ -890,6 +894,26 @@ function messageSourceFor(attrs: Record<string, unknown>, parentAgentId: unknown
   const explicit = strOrNull(attrs[AMP_MESSAGE_SOURCE]);
   if (explicit) return explicit;
   return parentAgentId ? 'agent' : 'user';
+}
+
+/** Add `[Agent] Result ID` / `Result Type` from a successful tool span's attributes. */
+function withToolResult(
+  props: Record<string, unknown> | undefined,
+  attrs: Record<string, unknown>,
+  toolName: string,
+  isError: boolean,
+): Record<string, unknown> | undefined {
+  const merged =
+    !isError && attrs[AMP_TOOL_RESULT_ID] != null
+      ? {
+          ...(props ?? {}),
+          ...sanitizeToolResult(
+            { id: attrs[AMP_TOOL_RESULT_ID], type: attrs[AMP_TOOL_RESULT_TYPE] },
+            toolName,
+          ),
+        }
+      : props;
+  return merged != null && Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 function strOrNull(value: unknown): string | null {

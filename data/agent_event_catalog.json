@@ -721,6 +721,16 @@
           "name": "[Agent] Parent Message ID",
           "type": "string",
           "description": "The message_id of the user message that triggered this tool call. Links the tool call into the event graph."
+        },
+        {
+          "name": "[Agent] Result ID",
+          "type": "string",
+          "description": "ID of what a successful tool call created, such as an order or booking ID. Goals matches it to a later event with the same ID to count confirmed outcomes. Set by the SDK tool wrapper's result hook or setter, or the amplitude.tool.result_id span attribute; only sent when the tool succeeds. An identifier, never content: sent in every content mode."
+        },
+        {
+          "name": "[Agent] Result Type",
+          "type": "string",
+          "description": "Kind of object in [Agent] Result ID, such as 'order' or 'booking' (lowercase letters, digits, and underscores). Lets a goal count one result type when a tool can create several."
         }
       ]
     },
