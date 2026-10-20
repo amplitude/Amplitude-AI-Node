@@ -223,10 +223,25 @@ export function sanitizeAnyContent(
   return result;
 }
 
-const JSON_STRING_TOKEN = /"(?:[^"\\]|\\.)*"(?:\s*:)?/g;
+const JSON_TOKEN = /"(?:[^"\\]|\\.)*"(?:\s*:)?|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}[\],:]/g;
+const SENSITIVE_JSON_FIELDS = new Map(([
+  ['[phone]', 'phone phones phonenumber phonenumbers mobile mobiles mobilenumber mobilenumbers telephone telephonenumber cellphone cellphonenumber homephone workphone contactphone billingphone'],
+  ['[credit_card]', 'card cards cardnumber cardnumbers creditcard creditcards creditcardnumber creditcardnumbers paymentcard paymentcardnumber pan'],
+  ['[ssn]', 'ssn ssns socialsecuritynumber socialsecuritynumbers'],
+] as const).flatMap(([placeholder, fields]) => fields.split(' ').map((field) => [field, placeholder] as const)));
+type JsonRedactionFrame = {
+  reason: string | null;
+  pending: string | null;
+  keys: Map<string, string> | null;
+};
 const MAX_JSON_STRING_DEPTH = 16;
 
-function redactJsonText(content: string, redactPii: boolean, depth = 0): string | null {
+function redactJsonText(
+  content: string,
+  redactPii: boolean,
+  depth = 0,
+  inheritedReason: string | null = null,
+): string | null {
   const first = content.trimStart()[0];
   if (content.length > MAX_TEXT_LENGTH || (first !== '{' && first !== '[')) return null;
   try {
@@ -236,13 +251,41 @@ function redactJsonText(content: string, redactPii: boolean, depth = 0): string 
     throw error;
   }
   if (depth >= MAX_JSON_STRING_DEPTH) throw new RangeError('Serialized JSON nesting limit');
-  // Rewrite only string values: numeric tokens retain precision and keys retain their schema.
-  return content.replace(JSON_STRING_TOKEN, (token: string) => {
-    if (token.endsWith(':')) return token;
-    const original = JSON.parse(token) as string;
-    const value = redactJsonText(original, redactPii, depth + 1)
-      ?? (redactPii ? redactPiiPatterns(original) : original);
-    return value === original ? token : JSON.stringify(value);
+  const stack: JsonRedactionFrame[] = [];
+  // Preserve source tokens and whitespace; never round-trip numeric values through JS numbers.
+  return content.replace(JSON_TOKEN, (token: string) => {
+    const frame = stack[stack.length - 1];
+    const reason = frame?.pending ?? frame?.reason ?? inheritedReason;
+    if (token === '{' || token === '[') {
+      stack.push({ reason, pending: null, keys: token === '{' ? new Map() : null });
+      return token;
+    }
+    if (token === '}' || token === ']') {
+      stack.pop();
+      return token;
+    }
+    if (token === ',') {
+      if (frame) frame.pending = null;
+      return token;
+    }
+    if (token.startsWith('"')) {
+      const key = token.endsWith(':');
+      const raw = key ? token.slice(0, token.lastIndexOf('"') + 1) : token;
+      const original = JSON.parse(raw) as string;
+      if (key) {
+        if (!frame?.keys) throw new Error('Invalid JSON key context');
+        frame.pending = SENSITIVE_JSON_FIELDS.get(original.toLowerCase().replace(/[^a-z0-9]/g, '')) ?? frame.reason;
+        const value = redactPii ? redactPiiPatterns(original) : original;
+        const previous = frame.keys.get(value);
+        if (previous !== undefined && previous !== original) throw new Error('Redacted JSON key collision');
+        frame.keys.set(value, original);
+        return value === original ? token : JSON.stringify(value) + token.slice(raw.length);
+      }
+      const value = redactJsonText(original, redactPii, depth + 1, reason)
+        ?? (redactPii ? redactPiiPatterns(original) : original);
+      return value === original ? token : JSON.stringify(value);
+    }
+    return redactPii && reason !== null && /^[-0-9]/.test(token) ? JSON.stringify(reason) : token;
   });
 }
 
