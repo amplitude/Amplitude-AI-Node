@@ -245,6 +245,29 @@ describe('setToolResultProperties', () => {
     expect(() => setToolResultProperties({ order_id: 'x' })).not.toThrow();
   });
 
+  it('keeps an untracked nested tool out of the outer tool', async () => {
+    const amp = transport();
+    const inner = tool(
+      async () => {
+        setToolResultProperties({ inner_id: 'i1' });
+        return 'inner';
+      },
+      { name: 'inner' },
+    );
+    const outer = tool(
+      async () => {
+        await inner();
+        setToolResultProperties({ outer_id: 'o1' });
+        return 'outer';
+      },
+      { name: 'outer', amplitude: amp, userId: 'user-1' },
+    );
+    await outer();
+    const [props] = toolProps(amp);
+    expect(props?.outer_id).toBe('o1');
+    expect(props).not.toHaveProperty('inner_id');
+  });
+
   it('isolates nested tools', async () => {
     const amp = setup();
     const inner = tool(

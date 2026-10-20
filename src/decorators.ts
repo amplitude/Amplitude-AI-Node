@@ -476,7 +476,8 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
       getLogger().warn(
         `Tool '${toolName}' called but tracking not configured. Call ToolCallTracker.setAmplitude() or pass amplitude/userId to tool().`,
       );
-      return fn.apply(this, args);
+      // An untracked tool must not write into an enclosing tool's holder.
+      return _toolResultStorage.exit(() => fn.apply(this, args));
     }
 
     const toolInput =
