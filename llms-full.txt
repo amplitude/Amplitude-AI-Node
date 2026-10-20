@@ -195,6 +195,16 @@ const searchProducts = tool(async (args: { query: string }) => { /* ... */ }, {
 const results = await searchProducts({ query: 'pancakes' });
 // [Agent] Tool Call event is automatically emitted with duration, success, input/output.
 ```
+For tools that create something (an order, booking, refund), record its ID so Agent Analytics Goals can confirm the action against a later event with the same ID:
+```
+import { setToolResultProperties, tool } from '@amplitude/ai';
+const placeOrder = tool(async (cart) => shop.create(cart), {
+  name: 'place_order',
+  resultProperties: (order) => ({ order_id: order.id }), // runs only on success
+});
+// Or from inside the tool body: setToolResultProperties({ booking_id: booking.id });
+```
+IDs only (never emails, names, or message text): strings up to 512 characters, finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. The hook wins over `setToolResultProperties()` on conflicts. Name the key exactly like the property on the confirming event.
 
 ### observe(fn, opts?) / observe(opts)(fn)
 Higher-order function that wraps a function to auto-emit [Agent] Span events.

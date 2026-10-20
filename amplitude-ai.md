@@ -310,6 +310,31 @@ const result = await searchProducts(query);
 
 > `tool()` applies to **any function the agent calls as a tool step** — not just external API calls. Deterministic helpers, local classifiers, pre-processing functions — if the agent invokes it as part of its reasoning flow, wrap it. Without wrapping, the tool step is invisible to Agent Analytics even though the rest of the session is tracked.
 
+**Record what an action tool created (for Agent Analytics Goals):** when a tool creates something with an ID (an order, booking, refund, ticket), attach that ID to its `[Agent] Tool Call`. A later event carrying the same ID, from any source, confirms the action happened, so Goals can measure confirmed outcomes rather than attempted ones.
+
+```typescript
+import { setToolResultProperties, tool } from '@amplitude/ai';
+
+const placeOrder = tool(async (cart: Cart) => shop.create(cart), {
+  name: 'place_order',
+  resultProperties: (order: Order) => ({ order_id: order.id }), // runs only after success
+});
+
+const bookSlot = tool(async (slotId: string) => {
+  const booking = await calendar.book(slotId);
+  setToolResultProperties({ booking_id: booking.id }); // from inside the body, across awaits
+  return 'Booked';
+}, { name: 'book_slot' });
+```
+
+Rules (follow these, do not guess):
+
+- **Only on tools that create or change something with an ID.** Read-only tools get none.
+- **IDs only.** Event properties are not redacted: never pass emails, names, addresses, or message content. Values must be strings (up to 512 characters), finite numbers, or booleans; at most 5 keys; `[Agent]`, `[Amplitude]`, and `$` keys are dropped. Nothing is added when the tool fails.
+- **Name the key exactly like the property on the confirming event** (for example `order_id` on both `[Agent] Tool Call` and `Payment Settled`). Find that event in the codebase; if there isn't one, **ask the developer** which event confirms the action instead of inventing one.
+- These keys are the exception to "avoid `eventProperties` for custom dimensions on `[Agent]` events": they are join keys, not dimensions, so `context` is not a substitute. If the project blocks unplanned properties, the developer must allow these keys on `[Agent] Tool Call`.
+- Provider wrappers record which tools the model asked for, not whether they ran: use `tool()` or `trackToolCall({ ..., eventProperties })` for action tools.
+
 **Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
 
 1. **`[Agent] Tool Call`** (via `tool()` or `trackToolCall()`) — operational telemetry: latency, success/failure, error rate on the action itself.
