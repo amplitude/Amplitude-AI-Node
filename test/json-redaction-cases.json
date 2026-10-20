@@ -1,0 +1,47 @@
+[
+  {
+    "name": "epoch-and-sensitive-string",
+    "input": "{\"start\":1791792000,\"end\":1791792000000,\"phone\":\"2025550123\",\"email\":\"owner@example.com\"}",
+    "expected": "{\"start\":1791792000,\"end\":1791792000000,\"phone\":\"[phone]\",\"email\":\"[email]\"}"
+  },
+  {
+    "name": "numeric-precision-and-whitespace",
+    "input": " [ 123456789012345678901, 0.12345678901234567890, 1e+30, true, null, \"2025550123\" ] ",
+    "expected": " [ 123456789012345678901, 0.12345678901234567890, 1e+30, true, null, \"[phone]\" ] "
+  },
+  {
+    "name": "nested-serialized-json",
+    "input": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"start\\\": 1791792000, \\\"phone\\\": \\\"2025550123\\\"}\"}]}",
+    "expected": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"start\\\": 1791792000, \\\"phone\\\": \\\"[phone]\\\"}\"}]}"
+  },
+  {
+    "name": "escaped-sensitive-string",
+    "input": "{\"phone\":\"\\u0032\\u0030\\u0032\\u0035\\u0035\\u0035\\u0030\\u0031\\u0032\\u0033\"}",
+    "expected": "{\"phone\":\"[phone]\"}"
+  },
+  {
+    "name": "numeric-looking-text",
+    "input": "1791792000",
+    "expected": "[phone]"
+  },
+  {
+    "name": "ordinary-phone-text",
+    "input": "Call +12025550123 or 202-555-0123",
+    "expected": "Call [phone] or [phone]"
+  },
+  {
+    "name": "object-keys-match-typed-objects",
+    "input": "{\"2025550123\":1791792000,\"text\":\"2025550123\"}",
+    "expected": "{\"2025550123\":1791792000,\"text\":\"[phone]\"}"
+  },
+  {
+    "name": "malformed-is-ordinary-text",
+    "input": "{\"start\":1791792000, \"phone\":\"2025550123\"",
+    "expected": "{\"start\":[phone], \"phone\":\"[phone]\""
+  },
+  {
+    "name": "html-is-ordinary-text",
+    "input": "<p>{\"start\":1791792000}</p>",
+    "expected": "<p>{\"start\":[phone]}</p>"
+  }
+]

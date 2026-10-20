@@ -739,6 +739,8 @@ const config = new AIConfig({
 
 With the default `redactPii: true`, a message like `"Contact me at john@example.com or 555-123-4567"` is sanitized to `"Contact me at [email] or [phone]"` before being sent.
 
+Structured content channels, including tool input/output, attachments, and span state, recognize complete JSON object/array strings up to 100,000 characters, within the runtime parser limits. Built-in PII redaction applies to decoded string values while preserving JSON escaping, numeric tokens (including timestamps), and object keys. Custom patterns and callbacks retain their original string boundary and run once after built-in redaction, followed by base64 redaction. If these later steps make an originally valid JSON document invalid, the SDK emits `[content redacted]`. Native parser limits or excessive nested JSON-string depth also fail closed. Numeric-looking strings, including timestamps embedded in HTML source, remain ordinary redaction. Malformed or oversized JSON follows the ordinary text-redaction and truncation path; existing final size limits can still truncate output.
+
 > **Upgrading to 0.7.0 with `redactPii: true`?** This release adds IPv4/IPv6 → `[ip_address]`, international phone → `[phone]`, and space-separated SSN → `[ssn]` placeholders. If any downstream pipeline or dashboard regex matches on raw IP or phone content in event properties, update those filters before upgrading.
 
 Built-in patterns now include international phone numbers (E.164 `+country...`) and IPv4/IPv6 addresses. Add custom patterns for domain-specific PII:

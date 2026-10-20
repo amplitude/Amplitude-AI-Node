@@ -223,19 +223,62 @@ export function sanitizeAnyContent(
   return result;
 }
 
+const JSON_STRING_TOKEN = /"(?:[^"\\]|\\.)*"(?:\s*:)?/g;
+const MAX_JSON_STRING_DEPTH = 16;
+
+function redactJsonText(content: string, redactPii: boolean, depth = 0): string | null {
+  const first = content.trimStart()[0];
+  if (content.length > MAX_TEXT_LENGTH || (first !== '{' && first !== '[')) return null;
+  try {
+    JSON.parse(content);
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+  if (depth >= MAX_JSON_STRING_DEPTH) throw new RangeError('Serialized JSON nesting limit');
+  // Rewrite only string values: numeric tokens retain precision and keys retain their schema.
+  return content.replace(JSON_STRING_TOKEN, (token: string) => {
+    if (token.endsWith(':')) return token;
+    const original = JSON.parse(token) as string;
+    const value = redactJsonText(original, redactPii, depth + 1)
+      ?? (redactPii ? redactPiiPatterns(original) : original);
+    return value === original ? token : JSON.stringify(value);
+  });
+}
+
+function sanitizeStructuredText(
+  content: string,
+  redactPii: boolean,
+  pc?: PrivacyConfig | null,
+): string {
+  let jsonText: string | null;
+  try {
+    jsonText = redactJsonText(content, redactPii);
+  } catch {
+    return REDACTED_CONTENT_PLACEHOLDER;
+  }
+  let text = jsonText ?? capText(content);
+  if (jsonText === null && redactPii) text = redactPiiPatterns(text);
+  // Preserve the custom redactor's original string boundary and ordering.
+  if (pc != null) text = pc.applyCustomRedaction(text);
+  text = redactBase64Content(text) as string;
+  if (jsonText !== null) {
+    try {
+      JSON.parse(text);
+    } catch {
+      return REDACTED_CONTENT_PLACEHOLDER;
+    }
+  }
+  return text;
+}
+
 export function sanitizeStructuredContent(
   content: unknown,
   redactPii: boolean,
   pc?: PrivacyConfig | null,
 ): unknown {
   if (typeof content === 'string') {
-    // Anything past the cap is cut by serializeToJsonString() anyway.
-    let text = capText(content);
-    if (redactPii) text = redactPiiPatterns(text);
-    if (pc != null) {
-      text = pc.applyCustomRedaction(text);
-    }
-    return redactBase64Content(text);
+    return sanitizeStructuredText(content, redactPii, pc);
   }
 
   if (

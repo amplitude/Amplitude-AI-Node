@@ -1,7 +1,7 @@
 <!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
-version=0.24.0
+version=0.24.1
 
 [routing]
 instrument-node=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.24.1
+
+### Fixed
+- Preserve numeric values and valid escaping in serialized JSON objects/arrays within structured content channels. Built-in redaction handles decoded string values without treating numeric timestamps as phone text or reformatting large integers. Custom patterns/callbacks retain their original string boundary and run once. JSON corrupted by later custom/base64 redaction and inputs exceeding native parser limits fail closed. Malformed/oversized text and HTML retain ordinary bounded text-redaction behavior.
+
 ## 0.24.0
 
 ### Documentation and validation
