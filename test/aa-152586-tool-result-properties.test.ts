@@ -241,6 +241,22 @@ describe('setToolResultProperties', () => {
     expect(props?.extra).toBe('kept');
   });
 
+  it('gives hook keys priority under the key cap', async () => {
+    const amp = setup();
+    const t = tool(
+      async () => {
+        setToolResultProperties({ k1: 1, k2: 2, k3: 3, k4: 4, k5: 5 });
+        return 'ok';
+      },
+      { name: 't', resultProperties: () => ({ order_id: 'ord_1' }) },
+    );
+    await t();
+    const [props] = toolProps(amp);
+    expect(props?.order_id).toBe('ord_1');
+    expect(props).toMatchObject({ k1: 1, k2: 2, k3: 3, k4: 4 });
+    expect(props).not.toHaveProperty('k5');
+  });
+
   it('is a no-op outside a tool', () => {
     expect(() => setToolResultProperties({ order_id: 'x' })).not.toThrow();
   });
@@ -354,6 +370,17 @@ describe('sanitizeResultProperties parity cases', () => {
     expect(sanitizeResultProperties(null)).toEqual({});
     expect(sanitizeResultProperties(['a'])).toEqual({});
     expect(sanitizeResultProperties('a')).toEqual({});
+  });
+
+  it('accepts only plain objects', () => {
+    class Order {
+      order_id = 'ord_1';
+    }
+    expect(sanitizeResultProperties(new Order())).toEqual({});
+    expect(sanitizeResultProperties(new Map([['a', 'b']]))).toEqual({});
+    expect(sanitizeResultProperties(new Date())).toEqual({});
+    expect(sanitizeResultProperties(Object.create(null))).toEqual({});
+    expect(sanitizeResultProperties({ a: 'b' })).toEqual({ a: 'b' });
   });
 });
 

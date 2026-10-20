@@ -80,7 +80,11 @@ export function setToolResultProperties(
 }
 
 function _isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value != null && !Array.isArray(value);
+  if (typeof value !== 'object' || value == null || Array.isArray(value)) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === null || proto === Object.prototype;
 }
 
 function _isValidResultValue(value: unknown): boolean {
@@ -140,7 +144,7 @@ function _collectResultProperties(
   holder: Record<string, unknown>,
   resultProperties: ResultPropertiesHook | null | undefined,
 ): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...holder };
+  let hookRecord: Record<string, unknown> = {};
   if (resultProperties != null) {
     let hookProps: unknown = null;
     try {
@@ -152,12 +156,17 @@ function _collectResultProperties(
       );
     }
     if (_isPlainRecord(hookProps) && typeof hookProps.then !== 'function') {
-      Object.assign(merged, hookProps);
+      hookRecord = hookProps;
     } else if (hookProps != null) {
       getLogger().debug(
         `Tool '${toolName}': resultProperties hook must synchronously return an object; ignored`,
       );
     }
+  }
+  // Hook keys go first so they win both conflicts and the key cap.
+  const merged: Record<string, unknown> = { ...hookRecord };
+  for (const [key, value] of Object.entries(holder)) {
+    if (!(key in merged)) merged[key] = value;
   }
   return sanitizeResultProperties(merged, toolName);
 }
