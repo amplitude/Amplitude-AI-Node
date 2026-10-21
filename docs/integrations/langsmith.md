@@ -100,7 +100,7 @@ Fetch one real thread (`listThreadTraces`, then `listTraceRuns` for each finishe
 - **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}` (including serialized LangChain messages), and common keys such as `input` and `output`. Check it returns what the user typed and saw. When it finds no text, the adapter sends `[No text input]` or `[No text output]` rather than dropping the message, so each trace stays its own exchange; if these appear, extend `textFrom`.
 - **Errors.** A root run that failed with no readable output is sent as the reply `[Error: <first line of its error>]`, and counted in context as `errored_traces`. Confirm the first line of the user's errors is safe to show.
 - **Tool calls.** Runs with `run_type` `TOOL` become tool calls, named by the run name. Run types are uppercase in v2.
-- **What a tool created.** If a `TOOL` run's `outputs` contain the created object's ID, such as an order or ticket ID, ask the user which key holds it and map it to `[Agent] Result ID` and `[Agent] Result Type` (see "What a tool call created" under Event contract). Otherwise leave them out.
+- **What a tool created.** If a `TOOL` run's `outputs` contain the created object's ID, such as an order or ticket ID, ask the user which key holds it and read it in a `toolResult` function (see "What a tool call created" under Event contract). Otherwise leave `toolResult` unset.
 - **Usage and cost.** The adapter sums `prompt_tokens`, `completion_tokens`, and `total_cost` over the exchange's `LLM` runs, and reads the model and provider from `ls_model_name` and `ls_provider` in the run's `metadata` (v2 returns `metadata` as its own field, not under `extra`). LangSmith reports `0` when it has no count or no price, so zero token totals and zero cost are omitted, not sent as `0`. Confirm these are populated.
 - **Spans.** Only the run types the user chose in do-not-guess answer 3 go in `spanRunTypes`, uppercase, for example `['RETRIEVER']`. `TOOL` is ignored there, because a run sent as both a tool call and a span would share one event ID.
 
@@ -157,7 +157,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | Event | Sent for | Properties beyond the common set |
 |---|---|---|
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
-| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
+| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Component Type` = `tool`; `[Agent] Tool Success` and `[Agent] Is Error` when the call's outcome is recorded; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
 | `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
@@ -167,14 +167,29 @@ Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `ins
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
 
-**What a tool call created.** The forwarder core does not send `[Agent] Result ID` or `[Agent] Result Type`. If your tool output contains the created object's ID (for example in the `TOOL` run's `outputs`), add these to the Tool Call event's properties in your copy of the core, only when the vendor recorded the call as successful (`tool.success === true`):
+**What a tool call created.** If your tool output contains the created object's ID (for example in the `TOOL` run's `outputs`), pass a `toolResult` function in the `toAgentEvents` options that returns `{ id, type }` from that field. The core calls it only for calls the vendor recorded as successful (`success === true`), validates what it returns, and sends:
 
 | Property | Value |
 |---|---|
-| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer |
-| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket` |
+| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer. An invalid ID drops both properties |
+| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket`. An invalid type is dropped on its own |
 
 Ask the user which output field holds the ID; never guess one or parse it out of free text. Agent Analytics Goals use the pair to confirm the action against a later event with the same ID.
+
+For example, if the user says the `create_ticket` tool returns the new ticket in `ticket_id`:
+
+```ts
+events = toAgentEvents(conversation, {
+  redact,
+  source: 'langsmith',
+  toolResult: (tool) => {
+    const id = (tool.output as { ticket_id?: unknown } | undefined)?.ticket_id;
+    return tool.name === 'create_ticket' && (typeof id === 'string' || typeof id === 'number')
+      ? { id, type: 'ticket' }
+      : undefined;
+  },
+});
+```
 
 ### Example: one complete session
 
@@ -352,8 +367,17 @@ export interface ForwarderToolCall {
   timestamp: number;
   input?: unknown;
   output?: unknown;
+  /** The vendor's recorded outcome. Leave unset if unknown; never assume success. */
   success?: boolean;
   latencyMs?: number;
+}
+
+/** What a successful tool call created. Becomes [Agent] Result ID / [Agent] Result Type. */
+export interface ForwarderToolResult {
+  /** A string of 1 to 512 characters after trimming, or a safe integer. */
+  id: string | number;
+  /** The object's kind, matching `[a-z][a-z0-9_]{0,63}`, for example `ticket`. */
+  type?: string;
 }
 
 export interface ForwarderSpan {
@@ -435,9 +459,40 @@ export interface ToAgentEventsOptions {
   redact?: (text: string) => string;
   /** Platform that produced the conversation. Becomes [Agent] Source. */
   source?: string;
+  /**
+   * Reads the created object's ID from a field the platform records in the tool
+   * call, never from free text. Called only for calls with `success === true`.
+   */
+  toolResult?: (tool: ForwarderToolCall) => ForwarderToolResult | undefined;
 }
 
 export const FORWARDER_VERSION = 'http-forwarder/1.0';
+
+// ASCII whitespace only, matching the Amplitude SDKs.
+const RESULT_ID_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+const RESULT_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** [Agent] Result ID / Result Type for `{ id, type }`, or `{}` when the ID is invalid. */
+export function toolResultProperties(result: unknown): Record<string, string> {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return {};
+  const proto = Object.getPrototypeOf(result);
+  if (proto !== Object.prototype && proto !== null) return {};
+  const { id, type } = result as { id?: unknown; type?: unknown };
+  const resultId =
+    typeof id === 'number' && Number.isSafeInteger(id)
+      ? String(id)
+      : typeof id === 'string'
+        ? id.replace(RESULT_ID_TRIM, '')
+        : '';
+  const length = [...resultId].length;
+  if (length === 0 || length > 512) return {};
+  return {
+    '[Agent] Result ID': resultId,
+    ...(typeof type === 'string' && RESULT_TYPE_PATTERN.test(type)
+      ? { '[Agent] Result Type': type }
+      : {}),
+  };
+}
 
 export function toAgentEvents(
   conversation: NormalizedConversation,
@@ -524,8 +579,12 @@ export function toAgentEvents(
           '[Agent] Turn ID': turnId,
           '[Agent] Invocation ID': invocationId,
           '[Agent] Tool Name': tool.name,
-          '[Agent] Tool Success': tool.success ?? true,
-          '[Agent] Is Error': tool.success === false,
+          ...(typeof tool.success === 'boolean'
+            ? { '[Agent] Tool Success': tool.success, '[Agent] Is Error': !tool.success }
+            : {}),
+          ...(tool.success === true && options.toolResult
+            ? toolResultProperties(options.toolResult(tool))
+            : {}),
           '[Agent] Component Type': 'tool',
           ...(tool.latencyMs !== undefined ? { '[Agent] Latency Ms': tool.latencyMs } : {}),
           ...(userMessageId ? { '[Agent] Parent Message ID': userMessageId } : {}),

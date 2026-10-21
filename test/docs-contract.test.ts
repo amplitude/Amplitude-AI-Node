@@ -508,6 +508,87 @@ describe('forwarder core and adapters', () => {
     expect(second).toEqual(first);
   });
 
+  const withToolCalls = (toolCalls: Record<string, unknown>[]) => ({
+    ...fixture,
+    messages: fixture.messages.map((m) =>
+      m.id === 'a1'
+        ? { ...m, toolCalls: toolCalls.map((t, i) => ({ id: `c${i + 1}`, name: 'create_ticket', timestamp: t0 + 2_000 + i, ...t })) }
+        : m,
+    ),
+  });
+  const toolEvents = (events: AgentEvent[]) => events.filter((e) => e.event_type === '[Agent] Tool Call');
+
+  it('sends Tool Success and Is Error only for an explicit boolean success', () => {
+    const tools = toolEvents(core.toAgentEvents(withToolCalls([{ success: true }, { success: false }, {}])));
+    expect(tools[0]?.event_properties).toMatchObject({ '[Agent] Tool Success': true, '[Agent] Is Error': false });
+    expect(tools[1]?.event_properties).toMatchObject({ '[Agent] Tool Success': false, '[Agent] Is Error': true });
+    expect(tools[2]?.event_properties).not.toHaveProperty('[Agent] Tool Success');
+    expect(tools[2]?.event_properties).not.toHaveProperty('[Agent] Is Error');
+  });
+
+  it('sends Result ID and Result Type from toolResult only on successful calls, in every content mode', () => {
+    const conversation = withToolCalls([
+      { success: true, output: { ticket_id: ' TCK-1042 ' } },
+      { success: false, output: { ticket_id: 'TCK-1043' } },
+      { output: { ticket_id: 'TCK-1044' } },
+    ]);
+    const toolResult = vi.fn((tool: { output?: { ticket_id?: string } }) => ({
+      id: tool.output?.ticket_id ?? '',
+      type: 'ticket',
+    }));
+    for (const contentMode of ['full', 'metadata_only'] as const) {
+      toolResult.mockClear();
+      const tools = toolEvents(core.toAgentEvents(conversation, { contentMode, toolResult }));
+      expect(tools[0]?.event_properties).toMatchObject({
+        '[Agent] Result ID': 'TCK-1042',
+        '[Agent] Result Type': 'ticket',
+      });
+      for (const tool of tools.slice(1)) {
+        expect(tool.event_properties).not.toHaveProperty('[Agent] Result ID');
+        expect(tool.event_properties).not.toHaveProperty('[Agent] Result Type');
+      }
+      expect(toolResult).toHaveBeenCalledTimes(1);
+    }
+
+    const without = toolEvents(core.toAgentEvents(conversation));
+    expect(without[0]?.event_properties).not.toHaveProperty('[Agent] Result ID');
+  });
+
+  it('drops an invalid Result ID with its type, and an invalid Result Type on its own', () => {
+    const results = [{ id: '  ', type: 'ticket' }, { id: 1.5, type: 'ticket' }, { id: 'TCK-1', type: 'Ticket' }, undefined];
+    const tools = toolEvents(
+      core.toAgentEvents(withToolCalls(results.map(() => ({ success: true }))), {
+        toolResult: (tool: { id: string }) => results[Number(tool.id.slice(1)) - 1],
+      }),
+    );
+    for (const i of [0, 1, 3]) {
+      expect(tools[i]?.event_properties).not.toHaveProperty('[Agent] Result ID');
+      expect(tools[i]?.event_properties).not.toHaveProperty('[Agent] Result Type');
+    }
+    expect(tools[2]?.event_properties['[Agent] Result ID']).toBe('TCK-1');
+    expect(tools[2]?.event_properties).not.toHaveProperty('[Agent] Result Type');
+  });
+
+  it('validates tool results exactly like the SDK parity cases', () => {
+    type Repeat = { char: string; count: number };
+    const { cases } = JSON.parse(
+      readFileSync(resolve(__dirname, 'fixtures/tool-result-cases.json'), 'utf8'),
+    ) as { cases: { name: string; input: unknown; expected?: Record<string, string>; expected_repeat?: Repeat }[] };
+    expect(cases.length).toBeGreaterThan(20);
+    for (const c of cases) {
+      const repeat = (c.input as { id_repeat?: Repeat } | null)?.id_repeat;
+      const input = repeat ? { id: repeat.char.repeat(repeat.count) } : c.input;
+      const expected = c.expected_repeat
+        ? { '[Agent] Result ID': c.expected_repeat.char.repeat(c.expected_repeat.count) }
+        : (c.expected ?? {});
+      expect(core.toolResultProperties(input), c.name).toEqual(expected);
+    }
+    class Order {
+      id = 'ord_1';
+    }
+    expect(core.toolResultProperties(new Order())).toEqual({});
+  });
+
   it('sorts out-of-order transcripts by timestamp', () => {
     const shuffled = { ...fixture, messages: [...fixture.messages].reverse() };
     expect(core.toAgentEvents(shuffled)).toEqual(core.toAgentEvents(fixture));
