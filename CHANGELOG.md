@@ -4,6 +4,10 @@
 
 ### Added
 - **Tool result.** `tool(fn, { result })` maps a successful tool's return value to `{ id, type }`, and `setToolResult(id, { type })` sets it from inside the tool body. They are sent as the new `[Agent] Result ID` and `[Agent] Result Type` properties on `[Agent] Tool Call`, so Agent Analytics Goals can confirm the action against a later event with the same ID. OTel tool spans can set `amplitude.tool.result_id` / `amplitude.tool.result_type`. The ID is a non-blank string of up to 512 characters or a safe integer; the type matches `[a-z][a-z0-9_]{0,63}`. Nothing is added when the tool fails.
+- **Warehouse templates: optional `result_id` and `result_type` columns.** Mapped to `[Agent] Result ID` and `[Agent] Result Type` on tool rows where `tool_success` is true; a blank or over-long ID, or a type that does not match the pattern, is dropped. The forwarder guides (LangSmith, Langfuse, Braintrust, Sierra, Decagon) document where a created object's ID maps to the same properties.
+
+### Changed
+- **Warehouse templates: a missing `tool_success` no longer defaults to true.** A tool row with `tool_success` `NULL` now leaves `[Agent] Tool Success` and `[Agent] Is Error` unset instead of sending `true` and `false`. This includes every tool call from the OpenAI-messages template, whose source records no outcome. Map `tool_success` from your table: tool-action goals count only successful calls.
 
 ## 0.24.0
 

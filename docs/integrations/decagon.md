@@ -86,6 +86,7 @@ Fetch or read one real export response. Compare it to the documented shape below
 - **Tags.** Documented as `{ "name": ..., "level": ... }` objects; PostHog's connector describes tag IDs. Check which your response has (see Context keys below the adapter). If they are IDs, confirm that `GET https://api.decagon.ai/tag/all` returns `{ "tags": [{ "id": ..., "name": ... }] }` and that the IDs match.
 - **Message IDs.** The documented export has none, so the adapter uses each message's position in the conversation. That stays stable as long as Decagon only appends messages. If your response has message IDs, use them.
 - **UI components and internal steps.** The archived export documents only text messages. If your response has structured blocks (cards, forms, quick replies) or routing and handoff steps, map each to `spans` on the reply it belongs to, as confirmed in do-not-guess answer 4. Never emit an assistant message with neither text nor spans.
+- **What a tool created.** The documented export has no tool calls. If your response has them and a tool's output contains the created object's ID, ask the user which field holds it and its kind, and send them as `[Agent] Result ID` and `[Agent] Result Type` on successful calls (see "What a tool call created" under Event contract).
 - **Context.** Decagon tags become one boolean context key each. Only `metadata` keys the user explicitly allows become context; metadata often contains personal data such as email.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
@@ -140,7 +141,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | Event | Sent for | Properties beyond the common set |
 |---|---|---|
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
-| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output` |
+| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
 | `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
@@ -149,6 +150,15 @@ Each of these is something a real integration got wrong. The forwarder core impl
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime` = `custom`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `decagon`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
+
+**What a tool call created.** The forwarder core does not send `[Agent] Result ID` or `[Agent] Result Type`. If your tool output contains the created object's ID (in a tool call's output, if your Decagon export includes tool calls at all), add these to the Tool Call event's properties in your copy of the core, only when the vendor recorded the call as successful (`tool.success === true`):
+
+| Property | Value |
+|---|---|
+| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer |
+| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket` |
+
+Ask the user which output field holds the ID; never guess one or parse it out of free text. Agent Analytics Goals use the pair to confirm the action against a later event with the same ID.
 
 ### Example: one export page
 

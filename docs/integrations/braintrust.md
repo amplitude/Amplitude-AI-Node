@@ -98,6 +98,7 @@ Run the adapter's queries for one real conversation and compare the rows to the 
 - **Text.** `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, OpenAI-style `choices`, and common keys. Check it returns what the user typed and saw. A trace after the first whose input yields no user text is skipped and counted as `traces_without_user_text` in context, because sending its reply alone would merge it into the previous exchange. If that count shows up, extend `textFrom`.
 - **Errors and empty replies.** A root with an `error` and no output is sent as the reply `[Error: <message>]`. A root with neither output nor error is skipped and counted as `traces_without_reply`, never sent as an empty AI Response. Check both counts on a real conversation.
 - **Tool calls.** Spans with `span_attributes.type` `tool` become tool calls, named by `span_attributes.name`.
+- **What a tool created.** If a `tool` span's `output` contains the created object's ID, ask the user which key holds it and its kind, and send them as `[Agent] Result ID` and `[Agent] Result Type` on successful calls (see "What a tool call created" under Event contract).
 - **Timing and usage.** Times come from `metrics.start` and `metrics.end` (Unix seconds with a fractional part, rounded to whole milliseconds), falling back to `created`. Tokens come from `metrics.prompt_tokens` and `metrics.completion_tokens` on leaf `llm` spans, those with no `llm` span beneath them, because a wrapper `llm` span can report its children's tokens; the model comes from `metadata.model` on the last leaf call. Confirm these are populated, and that the reply's token totals match what Braintrust shows for the trace.
 - **Spans.** Only the span types the user chose in do-not-guess answer 4 go in `spanTypes`. `tool` spans are always tool calls and are ignored in `spanTypes`.
 
@@ -156,7 +157,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | Event | Sent for | Properties beyond the common set |
 |---|---|---|
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
-| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output` |
+| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
 | `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
@@ -165,6 +166,15 @@ Each of these is something a real integration got wrong. The forwarder core impl
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` (here `braintrust`), `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
+
+**What a tool call created.** The forwarder core does not send `[Agent] Result ID` or `[Agent] Result Type`. If your tool output contains the created object's ID (for example in the `tool` span's `output`), add these to the Tool Call event's properties in your copy of the core, only when the vendor recorded the call as successful (`tool.success === true`):
+
+| Property | Value |
+|---|---|
+| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer |
+| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket` |
+
+Ask the user which output field holds the ID; never guess one or parse it out of free text. Agent Analytics Goals use the pair to confirm the action against a later event with the same ID.
 
 ### Example: one complete session
 

@@ -92,6 +92,7 @@ Fetch the observations for one real session with `fields=core,basic,io,model,usa
 - **Exchanges.** The adapter treats each trace in a session as one exchange: the root observation's `input` is the user message and its `output` is the reply. If the application logs a whole conversation in one trace, or several traces per user message, change the grouping.
 - **Text.** `input` and `output` arrive as raw strings, often JSON. `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, and OpenAI-style `choices`. Check it returns the text the user actually typed and saw, not a prompt template or a system message.
 - **Tool calls.** `TOOL` observations become tool calls. If the application logs tools as `SPAN` observations with a naming convention, adjust the filter.
+- **What a tool created.** If a `TOOL` observation's `output` contains the created object's ID, ask the user which key holds it and its kind, and send them as `[Agent] Result ID` and `[Agent] Result Type` on successful calls (see "What a tool call created" under Event contract).
 - **Usage and cost.** Langfuse stores usage as mutually exclusive buckets: `input` excludes every `input_*` key (for example `input_cached_tokens`), `output` excludes every `output_*` key (for example `output_reasoning_tokens`), and `total` is their sum. So the adapter reports input tokens as `input` plus every `input_*` key, and output tokens likewise, never adding `total`. Cost is `costDetails.total`, or `totalCost` when there is no cost breakdown; a zero `totalCost` with no breakdown counts as unknown. Both are summed over every observation in the exchange that reports usage or cost, whatever its type, except an observation whose descendant also reports usage, which is treated as a rollup so tokens are not counted twice. Confirm the keys in the response: usage ingested as flat keys is stored unchanged, so a key such as `cache_read_input_tokens` that does not start with `input_` is not counted.
 - **Spans.** Only the observation types the user chose in do-not-guess answer 3 go in `spanTypes`.
 
@@ -146,7 +147,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | Event | Sent for | Properties beyond the common set |
 |---|---|---|
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
-| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output` |
+| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
 | `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
@@ -155,6 +156,15 @@ Each of these is something a real integration got wrong. The forwarder core impl
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `langfuse`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
+
+**What a tool call created.** The forwarder core does not send `[Agent] Result ID` or `[Agent] Result Type`. If your tool output contains the created object's ID (for example in the `TOOL` observation's `output`), add these to the Tool Call event's properties in your copy of the core, only when the vendor recorded the call as successful (`tool.success === true`):
+
+| Property | Value |
+|---|---|
+| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer |
+| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket` |
+
+Ask the user which output field holds the ID; never guess one or parse it out of free text. Agent Analytics Goals use the pair to confirm the action against a later event with the same ID.
 
 ### Example: one complete session
 

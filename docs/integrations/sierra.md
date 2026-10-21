@@ -87,6 +87,7 @@ Read the actual sample payload. Fill in `normalizeSierraConversation` (below) so
 | `messages[].text` | Message text. If the reply was only a UI component, leave it empty and put the component in `spans`; the core sends `[Displayed: <name>]` |
 | `messages[].timestamp` | Epoch milliseconds. Convert from the vendor format and state the timezone assumption |
 | `messages[].toolCalls` | Tool or action calls made before that assistant reply, with the vendor's call ID |
+| `[Agent] Result ID` / `[Agent] Result Type` | Not a `NormalizedConversation` field. If a tool call's output contains the created object's ID, ask the user which field holds it and its kind, and add them on successful calls (see "What a tool call created" under Event contract) |
 | `messages[].spans` | UI components shown with that reply (name, what was rendered, what the user did) and steps the user never saw, such as routing. Never emit an assistant message with neither text nor spans |
 | `scores` | Post-conversation ratings such as CSAT, if present |
 | `endedAt` | When the conversation ended, in epoch milliseconds. Leave it undefined if the conversation may still be open |
@@ -148,7 +149,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | Event | Sent for | Properties beyond the common set |
 |---|---|---|
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
-| `[Agent] Tool Call` | Each tool or action call | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output` |
+| `[Agent] Tool Call` | Each tool or action call | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
 | `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | Post-conversation rating, such as CSAT | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
@@ -157,6 +158,15 @@ Each of these is something a real integration got wrong. The forwarder core impl
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `sierra`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
+
+**What a tool call created.** The forwarder core does not send `[Agent] Result ID` or `[Agent] Result Type`. If your tool output contains the created object's ID (for example in a tool call's output in your Sierra payload), add these to the Tool Call event's properties in your copy of the core, only when the vendor recorded the call as successful (`tool.success === true`):
+
+| Property | Value |
+|---|---|
+| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer |
+| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket` |
+
+Ask the user which output field holds the ID; never guess one or parse it out of free text. Agent Analytics Goals use the pair to confirm the action against a later event with the same ID.
 
 ### Example: one complete session
 

@@ -26,6 +26,7 @@ export const DIALECTS = {
     now: () => 'SYSDATE()',
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr}) IGNORE NULLS`,
+    fullMatch: (expr, pattern) => `REGEXP_LIKE(${expr}, '${pattern}')`,
     inlineObject: (entries) => `OBJECT_CONSTRUCT(${pairs(entries).join(', ')})`,
     properties: (entries, pad = '') => block('OBJECT_CONSTRUCT', entries, pad),
     jsonText: (entries) => `TO_JSON(OBJECT_CONSTRUCT(${pairs(entries).join(', ')}))`,
@@ -43,6 +44,7 @@ export const DIALECTS = {
     now: () => 'CURRENT_TIMESTAMP()',
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr} IGNORE NULLS)`,
+    fullMatch: (expr, pattern) => `REGEXP_CONTAINS(${expr}, '^${pattern}$')`,
     inlineObject: (entries) => `JSON_OBJECT(${pairs(entries).join(', ')})`,
     properties: (entries, pad = '') => `JSON_STRIP_NULLS(${block('JSON_OBJECT', entries, pad)})`,
     jsonText: (entries) =>
@@ -61,6 +63,7 @@ export const DIALECTS = {
     now: () => 'current_timestamp()',
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr}, TRUE)`,
+    fullMatch: (expr, pattern) => `${expr} RLIKE '^${pattern}$'`,
     inlineObject: (entries) => `named_struct(${pairs(entries).join(', ')})`,
     // Stored as JSON text in the staging table; the import query turns it back
     // into a struct with DATABRICKS_EVENT_PROPERTIES_SCHEMA.
@@ -81,6 +84,7 @@ export const DIALECTS = {
     now: () => `CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP)`,
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr} IGNORE NULLS)`,
+    fullMatch: (expr, pattern) => `regexp_full_match(${expr}, '${pattern}')`,
     inlineObject: (entries) => `json_object(${pairs(entries).join(', ')})`,
     properties: (entries, pad = '') => block('json_object', entries, pad),
     jsonText: (entries) => `CAST(json_object(${pairs(entries).join(', ')}) AS VARCHAR)`,
