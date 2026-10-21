@@ -86,7 +86,7 @@ Read the actual sample payload. Fill in `normalizeSierraConversation` (below) so
 | `messages[].role` | `user` for the end user, `assistant` for the agent. Skip system and internal messages |
 | `messages[].text` | Message text. If the reply was only a UI component, leave it empty and put the component in `spans`; the core sends `[Displayed: <name>]` |
 | `messages[].timestamp` | Epoch milliseconds. Convert from the vendor format and state the timezone assumption |
-| `messages[].toolCalls` | Tool or action calls made before that assistant reply, with the vendor's call ID |
+| `messages[].toolCalls` | Tool or action calls made before that assistant reply, with the vendor's call ID. Set `success` from the call's recorded outcome. If a call's output contains the created object's ID, see "What a tool call created" under Event contract |
 | `[Agent] Result ID` / `[Agent] Result Type` | Not a `NormalizedConversation` field. If a tool call's output contains the created object's ID, ask the user which field holds it and its kind, and add them on successful calls (see "What a tool call created" under Event contract) |
 | `messages[].spans` | UI components shown with that reply (name, what was rendered, what the user did) and steps the user never saw, such as routing. Never emit an assistant message with neither text nor spans |
 | `scores` | Post-conversation ratings such as CSAT, if present |

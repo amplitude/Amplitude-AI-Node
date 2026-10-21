@@ -87,6 +87,7 @@ Fetch or read one real export response. Compare it to the documented shape below
 - **Message IDs.** The documented export has none, so the adapter uses each message's position in the conversation. That stays stable as long as Decagon only appends messages. If your response has message IDs, use them.
 - **UI components and internal steps.** The archived export documents only text messages. If your response has structured blocks (cards, forms, quick replies) or routing and handoff steps, map each to `spans` on the reply it belongs to, as confirmed in do-not-guess answer 4. Never emit an assistant message with neither text nor spans.
 - **What a tool created.** The documented export has no tool calls. If your response has them and a tool's output contains the created object's ID, ask the user which field holds it and its kind, and send them as `[Agent] Result ID` and `[Agent] Result Type` on successful calls (see "What a tool call created" under Event contract).
+- **Tool calls.** The documented export has none. If your response has tool or action calls, map them into `toolCalls` with `success` from the recorded outcome, and if a call's output contains the created object's ID, see "What a tool call created" under Event contract.
 - **Context.** Decagon tags become one boolean context key each. Only `metadata` keys the user explicitly allows become context; metadata often contains personal data such as email.
 
 **PAUSE.** Show the user the normalized output for one real conversation.
