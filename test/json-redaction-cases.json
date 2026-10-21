@@ -1,0 +1,132 @@
+[
+  {
+    "name": "epoch-and-sensitive-string",
+    "input": "{\"start\":1791792000,\"end\":1791792000000,\"phone\":\"2025550123\",\"email\":\"owner@example.com\"}",
+    "expected": "{\"start\":1791792000,\"end\":1791792000000,\"phone\":\"[phone]\",\"email\":\"[email]\"}"
+  },
+  {
+    "name": "numeric-precision-and-whitespace",
+    "input": " [ 123456789012345678901, 0.12345678901234567890, 1e+30, true, null, \"2025550123\" ] ",
+    "expected": " [ 123456789012345678901, 0.12345678901234567890, 1e+30, true, null, \"[phone]\" ] "
+  },
+  {
+    "name": "nested-serialized-json",
+    "input": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"start\\\": 1791792000, \\\"phone\\\": \\\"2025550123\\\"}\"}]}",
+    "expected": "{\"content\": [{\"type\": \"text\", \"text\": \"{\\\"start\\\": 1791792000, \\\"phone\\\": \\\"[phone]\\\"}\"}]}"
+  },
+  {
+    "name": "escaped-sensitive-string",
+    "input": "{\"phone\":\"\\u0032\\u0030\\u0032\\u0035\\u0035\\u0035\\u0030\\u0031\\u0032\\u0033\"}",
+    "expected": "{\"phone\":\"[phone]\"}"
+  },
+  {
+    "name": "numeric-looking-text",
+    "input": "1791792000",
+    "expected": "[phone]"
+  },
+  {
+    "name": "ordinary-phone-text",
+    "input": "Call +12025550123 or 202-555-0123",
+    "expected": "Call [phone] or [phone]"
+  },
+  {
+    "name": "pii-bearing-object-key",
+    "input": "{\"2025550123\":1791792000,\"text\":\"2025550123\"}",
+    "expected": "{\"[phone]\":1791792000,\"text\":\"[phone]\"}"
+  },
+  {
+    "name": "malformed-is-ordinary-text",
+    "input": "{\"start\":1791792000, \"phone\":\"2025550123\"",
+    "expected": "{\"start\":[phone], \"phone\":\"[phone]\""
+  },
+  {
+    "name": "html-is-ordinary-text",
+    "input": "<p>{\"start\":1791792000}</p>",
+    "expected": "<p>{\"start\":[phone]}</p>"
+  },
+  {
+    "name": "review-poc",
+    "input": "{\"phone\":2025550123,\"credit_card\":4111111111111111,\"owner@example.com\":1}",
+    "expected": "{\"phone\":\"[phone]\",\"credit_card\":\"[credit_card]\",\"[email]\":1}"
+  },
+  {
+    "name": "sensitive-field-aliases",
+    "input": "{\"Phone_Number\":2025550123,\"creditCardNumber\":4111111111111111,\"social-security-number\":123456789,\"start\":1791792000}",
+    "expected": "{\"Phone_Number\":\"[phone]\",\"creditCardNumber\":\"[credit_card]\",\"social-security-number\":\"[ssn]\",\"start\":1791792000}"
+  },
+  {
+    "name": "sensitive-numeric-spelling",
+    "input": "{\"phone\":2.025550123e9,\"card\":-4111111111111111,\"ssn\":123456789.0}",
+    "expected": "{\"phone\":\"[phone]\",\"card\":\"[credit_card]\",\"ssn\":\"[ssn]\"}"
+  },
+  {
+    "name": "array-field-context",
+    "input": "{\"phones\":[2025550123,[2025550124],{\"value\":2025550125}],\"start\":1791792000,\"data\":[1791792000]}",
+    "expected": "{\"phones\":[\"[phone]\",[\"[phone]\"],{\"value\":\"[phone]\"}],\"start\":1791792000,\"data\":[1791792000]}"
+  },
+  {
+    "name": "nested-field-override",
+    "input": "{\"phone\":{\"value\":2025550123,\"card\":4111111111111111,\"nested\":{\"ssn\":123456789},\"another\":2025550124},\"n\":1791792000}",
+    "expected": "{\"phone\":{\"value\":\"[phone]\",\"card\":\"[credit_card]\",\"nested\":{\"ssn\":\"[ssn]\"},\"another\":\"[phone]\"},\"n\":1791792000}"
+  },
+  {
+    "name": "context-does-not-leak",
+    "input": "[{\"phone\":2025550123,\"other\":{\"value\":1791792000}},1791792000,{\"n\":1791792000}]",
+    "expected": "[{\"phone\":\"[phone]\",\"other\":{\"value\":1791792000}},1791792000,{\"n\":1791792000}]"
+  },
+  {
+    "name": "escaped-sensitive-key",
+    "input": "{\"ph\\u006fne\":2025550123,\"owner\\u0040example.com\" :1}",
+    "expected": "{\"ph\\u006fne\":\"[phone]\",\"[email]\" :1}"
+  },
+  {
+    "name": "numeric-key-and-whitespace",
+    "input": " { \"2025550123\"  : 1791792000, \"phone\" : 2025550123 } ",
+    "expected": " { \"[phone]\"  : 1791792000, \"phone\" : \"[phone]\" } "
+  },
+  {
+    "name": "redacted-key-collision",
+    "input": "{\"first@example.com\":1,\"second@example.com\":2}",
+    "expected": "[content redacted]"
+  },
+  {
+    "name": "redacted-key-placeholder-collision",
+    "input": "{\"owner@example.com\":1,\"[email]\":2}",
+    "expected": "[content redacted]"
+  },
+  {
+    "name": "redacted-key-placeholder-reverse-collision",
+    "input": "{\"[email]\":2,\"owner@example.com\":1}",
+    "expected": "[content redacted]"
+  },
+  {
+    "name": "identical-duplicate-keys-retained",
+    "input": "{\"owner@example.com\":1,\"owner@example.com\":2,\"phone\":2025550123,\"phone\":2025550124}",
+    "expected": "{\"[email]\":1,\"[email]\":2,\"phone\":\"[phone]\",\"phone\":\"[phone]\"}"
+  },
+  {
+    "name": "key-scope-is-per-object",
+    "input": "[{\"first@example.com\":1},{\"second@example.com\":2}]",
+    "expected": "[{\"[email]\":1},{\"[email]\":2}]"
+  },
+  {
+    "name": "ambiguous-unlabelled-numbers-retained",
+    "input": "[1791792000,2025550123,4111111111111111,{\"value\":2025550123,\"phone_count\":2}]",
+    "expected": "[1791792000,2025550123,4111111111111111,{\"value\":2025550123,\"phone_count\":2}]"
+  },
+  {
+    "name": "nested-serialized-sensitive-values",
+    "input": "{\"payload\":\"{\\\"phone\\\":2025550123,\\\"owner@example.com\\\":1,\\\"start\\\":1791792000}\"}",
+    "expected": "{\"payload\":\"{\\\"phone\\\":\\\"[phone]\\\",\\\"[email]\\\":1,\\\"start\\\":1791792000}\"}"
+  },
+  {
+    "name": "nested-serialized-inherited-field",
+    "input": "{\"phone\":\"[2025550123,{\\\"value\\\":2025550124}]\"}",
+    "expected": "{\"phone\":\"[\\\"[phone]\\\",{\\\"value\\\":\\\"[phone]\\\"}]\"}"
+  },
+  {
+    "name": "nested-key-collision",
+    "input": "{\"payload\":\"{\\\"first@example.com\\\":1,\\\"second@example.com\\\":2}\"}",
+    "expected": "[content redacted]"
+  }
+]

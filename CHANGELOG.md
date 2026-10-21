@@ -9,6 +9,11 @@
 ### Changed
 - **Warehouse templates: a missing `tool_success` no longer defaults to true.** A tool row with `tool_success` `NULL` now leaves `[Agent] Tool Success` and `[Agent] Is Error` unset instead of sending `true` and `false`. This includes every tool call from the OpenAI-messages template, whose source records no outcome. Map `tool_success` from your table: tool-action goals count only successful calls.
 
+## 0.24.1
+
+### Fixed
+- Preserve numeric values and valid escaping in serialized JSON objects/arrays within structured content channels. Built-in redaction scans decoded string values and keys, and masks numeric values under recognized phone/card/SSN fields while preserving other numeric tokens verbatim. Distinct original keys collapsing to one redacted key fail the serialized document closed. Native object/array behavior remains unchanged; ambiguous unlabeled numbers require producer-selected content or custom redaction. Custom patterns/callbacks retain their original string boundary and run once. JSON corrupted by later custom/base64 redaction and inputs exceeding native parser limits fail closed. Malformed/oversized text and HTML retain ordinary bounded text-redaction behavior.
+
 ## 0.24.0
 
 ### Documentation and validation
