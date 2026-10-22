@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Experiment } from './core/experiments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
@@ -16,6 +17,8 @@ export interface SessionContextOptions {
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   tags?: string[] | null;
+  /** Agent and session level, already validated and merged. */
+  experiments?: Experiment[] | null;
   idleTimeoutMinutes?: number | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
@@ -40,6 +43,7 @@ export class SessionContext {
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
   readonly tags: string[] | null;
+  readonly experiments: Experiment[] | null;
   readonly idleTimeoutMinutes: number | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
@@ -74,6 +78,7 @@ export class SessionContext {
     this.context = options.context ?? null;
     this.groups = options.groups ?? null;
     this.tags = options.tags ?? null;
+    this.experiments = options.experiments ?? null;
     this.idleTimeoutMinutes = options.idleTimeoutMinutes ?? null;
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;

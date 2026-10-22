@@ -7,49 +7,56 @@
 
 import type { AmplitudeAI, FlushOptions } from './client.js';
 import type { SessionEnrichments } from './core/enrichments.js';
+import {
+  type Experiment,
+  type ExperimentInput,
+  type ExperimentOpts,
+  mergeExperiments,
+  withExperiments,
+} from './core/experiments.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { Session } from './session.js';
 
 export type UserMessageOpts = Partial<
   Omit<Parameters<AmplitudeAI['trackUserMessage']>[0], 'content'>
->;
+> & ExperimentOpts;
 
 export type AiMessageOpts = Partial<
   Omit<
     Parameters<AmplitudeAI['trackAiMessage']>[0],
     'content' | 'model' | 'provider' | 'latencyMs'
   >
->;
+> & ExperimentOpts;
 
 export type ToolCallOpts = Partial<
   Omit<
     Parameters<AmplitudeAI['trackToolCall']>[0],
     'toolName' | 'latencyMs' | 'success'
   >
->;
+> & ExperimentOpts;
 
 export type EmbeddingOpts = Partial<
   Omit<
     Parameters<AmplitudeAI['trackEmbedding']>[0],
     'model' | 'provider' | 'latencyMs'
   >
->;
+> & ExperimentOpts;
 
 export type SpanOpts = Partial<
   Omit<Parameters<AmplitudeAI['trackSpan']>[0], 'spanName' | 'latencyMs'>
->;
+> & ExperimentOpts;
 
 export type SessionEndOpts = Partial<
   Parameters<AmplitudeAI['trackSessionEnd']>[0]
->;
+> & ExperimentOpts;
 
 export type SessionEnrichmentOpts = Partial<
   Omit<Parameters<AmplitudeAI['trackSessionEnrichment']>[0], 'enrichments'>
->;
+> & ExperimentOpts;
 
 export type ScoreOpts = Partial<
   Omit<Parameters<AmplitudeAI['score']>[0], 'name' | 'value' | 'targetId'>
->;
+> & ExperimentOpts;
 
 const CONTEXT_FIELDS = [
   'userId',
@@ -79,6 +86,16 @@ export interface AgentOptions {
   groups?: Record<string, unknown> | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
+  /**
+   * Experiment assignment, `[{ key, variant, provider?, unit? }]`; `unit` is
+   * `'agent_session'` (default), `'turn'` or `'span'`. Every event carries
+   * `[Agent] Experiments` (`"key:variant"` strings) and, when exactly one
+   * experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit` and
+   * `Provider`. `session({ experiments })` and `experiments` on a `track*`
+   * call override entries with the same key; `child()` agents inherit them.
+   * Invalid entries are dropped with a debug log; at most 10 apply to an event.
+   */
+  experiments?: ExperimentInput[] | null;
 }
 
 export class BoundAgent {
@@ -104,6 +121,8 @@ export class BoundAgent {
       groups: opts.groups ?? null,
       deviceId: opts.deviceId ?? null,
       browserSessionId: opts.browserSessionId ?? null,
+      // Not in CONTEXT_FIELDS: _merge turns it into event properties.
+      experiments: mergeExperiments(opts.experiments),
     };
   }
 
@@ -131,7 +150,11 @@ export class BoundAgent {
     const parentCtx = this._defaults.context as Record<string, unknown> | null;
     const childCtx = overrides.context ?? null;
     const overrideEntries = Object.entries(overrides).filter(
-      ([k]) => k !== 'context',
+      ([k]) => k !== 'context' && k !== 'experiments',
+    );
+    inherited.experiments = mergeExperiments(
+      this._defaults.experiments,
+      overrides.experiments,
     );
     if (parentCtx || childCtx) {
       const merged = { ...(parentCtx ?? {}) };
@@ -152,7 +175,7 @@ export class BoundAgent {
     return new BoundAgent(this._ai, {
       agentId,
       parentAgentId: explicitParent,
-      ...(inheritedWithoutParent as Record<string, string | null>),
+      ...(inheritedWithoutParent as Omit<AgentOptions, 'parentAgentId'>),
     });
   }
 
@@ -160,11 +183,22 @@ export class BoundAgent {
     kwargs: T,
     fields: readonly string[] = CONTEXT_FIELDS,
   ): T {
-    const merged = { ...kwargs } as Record<string, unknown>;
+    const { experiments: callExperiments, ...rest } = kwargs as Record<string, unknown>;
+    const merged = rest;
     for (const field of fields) {
       if (merged[field] == null && this._defaults[field] != null) {
         merged[field] = this._defaults[field];
       }
+    }
+    const experiments = mergeExperiments(
+      this._defaults.experiments as Experiment[],
+      callExperiments,
+    );
+    if (experiments.length > 0) {
+      merged.eventProperties = withExperiments(
+        merged.eventProperties as Record<string, unknown> | null | undefined,
+        experiments,
+      );
     }
     if (merged.browserSessionId == null && this._defaults.browserSessionId != null) {
       merged.browserSessionId = this._defaults.browserSessionId;
@@ -318,6 +352,7 @@ export class BoundAgent {
       browserSessionId?: string | null;
       autoFlush?: boolean;
       tags?: string[] | null;
+      experiments?: ExperimentInput[] | null;
     } = {},
   ): Session {
     if (opts.idleTimeoutMinutes != null && opts.idleTimeoutMinutes < -1) {

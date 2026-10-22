@@ -653,7 +653,6 @@ The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unk
 | Key | Example Values | Use Case |
 | --- | --- | --- |
 | `agent_type` | `"planner"`, `"executor"`, `"retriever"`, `"router"` | Filter/group analytics by agent role in multi-agent systems. |
-| `experiment_variant` | `"control"`, `"treatment-v2"`, `"prompt-rewrite-a"` | Segment AI sessions by A/B test variant. Compare quality scores, abandonment rates, or cost across experiment arms. |
 | `feature_flag` | `"new-rag-pipeline"`, `"reasoning-model-enabled"` | Track which feature flags were active during the session. |
 | `surface` | `"chat"`, `"search"`, `"copilot"`, `"email-draft"` | Identify which UI surface or product area triggered the AI interaction. |
 | `prompt_revision` | `"v7"`, `"abc123"`, `"2026-02-15"` | Track which prompt version was used. Detect prompt regression when combined with `agentVersion`. |
@@ -671,7 +670,6 @@ const agent = ai.agent('support-bot', {
   agentVersion: '4.2.0',
   context: {
     agent_type: 'executor',
-    experiment_variant: 'reasoning-enabled',
     surface: 'chat',
     feature_flag: 'new-rag-pipeline',
     prompt_revision: 'v7',
@@ -686,12 +684,12 @@ const agent = ai.agent('support-bot', {
 
 ```typescript
 const parent = ai.agent('orchestrator', {
-  context: { experiment_variant: 'treatment', surface: 'chat' },
+  context: { surface: 'chat', prompt_revision: 'v7' },
 });
 const child = parent.child('researcher', {
   context: { agent_type: 'retriever' },
 });
-// child context = { experiment_variant: 'treatment', surface: 'chat', agent_type: 'retriever' }
+// child context = { surface: 'chat', prompt_revision: 'v7', agent_type: 'retriever' }
 // Child keys override parent keys; parent keys absent from the child are preserved.
 ```
 
@@ -699,7 +697,23 @@ const child = parent.child('researcher', {
 - **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
-> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `experiment_variant`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
+> **Note on context keys and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `surface`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
+
+> Record experiment assignment with the [`experiments` option](#report-experiment-arms), not a context key.
+
+## Report experiment arms
+
+Pass the assignment as `experiments` on the agent, the session, or a single agent or session `track*` call:
+
+```typescript
+await agent
+  .session({ userId: 'u1', experiments: [{ key: 'planner', variant: 'v2', provider: 'statsig' }] })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+Every event in the session then carries `[Agent] Experiments` (`["planner:v2"]`) and, when exactly one experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider`, so any goal chart can be split by variant. `unit` says what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. A session entry overrides an agent entry with the same key, and a call entry overrides both. Child agents (`agent.child()`, `session.runAs()`) inherit the experiments. At most 10 apply to an event; invalid entries are dropped with a debug log, never thrown. Earlier code that put `experiment_variant` in `context` keeps working, but use `experiments` for new code so the assignment isn't recorded twice. For model or prompt tests you can also set `agentVersion` on the agent or `promptId` on AI responses.
 
 ## Works with
 
@@ -2413,10 +2427,15 @@ All event properties are prefixed with `[Agent]` (except `[Amplitude] Session Re
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
-| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties. |
 | `[Agent] Env` | string | No | Deployment environment: 'production', 'staging', or 'dev'. |
 | `[Agent] SDK Version` | string | Yes | Version of the amplitude-ai SDK that produced this event. |
 | `[Agent] Runtime` | string | Yes | SDK runtime: 'python' or 'node'. |
+| `[Agent] Experiments` | string[] | No | Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies. |
+| `[Agent] Experiment Key` | string | No | Experiment or flag key. Sent only when exactly one experiment applies to the event. |
+| `[Agent] Experiment Variant` | string | No | Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants. |
+| `[Agent] Experiment Unit` | string | No | What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies. |
+| `[Agent] Experiment Provider` | string | No | Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set. |
 
 ### User Message Properties
 
@@ -2619,7 +2638,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] User Score` | number | No | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
-| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties. |
 | `[Agent] Task Completed` | string | No | OOTB detector result: 'True' if agent completed user's request, 'False' otherwise. |
 | `[Agent] Task Completed Rationale` | string | No | Brief rationale for the task completion determination. |
 | `[Agent] Task Completed Evidence` | string | No | Supporting evidence for the task completion determination. |

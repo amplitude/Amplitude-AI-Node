@@ -97,6 +97,7 @@ const agent = ai.agent('shopping-agent', {
   groups?: Record<string, unknown>,
   deviceId?: string,
   browserSessionId?: string,
+  experiments?: { key, variant, provider?, unit? }[], // see Experiments
 });
 ```
 
@@ -117,6 +118,7 @@ const session = agent.session({
   deviceId?: string,
   browserSessionId?: string, // links to Amplitude browser session
   autoFlush?: boolean,       // auto-flush on completion (default: auto-detect serverless)
+  experiments?: { key, variant, provider?, unit? }[], // overrides the agent's, by key
 });
 ```
 
@@ -195,6 +197,16 @@ const searchProducts = tool(async (args: { query: string }) => { /* ... */ }, {
 const results = await searchProducts({ query: 'pancakes' });
 // [Agent] Tool Call event is automatically emitted with duration, success, input/output.
 ```
+
+### Experiments
+Record A/B test or feature flag assignment with `experiments`, not `context`:
+```
+const agent = ai.agent('support-bot', { experiments: [{ key: 'router', variant: 'fast' }] });
+await agent.session({ userId: 'u1', experiments: [{ key: 'prompt', variant: 'v2', provider: 'statsig' }] }).run(async (s) => {
+  s.trackUserMessage('Hi', { experiments: [{ key: 'retry', variant: 'on', unit: 'turn' }] });
+});
+```
+Every event carries `[Agent] Experiments` (`"key:variant"` strings) and, when exactly one experiment applies, `[Agent] Experiment Key` / `Variant` / `Unit` / `Provider`. Call entries override session entries, which override agent entries, by key; `child()` and `runAs()` inherit them. `unit` is `agent_session` (default), `turn`, or `span`. Key, variant, and provider are up to 256 characters, keys without `:`; at most 10 per event; invalid entries are dropped with a debug log.
 
 ### observe(fn, opts?) / observe(opts)(fn)
 Higher-order function that wraps a function to auto-emit [Agent] Span events.
