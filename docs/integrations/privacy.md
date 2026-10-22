@@ -56,7 +56,7 @@ The platform and tracing-tool guides call `redact` on the content fields they se
 
 The shared forwarder core still defaults `redact` to the identity function. A deployment that already copied that core keeps sending content unchanged until its call site passes `redactAgentContent`. Omitting `redact` sends content unchanged.
 
-`contentMode: 'metadata_only'` sends none of those fields. Keep personal data out of `[Agent] Context`. That property is a filter dimension, not a content field, and `redact` does not run on it.
+`contentMode: 'metadata_only'` sends none of those fields. Keep personal data out of `[Agent] Context`. That property is a filter dimension, not a content field, and `redact` does not run on it. The same holds for the `[Agent] Experiment*` properties: every content mode sends them and `redact` does not run on them, so experiment keys, variants and providers must be names, never user data.
 
 Batch API and S3 import accept the same events as the HTTP API. Scrub before those uploads too.
 

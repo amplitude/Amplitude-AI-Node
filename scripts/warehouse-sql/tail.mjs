@@ -7,6 +7,8 @@ export const SQL_VERSION = 'warehouse-sql/1.0';
 
 // Must match the SDK's Result Type rule in src/core/tool-result.ts.
 const RESULT_TYPE_PATTERN = '[a-z][a-z0-9_]{0,63}';
+// Must match the SDK's experiment key rule in src/core/experiments.ts.
+const EXPERIMENT_KEY_PATTERN = '[^:]{1,256}';
 
 /** Columns every Stage 1 `canonical` CTE must produce, in this order. */
 export const CANONICAL_COLUMNS = [
@@ -34,6 +36,8 @@ export const CANONICAL_COLUMNS = [
   ['span_input', 'string (JSON text)', false, 'Span rows: what was rendered or passed in.'],
   ['span_output', 'string (JSON text)', false, 'Span rows: what the user did, or what the step returned.'],
   ['context', 'string (JSON object text)', false, 'Filterable dimensions, one key per dimension. Becomes `[Agent] Context`.'],
+  ['experiment_key', 'string', false, 'Experiment or feature flag key the row ran under, such as `planner`. With `experiment_variant`, becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Trimmed, 1 to 256 characters, no `:`; an invalid pair is dropped.'],
+  ['experiment_variant', 'string', false, 'Variant of `experiment_key` the row ran under, such as `treatment`. Trimmed, 1 to 256 characters.'],
   ['updated_at', 'timestamp (UTC)', false, 'When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded.'],
 ];
 
@@ -47,6 +51,10 @@ export const EVENT_PROPERTIES = [
   ['[Agent] Source', 'STRING'],
   ['[Agent] Content Mode', 'STRING'],
   ['[Agent] Context', 'STRING'],
+  ['[Agent] Experiments', 'ARRAY<STRING>'],
+  ['[Agent] Experiment Key', 'STRING'],
+  ['[Agent] Experiment Variant', 'STRING'],
+  ['[Agent] Experiment Unit', 'STRING'],
   ['[Agent] Trace ID', 'STRING'],
   ['[Agent] Turn ID', 'BIGINT'],
   ['[Agent] Message ID', 'STRING'],
@@ -100,8 +108,16 @@ export function renderTail(d) {
     ['[Agent] Source', "'warehouse-sql'"],
     ['[Agent] Content Mode', "CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END"],
     ['[Agent] Context', 'context'],
+    [
+      '[Agent] Experiments',
+      `CASE WHEN experiment_key_clean IS NOT NULL THEN ${d.stringArray("experiment_key_clean || ':' || experiment_variant_clean")} END`,
+    ],
+    ['[Agent] Experiment Key', 'experiment_key_clean'],
+    ['[Agent] Experiment Variant', 'experiment_variant_clean'],
+    ['[Agent] Experiment Unit', "CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END"],
     ['[Agent] Trace ID', 'trace_id'],
   ];
+  const experimentValid = `${d.fullMatch('TRIM(e.experiment_key)', EXPERIMENT_KEY_PATTERN)} AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256`;
 
   const messageProperties = [
     ...base,
@@ -204,7 +220,9 @@ settled AS (
     e.session_id || ':' || e.message_id AS event_key,
     CASE
       WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
-    END AS result_id_clean
+    END AS result_id_clean,
+    CASE WHEN ${experimentValid} THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN ${experimentValid} THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= ${d.now()}
 )

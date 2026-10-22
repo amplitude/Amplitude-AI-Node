@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, basename, dirname, isAbsolute, parse, resolve, sep } from 'node:path';
+import { EXPERIMENT_DEPS } from './experiment-deps.js';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
 export interface ScanResult {
@@ -61,6 +62,8 @@ export interface ScanResult {
   has_frontend_deps: boolean;
   has_otel_deps: boolean;
   otel_packages: string[];
+  /** Feature flag or experimentation SDKs in the dependencies. */
+  experiment_packages: string[];
   recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
@@ -583,6 +586,12 @@ export function scanProject(requestedRoot: string): ScanResult {
       'Use session.run() with an awaited stream, not a fire-and-forget pattern.',
     );
   }
+  const experimentPackages = EXPERIMENT_DEPS.filter((dep) => allDeps.has(dep));
+  if (experimentPackages.length > 0) {
+    recommendations.push(
+      `Feature flag or experiment SDKs detected (${experimentPackages.join(', ')}): where the app reads a variant that changes agent behavior, pass it as \`experiments: [{ key, variant, provider }]\` on ai.agent(), agent.session() or one track call, so [Agent] Experiment Variant can split any chart. See "Experiments" in amplitude-ai.md.`,
+    );
+  }
   if (messageQueueDeps.length > 0) {
     recommendations.push(
       `Message queue deps detected (${messageQueueDeps.join(', ')}): enable propagateContext in the bootstrap file and use injectContext/extractContext to correlate events across services.`,
@@ -699,6 +708,7 @@ export function scanProject(requestedRoot: string): ScanResult {
     has_frontend_deps: hasFrontendDeps,
     has_otel_deps: hasOtelDeps,
     otel_packages: otelPackages,
+    experiment_packages: experimentPackages,
     recommendations,
     recommended_tier: recommendedTier,
   };

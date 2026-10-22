@@ -7,7 +7,9 @@
  * single call, and every `[Agent]` event the SDK emits carries the result.
  */
 
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AmplitudeAI } from '../src/client.js';
 import { SessionContext } from '../src/context.js';
@@ -25,6 +27,11 @@ import {
   mergeExperiments,
 } from '../src/core/experiments.js';
 import { tool } from '../src/decorators.js';
+import { generateVerifyTest } from '../src/mcp/generate-verify-test.js';
+import { instrumentFile } from '../src/mcp/instrument-file.js';
+import { getIntegrationPatterns } from '../src/mcp/patterns.js';
+import { scanProject } from '../src/mcp/scan-project.js';
+import { buildInstrumentationGuidance } from '../src/mcp/server.js';
 import { SpanEventMapper } from '../src/otel/mapper.js';
 import { BaseAIProvider } from '../src/providers/base.js';
 import { MockAmplitudeAI } from '../src/testing.js';
@@ -341,5 +348,62 @@ describe('tracked inside the session but not through it', () => {
         mock.trackUserMessage({ content: 'hi', userId: 'user-1', sessionId: 'other' });
       });
     expect(mock.events[0]?.event_properties ?? {}).not.toHaveProperty(PROP_EXPERIMENTS);
+  });
+});
+
+describe('coding-agent tools', () => {
+  function scanWith(dependencies: Record<string, string>): ReturnType<typeof scanProject> {
+    const root = mkdtempSync(join(tmpdir(), 'aa-152586-'));
+    try {
+      mkdirSync(join(root, 'src'));
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'app', dependencies }));
+      writeFileSync(
+        join(root, 'src', 'agent.ts'),
+        "import OpenAI from 'openai';\nconst client = new OpenAI();\nexport const run = () => client.chat.completions.create({ model: 'gpt-4o', messages: [] });\n",
+      );
+      return scanProject(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  it('scan_project reports flag SDKs and recommends experiments', (): void => {
+    const result = scanWith({ openai: '*', 'posthog-node': '*' });
+    expect(result.experiment_packages).toEqual(['posthog-node']);
+    expect(result.recommendations.some((r) => r.includes('experiments: [{ key, variant, provider }]'))).toBe(true);
+    expect(scanWith({ openai: '*' }).experiment_packages).toEqual([]);
+  });
+
+  it('generate_verify_test asserts the experiment properties only when a flag SDK is present', (): void => {
+    const withFlags = generateVerifyTest(scanWith({ openai: '*', '@growthbook/growthbook': '*' }));
+    expect(withFlags).toContain("['[Agent] Experiments']).toEqual(['verify-experiment:treatment'])");
+    expect(withFlags).toContain("['[Agent] Experiment Variant']).toBe('treatment')");
+    expect(generateVerifyTest(scanWith({ openai: '*' }))).not.toContain('[Agent] Experiment');
+  });
+
+  it('instrument_file leaves an experiments TODO in files that import a flag client', (): void => {
+    const handler = (imports: string): string =>
+      `${imports}import OpenAI from 'openai';\nconst client = new OpenAI();\nexport async function POST(req: Request) {\n  return client.chat.completions.create({ model: 'gpt-4o', messages: [] });\n}\n`;
+    const options = {
+      filePath: 'app/api/chat/route.ts',
+      tier: 'advanced' as const,
+      bootstrapImportPath: '@/lib/amplitude',
+      agentId: 'chat',
+      providers: ['openai'],
+    };
+    const flagged = instrumentFile({
+      ...options,
+      source: handler("import { PostHog } from 'posthog-node';\n"),
+    });
+    expect(flagged).toContain('experiments: [{ key, variant, provider }] in agent.session');
+    expect(instrumentFile({ ...options, source: handler('') })).not.toContain('experiments:');
+  });
+
+  it('patterns and suggestions show the option', (): void => {
+    const pattern = getIntegrationPatterns().find((p) => p.id === 'experiments');
+    expect(pattern?.snippet).toContain('experiments: [{ key: "planner", variant');
+    expect(buildInstrumentationGuidance('node', 'openai', 'full').join('\n')).toContain(
+      'experiments: [{ key, variant, provider }]',
+    );
   });
 });
