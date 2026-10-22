@@ -138,6 +138,7 @@ const buildInstrumentationGuidance = (
     '',
     'Next:',
     `- ${nextForTier}`,
+    '- if the app reads an A/B test or feature flag that changes agent behavior, pass the variant as `experiments: [{ key, variant, provider }]` on `ai.agent()` or `agent.session()` so `[Agent] Experiment Variant` can split any chart.',
     isManagedAgent
       ? '- refine your poll-and-track loop with deduplication and latency measurement for production reliability.'
       : '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',

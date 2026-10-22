@@ -38,6 +38,14 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       'import { tool } from "@amplitude/ai";\nconst searchProducts = tool(async (query: string) => ({ items: [] }), {\n  name: "search_products",\n  inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },\n});',
   },
   {
+    id: 'experiments',
+    title: 'Experiment and feature flag assignment',
+    whenToUse:
+      'The agent runs under an A/B test or feature flag (prompt, model, router, or tool variant). Pass the variant the flag client already returned; never put it in context or eventProperties.',
+    snippet:
+      'const variant = await flags.getVariant("planner"); // your existing flag client\nconst session = ai.agent("assistant", { userId: "u1" }).session({\n  sessionId: "s1",\n  experiments: [{ key: "planner", variant, provider: "statsig" }],\n});\n// Every event carries [Agent] Experiments and [Agent] Experiment Variant.',
+  },
+  {
     id: 'express-middleware',
     title: 'Express middleware propagation',
     whenToUse: 'Server app needs per-request context propagation.',

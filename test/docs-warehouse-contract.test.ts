@@ -178,6 +178,35 @@ describe('message-rows query', () => {
     expect(await sessionsWith('conv_2', 'agent_name', null)).toEqual(['conv_1']);
   });
 
+  it('validates experiment columns the way the SDK does', async () => {
+    const format = MESSAGE_FORMATS['message-rows'];
+    const names = format.sourceColumns.map(([name]) => name);
+    const conv = names.indexOf('conversation_id');
+    const keyAt = names.indexOf('experiment_key');
+    const variantAt = names.indexOf('experiment_variant');
+    const experimentsFor = async (key: string | null, variant: string | null) => {
+      const rows = format.sampleRows.map((row) =>
+        row.map((cell, i) => {
+          if (row[conv] !== 'conv_1') return cell;
+          if (i === keyAt) return key;
+          if (i === variantAt) return variant;
+          return cell;
+        }),
+      );
+      const source = renderSample(DIALECTS.duckdb, format.sourceColumns, rows);
+      const events = await runDuckDb(renderMessageQuery(format, 'duckdb', { source }));
+      const first = events.find((e) => e.event_properties['[Agent] Session ID'] === 'conv_1');
+      return first?.event_properties['[Agent] Experiments'];
+    };
+    expect(await experimentsFor('  planner ', ' v2 ')).toEqual(['planner:v2']);
+    expect(await experimentsFor('planner', 'v:2')).toEqual(['planner:v:2']);
+    expect(await experimentsFor('a:b', 'v2')).toBeUndefined();
+    expect(await experimentsFor('k'.repeat(256), 'v2')).toEqual([`${'k'.repeat(256)}:v2`]);
+    expect(await experimentsFor('k'.repeat(257), 'v2')).toBeUndefined();
+    expect(await experimentsFor('planner', '   ')).toBeUndefined();
+    expect(await experimentsFor('planner', null)).toBeUndefined();
+  });
+
   it('produces the same events as the hosted-platform forwarder core', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-warehouse-parity-'));
     try {
