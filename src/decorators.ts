@@ -6,6 +6,7 @@
  * these are implemented as HOFs (higher-order functions) that wrap callables.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
@@ -15,6 +16,11 @@ import {
 } from './context.js';
 import { _getOtelOwner } from './client.js';
 import { PrivacyConfig, redactPiiPatterns } from './core/privacy.js';
+import {
+  sanitizeToolResult,
+  type ToolResult,
+  withoutResultProps,
+} from './core/tool-result.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
 import {
   AMP_AGENT_ID,
@@ -28,6 +34,71 @@ import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
 
 const _require = createRequire(import.meta.url);
+
+// ---------------------------------------------------------------------------
+// Tool result (parity with Python)
+// ---------------------------------------------------------------------------
+
+const _toolResultStorage = new AsyncLocalStorage<Record<string, unknown>>();
+
+/**
+ * Record what the running `tool()` created, such as an order or a booking.
+ *
+ * Use this when the ID is only known inside the tool body:
+ *
+ * ```ts
+ * const placeOrder = tool(async (cart: Cart) => {
+ *   const order = await shop.create(cart);
+ *   setToolResult(order.id, { type: 'order' });
+ *   return 'Order placed';
+ * });
+ * ```
+ *
+ * The ID is sent as `[Agent] Result ID` (and `type` as `[Agent] Result Type`)
+ * on the `[Agent] Tool Call` event, only when the tool succeeds. Goals
+ * matches it to a later event that carries the same ID to count confirmed
+ * outcomes. Pass an identifier, never content or personal data: it is sent
+ * in every content mode and is not redacted.
+ *
+ * The last call wins. Outside a `tool()` call this is a no-op.
+ */
+export function setToolResult(
+  id: string | number,
+  options?: { type?: string | null },
+): void {
+  const holder = _toolResultStorage.getStore();
+  if (holder == null) {
+    getLogger().debug('setToolResult called outside a tool() call; ignored');
+    return;
+  }
+  for (const key of Object.keys(holder)) delete holder[key];
+  Object.assign(holder, { id, type: options?.type ?? null });
+}
+
+async function _collectToolResult(
+  toolName: string,
+  result: unknown,
+  holder: Record<string, unknown>,
+  hook: ToolResultHook | null | undefined,
+): Promise<Record<string, string>> {
+  let hookOutput: unknown = null;
+  if (hook != null) {
+    try {
+      hookOutput = await hook(result);
+    } catch (e) {
+      const errorType = e instanceof Error ? e.name : typeof e;
+      getLogger().debug(
+        `Tool '${toolName}': result hook threw ${errorType}; ignored`,
+      );
+      hookOutput = null;
+    }
+  }
+  // The hook wins over setToolResult().
+  return sanitizeToolResult(
+    hookOutput ?? (Object.keys(holder).length > 0 ? holder : null),
+    toolName,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // ToolCallTracker — global config singleton (parity with Python)
@@ -152,6 +223,12 @@ function _resolvePrivacyConfig(
   );
 }
 
+/** Maps a successful tool's return value to the `{ id, type }` it created. */
+export type ToolResultHook = (
+  // biome-ignore lint/suspicious/noExplicitAny: the hook receives the tool's own return type
+  result: any,
+) => ToolResult | null | undefined | Promise<ToolResult | null | undefined>;
+
 interface ToolOptions {
   name?: string;
   toolType?: string | null;
@@ -174,6 +251,18 @@ interface ToolOptions {
   inputSchema?: Record<string, unknown> | null;
   timeoutMs?: number | null;
   onError?: ((error: Error, toolName: string) => void) | null;
+  /**
+   * Called once with the return value after the tool succeeds (never on
+   * failure), naming what the tool created, for example
+   * `(order) => ({ id: order.id, type: 'order' })`. Sent as
+   * `[Agent] Result ID` / `[Agent] Result Type`; may be async. The ID must
+   * be a non-blank string of up to 512 characters (outer ASCII whitespace
+   * is trimmed) or a safe integer; the type must match
+   * `[a-z][a-z0-9_]{0,63}`. Invalid values are dropped. Wins over
+   * `setToolResult()`. Pass an identifier, not content: it is sent in every
+   * content mode and is not redacted. A hook that throws is ignored.
+   */
+  result?: ToolResultHook | null;
 }
 
 interface ResolvedContext {
@@ -331,7 +420,8 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
       getLogger().warn(
         `Tool '${toolName}' called but tracking not configured. Call ToolCallTracker.setAmplitude() or pass amplitude/userId to tool().`,
       );
-      return fn.apply(this, args);
+      // An untracked tool must not write into an enclosing tool's holder.
+      return _toolResultStorage.exit(() => fn.apply(this, args));
     }
 
     const toolInput =
@@ -346,17 +436,18 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     let errorMsg: string | null = null;
     let errorStack: string | null = null;
     let result: unknown = undefined;
+    const resultHolder: Record<string, unknown> = {};
 
     try {
-      if (opts.timeoutMs != null) {
-        result = await _runWithTimeout(
-          fn.bind(this, ...args) as AsyncFn,
-          opts.timeoutMs,
-          toolName,
-        );
-      } else {
-        result = await fn.apply(this, args);
-      }
+      result = await _toolResultStorage.run(resultHolder, () =>
+        opts.timeoutMs != null
+          ? _runWithTimeout(
+              fn.bind(this, ...args) as AsyncFn,
+              opts.timeoutMs,
+              toolName,
+            )
+          : fn.apply(this, args),
+      );
       return result;
     } catch (e) {
       success = false;
@@ -379,13 +470,16 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     } finally {
       const latencyMs = performance.now() - startTime;
 
-      const extraProps: Record<string, unknown> = {};
+      const extraProps: Record<string, unknown> = success
+        ? await _collectToolResult(toolName, result, resultHolder, opts.result)
+        : {};
       if (schemaJson != null) {
         extraProps['[Agent] Tool Input Schema'] = schemaJson;
       }
 
+      const callerProps = withoutResultProps(r.eventProperties);
       const mergedEvtProps = {
-        ...(r.eventProperties ?? {}),
+        ...(callerProps ?? {}),
         ...extraProps,
       };
 
@@ -414,9 +508,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           agentVersion: r.agentVersion,
           context: r.context,
           eventProperties:
-            Object.keys(extraProps).length > 0
-              ? mergedEvtProps
-              : r.eventProperties,
+            Object.keys(extraProps).length > 0 ? mergedEvtProps : callerProps,
           userProperties: r.userProperties,
           groups: r.groups,
           privacyConfig: r.privacyConfig,

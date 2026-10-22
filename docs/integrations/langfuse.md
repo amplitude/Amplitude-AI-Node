@@ -92,6 +92,7 @@ Fetch the observations for one real session with `fields=core,basic,io,model,usa
 - **Exchanges.** The adapter treats each trace in a session as one exchange: the root observation's `input` is the user message and its `output` is the reply. If the application logs a whole conversation in one trace, or several traces per user message, change the grouping.
 - **Text.** `input` and `output` arrive as raw strings, often JSON. `textFrom` handles plain strings, chat message arrays, `{messages: [...]}`, and OpenAI-style `choices`. Check it returns the text the user actually typed and saw, not a prompt template or a system message.
 - **Tool calls.** `TOOL` observations become tool calls. If the application logs tools as `SPAN` observations with a naming convention, adjust the filter.
+- **What a tool created.** If a tool observation's `output` contains the created object's ID, such as an order or ticket ID, ask the user which key holds it and read it in a `toolResult` function (see "What a tool call created" under Event contract). Otherwise leave `toolResult` unset.
 - **Usage and cost.** Langfuse stores usage as mutually exclusive buckets: `input` excludes every `input_*` key (for example `input_cached_tokens`), `output` excludes every `output_*` key (for example `output_reasoning_tokens`), and `total` is their sum. So the adapter reports input tokens as `input` plus every `input_*` key, and output tokens likewise, never adding `total`. Cost is `costDetails.total`, or `totalCost` when there is no cost breakdown; a zero `totalCost` with no breakdown counts as unknown. Both are summed over every observation in the exchange that reports usage or cost, whatever its type, except an observation whose descendant also reports usage, which is treated as a rollup so tokens are not counted twice. Confirm the keys in the response: usage ingested as flat keys is stored unchanged, so a key such as `cache_read_input_tokens` that does not start with `input_` is not counted.
 - **Spans.** Only the observation types the user chose in do-not-guess answer 3 go in `spanTypes`.
 
@@ -146,7 +147,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 | Event | Sent for | Properties beyond the common set |
 |---|---|---|
 | `[Agent] User Message` | Each end-user message | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `user_input`, `$llm_message` |
-| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Tool Success`, `[Agent] Is Error`, `[Agent] Component Type` = `tool`; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output` |
+| `[Agent] Tool Call` | Each tool or action call, if available | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Invocation ID`, `[Agent] Tool Name`, `[Agent] Component Type` = `tool`; `[Agent] Tool Success` and `[Agent] Is Error` when the call's outcome is recorded; optional `[Agent] Latency Ms`, `[Agent] Parent Message ID`, `[Agent] Tool Input`, `[Agent] Tool Output`; on successful calls only, optional `[Agent] Result ID`, `[Agent] Result Type` (see below) |
 | `[Agent] AI Response` | Each agent reply | `[Agent] Trace ID`, `[Agent] Turn ID`, `[Agent] Message ID`, `[Agent] Component Type` = `llm`, `[Agent] Is Error`, `$llm_message`; optional `[Agent] Model Name`, `[Agent] Provider`, `[Agent] Input Tokens`, `[Agent] Output Tokens`, `[Agent] Cost USD` |
 | `[Agent] Span` | Each UI component shown with a reply, and each internal step the user never saw | `[Agent] Trace ID` and `[Agent] Turn ID` of its reply, `[Agent] Span ID`, `[Agent] Span Name`, `[Agent] Is Error`; optional `[Agent] Latency Ms`, `[Agent] Input State` (what was rendered), `[Agent] Output State` (what the user did) |
 | `[Agent] Score` | CSAT or another post-conversation rating | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source`; optional `[Agent] Comment` |
@@ -154,7 +155,33 @@ Each of these is something a real integration got wrong. The forwarder core impl
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `langfuse`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
+**Experiments.** If the conversation ran under an A/B test or feature flag variant and it is recorded in the trace's `metadata` (ask the user which key), or your app's flag client assigned it when the conversation started, set `experiments: [{ key, variant, provider }]` on the normalized conversation. Every event then carries `[Agent] Experiments` and, for exactly one experiment, `[Agent] Experiment Key`, `Variant`, `Unit` (`agent_session` unless you set `unit`) and `Provider`, so any chart can be split by variant. Key, variant and provider are trimmed and 1 to 256 characters; keys can't contain `:`; at most 10 are sent; invalid entries are dropped. Don't put the variant in `[Agent] Context`. If nothing records it, leave `experiments` unset.
+
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
+
+**What a tool call created.** If your tool output contains the created object's ID (for example in the `TOOL` observation's `output`), pass a `toolResult` function in the `toAgentEvents` options that returns `{ id, type }` from that field. The core calls it only for calls the vendor recorded as successful (`success === true`), validates what it returns, and sends:
+
+| Property | Value |
+|---|---|
+| `[Agent] Result ID` | The created object's ID, such as an order or ticket ID: a string of 1 to 512 characters after trimming, or a safe integer. An invalid ID drops both properties |
+| `[Agent] Result Type` | Optional. The object's kind, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket`. An invalid type is dropped on its own |
+
+Ask the user which output field holds the ID; never guess one or parse it out of free text. Agent Analytics Goals use the pair to confirm the action against a later event with the same ID.
+
+For example, if the user says the `create_ticket` tool returns the new ticket in `ticket_id`:
+
+```ts
+events = toAgentEvents(conversation, {
+  redact,
+  source: 'langfuse',
+  toolResult: (tool) => {
+    const id = (tool.output as { ticket_id?: unknown } | undefined)?.ticket_id;
+    return tool.name === 'create_ticket' && (typeof id === 'string' || typeof id === 'number')
+      ? { id, type: 'ticket' }
+      : undefined;
+  },
+});
+```
 
 ### Example: one complete session
 
@@ -330,8 +357,17 @@ export interface ForwarderToolCall {
   timestamp: number;
   input?: unknown;
   output?: unknown;
+  /** The vendor's recorded outcome. Leave unset if unknown; never assume success. */
   success?: boolean;
   latencyMs?: number;
+}
+
+/** What a successful tool call created. Becomes [Agent] Result ID / [Agent] Result Type. */
+export interface ForwarderToolResult {
+  /** A string of 1 to 512 characters after trimming, or a safe integer. */
+  id: string | number;
+  /** The object's kind, matching `[a-z][a-z0-9_]{0,63}`, for example `ticket`. */
+  type?: string;
 }
 
 export interface ForwarderSpan {
@@ -381,6 +417,16 @@ export interface ForwarderScore {
   comment?: string;
 }
 
+/** An experiment or feature flag assignment the conversation ran under. */
+export interface ForwarderExperiment {
+  key: string;
+  variant: string;
+  /** Experimentation tool, such as 'amplitude', 'statsig' or 'launchdarkly'. */
+  provider?: string;
+  /** What was randomized. Defaults to 'agent_session'. */
+  unit?: 'agent_session' | 'turn' | 'span';
+}
+
 export interface NormalizedConversation {
   /** Becomes [Agent] Session ID. Stable for the life of the conversation. */
   conversationId: string;
@@ -391,6 +437,8 @@ export interface NormalizedConversation {
   deviceId?: string;
   /** Filterable dimensions, one key per dimension. Becomes [Agent] Context. */
   context?: Record<string, string | number | boolean>;
+  /** Becomes [Agent] Experiments and, for exactly one, [Agent] Experiment Key / Variant / Unit / Provider. */
+  experiments?: ForwarderExperiment[];
   messages: ForwarderMessage[];
   scores?: ForwarderScore[];
   /** Epoch milliseconds. Set only once the conversation is finished; emits Session End. */
@@ -413,9 +461,87 @@ export interface ToAgentEventsOptions {
   redact?: (text: string) => string;
   /** Platform that produced the conversation. Becomes [Agent] Source. */
   source?: string;
+  /**
+   * Reads the created object's ID from a field the platform records in the tool
+   * call, never from free text. Called only for calls with `success === true`.
+   */
+  toolResult?: (tool: ForwarderToolCall) => ForwarderToolResult | undefined;
 }
 
 export const FORWARDER_VERSION = 'http-forwarder/1.0';
+
+// ASCII whitespace only, matching the Amplitude SDKs.
+const RESULT_ID_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+const RESULT_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** [Agent] Result ID / Result Type for `{ id, type }`, or `{}` when the ID is invalid. */
+export function toolResultProperties(result: unknown): Record<string, string> {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return {};
+  const proto = Object.getPrototypeOf(result);
+  if (proto !== Object.prototype && proto !== null) return {};
+  const { id, type } = result as { id?: unknown; type?: unknown };
+  const resultId =
+    typeof id === 'number' && Number.isSafeInteger(id)
+      ? String(id)
+      : typeof id === 'string'
+        ? id.replace(RESULT_ID_TRIM, '')
+        : '';
+  const length = [...resultId].length;
+  if (length === 0 || length > 512) return {};
+  return {
+    '[Agent] Result ID': resultId,
+    ...(typeof type === 'string' && RESULT_TYPE_PATTERN.test(type)
+      ? { '[Agent] Result Type': type }
+      : {}),
+  };
+}
+
+const EXPERIMENT_UNITS = ['agent_session', 'turn', 'span'];
+
+function experimentField(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.replace(RESULT_ID_TRIM, '');
+  const length = [...trimmed].length;
+  return length > 0 && length <= 256 ? trimmed : undefined;
+}
+
+/**
+ * [Agent] Experiment properties, with the SDKs' rules: an entry needs a key
+ * (no ':') and a variant of 1 to 256 characters, a later entry with the same
+ * key wins, and at most 10 are sent. Invalid entries are dropped.
+ */
+export function experimentProperties(experiments: unknown): Record<string, unknown> {
+  if (!Array.isArray(experiments)) return {};
+  const byKey = new Map<string, { key: string; variant: string; unit: string; provider?: string }>();
+  for (const raw of experiments) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
+    const { key: rawKey, variant: rawVariant, unit, provider: rawProvider } = raw as Record<string, unknown>;
+    const key = experimentField(rawKey);
+    const variant = experimentField(rawVariant);
+    if (key === undefined || key.includes(':') || variant === undefined) continue;
+    const provider = experimentField(rawProvider);
+    byKey.set(key, {
+      key,
+      variant,
+      unit: EXPERIMENT_UNITS.includes(unit as string) ? (unit as string) : 'agent_session',
+      ...(provider !== undefined ? { provider } : {}),
+    });
+  }
+  const entries = [...byKey.values()].slice(0, 10);
+  if (entries.length === 0) return {};
+  const only = entries.length === 1 ? entries[0] : undefined;
+  return {
+    '[Agent] Experiments': entries.map((e) => `${e.key}:${e.variant}`),
+    ...(only
+      ? {
+          '[Agent] Experiment Key': only.key,
+          '[Agent] Experiment Variant': only.variant,
+          '[Agent] Experiment Unit': only.unit,
+          ...(only.provider !== undefined ? { '[Agent] Experiment Provider': only.provider } : {}),
+        }
+      : {}),
+  };
+}
 
 export function toAgentEvents(
   conversation: NormalizedConversation,
@@ -432,6 +558,7 @@ export function toAgentEvents(
   const serialize = (value: unknown) =>
     redact(typeof value === 'string' ? value : JSON.stringify(value));
   const scoped = (id: string) => `${conversation.conversationId}:${id}`;
+  const experiments = experimentProperties(conversation.experiments);
 
   const event = (
     eventType: string,
@@ -455,6 +582,7 @@ export function toAgentEvents(
       ...(conversation.context
         ? { '[Agent] Context': JSON.stringify(conversation.context) }
         : {}),
+      ...experiments,
       ...properties,
     },
   });
@@ -502,8 +630,12 @@ export function toAgentEvents(
           '[Agent] Turn ID': turnId,
           '[Agent] Invocation ID': invocationId,
           '[Agent] Tool Name': tool.name,
-          '[Agent] Tool Success': tool.success ?? true,
-          '[Agent] Is Error': tool.success === false,
+          ...(typeof tool.success === 'boolean'
+            ? { '[Agent] Tool Success': tool.success, '[Agent] Is Error': !tool.success }
+            : {}),
+          ...(tool.success === true && options.toolResult
+            ? toolResultProperties(options.toolResult(tool))
+            : {}),
           '[Agent] Component Type': 'tool',
           ...(tool.latencyMs !== undefined ? { '[Agent] Latency Ms': tool.latencyMs } : {}),
           ...(userMessageId ? { '[Agent] Parent Message ID': userMessageId } : {}),

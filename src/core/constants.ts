@@ -15,6 +15,13 @@ export const EVENT_SCORE = '[Agent] Score';
 export const PROP_SESSION_ID = '[Agent] Session ID';
 export const PROP_TRACE_ID = '[Agent] Trace ID';
 export const PROP_TURN_ID = '[Agent] Turn ID';
+// Experiment assignment, from the `experiments` option. The array is sent
+// whenever an experiment applies; the scalars only when exactly one does.
+export const PROP_EXPERIMENTS = '[Agent] Experiments';
+export const PROP_EXPERIMENT_KEY = '[Agent] Experiment Key';
+export const PROP_EXPERIMENT_VARIANT = '[Agent] Experiment Variant';
+export const PROP_EXPERIMENT_UNIT = '[Agent] Experiment Unit';
+export const PROP_EXPERIMENT_PROVIDER = '[Agent] Experiment Provider';
 export const PROP_MESSAGE_ID = '[Agent] Message ID';
 export const PROP_PROVIDER_REQUEST_ID = '[Agent] Provider Request ID';
 export const PROP_MODEL_NAME = '[Agent] Model Name';
@@ -37,6 +44,8 @@ export const PROP_TOOL_NAME = '[Agent] Tool Name';
 export const PROP_TOOL_SUCCESS = '[Agent] Tool Success';
 export const PROP_TOOL_TYPE = '[Agent] Tool Type';
 export const PROP_TOOL_OWNER = '[Agent] Tool Owner';
+export const PROP_RESULT_ID = '[Agent] Result ID';
+export const PROP_RESULT_TYPE = '[Agent] Result Type';
 export const PROP_INVOCATION_ID = '[Agent] Invocation ID';
 export const PROP_PARENT_MESSAGE_ID = '[Agent] Parent Message ID';
 export const PROP_AGENT_ID = '[Agent] Agent ID';

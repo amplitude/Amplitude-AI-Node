@@ -60,6 +60,8 @@ The query imports what your table already records; it cannot add what was never 
 | Agent ID | Sessions appearing in Agent Analytics | Use a constant if the table holds one agent |
 | Message text | The thread view and content-based quality signals | Import metadata only (`include_content = FALSE`) |
 | Tool calls, UI components, model, tokens, cost | Richer turns and cost reporting | Left empty, never estimated |
+| Tool success or failure | Tool-action goals, which count only successful calls | `[Agent] Tool Success` is left unset, never assumed true |
+| ID of what a tool created (order, ticket, booking) | Goals that confirm the action against a later event with the same ID | Left empty |
 
 ### What you need before starting
 
@@ -106,8 +108,9 @@ Open the format page and copy the query for the user's warehouse. Then:
 2. Edit the `canonical` CTE so every column in [Canonical message rows](#canonical-message-rows) comes from the right source column. Use `NULL` for anything the table doesn't record. Never guess a model name or estimate cost.
 3. Put each filterable dimension in `context` as one JSON key per dimension.
 4. Set `settle_hours` from do-not-guess answer 4.
-
-5. Measure coverage over the whole table: the share of conversations with no user or device ID, and with no agent ID. Stage 2 drops those rows, so they never reach Amplitude.
+5. Map `tool_success` from whatever the table records about a tool call's outcome (a status, an error column). A `NULL` leaves `[Agent] Tool Success` unset, and tool-action goals count only successful calls. If a tool's output contains the ID of the object it created, map it to `result_id` and the object's kind to `result_type`; Stage 2 sends them only on successful tool rows.
+6. If the table records which experiment or feature flag variant a conversation ran under, map the key to `experiment_key` and the variant to `experiment_variant`. Otherwise leave both `NULL`; never put the variant in `context`.
+7. Measure coverage over the whole table: the share of conversations with no user or device ID, and with no agent ID. Stage 2 drops those rows, so they never reach Amplitude.
 
 **PAUSE.** Show the user the mapping, the coverage numbers, and the `canonical` rows for one sample conversation (run the query up to `canonical` with `SELECT * FROM canonical`). If coverage is low, say so plainly; do not invent a fallback identity.
 
@@ -167,7 +170,9 @@ Stage 1 produces one row per message, tool call, or span, with these columns:
 | `tool_name` | string | No | Tool rows only. |
 | `tool_input` | string | No | Tool rows only; JSON text is fine. |
 | `tool_output` | string | No | Tool rows only. |
-| `tool_success` | boolean | No | Tool rows only; `NULL` means success. |
+| `tool_success` | boolean | No | Tool rows only. `NULL` leaves `[Agent] Tool Success` unset; map it, because tool-action goals count only successful calls. |
+| `result_id` | string | No | Tool rows only: ID of the object a successful call created, such as an order or ticket ID. Becomes `[Agent] Result ID` only when `tool_success` is `TRUE`; trimmed, 1 to 512 characters. |
+| `result_type` | string | No | Tool rows only: kind of object `result_id` names, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket`. Becomes `[Agent] Result Type` only alongside `[Agent] Result ID`. |
 | `latency_ms` | number | No | Tool and assistant rows. |
 | `model` | string | No | Assistant rows. Only if recorded; never guess. |
 | `provider` | string | No | Assistant rows. |
@@ -178,6 +183,8 @@ Stage 1 produces one row per message, tool call, or span, with these columns:
 | `span_input` | string (JSON text) | No | Span rows: what was rendered or passed in. |
 | `span_output` | string (JSON text) | No | Span rows: what the user did, or what the step returned. |
 | `context` | string (JSON object text) | No | Filterable dimensions, one key per dimension. Becomes `[Agent] Context`. |
+| `experiment_key` | string | No | Experiment or feature flag key the row ran under, such as `planner`. With `experiment_variant`, becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Trimmed, 1 to 256 characters, no `:`; an invalid pair is dropped. |
+| `experiment_variant` | string | No | Variant of `experiment_key` the row ran under, such as `treatment`. Trimmed, 1 to 256 characters. |
 | `updated_at` | timestamp (UTC) | No | When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded. |
 <!-- warehouse-sql:canonical-columns:end -->
 
@@ -192,6 +199,8 @@ Stage 2 implements the same rules as the [hosted-platform forwarder](../sierra.m
 5. **Cost and tokens only on AI Response**, and only when your table records them.
 6. **Session End**, once per conversation at its last activity, with the final exchange's Trace ID.
 7. **Settled sessions only.** A conversation imports once `settle_hours` have passed since the later of its last `event_time` and its latest `updated_at`.
+8. **Tool outcome from your data only.** `[Agent] Tool Success` and `[Agent] Is Error` on a tool row come from `tool_success`; when it is `NULL`, both are left unset rather than assumed successful. `[Agent] Result ID` and `[Agent] Result Type` are sent only when `tool_success` is `TRUE`: `result_id` is trimmed and dropped if blank or longer than 512 characters, and `result_type` is dropped unless it matches `[a-z][a-z0-9_]{0,63}`.
+9. **Experiments, the same rule as the SDK.** When a row has both `experiment_key` and `experiment_variant`, every event from it carries `[Agent] Experiments` (`["<key>:<variant>"]`), `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Both are trimmed and must be 1 to 256 characters, and the key can't contain `:`; otherwise the pair is dropped. Session End carries the last row's experiment. One experiment per row; use the SDK or OTel `feature_flag.*` attributes when a turn runs under several.
 
 Two settings at the top of Stage 2 are safe to edit:
 
@@ -265,7 +274,7 @@ SELECT
   device_id,
   time,
   insert_id,
-  from_json(event_properties, '`[Agent] Session ID` STRING, `[Agent] Agent ID` STRING, `[Agent] Runtime` STRING, `[Agent] SDK Version` STRING, `[Agent] Ingestion Path` STRING, `[Agent] Source` STRING, `[Agent] Content Mode` STRING, `[Agent] Context` STRING, `[Agent] Trace ID` STRING, `[Agent] Turn ID` BIGINT, `[Agent] Message ID` STRING, `[Agent] Invocation ID` STRING, `[Agent] Component Type` STRING, `[Agent] Tool Name` STRING, `[Agent] Tool Success` BOOLEAN, `[Agent] Is Error` BOOLEAN, `[Agent] Latency Ms` DOUBLE, `[Agent] Parent Message ID` STRING, `[Agent] Tool Input` STRING, `[Agent] Tool Output` STRING, `[Agent] Model Name` STRING, `[Agent] Provider` STRING, `[Agent] Input Tokens` BIGINT, `[Agent] Output Tokens` BIGINT, `[Agent] Cost USD` DOUBLE, `[Agent] Span ID` STRING, `[Agent] Span Name` STRING, `[Agent] Input State` STRING, `[Agent] Output State` STRING, `$llm_message` STRUCT<text: STRING>') AS event_properties
+  from_json(event_properties, '`[Agent] Session ID` STRING, `[Agent] Agent ID` STRING, `[Agent] Runtime` STRING, `[Agent] SDK Version` STRING, `[Agent] Ingestion Path` STRING, `[Agent] Source` STRING, `[Agent] Content Mode` STRING, `[Agent] Context` STRING, `[Agent] Experiments` ARRAY<STRING>, `[Agent] Experiment Key` STRING, `[Agent] Experiment Variant` STRING, `[Agent] Experiment Unit` STRING, `[Agent] Trace ID` STRING, `[Agent] Turn ID` BIGINT, `[Agent] Message ID` STRING, `[Agent] Invocation ID` STRING, `[Agent] Component Type` STRING, `[Agent] Tool Name` STRING, `[Agent] Tool Success` BOOLEAN, `[Agent] Is Error` BOOLEAN, `[Agent] Result ID` STRING, `[Agent] Result Type` STRING, `[Agent] Latency Ms` DOUBLE, `[Agent] Parent Message ID` STRING, `[Agent] Tool Input` STRING, `[Agent] Tool Output` STRING, `[Agent] Model Name` STRING, `[Agent] Provider` STRING, `[Agent] Input Tokens` BIGINT, `[Agent] Output Tokens` BIGINT, `[Agent] Cost USD` DOUBLE, `[Agent] Span ID` STRING, `[Agent] Span Name` STRING, `[Agent] Input State` STRING, `[Agent] Output State` STRING, `$llm_message` STRUCT<text: STRING>') AS event_properties
 FROM amplitude_agent_events
 ```
 <!-- warehouse-sql:databricks:import:end -->

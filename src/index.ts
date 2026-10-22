@@ -74,6 +74,11 @@ export {
   PROP_SESSION_ID,
   PROP_TRACE_ID,
   PROP_TURN_ID,
+  PROP_EXPERIMENTS,
+  PROP_EXPERIMENT_KEY,
+  PROP_EXPERIMENT_VARIANT,
+  PROP_EXPERIMENT_UNIT,
+  PROP_EXPERIMENT_PROVIDER,
   PROP_MESSAGE_ID,
   PROP_PROVIDER_REQUEST_ID,
   PROP_MODEL_NAME,
@@ -94,6 +99,8 @@ export {
   PROP_TOOL_CALLS,
   PROP_TOOL_NAME,
   PROP_TOOL_OWNER,
+  PROP_RESULT_ID,
+  PROP_RESULT_TYPE,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
   PROP_INVOCATION_ID,
@@ -226,8 +233,24 @@ export type { MiddlewareOptions } from './middleware.js';
 export { wrap, AmplitudeAIWrapError } from './wrappers.js';
 
 // Decorators (tool/observe HOFs + ToolCallTracker)
-export { tool, observe, ToolCallTracker } from './decorators.js';
-export type { ToolWrapped, ObserveWrapped, ObserveSpanType } from './decorators.js';
+export {
+  tool,
+  observe,
+  ToolCallTracker,
+  setToolResult,
+} from './decorators.js';
+export type { ToolResult } from './core/tool-result.js';
+export type {
+  ExperimentInput,
+  ExperimentOpts,
+  ExperimentUnit,
+} from './core/experiments.js';
+export type {
+  ToolWrapped,
+  ObserveWrapped,
+  ObserveSpanType,
+  ToolResultHook,
+} from './decorators.js';
 
 // Patching
 export {

@@ -257,7 +257,7 @@ export async function POST(req: Request) {
 - `s.trackUserMessage(...)` **first argument** (the string `content`) becomes **`$llm_message.text`** on `[Agent] User Message`. That string is what **session lists, segmentation, and enrichment** treat as “what the user said.”
 - **Do not** pass large JSON blobs, RAG context packs, or internal pipeline state as the **only** user message body — the product will show that JSON as the session title and break down charts by raw JSON.
 - **Do** pass a **short natural-language** line (the real end-user prompt, or a canonical summary for headless jobs, e.g. `"Summarize the attached design doc and list open questions"`).
-- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
+- Put structured segmentation dimensions in the **options** object: **`context`** (object → `[Agent] Context` JSON, always queryable in charts). Avoid `eventProperties` for custom dimensions on `[Agent]` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 
 ```typescript
 // GOOD: readable user line + structured state in context
@@ -296,6 +296,28 @@ const result = await s.runAs(recipeAgent, async () => {
 });
 ```
 
+**Experiments.** If the agent runs under an A/B test or feature flag (a prompt, model, router, or tool variant), pass the assignment as `experiments`. Do not put it in `context` or `eventProperties`:
+
+```typescript
+await agent
+  .session({
+    userId,
+    experiments: [{ key: 'planner', variant: flags.getVariant('planner'), provider: 'statsig' }],
+  })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+Rules (follow these, do not guess):
+
+- **Use the assignment the app already computes.** Find the flag client call (Amplitude Experiment, Statsig, LaunchDarkly, PostHog, GrowthBook, Optimizely, or in-house) and pass its key and variant. If there is no experiment, add nothing.
+- **Where to set it:** `ai.agent(id, { experiments })` when the whole agent is under the variant, `agent.session({ experiments })` when it's assigned per session, `{ experiments }` on one `agent.track*` / `s.track*` call for a single turn. A session entry overrides an agent entry with the same key; a call entry overrides both. Child agents (`agent.child()`, `s.runAs()`) inherit them.
+- **`unit`** is what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. **`provider`** is free text; use lowercase `amplitude`, `statsig`, `launchdarkly`, `posthog`, `growthbook`, `optimizely`, or `custom`.
+- **Limits:** key, variant, and provider are non-blank strings of up to 256 characters; keys can't contain `:`. At most 10 experiments per event. Invalid entries are dropped with a debug log, never thrown.
+- **Sent as** `[Agent] Experiments` (`["planner:v2"]`) on every event and, when exactly one experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider`. Split any Agent Analytics chart by `[Agent] Experiment Variant` to compare arms.
+- **Existing `context: { experiment_variant }` code keeps working**; when you touch it, move the value to `experiments` instead of writing it in both places.
+
 ### Step 3e: Track tools and explicit AI responses
 
 **Tool tracking** with the `tool()` higher-order function:
@@ -311,6 +333,32 @@ const result = await searchProducts(query);
 ```
 
 > `tool()` applies to **any function the agent calls as a tool step** — not just external API calls. Deterministic helpers, local classifiers, pre-processing functions — if the agent invokes it as part of its reasoning flow, wrap it. Without wrapping, the tool step is invisible to Agent Analytics even though the rest of the session is tracked.
+
+**Record what an action tool created (for Agent Analytics Goals):** when a tool creates something with an ID (an order, booking, refund, ticket), attach that ID to its `[Agent] Tool Call`. A later event carrying the same ID, from any source, confirms the action happened, so Goals can measure confirmed outcomes rather than attempted ones.
+
+```typescript
+import { setToolResult, tool } from '@amplitude/ai';
+
+const placeOrder = tool(async (cart: Cart) => shop.create(cart), {
+  name: 'place_order',
+  result: (order: Order) => ({ id: order.id, type: 'order' }), // runs only after success
+});
+
+const bookSlot = tool(async (slotId: string) => {
+  const booking = await calendar.book(slotId);
+  setToolResult(booking.id, { type: 'booking' }); // from inside the body, across awaits
+  return 'Booked';
+}, { name: 'book_slot' });
+```
+
+Rules (follow these, do not guess):
+
+- **Only on tools that create or change something with an ID.** Read-only tools get none.
+- **IDs only.** `[Agent] Result ID` is sent in every content mode and is not redacted: never pass emails, names, addresses, or message content. The ID is a non-blank string of up to 512 characters or a safe integer; the type matches `[a-z][a-z0-9_]{0,63}`. Invalid values are dropped. Nothing is added when the tool fails.
+- **Use a stable type per kind of object** (`order`, `booking`, `refund`) so a goal can count one kind when a tool creates several.
+- **Find the confirming event** (the backend or webhook event that proves the action happened, such as `Payment Settled`) and note which of its properties carries the same ID. If there isn't one, **ask the developer** which event confirms the action instead of inventing one.
+- Do not put these IDs in `eventProperties` or `context`: `[Agent] Result ID` and `[Agent] Result Type` are SDK-managed and `eventProperties` can't set them.
+- Provider wrappers record which tools the model asked for, not whether they ran: use `tool()` for action tools.
 
 **Agentic actions that drive business outcomes:** When an agent performs a business action on the user's behalf — adding to cart, completing a purchase, submitting a form — emit **two** events, on two different planes:
 
@@ -1068,8 +1116,8 @@ After the PR is merged and deployed:
 | `new AmplitudeAI({ apiKey, config? })` | Initialize SDK |
 | `new AIConfig({ contentMode?, redactPii?, customRedactionPatterns?, customRedactionFn?, dryRun?, reviewMode?, validate?, onEventCallback?, propagateContext?, debug? })` — `contentMode`: `'full'` (text + PII redaction) \| `'metadata_only'` (tokens/latency/cost, no text) \| `'customer_enriched'` (no text by default, customer sends enriched summaries via `trackSessionEnrichment`). `dryRun`: emit no events (safe for testing the instrumentation path). `reviewMode`: capture complete post-redaction events in sanitized pre-transport request previews without sending them. `validate`: surface schema violations before sending. `onEventCallback(event, statusCode, message)`: fired per tracked event, useful for debugging or secondary sinks. `propagateContext`: auto-propagate session context across async boundaries. | Privacy/debug config |
 | `ai.agent(agentId, opts?)` — `opts`: `{ description?, context?, userId?, env?, agentVersion? }`. `env` tags events with deployment environment (e.g. `'staging'`, `'production'`). `agentVersion` versions the agent for A/B comparison in dashboards. | Create bound agent |
-| `agent.child(agentId, opts?)` — `opts`: `{ description?, context? }` | Create child agent |
-| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush? }`. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Pages Functions). | Create session |
+| `agent.child(agentId, opts?)` — `opts`: `{ description?, context?, experiments? }` | Create child agent (inherits the parent's experiments) |
+| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush?, experiments? }`. `experiments: [{ key, variant, provider?, unit? }]` stamps `[Agent] Experiment*` on every event in the session. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Pages Functions). | Create session |
 | `session.run(fn)` | Execute with session context (auto-flushes in serverless) |
 | `s.runAs(childAgent, fn)` | Delegate to child agent |
 | `ai.flush()` | Flush queued events — required after each session in long-lived servers. Always use `try/finally`: `try { await session.run(...) } finally { await ai.flush() }` — without `finally`, a thrown error inside `session.run()` skips the flush and silently drops all events from that session. |

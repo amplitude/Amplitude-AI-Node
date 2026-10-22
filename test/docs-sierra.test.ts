@@ -107,6 +107,7 @@ const documentedConversation = {
           latencyMs: 820,
           input: { order_id: 'A1001' },
           output: { status: 'shipped', eta: '2026-09-03' },
+          success: true,
         },
       ],
     },

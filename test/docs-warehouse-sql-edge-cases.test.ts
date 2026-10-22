@@ -48,7 +48,8 @@ const byId = (rows: Row[], id: string) => {
 describe('message-rows', () => {
   // conversation_id, message_id, sender, body, sent_at, customer_id, agent_name, channel,
   // tool_name, tool_args, tool_result, tool_status, duration_ms, model, prompt_tokens,
-  // completion_tokens, cost_usd, ui_component, ui_payload, ui_interaction
+  // completion_tokens, cost_usd, ui_component, ui_payload, ui_interaction (result_id and result_type
+  // are left off, so they are NULL)
   const row = (id: string, sender: string, body: string | null, second: number, ui: string | null = null) => [
     'c1', id, sender, body, at(second), 'u1', 'agent', 'web', null, null, null, null, 500, null, null, null, null,
     ui, ui ? '{"k":1}' : null, null,
@@ -68,6 +69,48 @@ describe('message-rows', () => {
     const rows = await run('message-rows', [row('m1', 'user', 'Hi', 0), row('m2', 'assistant', null, 5, 'picker')]);
     expect(rows.map((r) => r.insert_id)).not.toContain('c1:m2-ui');
     expect(byId(rows, 'c1:m2').event_type).toBe('[Agent] Span');
+  });
+
+  // ...ui_interaction, result_id, result_type
+  const tool = (id: string, second: number, status: string | null, resultId: string | null, resultType: string | null) => [
+    'c1', id, 'tool', null, at(second), 'u1', 'agent', 'web', 'create_ticket', '{}', 'ok', status, 100, null, null, null, null,
+    null, null, null, resultId, resultType,
+  ];
+
+  it('sends Result ID and Result Type only on successful tool rows', async () => {
+    const rows = await run('message-rows', [
+      row('m1', 'user', 'Hi', 0),
+      tool('t1', 1, 'ok', '  TCK-1  ', 'ticket'),
+      tool('t2', 2, 'error', 'TCK-2', 'ticket'),
+      tool('t3', 3, null, 'TCK-3', 'ticket'),
+      row('m2', 'assistant', 'Done', 4),
+    ]);
+    expect(byId(rows, 'c1:t1').props).toMatchObject({ '[Agent] Result ID': 'TCK-1', '[Agent] Result Type': 'ticket' });
+    for (const id of ['c1:t2', 'c1:t3']) {
+      expect(byId(rows, id).props['[Agent] Result ID']).toBeNull();
+      expect(byId(rows, id).props['[Agent] Result Type']).toBeNull();
+    }
+  });
+
+  it('leaves Tool Success and Is Error unset when tool_success is NULL', async () => {
+    const rows = await run('message-rows', [row('m1', 'user', 'Hi', 0), tool('t1', 1, null, null, null), row('m2', 'assistant', 'Done', 4)]);
+    expect(byId(rows, 'c1:t1').props['[Agent] Tool Success']).toBeNull();
+    expect(byId(rows, 'c1:t1').props['[Agent] Is Error']).toBeNull();
+  });
+
+  it('drops a blank or over-long Result ID, and a Result Type that does not match the pattern', async () => {
+    const rows = await run('message-rows', [
+      row('m1', 'user', 'Hi', 0),
+      tool('t1', 1, 'ok', '   ', 'ticket'),
+      tool('t2', 2, 'ok', 'x'.repeat(513), 'ticket'),
+      tool('t3', 3, 'ok', 'TCK-3', 'Ticket'),
+      row('m2', 'assistant', 'Done', 4),
+    ]);
+    expect(byId(rows, 'c1:t1').props['[Agent] Result ID']).toBeNull();
+    expect(byId(rows, 'c1:t1').props['[Agent] Result Type']).toBeNull();
+    expect(byId(rows, 'c1:t2').props['[Agent] Result ID']).toBeNull();
+    expect(byId(rows, 'c1:t3').props['[Agent] Result ID']).toBe('TCK-3');
+    expect(byId(rows, 'c1:t3').props['[Agent] Result Type']).toBeNull();
   });
 });
 

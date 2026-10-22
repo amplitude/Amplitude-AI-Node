@@ -62,22 +62,26 @@ const messageRows = {
     ['ui_component', 'string'],
     ['ui_payload', 'string'],
     ['ui_interaction', 'string'],
+    ['result_id', 'string'],
+    ['result_type', 'string'],
+    ['experiment_key', 'string'],
+    ['experiment_variant', 'string'],
   ],
   sampleRows: [
-    ['conv_1', 'a0', 'assistant', 'Hi! How can I help?', at(0), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_1', 'u1', 'user', 'Where is my order?', at(1), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_1', 'c1', 'tool', null, at(2), 'user_12345', 'order-support', 'web_chat', 'lookup_order', '{"id":"A1"}', 'ok', 'ok', 120, null, null, null, null, null, null, null],
-    ['conv_1', 'a1', 'assistant', 'It arrives Thursday.', at(5), 'user_12345', 'order-support', 'web_chat', null, null, null, null, 900, 'gpt-4o', 310, 12, 0.0012, null, null, null],
-    ['conv_1', 'k1', 'assistant', null, at(5), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, 'order-status-card', '{"order":"A1","eta":"Thursday"}', '{"clicked":"track_package"}'],
-    ['conv_1', 'u2', 'user', 'Thanks', at(10), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_1', 's1', 'system', 'internal note', at(10), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_1', 'a2', 'assistant', 'Anytime.', at(11), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_2', 'm1', 'user', 'Cancel my plan', at(60), 'user_67890', 'order-support', 'sms', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_2', 'm2', 'tool', null, at(61), 'user_67890', 'order-support', 'sms', 'cancel_plan', '{"plan":"pro"}', 'timeout', 'error', 3000, null, null, null, null, null, null, null],
-    ['conv_2', 'm3', 'assistant', null, at(64), 'user_67890', 'order-support', 'sms', null, null, null, null, 700, 'gpt-4o', 280, 0, 0.0009, null, null, null],
-    ['conv_2', 'm4', 'assistant', null, at(64), 'user_67890', 'order-support', 'sms', null, null, null, null, null, null, null, null, null, 'callback-form', '{"fields":["phone","preferred_time"]}', '{"submitted":true}'],
-    ['conv_2', 'm5', 'user', 'Tomorrow morning works', at(70), 'user_67890', 'order-support', 'sms', null, null, null, null, null, null, null, null, null, null, null, null],
-    ['conv_2', 'm6', 'assistant', 'Pick a time below.', at(72), 'user_67890', 'order-support', 'sms', null, null, null, null, 650, 'gpt-4o', 300, 5, 0.0008, 'time-picker', '{"slots":["9:00","10:30"]}', null],
+    ['conv_1', 'a0', 'assistant', 'Hi! How can I help?', at(0), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_1', 'u1', 'user', 'Where is my order?', at(1), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_1', 'c1', 'tool', null, at(2), 'user_12345', 'order-support', 'web_chat', 'lookup_order', '{"id":"A1"}', 'ok', 'ok', 120, null, null, null, null, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_1', 'a1', 'assistant', 'It arrives Thursday.', at(5), 'user_12345', 'order-support', 'web_chat', null, null, null, null, 900, 'gpt-4o', 310, 12, 0.0012, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_1', 'k1', 'assistant', null, at(5), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, 'order-status-card', '{"order":"A1","eta":"Thursday"}', '{"clicked":"track_package"}', null, null, 'planner', 'v2'],
+    ['conv_1', 'u2', 'user', 'Thanks', at(10), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_1', 's1', 'system', 'internal note', at(10), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_1', 'a2', 'assistant', 'Anytime.', at(11), 'user_12345', 'order-support', 'web_chat', null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'planner', 'v2'],
+    ['conv_2', 'm1', 'user', 'Cancel my plan', at(60), 'user_67890', 'order-support', 'sms', null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    ['conv_2', 'm2', 'tool', null, at(61), 'user_67890', 'order-support', 'sms', 'cancel_plan', '{"plan":"pro"}', 'timeout', 'error', 3000, null, null, null, null, null, null, null, null, null, null, null],
+    ['conv_2', 'm3', 'assistant', null, at(64), 'user_67890', 'order-support', 'sms', null, null, null, null, 700, 'gpt-4o', 280, 0, 0.0009, null, null, null, null, null, null, null],
+    ['conv_2', 'm4', 'assistant', null, at(64), 'user_67890', 'order-support', 'sms', null, null, null, null, null, null, null, null, null, 'callback-form', '{"fields":["phone","preferred_time"]}', '{"submitted":true}', null, null, null, null],
+    ['conv_2', 'm5', 'user', 'Tomorrow morning works', at(70), 'user_67890', 'order-support', 'sms', null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    ['conv_2', 'm6', 'assistant', 'Pick a time below.', at(72), 'user_67890', 'order-support', 'sms', null, null, null, null, 650, 'gpt-4o', 300, 5, 0.0008, 'time-picker', '{"slots":["9:00","10:30"]}', null, null, null, null, null],
   ],
   // A row with both text and a UI component becomes the reply plus a span
   // (`<message_id>-ui`) right after it, so neither the text nor the component is lost.
@@ -103,6 +107,8 @@ const messageRows = {
     tool_args AS tool_input,
     tool_result AS tool_output,
     CASE WHEN tool_status IS NULL THEN NULL ELSE tool_status <> 'error' END AS tool_success,
+    result_id,
+    result_type,
     duration_ms AS latency_ms,
     model,
     ${nullOf(d, 'string')} AS provider,
@@ -111,6 +117,8 @@ const messageRows = {
     cost_usd,
     ${spanNulls(d)}
     ${d.jsonText([['channel', 'channel']])} AS context,
+    experiment_key,
+    experiment_variant,
     ${nullOf(d, 'timestamp')} AS updated_at
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
@@ -128,6 +136,8 @@ const messageRows = {
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
     ${nullOf(d, 'bool')} AS tool_success,
+    ${nullOf(d, 'string')} AS result_id,
+    ${nullOf(d, 'string')} AS result_type,
     CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
     ${nullOf(d, 'string')} AS model,
     ${nullOf(d, 'string')} AS provider,
@@ -138,6 +148,8 @@ const messageRows = {
     ui_payload AS span_input,
     ui_interaction AS span_output,
     ${d.jsonText([['channel', 'channel']])} AS context,
+    experiment_key,
+    experiment_variant,
     ${nullOf(d, 'timestamp')} AS updated_at
   FROM source
   WHERE ui_component IS NOT NULL`,
@@ -188,6 +200,8 @@ const turnRows = {
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
     ${nullOf(d, 'bool')} AS tool_success,
+    ${nullOf(d, 'string')} AS result_id,
+    ${nullOf(d, 'string')} AS result_type,
     ${nullOf(d, 'int')} AS latency_ms,
     ${nullOf(d, 'string')} AS model,
     ${nullOf(d, 'string')} AS provider,
@@ -196,6 +210,8 @@ const turnRows = {
     ${nullOf(d, 'float')} AS cost_usd,
     ${spanNulls(d)}
     ${d.jsonText([['locale', 'locale']])} AS context,
+    ${nullOf(d, 'string')} AS experiment_key,
+    ${nullOf(d, 'string')} AS experiment_variant,
     ${nullOf(d, 'timestamp')} AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
@@ -213,6 +229,8 @@ const turnRows = {
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
     ${nullOf(d, 'bool')} AS tool_success,
+    ${nullOf(d, 'string')} AS result_id,
+    ${nullOf(d, 'string')} AS result_type,
     latency_ms,
     model,
     ${nullOf(d, 'string')} AS provider,
@@ -221,6 +239,8 @@ const turnRows = {
     cost_usd,
     ${spanNulls(d)}
     ${d.jsonText([['locale', 'locale']])} AS context,
+    ${nullOf(d, 'string')} AS experiment_key,
+    ${nullOf(d, 'string')} AS experiment_variant,
     ${nullOf(d, 'timestamp')} AS updated_at
   FROM source
   WHERE response_text IS NOT NULL`,
@@ -275,6 +295,8 @@ const openaiCanonical = (d, { time, callTime, usage }) => `  SELECT
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
     ${nullOf(d, 'bool')} AS tool_success,
+    ${nullOf(d, 'string')} AS result_id,
+    ${nullOf(d, 'string')} AS result_type,
     ${nullOf(d, 'int')} AS latency_ms,
     CASE WHEN message_role = 'assistant' THEN model END AS model,
     ${nullOf(d, 'string')} AS provider,
@@ -283,6 +305,8 @@ const openaiCanonical = (d, { time, callTime, usage }) => `  SELECT
     ${nullOf(d, 'float')} AS cost_usd,
     ${spanNulls(d)}
     ${nullOf(d, 'string')} AS context,
+    ${nullOf(d, 'string')} AS experiment_key,
+    ${nullOf(d, 'string')} AS experiment_variant,
     updated_at
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
@@ -304,6 +328,8 @@ const openaiCanonical = (d, { time, callTime, usage }) => `  SELECT
     c.tool_input,
     r.tool_output,
     ${nullOf(d, 'bool')} AS tool_success,
+    ${nullOf(d, 'string')} AS result_id,
+    ${nullOf(d, 'string')} AS result_type,
     ${nullOf(d, 'int')} AS latency_ms,
     ${nullOf(d, 'string')} AS model,
     ${nullOf(d, 'string')} AS provider,
@@ -312,6 +338,8 @@ const openaiCanonical = (d, { time, callTime, usage }) => `  SELECT
     ${nullOf(d, 'float')} AS cost_usd,
     ${spanNulls(d)}
     ${nullOf(d, 'string')} AS context,
+    ${nullOf(d, 'string')} AS experiment_key,
+    ${nullOf(d, 'string')} AS experiment_variant,
     c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r

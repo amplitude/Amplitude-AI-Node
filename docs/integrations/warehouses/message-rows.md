@@ -19,6 +19,9 @@ The sample query uses these columns. Your table will differ; map yours in Stage 
 | `tool_name`, `tool_args`, `tool_result`, `tool_status`, `duration_ms` | Tool rows |
 | `model`, `prompt_tokens`, `completion_tokens`, `cost_usd` | Assistant rows, when recorded |
 | `ui_component`, `ui_payload`, `ui_interaction` | A UI component the agent showed: its name, what it rendered, what the user did |
+| `result_id`, `result_type` | Optional, tool rows: the ID and kind of the object a tool created, such as `TCK-1042` and `ticket`. Sent as `[Agent] Result ID` and `[Agent] Result Type` only when the tool succeeded |
+
+`tool_status` becomes `tool_success`: `error` is a failure, any other value a success, and `NULL` leaves `[Agent] Tool Success` unset. Map it from your table, because tool-action goals count only successful calls.
 
 ## What the sample shows
 
@@ -39,33 +42,33 @@ WITH
 -- Stage 1a: source rows. This sample makes the query run as-is.
 -- Replace the body with: SELECT * FROM <your table>
 source AS (
-  SELECT 'conv_1' AS conversation_id, 'a0' AS message_id, 'assistant' AS sender, 'Hi! How can I help?' AS body, '2026-01-15 12:00:00'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a0' AS message_id, 'assistant' AS sender, 'Hi! How can I help?' AS body, '2026-01-15 12:00:00'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'u1' AS message_id, 'user' AS sender, 'Where is my order?' AS body, '2026-01-15 12:00:01'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'u1' AS message_id, 'user' AS sender, 'Where is my order?' AS body, '2026-01-15 12:00:01'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'c1' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:00:02'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, 'lookup_order' AS tool_name, '{"id":"A1"}' AS tool_args, 'ok' AS tool_result, 'ok' AS tool_status, 120 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'c1' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:00:02'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, 'lookup_order' AS tool_name, '{"id":"A1"}' AS tool_args, 'ok' AS tool_result, 'ok' AS tool_status, 120 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'a1' AS message_id, 'assistant' AS sender, 'It arrives Thursday.' AS body, '2026-01-15 12:00:05'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 900 AS duration_ms, 'gpt-4o' AS model, 310 AS prompt_tokens, 12 AS completion_tokens, 0.0012 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a1' AS message_id, 'assistant' AS sender, 'It arrives Thursday.' AS body, '2026-01-15 12:00:05'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 900 AS duration_ms, 'gpt-4o' AS model, 310 AS prompt_tokens, 12 AS completion_tokens, 0.0012 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'k1' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:00:05'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'order-status-card' AS ui_component, '{"order":"A1","eta":"Thursday"}' AS ui_payload, '{"clicked":"track_package"}' AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'k1' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:00:05'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'order-status-card' AS ui_component, '{"order":"A1","eta":"Thursday"}' AS ui_payload, '{"clicked":"track_package"}' AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'u2' AS message_id, 'user' AS sender, 'Thanks' AS body, '2026-01-15 12:00:10'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'u2' AS message_id, 'user' AS sender, 'Thanks' AS body, '2026-01-15 12:00:10'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 's1' AS message_id, 'system' AS sender, 'internal note' AS body, '2026-01-15 12:00:10'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 's1' AS message_id, 'system' AS sender, 'internal note' AS body, '2026-01-15 12:00:10'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'a2' AS message_id, 'assistant' AS sender, 'Anytime.' AS body, '2026-01-15 12:00:11'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a2' AS message_id, 'assistant' AS sender, 'Anytime.' AS body, '2026-01-15 12:00:11'::TIMESTAMP_NTZ AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm1' AS message_id, 'user' AS sender, 'Cancel my plan' AS body, '2026-01-15 12:01:00'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm1' AS message_id, 'user' AS sender, 'Cancel my plan' AS body, '2026-01-15 12:01:00'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm2' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:01'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, 'cancel_plan' AS tool_name, '{"plan":"pro"}' AS tool_args, 'timeout' AS tool_result, 'error' AS tool_status, 3000 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm2' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:01'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, 'cancel_plan' AS tool_name, '{"plan":"pro"}' AS tool_args, 'timeout' AS tool_result, 'error' AS tool_status, 3000 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:04'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:04'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:04'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, '2026-01-15 12:01:04'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, '2026-01-15 12:01:10'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, '2026-01-15 12:01:10'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, '2026-01-15 12:01:12'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, '2026-01-15 12:01:12'::TIMESTAMP_NTZ AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
 ),
 -- Stage 1b (message-rows): normalize into canonical message rows.
 canonical AS (
@@ -91,6 +94,8 @@ canonical AS (
     tool_args AS tool_input,
     tool_result AS tool_output,
     CASE WHEN tool_status IS NULL THEN NULL ELSE tool_status <> 'error' END AS tool_success,
+    result_id,
+    result_type,
     duration_ms AS latency_ms,
     model,
     CAST(NULL AS STRING) AS provider,
@@ -101,6 +106,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context,
+    experiment_key,
+    experiment_variant,
     CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
@@ -118,6 +125,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
     CAST(NULL AS STRING) AS model,
     CAST(NULL AS STRING) AS provider,
@@ -128,6 +137,8 @@ canonical AS (
     ui_payload AS span_input,
     ui_interaction AS span_output,
     TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context,
+    experiment_key,
+    experiment_variant,
     CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
   WHERE ui_component IS NOT NULL
@@ -185,7 +196,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= SYSDATE()
 )
@@ -209,14 +225,20 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN ARRAY_CONSTRUCT(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
     '[Agent] Invocation ID', CASE WHEN role = 'tool' THEN event_key END,
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
-    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN tool_success END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Result ID', result_id_clean,
+    '[Agent] Result Type', CASE WHEN result_id_clean IS NOT NULL AND REGEXP_LIKE(result_type, '[a-z][a-z0-9_]{0,63}') THEN result_type END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -250,6 +272,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN ARRAY_CONSTRUCT(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   ),
   import_cursor
@@ -266,33 +292,33 @@ WITH
 -- Stage 1a: source rows. This sample makes the query run as-is.
 -- Replace the body with: SELECT * FROM <your table>
 source AS (
-  SELECT 'conv_1' AS conversation_id, 'a0' AS message_id, 'assistant' AS sender, 'Hi! How can I help?' AS body, TIMESTAMP '2026-01-15 12:00:00+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a0' AS message_id, 'assistant' AS sender, 'Hi! How can I help?' AS body, TIMESTAMP '2026-01-15 12:00:00+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'u1' AS message_id, 'user' AS sender, 'Where is my order?' AS body, TIMESTAMP '2026-01-15 12:00:01+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'u1' AS message_id, 'user' AS sender, 'Where is my order?' AS body, TIMESTAMP '2026-01-15 12:00:01+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'c1' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:02+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, 'lookup_order' AS tool_name, '{"id":"A1"}' AS tool_args, 'ok' AS tool_result, 'ok' AS tool_status, 120 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'c1' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:02+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, 'lookup_order' AS tool_name, '{"id":"A1"}' AS tool_args, 'ok' AS tool_result, 'ok' AS tool_status, 120 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'a1' AS message_id, 'assistant' AS sender, 'It arrives Thursday.' AS body, TIMESTAMP '2026-01-15 12:00:05+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 900 AS duration_ms, 'gpt-4o' AS model, 310 AS prompt_tokens, 12 AS completion_tokens, 0.0012 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a1' AS message_id, 'assistant' AS sender, 'It arrives Thursday.' AS body, TIMESTAMP '2026-01-15 12:00:05+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 900 AS duration_ms, 'gpt-4o' AS model, 310 AS prompt_tokens, 12 AS completion_tokens, 0.0012 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'k1' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:05+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, 'order-status-card' AS ui_component, '{"order":"A1","eta":"Thursday"}' AS ui_payload, '{"clicked":"track_package"}' AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'k1' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:05+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, 'order-status-card' AS ui_component, '{"order":"A1","eta":"Thursday"}' AS ui_payload, '{"clicked":"track_package"}' AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'u2' AS message_id, 'user' AS sender, 'Thanks' AS body, TIMESTAMP '2026-01-15 12:00:10+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'u2' AS message_id, 'user' AS sender, 'Thanks' AS body, TIMESTAMP '2026-01-15 12:00:10+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 's1' AS message_id, 'system' AS sender, 'internal note' AS body, TIMESTAMP '2026-01-15 12:00:10+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 's1' AS message_id, 'system' AS sender, 'internal note' AS body, TIMESTAMP '2026-01-15 12:00:10+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'a2' AS message_id, 'assistant' AS sender, 'Anytime.' AS body, TIMESTAMP '2026-01-15 12:00:11+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a2' AS message_id, 'assistant' AS sender, 'Anytime.' AS body, TIMESTAMP '2026-01-15 12:00:11+00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm1' AS message_id, 'user' AS sender, 'Cancel my plan' AS body, TIMESTAMP '2026-01-15 12:01:00+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm1' AS message_id, 'user' AS sender, 'Cancel my plan' AS body, TIMESTAMP '2026-01-15 12:01:00+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm2' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:01+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, 'cancel_plan' AS tool_name, '{"plan":"pro"}' AS tool_args, 'timeout' AS tool_result, 'error' AS tool_status, 3000 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm2' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:01+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, 'cancel_plan' AS tool_name, '{"plan":"pro"}' AS tool_args, 'timeout' AS tool_result, 'error' AS tool_status, 3000 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, TIMESTAMP '2026-01-15 12:01:10+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, TIMESTAMP '2026-01-15 12:01:10+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS INT64) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS INT64) AS prompt_tokens, CAST(NULL AS INT64) AS completion_tokens, CAST(NULL AS FLOAT64) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, TIMESTAMP '2026-01-15 12:01:12+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, TIMESTAMP '2026-01-15 12:01:12+00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
 ),
 -- Stage 1b (message-rows): normalize into canonical message rows.
 canonical AS (
@@ -318,6 +344,8 @@ canonical AS (
     tool_args AS tool_input,
     tool_result AS tool_output,
     CASE WHEN tool_status IS NULL THEN NULL ELSE tool_status <> 'error' END AS tool_success,
+    result_id,
+    result_type,
     duration_ms AS latency_ms,
     model,
     CAST(NULL AS STRING) AS provider,
@@ -328,6 +356,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context,
+    experiment_key,
+    experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
@@ -345,6 +375,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOL) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
     CAST(NULL AS STRING) AS model,
     CAST(NULL AS STRING) AS provider,
@@ -355,6 +387,8 @@ canonical AS (
     ui_payload AS span_input,
     ui_interaction AS span_output,
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context,
+    experiment_key,
+    experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE ui_component IS NOT NULL
@@ -412,7 +446,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= CURRENT_TIMESTAMP()
 )
@@ -436,14 +475,20 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN JSON_ARRAY(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
     '[Agent] Invocation ID', CASE WHEN role = 'tool' THEN event_key END,
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
-    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN tool_success END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Result ID', result_id_clean,
+    '[Agent] Result Type', CASE WHEN result_id_clean IS NOT NULL AND REGEXP_CONTAINS(result_type, '^[a-z][a-z0-9_]{0,63}$') THEN result_type END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -477,6 +522,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN JSON_ARRAY(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   )),
   import_cursor
@@ -496,33 +545,33 @@ WITH
 -- Stage 1a: source rows. This sample makes the query run as-is.
 -- Replace the body with: SELECT * FROM <your table>
 source AS (
-  SELECT 'conv_1' AS conversation_id, 'a0' AS message_id, 'assistant' AS sender, 'Hi! How can I help?' AS body, TIMESTAMP '2026-01-15 12:00:00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a0' AS message_id, 'assistant' AS sender, 'Hi! How can I help?' AS body, TIMESTAMP '2026-01-15 12:00:00' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'u1' AS message_id, 'user' AS sender, 'Where is my order?' AS body, TIMESTAMP '2026-01-15 12:00:01' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'u1' AS message_id, 'user' AS sender, 'Where is my order?' AS body, TIMESTAMP '2026-01-15 12:00:01' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'c1' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:02' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, 'lookup_order' AS tool_name, '{"id":"A1"}' AS tool_args, 'ok' AS tool_result, 'ok' AS tool_status, 120 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'c1' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:02' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, 'lookup_order' AS tool_name, '{"id":"A1"}' AS tool_args, 'ok' AS tool_result, 'ok' AS tool_status, 120 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'a1' AS message_id, 'assistant' AS sender, 'It arrives Thursday.' AS body, TIMESTAMP '2026-01-15 12:00:05' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 900 AS duration_ms, 'gpt-4o' AS model, 310 AS prompt_tokens, 12 AS completion_tokens, 0.0012 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a1' AS message_id, 'assistant' AS sender, 'It arrives Thursday.' AS body, TIMESTAMP '2026-01-15 12:00:05' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 900 AS duration_ms, 'gpt-4o' AS model, 310 AS prompt_tokens, 12 AS completion_tokens, 0.0012 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'k1' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:05' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'order-status-card' AS ui_component, '{"order":"A1","eta":"Thursday"}' AS ui_payload, '{"clicked":"track_package"}' AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'k1' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:00:05' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'order-status-card' AS ui_component, '{"order":"A1","eta":"Thursday"}' AS ui_payload, '{"clicked":"track_package"}' AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'u2' AS message_id, 'user' AS sender, 'Thanks' AS body, TIMESTAMP '2026-01-15 12:00:10' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'u2' AS message_id, 'user' AS sender, 'Thanks' AS body, TIMESTAMP '2026-01-15 12:00:10' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 's1' AS message_id, 'system' AS sender, 'internal note' AS body, TIMESTAMP '2026-01-15 12:00:10' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 's1' AS message_id, 'system' AS sender, 'internal note' AS body, TIMESTAMP '2026-01-15 12:00:10' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_1' AS conversation_id, 'a2' AS message_id, 'assistant' AS sender, 'Anytime.' AS body, TIMESTAMP '2026-01-15 12:00:11' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_1' AS conversation_id, 'a2' AS message_id, 'assistant' AS sender, 'Anytime.' AS body, TIMESTAMP '2026-01-15 12:00:11' AS sent_at, 'user_12345' AS customer_id, 'order-support' AS agent_name, 'web_chat' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, 'planner' AS experiment_key, 'v2' AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm1' AS message_id, 'user' AS sender, 'Cancel my plan' AS body, TIMESTAMP '2026-01-15 12:01:00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm1' AS message_id, 'user' AS sender, 'Cancel my plan' AS body, TIMESTAMP '2026-01-15 12:01:00' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm2' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:01' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, 'cancel_plan' AS tool_name, '{"plan":"pro"}' AS tool_args, 'timeout' AS tool_result, 'error' AS tool_status, 3000 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm2' AS message_id, 'tool' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:01' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, 'cancel_plan' AS tool_name, '{"plan":"pro"}' AS tool_args, 'timeout' AS tool_result, 'error' AS tool_status, 3000 AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm3' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 700 AS duration_ms, 'gpt-4o' AS model, 280 AS prompt_tokens, 0 AS completion_tokens, 0.0009 AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm4' AS message_id, 'assistant' AS sender, CAST(NULL AS STRING) AS body, TIMESTAMP '2026-01-15 12:01:04' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, 'callback-form' AS ui_component, '{"fields":["phone","preferred_time"]}' AS ui_payload, '{"submitted":true}' AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, TIMESTAMP '2026-01-15 12:01:10' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm5' AS message_id, 'user' AS sender, 'Tomorrow morning works' AS body, TIMESTAMP '2026-01-15 12:01:10' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, CAST(NULL AS BIGINT) AS duration_ms, CAST(NULL AS STRING) AS model, CAST(NULL AS BIGINT) AS prompt_tokens, CAST(NULL AS BIGINT) AS completion_tokens, CAST(NULL AS DOUBLE) AS cost_usd, CAST(NULL AS STRING) AS ui_component, CAST(NULL AS STRING) AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
   UNION ALL
-  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, TIMESTAMP '2026-01-15 12:01:12' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction
+  SELECT 'conv_2' AS conversation_id, 'm6' AS message_id, 'assistant' AS sender, 'Pick a time below.' AS body, TIMESTAMP '2026-01-15 12:01:12' AS sent_at, 'user_67890' AS customer_id, 'order-support' AS agent_name, 'sms' AS channel, CAST(NULL AS STRING) AS tool_name, CAST(NULL AS STRING) AS tool_args, CAST(NULL AS STRING) AS tool_result, CAST(NULL AS STRING) AS tool_status, 650 AS duration_ms, 'gpt-4o' AS model, 300 AS prompt_tokens, 5 AS completion_tokens, 0.0008 AS cost_usd, 'time-picker' AS ui_component, '{"slots":["9:00","10:30"]}' AS ui_payload, CAST(NULL AS STRING) AS ui_interaction, CAST(NULL AS STRING) AS result_id, CAST(NULL AS STRING) AS result_type, CAST(NULL AS STRING) AS experiment_key, CAST(NULL AS STRING) AS experiment_variant
 ),
 -- Stage 1b (message-rows): normalize into canonical message rows.
 canonical AS (
@@ -548,6 +597,8 @@ canonical AS (
     tool_args AS tool_input,
     tool_result AS tool_output,
     CASE WHEN tool_status IS NULL THEN NULL ELSE tool_status <> 'error' END AS tool_success,
+    result_id,
+    result_type,
     duration_ms AS latency_ms,
     model,
     CAST(NULL AS STRING) AS provider,
@@ -558,6 +609,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     to_json(named_struct('channel', channel)) AS context,
+    experiment_key,
+    experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
@@ -575,6 +628,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     CASE WHEN NULLIF(body, '') IS NULL THEN duration_ms END AS latency_ms,
     CAST(NULL AS STRING) AS model,
     CAST(NULL AS STRING) AS provider,
@@ -585,6 +640,8 @@ canonical AS (
     ui_payload AS span_input,
     ui_interaction AS span_output,
     to_json(named_struct('channel', channel)) AS context,
+    experiment_key,
+    experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE ui_component IS NOT NULL
@@ -642,7 +699,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= current_timestamp()
 )
@@ -666,14 +728,20 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN array(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
     '[Agent] Invocation ID', CASE WHEN role = 'tool' THEN event_key END,
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
-    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN tool_success END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Result ID', result_id_clean,
+    '[Agent] Result Type', CASE WHEN result_id_clean IS NOT NULL AND result_type RLIKE '^[a-z][a-z0-9_]{0,63}$' THEN result_type END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -707,6 +775,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN array(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   )),
   import_cursor

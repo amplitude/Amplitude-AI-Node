@@ -5,6 +5,11 @@
 
 export const SQL_VERSION = 'warehouse-sql/1.0';
 
+// Must match the SDK's Result Type rule in src/core/tool-result.ts.
+const RESULT_TYPE_PATTERN = '[a-z][a-z0-9_]{0,63}';
+// Must match the SDK's experiment key rule in src/core/experiments.ts.
+const EXPERIMENT_KEY_PATTERN = '[^:]{1,256}';
+
 /** Columns every Stage 1 `canonical` CTE must produce, in this order. */
 export const CANONICAL_COLUMNS = [
   ['session_id', 'string', true, 'Stable conversation ID. Becomes `[Agent] Session ID`.'],
@@ -18,7 +23,9 @@ export const CANONICAL_COLUMNS = [
   ['tool_name', 'string', false, 'Tool rows only.'],
   ['tool_input', 'string', false, 'Tool rows only; JSON text is fine.'],
   ['tool_output', 'string', false, 'Tool rows only.'],
-  ['tool_success', 'boolean', false, 'Tool rows only; `NULL` means success.'],
+  ['tool_success', 'boolean', false, 'Tool rows only. `NULL` leaves `[Agent] Tool Success` unset; map it, because tool-action goals count only successful calls.'],
+  ['result_id', 'string', false, 'Tool rows only: ID of the object a successful call created, such as an order or ticket ID. Becomes `[Agent] Result ID` only when `tool_success` is `TRUE`; trimmed, 1 to 512 characters.'],
+  ['result_type', 'string', false, 'Tool rows only: kind of object `result_id` names, matching `[a-z][a-z0-9_]{0,63}`, such as `ticket`. Becomes `[Agent] Result Type` only alongside `[Agent] Result ID`.'],
   ['latency_ms', 'number', false, 'Tool and assistant rows.'],
   ['model', 'string', false, 'Assistant rows. Only if recorded; never guess.'],
   ['provider', 'string', false, 'Assistant rows.'],
@@ -29,6 +36,8 @@ export const CANONICAL_COLUMNS = [
   ['span_input', 'string (JSON text)', false, 'Span rows: what was rendered or passed in.'],
   ['span_output', 'string (JSON text)', false, 'Span rows: what the user did, or what the step returned.'],
   ['context', 'string (JSON object text)', false, 'Filterable dimensions, one key per dimension. Becomes `[Agent] Context`.'],
+  ['experiment_key', 'string', false, 'Experiment or feature flag key the row ran under, such as `planner`. With `experiment_variant`, becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Trimmed, 1 to 256 characters, no `:`; an invalid pair is dropped.'],
+  ['experiment_variant', 'string', false, 'Variant of `experiment_key` the row ran under, such as `treatment`. Trimmed, 1 to 256 characters.'],
   ['updated_at', 'timestamp (UTC)', false, 'When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded.'],
 ];
 
@@ -42,6 +51,10 @@ export const EVENT_PROPERTIES = [
   ['[Agent] Source', 'STRING'],
   ['[Agent] Content Mode', 'STRING'],
   ['[Agent] Context', 'STRING'],
+  ['[Agent] Experiments', 'ARRAY<STRING>'],
+  ['[Agent] Experiment Key', 'STRING'],
+  ['[Agent] Experiment Variant', 'STRING'],
+  ['[Agent] Experiment Unit', 'STRING'],
   ['[Agent] Trace ID', 'STRING'],
   ['[Agent] Turn ID', 'BIGINT'],
   ['[Agent] Message ID', 'STRING'],
@@ -50,6 +63,8 @@ export const EVENT_PROPERTIES = [
   ['[Agent] Tool Name', 'STRING'],
   ['[Agent] Tool Success', 'BOOLEAN'],
   ['[Agent] Is Error', 'BOOLEAN'],
+  ['[Agent] Result ID', 'STRING'],
+  ['[Agent] Result Type', 'STRING'],
   ['[Agent] Latency Ms', 'DOUBLE'],
   ['[Agent] Parent Message ID', 'STRING'],
   ['[Agent] Tool Input', 'STRING'],
@@ -93,8 +108,16 @@ export function renderTail(d) {
     ['[Agent] Source', "'warehouse-sql'"],
     ['[Agent] Content Mode', "CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END"],
     ['[Agent] Context', 'context'],
+    [
+      '[Agent] Experiments',
+      `CASE WHEN experiment_key_clean IS NOT NULL THEN ${d.stringArray("experiment_key_clean || ':' || experiment_variant_clean")} END`,
+    ],
+    ['[Agent] Experiment Key', 'experiment_key_clean'],
+    ['[Agent] Experiment Variant', 'experiment_variant_clean'],
+    ['[Agent] Experiment Unit', "CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END"],
     ['[Agent] Trace ID', 'trace_id'],
   ];
+  const experimentValid = `${d.fullMatch('TRIM(e.experiment_key)', EXPERIMENT_KEY_PATTERN)} AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256`;
 
   const messageProperties = [
     ...base,
@@ -106,10 +129,15 @@ export function renderTail(d) {
       "CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END",
     ],
     ['[Agent] Tool Name', "CASE WHEN role = 'tool' THEN tool_name END"],
-    ['[Agent] Tool Success', "CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END"],
+    ['[Agent] Tool Success', "CASE WHEN role = 'tool' THEN tool_success END"],
     [
       '[Agent] Is Error',
-      "CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END",
+      "CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END",
+    ],
+    ['[Agent] Result ID', 'result_id_clean'],
+    [
+      '[Agent] Result Type',
+      `CASE WHEN result_id_clean IS NOT NULL AND ${d.fullMatch('result_type', RESULT_TYPE_PATTERN)} THEN result_type END`,
     ],
     ['[Agent] Latency Ms', "CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END"],
     [
@@ -189,7 +217,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || ${d.toString('e.exchange_number')} AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN ${experimentValid} THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN ${experimentValid} THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= ${d.now()}
 )

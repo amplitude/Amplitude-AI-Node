@@ -653,7 +653,6 @@ The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unk
 | Key | Example Values | Use Case |
 | --- | --- | --- |
 | `agent_type` | `"planner"`, `"executor"`, `"retriever"`, `"router"` | Filter/group analytics by agent role in multi-agent systems. |
-| `experiment_variant` | `"control"`, `"treatment-v2"`, `"prompt-rewrite-a"` | Segment AI sessions by A/B test variant. Compare quality scores, abandonment rates, or cost across experiment arms. |
 | `feature_flag` | `"new-rag-pipeline"`, `"reasoning-model-enabled"` | Track which feature flags were active during the session. |
 | `surface` | `"chat"`, `"search"`, `"copilot"`, `"email-draft"` | Identify which UI surface or product area triggered the AI interaction. |
 | `prompt_revision` | `"v7"`, `"abc123"`, `"2026-02-15"` | Track which prompt version was used. Detect prompt regression when combined with `agentVersion`. |
@@ -671,7 +670,6 @@ const agent = ai.agent('support-bot', {
   agentVersion: '4.2.0',
   context: {
     agent_type: 'executor',
-    experiment_variant: 'reasoning-enabled',
     surface: 'chat',
     feature_flag: 'new-rag-pipeline',
     prompt_revision: 'v7',
@@ -686,12 +684,12 @@ const agent = ai.agent('support-bot', {
 
 ```typescript
 const parent = ai.agent('orchestrator', {
-  context: { experiment_variant: 'treatment', surface: 'chat' },
+  context: { surface: 'chat', prompt_revision: 'v7' },
 });
 const child = parent.child('researcher', {
   context: { agent_type: 'retriever' },
 });
-// child context = { experiment_variant: 'treatment', surface: 'chat', agent_type: 'retriever' }
+// child context = { surface: 'chat', prompt_revision: 'v7', agent_type: 'retriever' }
 // Child keys override parent keys; parent keys absent from the child are preserved.
 ```
 
@@ -699,7 +697,23 @@ const child = parent.child('researcher', {
 - **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
-> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `experiment_variant`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
+> **Note on context keys and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `surface`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
+
+> Record experiment assignment with the [`experiments` option](#report-experiment-arms), not a context key.
+
+## Report experiment arms
+
+Pass the assignment as `experiments` on the agent, the session, or a single agent or session `track*` call:
+
+```typescript
+await agent
+  .session({ userId: 'u1', experiments: [{ key: 'planner', variant: 'v2', provider: 'statsig' }] })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+Every event in the session then carries `[Agent] Experiments` (`["planner:v2"]`) and, when exactly one experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider`, so any goal chart can be split by variant. `unit` says what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. A session entry overrides an agent entry with the same key, and a call entry overrides both. Child agents (`agent.child()`, `session.runAs()`) inherit the experiments. At most 10 apply to an event; invalid entries are dropped with a debug log, never thrown. Earlier code that put `experiment_variant` in `context` keeps working, but use `experiments` for new code so the assignment isn't recorded twice. For model or prompt tests you can also set `agentVersion` on the agent or `promptId` on AI responses.
 
 ## Works with
 
@@ -1218,6 +1232,39 @@ track(
 ```
 
 The `journey_type` discriminator (`agent` / `web` / `mobile`) makes agent-driven and click-driven journeys comparable in the **same funnel** with no joining. This is the one case where the base SDK's `track()` is correct — it stays a non-`[Agent]` event so it lands in the standard product taxonomy. Only for actions with a click-driven equivalent (not read-only tools), and reuse the existing event name/properties — don't invent them. See Step 3e of `amplitude-ai.md`.
+
+#### Goals: record what a tool created
+
+Agent Analytics Goals measures whether sessions lead to outcomes. When a tool creates something (an order, booking, refund, ticket), record its ID on the `[Agent] Tool Call`; a later event carrying the same ID, from any source, confirms it. No new events are involved:
+
+```typescript
+import { setToolResult, tool } from '@amplitude/ai';
+
+const placeOrder = tool(async (cart: Cart) => shop.create(cart), {
+  name: 'place_order',
+  result: (order: Order) => ({ id: order.id, type: 'order' }),
+});
+
+const bookSlot = tool(async (slotId: string) => {
+  const booking = await calendar.book(slotId);
+  setToolResult(booking.id, { type: 'booking' });
+  return 'Booked';
+}, { name: 'book_slot' });
+```
+
+- The ID is sent as `[Agent] Result ID` and the type as `[Agent] Result Type`, only when the tool succeeds. The `result` hook runs once after success (it may be async) and wins over `setToolResult()`; the last `setToolResult()` call wins, across `await`s.
+- The ID must be a non-blank string of up to 512 characters (outer spaces, tabs, and newlines are trimmed) or a safe integer. The type is optional and must match `[a-z][a-z0-9_]{0,63}`. Invalid values are dropped.
+- Your confirming event (for example `Payment Settled`) carries the same ID in a property of your choosing, such as `order_id`. When you set up a confirmed goal you pick that property; send the event with the same user ID where you can. Send confirmations and reversals (`Payment Settled`, `Refund Issued`) from your backend as ordinary events; they are billed like any other event.
+- **IDs only.** The ID is sent in every content mode and is not redacted, so never pass emails, names, or message content.
+- Provider wrappers record which tools the model asked for, not whether they ran. Use `tool()` on tools that take actions. OTel tool spans can set `amplitude.tool.result_id` / `amplitude.tool.result_type` instead.
+
+Other signals Goals reads, all with existing APIs:
+
+- **Exact session join:** add `'[Agent] Session ID': getActiveContext()?.sessionId` to your own product events. For in-app agents, also pass `deviceId` and `browserSessionId` to the session so Goals can match events from the same app session.
+- **User acceptance:** `s.score('accepted', 1, messageId, { source: 'user' })`, likewise `edited`, `undone`, `rejected` (value `1` or `0`).
+- **Experiment arms:** see [Report experiment arms](#report-experiment-arms).
+- **Incrementality:** create an Amplitude Experiment flag `agent-holdout-<agentId>` (for example 5% held out) and hide the agent entry point when its variant is `off`.
+- **Handoffs to people:** track human-agent messages with `messageSource: 'human_agent'` so deflection goals can count escalations.
 
 ### observe()
 
@@ -1925,7 +1972,7 @@ Your Application
 
 These rules match the Python `amplitude-ai` agent guide and affect how Agent Analytics labels sessions and computes costs:
 
-- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** (preferred — maps to the registered `[Agent] Context` property, always queryable in charts), not as the only `content`, or session titles and segmentation will show raw JSON. Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
+- **`trackUserMessage(content, opts?)`** — The **`content`** string becomes **`$llm_message.text`**. Use a **short, human-readable** line for the real user intent (or a headless summary). Put large JSON, RAG packs, or pipeline state in **`opts.context`** (preferred — maps to the registered `[Agent] Context` property, always queryable in charts), not as the only `content`, or session titles and segmentation will show raw JSON. Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 - **Turn-level vs spans** — **`[Agent] User Message`** and **`[Agent] AI Response`** (with session + turn ids) drive **turn counts** and conversation views. **`observe()`** / **`trackSpan()`** add trace detail but **do not replace** those turn events; keep a user + AI pair for each user-visible cycle unless you intentionally document otherwise.
 - **Gateways / custom `baseURL`** — If you use stock `openai` (or another client) against a proxy, the SDK may not auto-wrap that path. Call **`trackAiMessage`** with **`usage`** token fields from the response (or stream end), pass the **actual routed model id** as the model argument, and set **`totalCostUsd`** if genai-prices cannot resolve the model string. The `@pydantic/genai-prices` package is included as a dependency for automatic USD estimates when model + tokens are known.
 
@@ -2406,10 +2453,15 @@ All event properties are prefixed with `[Agent]` (except `[Amplitude] Session Re
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
-| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties. |
 | `[Agent] Env` | string | No | Deployment environment: 'production', 'staging', or 'dev'. |
 | `[Agent] SDK Version` | string | Yes | Version of the amplitude-ai SDK that produced this event. |
 | `[Agent] Runtime` | string | Yes | SDK runtime: 'python' or 'node'. |
+| `[Agent] Experiments` | string[] | No | Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies. |
+| `[Agent] Experiment Key` | string | No | Experiment or flag key. Sent only when exactly one experiment applies to the event. |
+| `[Agent] Experiment Variant` | string | No | Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants. |
+| `[Agent] Experiment Unit` | string | No | What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies. |
+| `[Agent] Experiment Provider` | string | No | Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set. |
 
 ### User Message Properties
 
@@ -2611,7 +2663,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] User Score` | number | No | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
-| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties. |
 | `[Agent] Task Completed` | string | No | OOTB detector result: 'True' if agent completed user's request, 'False' otherwise. |
 | `[Agent] Task Completed Rationale` | string | No | Brief rationale for the task completion determination. |
 | `[Agent] Task Completed Evidence` | string | No | Supporting evidence for the task completion determination. |

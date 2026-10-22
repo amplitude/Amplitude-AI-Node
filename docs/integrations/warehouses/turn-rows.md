@@ -23,7 +23,7 @@ Stage 1b splits each row into a user message (`turn-<n>-user`) and an agent repl
 
 `sess_1` has two answered turns and a final user message with no reply. Each answered turn is one exchange; tokens, cost, and latency land only on the AI Response. `sess_2` has an answer with no `response_time`, so the reply takes the user's time.
 
-If your table records tool calls or UI components per turn, add them as extra `UNION ALL` branches in Stage 1b with role `tool` or `span` and an `event_time` between the user and response times.
+If your table records tool calls or UI components per turn, add them as extra `UNION ALL` branches in Stage 1b with role `tool` or `span` and an `event_time` between the user and response times. On a tool branch, set `tool_success` from the call's recorded outcome; a `NULL` leaves `[Agent] Tool Success` unset, and tool-action goals count only successful calls. If the tool's output contains the ID of the object it created, set `result_id` and `result_type` too; they are sent as `[Agent] Result ID` and `[Agent] Result Type` only when `tool_success` is `TRUE`.
 
 ## Query
 
@@ -60,6 +60,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     CAST(NULL AS BIGINT) AS latency_ms,
     CAST(NULL AS STRING) AS model,
     CAST(NULL AS STRING) AS provider,
@@ -70,6 +72,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     TO_JSON(OBJECT_CONSTRUCT('locale', locale)) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
@@ -87,6 +91,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     latency_ms,
     model,
     CAST(NULL AS STRING) AS provider,
@@ -97,6 +103,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     TO_JSON(OBJECT_CONSTRUCT('locale', locale)) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
   FROM source
   WHERE response_text IS NOT NULL
@@ -154,7 +162,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= SYSDATE()
 )
@@ -178,14 +191,20 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN ARRAY_CONSTRUCT(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
     '[Agent] Invocation ID', CASE WHEN role = 'tool' THEN event_key END,
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
-    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN tool_success END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Result ID', result_id_clean,
+    '[Agent] Result Type', CASE WHEN result_id_clean IS NOT NULL AND REGEXP_LIKE(result_type, '[a-z][a-z0-9_]{0,63}') THEN result_type END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -219,6 +238,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN ARRAY_CONSTRUCT(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   ),
   import_cursor
@@ -258,6 +281,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOL) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     CAST(NULL AS INT64) AS latency_ms,
     CAST(NULL AS STRING) AS model,
     CAST(NULL AS STRING) AS provider,
@@ -268,6 +293,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('locale', locale))) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
@@ -285,6 +312,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOL) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     latency_ms,
     model,
     CAST(NULL AS STRING) AS provider,
@@ -295,6 +324,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('locale', locale))) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE response_text IS NOT NULL
@@ -352,7 +383,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= CURRENT_TIMESTAMP()
 )
@@ -376,14 +412,20 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN JSON_ARRAY(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
     '[Agent] Invocation ID', CASE WHEN role = 'tool' THEN event_key END,
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
-    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN tool_success END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Result ID', result_id_clean,
+    '[Agent] Result Type', CASE WHEN result_id_clean IS NOT NULL AND REGEXP_CONTAINS(result_type, '^[a-z][a-z0-9_]{0,63}$') THEN result_type END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -417,6 +459,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN JSON_ARRAY(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   )),
   import_cursor
@@ -459,6 +505,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     CAST(NULL AS BIGINT) AS latency_ms,
     CAST(NULL AS STRING) AS model,
     CAST(NULL AS STRING) AS provider,
@@ -469,6 +517,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     to_json(named_struct('locale', locale)) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE user_text IS NOT NULL
@@ -486,6 +536,8 @@ canonical AS (
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
     CAST(NULL AS BOOLEAN) AS tool_success,
+    CAST(NULL AS STRING) AS result_id,
+    CAST(NULL AS STRING) AS result_type,
     latency_ms,
     model,
     CAST(NULL AS STRING) AS provider,
@@ -496,6 +548,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     to_json(named_struct('locale', locale)) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     CAST(NULL AS TIMESTAMP) AS updated_at
   FROM source
   WHERE response_text IS NOT NULL
@@ -553,7 +607,12 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE
+      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
+    END AS result_id_clean,
+    CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= current_timestamp()
 )
@@ -577,14 +636,20 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN array(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
     '[Agent] Invocation ID', CASE WHEN role = 'tool' THEN event_key END,
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
-    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Tool Success', CASE WHEN role = 'tool' THEN tool_success END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT tool_success WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Result ID', result_id_clean,
+    '[Agent] Result Type', CASE WHEN result_id_clean IS NOT NULL AND result_type RLIKE '^[a-z][a-z0-9_]{0,63}$' THEN result_type END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -618,6 +683,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN array(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   )),
   import_cursor

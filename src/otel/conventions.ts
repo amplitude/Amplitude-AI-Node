@@ -87,6 +87,10 @@ export const AMP_ERROR_SOURCE = 'amplitude.error.source';
 export const AMP_TOOL_TYPE = 'amplitude.tool.type';
 export const AMP_TOOL_OWNER = 'amplitude.tool.owner';
 
+// What a successful tool call created → [Agent] Result ID / [Agent] Result Type
+export const AMP_TOOL_RESULT_ID = 'amplitude.tool.result_id';
+export const AMP_TOOL_RESULT_TYPE = 'amplitude.tool.result_type';
+
 // Delegation control
 export const AMP_SKIP_AUTO_USER_TRACKING = 'amplitude.skip.auto.user.tracking';
 

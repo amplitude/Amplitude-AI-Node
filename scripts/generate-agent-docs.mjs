@@ -176,7 +176,7 @@ Prompt:
 - Use \`MockAmplitudeAI\` for deterministic tests.
 - Call \`ai.flush()\` before returning from serverless handlers (Next.js, Lambda, Vercel).
 - \`session.run()\` relies on \`AsyncLocalStorage\`; not available in Edge Runtime. **Cloudflare Workers:** do NOT import \`AmplitudeAI\`, \`AIConfig\`, or any runtime export from \`@amplitude/ai\` in Worker bundles — they pull in \`node:async_hooks\` / \`node:module\` which break Workers Builds. Use the SDK-free \`FetchAmplitudeClient\` pattern with direct \`[Agent]\` event construction (see "Edge Runtime / Cloudflare Workers" in amplitude-ai.md). Only \`import type { ... } from '@amplitude/ai/types'\` is safe.
-- **User message text:** \`trackUserMessage(content, opts?)\` — put human-readable intent in \`content\`; large JSON / RAG / pipeline state in \`opts.context\` (preferred — maps to the registered \`[Agent] Context\` property, always queryable in charts), not as the only \`content\`, or session labels and segmentation show raw JSON. Avoid \`opts.eventProperties\` for custom dimensions on \`[Agent]\` events — unregistered properties may be silently dropped by schema enforcement.
+- **User message text:** \`trackUserMessage(content, opts?)\` — put human-readable intent in \`content\`; large JSON / RAG / pipeline state in \`opts.context\` (preferred — maps to the registered \`[Agent] Context\` property, always queryable in charts), not as the only \`content\`, or session labels and segmentation show raw JSON. Avoid \`opts.eventProperties\` for custom dimensions on \`[Agent]\` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 - **Turns vs spans:** \`[Agent] User Message\` + \`[Agent] AI Response\` drive turn-level analytics; \`observe()\` / \`trackSpan()\` complement them — do not use spans alone for conversation metrics.
 - **Gateways / custom \`baseURL\`:** use \`trackAiMessage\` with \`usage\` fields, the **real** routed model id, and \`totalCostUsd\` when genai-prices cannot resolve the model string (install \`@pydantic/genai-prices\` for automatic cost when supported). Tag gateway traffic with \`context: { ingestion_path: 'gateway', gateway: 'openrouter'|'litellm'|'requesty' }\`.
 - **LangChain callbacks:** \`AmplitudeCallbackHandler\` is duck-typed (no hard \`@langchain/core\` dep). Prefer \`handleChatModelStart\` coverage for chat models.
@@ -362,6 +362,7 @@ const agent = ai.agent('shopping-agent', {
   groups?: Record<string, unknown>,
   deviceId?: string,
   browserSessionId?: string,
+  experiments?: { key, variant, provider?, unit? }[], // see Experiments
 });
 \`\`\`
 
@@ -382,6 +383,7 @@ const session = agent.session({
   deviceId?: string,
   browserSessionId?: string, // links to Amplitude browser session
   autoFlush?: boolean,       // auto-flush on completion (default: auto-detect serverless)
+  experiments?: { key, variant, provider?, unit? }[], // overrides the agent's, by key
 });
 \`\`\`
 
@@ -409,7 +411,7 @@ await s.runAs(recipeAgent, async (cs) => {
 \`\`\`
 
 ### s.trackUserMessage(content, opts?) → eventId
-Track a user message. Returns the event ID. The \`content\` string becomes \`$llm_message.text\` in Amplitude — use a short natural-language line; put structured segmentation dimensions in \`opts.context\` (maps to the registered \`[Agent] Context\` property). Avoid \`opts.eventProperties\` for custom dimensions on \`[Agent]\` events — unregistered properties may not be queryable.
+Track a user message. Returns the event ID. The \`content\` string becomes \`$llm_message.text\` in Amplitude — use a short natural-language line; put structured segmentation dimensions in \`opts.context\` (maps to the registered \`[Agent] Context\` property). Avoid \`opts.eventProperties\` for custom dimensions on \`[Agent]\` events — unregistered properties still arrive, but projects that block unplanned properties will reject them.
 \`\`\`
 s.trackUserMessage('What recipes do you have for pancakes?');
 s.trackUserMessage('Summarize the design doc', { context: { outline: docOutline } });
@@ -460,6 +462,26 @@ const searchProducts = tool(async (args: { query: string }) => { /* ... */ }, {
 const results = await searchProducts({ query: 'pancakes' });
 // [Agent] Tool Call event is automatically emitted with duration, success, input/output.
 \`\`\`
+For tools that create something (an order, booking, refund), record its ID so Agent Analytics Goals can confirm the action against a later event with the same ID:
+\`\`\`
+import { setToolResult, tool } from '@amplitude/ai';
+const placeOrder = tool(async (cart) => shop.create(cart), {
+  name: 'place_order',
+  result: (order) => ({ id: order.id, type: 'order' }), // runs only on success
+});
+// Or from inside the tool body: setToolResult(booking.id, { type: 'booking' });
+\`\`\`
+Sent as \`[Agent] Result ID\` / \`[Agent] Result Type\`, in every content mode and unredacted, so IDs only (never emails, names, or message text). The ID is a non-blank string up to 512 characters or a safe integer; the type matches \`[a-z][a-z0-9_]{0,63}\`. The hook wins over \`setToolResult()\`.
+
+### Experiments
+Record A/B test or feature flag assignment with \`experiments\`, not \`context\`:
+\`\`\`
+const agent = ai.agent('support-bot', { experiments: [{ key: 'router', variant: 'fast' }] });
+await agent.session({ userId: 'u1', experiments: [{ key: 'prompt', variant: 'v2', provider: 'statsig' }] }).run(async (s) => {
+  s.trackUserMessage('Hi', { experiments: [{ key: 'retry', variant: 'on', unit: 'turn' }] });
+});
+\`\`\`
+Every event carries \`[Agent] Experiments\` (\`"key:variant"\` strings) and, when exactly one experiment applies, \`[Agent] Experiment Key\` / \`Variant\` / \`Unit\` / \`Provider\`. Call entries override session entries, which override agent entries, by key; \`child()\` and \`runAs()\` inherit them. \`unit\` is \`agent_session\` (default), \`turn\`, or \`span\`. Key, variant, and provider are up to 256 characters, keys without \`:\`; at most 10 per event; invalid entries are dropped with a debug log.
 
 ### observe(fn, opts?) / observe(opts)(fn)
 Higher-order function that wraps a function to auto-emit [Agent] Span events.

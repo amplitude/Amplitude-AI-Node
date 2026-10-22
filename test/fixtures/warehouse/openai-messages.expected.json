@@ -40,8 +40,6 @@
       "[Agent] Invocation ID": "chat_1:m2-call_1",
       "[Agent] Component Type": "tool",
       "[Agent] Tool Name": "flight_status",
-      "[Agent] Tool Success": true,
-      "[Agent] Is Error": false,
       "[Agent] Parent Message ID": "chat_1:m1",
       "[Agent] Tool Input": "{\"flight\":\"XY12\"}",
       "[Agent] Tool Output": "{\"status\":\"on_time\"}"
@@ -114,8 +112,6 @@
       "[Agent] Invocation ID": "chat_1:m6-call_1",
       "[Agent] Component Type": "tool",
       "[Agent] Tool Name": "flight_status",
-      "[Agent] Tool Success": true,
-      "[Agent] Is Error": false,
       "[Agent] Parent Message ID": "chat_1:m5",
       "[Agent] Tool Input": "{\"flight\":\"XY34\"}",
       "[Agent] Tool Output": "{\"status\":\"delayed\"}"
