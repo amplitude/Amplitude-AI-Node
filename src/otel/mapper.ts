@@ -26,6 +26,7 @@ import {
   PROP_ERROR_SOURCE as CONST_PROP_ERROR_SOURCE,
   PROP_SPAN_KIND as CONST_PROP_SPAN_KIND,
 } from '../core/constants.js';
+import { experimentProperties } from '../core/experiments.js';
 import { PrivacyConfig, redactPiiPatterns } from '../core/privacy.js';
 import { sanitizeToolResult } from '../core/tool-result.js';
 import { getGitMetadata } from '../utils/git_metadata.js';
@@ -658,6 +659,10 @@ export class SpanEventMapper {
       extra[PROP_TAGS] = typeof tags === 'string' ? tags : JSON.stringify(tags);
     } else if (opts.sessionContext?.tags != null && opts.sessionContext.tags.length > 0) {
       extra[PROP_TAGS] = JSON.stringify(opts.sessionContext.tags);
+    }
+    const experiments = opts.sessionContext?.experiments;
+    if (experiments != null && experiments.length > 0) {
+      Object.assign(extra, experimentProperties(experiments));
     }
 
     if (attrs[AMP_GIT_SHA]) {

@@ -35,6 +35,12 @@ import {
   normalizeFlushTimeoutMs,
 } from './config.js';
 import type { SessionEnrichments } from './core/enrichments.js';
+import {
+  chainLevels,
+  type Experiment,
+  type ExperimentInput,
+  mergeExperiments,
+} from './core/experiments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { isServerless } from './serverless.js';
@@ -73,6 +79,12 @@ export interface SessionOptions {
    * User-defined tags for filtering/segmentation.
    */
   tags?: string[] | null;
+  /**
+   * Experiment assignment for this session, the same shape as the agent's
+   * `experiments`. Overrides the agent's entries with the same key; a
+   * `track*` call's `experiments` override these.
+   */
+  experiments?: ExperimentInput[] | null;
   /**
    * Automatically flush pending events when `run()` completes.
    *
@@ -114,6 +126,7 @@ export class Session {
   private _agent: BoundAgent;
   private _enrichments: SessionEnrichments | null = null;
   private _sessionReplayId: string | null;
+  private _experiments: Experiment[];
 
   constructor(agent: BoundAgent, opts: SessionOptions = {}) {
     this.sessionId = opts.sessionId ?? randomUUID();
@@ -125,6 +138,7 @@ export class Session {
       opts.browserSessionId ??
       (agent._defaults.browserSessionId as string | null);
     this.tags = opts.tags ?? null;
+    this._experiments = mergeExperiments(opts.experiments);
     this.autoFlush = opts.autoFlush ?? isServerless();
     this.flushTimeoutMs = normalizeFlushTimeoutMs(opts.flushTimeoutMs);
     this.trackSessionEnd = opts.trackSessionEnd ?? true;
@@ -139,6 +153,10 @@ export class Session {
     const defaults = this._agent._defaults;
     const ai = this._agent._ai;
     const sid = this.sessionId;
+    const experiments = mergeExperiments(
+      defaults.experiments as Experiment[] | undefined,
+      this._experiments,
+    );
 
     return new SessionContext({
       sessionId: sid,
@@ -153,6 +171,7 @@ export class Session {
       context: defaults.context as Record<string, unknown> | null,
       groups: defaults.groups as Record<string, unknown> | null,
       tags: this.tags,
+      experiments: experiments.length > 0 ? experiments : null,
       idleTimeoutMinutes: this.idleTimeoutMinutes,
       deviceId: this.deviceId ?? (defaults.deviceId as string | null),
       browserSessionId:
@@ -250,6 +269,7 @@ export class Session {
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
       tags: this.tags,
+      experiments: this._experiments,
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
@@ -271,6 +291,7 @@ export class Session {
       deviceId: this.deviceId,
       browserSessionId: this.browserSessionId,
       tags: this.tags,
+      experiments: this._experiments,
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
@@ -376,6 +397,9 @@ export class Session {
         ep['[Agent] Tags'] = JSON.stringify(this.tags);
       }
       merged.eventProperties = ep;
+    }
+    if (this._experiments.length > 0) {
+      merged.experiments = chainLevels(this._experiments, merged.experiments);
     }
     return merged as T;
   }
