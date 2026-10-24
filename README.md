@@ -2567,7 +2567,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Target Type` | string | Yes | What is being scored: 'message' or 'session'. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
 | `[Agent] Comment` | string | No | Optional text explanation for the score (respects content_mode). |
-| `[Agent] Taxonomy Version` | string | No | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Taxonomy Version` | string | No | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | No | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
 | `[Agent] Score Label` | string | No | Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only. |
@@ -2583,8 +2583,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
-| `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Taxonomy Version` | string | Yes | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Signal Versions` | string[] | No | Signals (Amplitude's built-in evals) that produced a result for this session, each as '<signal_id>@<version>' (e.g. 'task_completion@2'). Changes only when Amplitude updates one of those signals, unlike [Agent] Taxonomy Version, which changes on every evaluator publish in the org. Custom evaluators carry their version on [Agent] Evaluator Result. JSON array of strings. |
 | `[Agent] Turn Count` | number | Yes | Number of conversation turns in this session. |
 | `[Agent] Session Total Tokens` | number | No | Total LLM tokens consumed across all turns in this session. |
 | `[Agent] Session Avg Latency Ms` | number | No | Average AI response latency in milliseconds across the session. |
@@ -2641,7 +2642,7 @@ Do not send this event from your code.
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
-| `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Taxonomy Version` | string | Yes | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Topic` | string | Yes | Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain'). |
 | `[Agent] Selection Mode` | string | Yes | Whether this topic model uses 'single' (MECE) or 'multiple' (multi-label) selection. |
@@ -2660,7 +2661,8 @@ Do not send this event from your code.
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
-| `[Agent] Evaluator Version` | string | Yes | Config version ID that produced this result. |
+| `[Agent] Evaluator ID` | string | No | Stable ID of the custom evaluator, the same across all of its versions and renames. Set together with [Agent] Evaluator Version. |
+| `[Agent] Evaluator Version` | string | No | Version of this evaluator that produced the result (1, 2, 3...), bumped each time it is edited and promoted. Set together with [Agent] Evaluator ID. Events from before evaluator versions were tracked hold an org-wide configuration ID here instead. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Evaluator Name` | string | Yes | Human-readable evaluator name (primary group-by for users). |
 | `[Agent] Evaluator Output Type` | string | Yes | Discriminator for the evaluator kind: 'classification', 'score', or 'binary'. |
