@@ -63,6 +63,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
 - HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
 - Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
+- Agent built on the Cursor Agent SDK: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following `docs/integrations/cursor-agent-sdk.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
@@ -139,9 +140,10 @@ Fetch the public guide for the job. These URLs track `main`.
 
 - Node app: fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md` and follow it, then install `@amplitude/ai` as that guide says.
 - Python app: `python3 -m pip install amplitude-ai`, then run `amplitude-ai --print-guide`.
-- Hosted platform, tracing tool, warehouse, gateway, or AWS Strands: start at `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md` and follow the linked page, including privacy.
+- Hosted platform, Cursor Agent SDK, tracing tool, warehouse, gateway, or AWS Strands: start at `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md` and follow the linked page, including privacy.
 - `amplitude-ai.md` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is `node_modules/@amplitude/ai/amplitude-ai.md`.
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
+- `docs/integrations/cursor-agent-sdk.md` — Cursor Agent SDK live sessions over the HTTP API, from a hook (no SDK)
 - `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/fin.md` — Fin conversation ingestion over the HTTP API (no SDK)

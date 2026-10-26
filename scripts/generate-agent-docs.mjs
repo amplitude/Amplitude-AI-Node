@@ -30,6 +30,7 @@ const integrations = JSON.parse(
   readFileSync(join(root, 'docs', 'integrations', 'manifest.json'), 'utf8'),
 );
 const platforms = integrations.platforms;
+const runtimes = integrations.runtimes ?? [];
 const hostedPlatforms = platforms.filter((p) => p.category === 'hosted_agent_platform');
 const tracingTools = platforms.filter((p) => p.category === 'tracing_tool');
 const warehouses = integrations.warehouses;
@@ -143,6 +144,7 @@ ${mcpJsonGeneric}
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
 - HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
 - Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
+${runtimes.map((r) => `- Agent built on the ${r.name}: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following \`docs/integrations/${r.id}.md\`.`).join('\n')}
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
@@ -209,9 +211,10 @@ Fetch the public guide for the job. These URLs track \`main\`.
 
 - Node app: fetch \`${releaseRawPrefix}amplitude-ai.md\` and follow it, then install \`${packageJson.name}\` as that guide says.
 - Python app: \`python3 -m pip install amplitude-ai\`, then run \`amplitude-ai --print-guide\`.
-- Hosted platform, tracing tool, warehouse, gateway, or AWS Strands: start at \`${releaseRawPrefix}docs/integrations/README.md\` and follow the linked page, including privacy.
+- Hosted platform, ${runtimes.map((r) => `${r.name}, `).join('')}tracing tool, warehouse, gateway, or AWS Strands: start at \`${releaseRawPrefix}docs/integrations/README.md\` and follow the linked page, including privacy.
 - \`amplitude-ai.md\` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is \`node_modules/@amplitude/ai/amplitude-ai.md\`.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
+${runtimes.map((r) => `- \`docs/integrations/${r.id}.md\` — ${r.name} live sessions over the HTTP API, from a hook (no SDK)`).join('\n')}
 ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
 - \`docs/integrations/routers.md\` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API

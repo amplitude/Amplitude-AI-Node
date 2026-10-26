@@ -617,6 +617,8 @@ For platform integrations where installing the SDK isn't practical (e.g., Sierra
 
 **Hosted agent platforms:** if the agent runs on Sierra or Decagon, stop here and follow the platform guide instead; each is a complete, self-contained procedure with a tested forwarder: [`docs/integrations/sierra.md`](docs/integrations/sierra.md), [`docs/integrations/decagon.md`](docs/integrations/decagon.md). For other platforms, the same guides' forwarder core works with your own `normalize` function.
 
+**Cursor Agent SDK:** Cursor runs the model loop, so `patch()` and `wrap()` never see the call. Forward live sessions from a hook. Cursor's fixture evals stay in Cursor. Follow [`docs/integrations/cursor-agent-sdk.md`](docs/integrations/cursor-agent-sdk.md).
+
 **Required structure** — each event in the `events` array:
 
 ```json
