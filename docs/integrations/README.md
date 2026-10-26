@@ -21,7 +21,7 @@ The runtime owns the model loop. A hook in the agent posts each live turn.
 
 | Runtime | Guide | How conversations are extracted | Last verified |
 |---|---|---|---|
-| Cursor Agent SDK | [cursor-agent-sdk.md](./cursor-agent-sdk.md) | In-process hook on `message.received`, `action.result`, and `turn.completed` | 2026-10-26, `@grok/agent-sdk` 0.3.0 |
+| Cursor Agent SDK | [cursor-agent-sdk.md](./cursor-agent-sdk.md) | In-process hook on `message.received`, `action.result`, and `turn.completed` | 2026-10-26, `@grok/agent-sdk` 0.3.0, one real turn |
 
 Cursor's built-in evals stay in Cursor. The hook drops eval and dry-run sessions. The user id has to be the one product analytics already uses.
 

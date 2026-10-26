@@ -1,5 +1,5 @@
 // Maps Cursor Agent SDK hook envelopes to Amplitude [Agent] events.
-// No network. Copy this file into the agent project and call it from a hook.
+// No network. Copy this file to bot/lib/ (not bot/hooks/) and call it from a hook.
 //
 // Envelope: { type, index, sessionId, turnId?, at, data }, from @grok/agent-sdk 0.3.0 SessionEvent.
 // The hook stamps purpose from ctx.session.purpose; the SDK does not put it on the event.

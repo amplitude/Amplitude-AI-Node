@@ -2,7 +2,7 @@
 
 **Amplitude Agent Analytics can ingest live Cursor Agent SDK sessions over the Amplitude HTTP API, with no Amplitude SDK inside the agent.**
 
-Last verified: 2026-10-26, against `@grok/agent-sdk` 0.3.0. The hook below type-checks against that package's `dist/types.d.ts`, and the event shapes in the fixture come from its `SessionEvent` type. This is an Amplitude-authored guide. Cursor and the Agent SDK are trademarks of their owner. This guide is not affiliated with or endorsed by Cursor.
+Last verified: 2026-10-26, against `@grok/agent-sdk` 0.3.0. The hook below type-checks against that package's `dist/types.d.ts`, passes `agent-sdk validate`, and ran on one real `agent-sdk run` turn with `AMPLITUDE_DRY_RUN=1`: one tool call, a 3,269-character reply, and `turn.completed.data.result` equal to the final `message.completed.data.text`. This is an Amplitude-authored guide. Cursor and the Agent SDK are trademarks of their owner. This guide is not affiliated with or endorsed by Cursor.
 
 **Provenance.** Event payloads are `SessionEventPayload` in `@grok/agent-sdk/dist/types.d.ts` and the [hook reference](https://cursor.com/docs/agent-sdk/reference/hooks). `ctx.host.kv` is `HostKvApi`: `get`, `put`, `delete`. `turn.completed.data` is `{ result?, usage? }`. It has tokens and no cost or model. Cursor prices a session, not a turn. `purpose` and `dryRun` are on `ctx.session`, not on the event. The 2000-character cap is `memoryHook`'s journal limit ([Memory](https://cursor.com/docs/agent-sdk/reference/memory)), not a property of the hook event. Do not read the memory journal. It is truncated and shared across sessions.
 
@@ -46,19 +46,19 @@ bot/hooks/amplitude.ts
 - **Agent ID:** `ctx.agent.name`.
 - **User ID:** a field you name on `ctx.session.auth` or channel state. It must match product analytics. The guide does not guess it. Slack `attributes.user_id` on an approval is the approver, not the default.
 - **Reply text:** `turn.completed.data.result`. Phase 2 checks that this is the full reply.
-- **Model:** the `model` string in `bot/agent.ts`. The default is `grok-4.5`.
+- **Model:** the `model` string in `bot/agent.ts`. If `agent.ts` omits it, ask which model the deployment runs. The SDK default is not available on every account.
 
 Turns with no user id are skipped and counted, not sent.
 
 ### Effort
 
-Copy `cursor-agent-sdk.mjs` and the hook below, name the user id field, and confirm one live reply in Phase 2. Hosted agents also allow egress to the Amplitude HTTP host.
+Copy `cursor-agent-sdk.mjs` to `bot/lib/` and the hook below to `bot/hooks/`, name the user id field, and confirm one reply in Phase 2. Hosted agents also allow egress to the Amplitude HTTP host.
 
 ---
 
 ## Part 2: Coding agent procedure
 
-**If you are a coding agent, start here.** Copy [cursor-agent-sdk.mjs](./cursor-agent-sdk.mjs) unchanged. It has no network. The hook below is the only file that posts.
+**If you are a coding agent, start here.** Copy [cursor-agent-sdk.mjs](./cursor-agent-sdk.mjs) unchanged to `bot/lib/`, not `bot/hooks/`. Every file in `bot/hooks/` must default-export `defineHook`. It has no network. The hook below is the only file that posts.
 
 ### Do not guess
 
@@ -83,7 +83,7 @@ Print:
 
 ### Phase 2: Confirm the reply text
 
-Run one turn with a reply longer than 2000 characters, for example `agent-sdk run --message "..." --trace turn.ndjson`. Compare `turn.completed.data.result` with the last `message.completed.data.text` in that trace.
+On `@grok/agent-sdk` 0.3.x this matched in full (see Last verified). On another version, run one turn with a reply longer than 2000 characters: `AMPLITUDE_DRY_RUN=1 agent-sdk run --dir . --message "..." --trace turn.ndjson`. Do not pass `--dry-run`. That marks the session `dryRun`, and the hook skips it. Compare `turn.completed.data.result` with the last `message.completed.data.text` in the trace.
 
 - They match: keep `result` as the reply field.
 - `result` is shorter: stop. Do not send `contentMode: "full"`. Quality signals would judge a partial answer.
@@ -94,10 +94,11 @@ Also confirm `actions.requested` carries `calls[].args` and `action.result` carr
 
 ### Phase 3: Implement
 
-1. Copy `cursor-agent-sdk.mjs` into the agent project.
-2. Add `bot/hooks/amplitude.ts` from the hook below.
-3. On a hosted agent, add the Amplitude host to `hosting.egressDomains` and the API key to `hosting.secretNames`.
-4. Keep `AMPLITUDE_DRY_RUN=1` until Phase 4.
+1. Copy `cursor-agent-sdk.mjs` to `bot/lib/cursor-agent-sdk.mjs`.
+2. Add `bot/hooks/amplitude.ts` from the hook below. Set `MODEL` to the `model` in `bot/agent.ts`.
+3. Run `agent-sdk validate --dir .`. It must report no diagnostics.
+4. On a hosted agent, add the Amplitude host to `hosting.egressDomains` and the API key to `hosting.secretNames`.
+5. Keep `AMPLITUDE_DRY_RUN=1` until Phase 4.
 
 The hook posts on `turn.completed` and on `turn.failed`. It retries that in-memory batch twice after the first attempt. Each attempt times out at 5 seconds. If all three fail, it logs the insert ids and moves on. It does not write the transcript to `ctx.host.kv`.
 
@@ -121,7 +122,7 @@ The hook posts on `turn.completed` and on `turn.failed`. It retries that in-memo
 ```ts
 import { defineHook, type HookContext } from '@grok/agent-sdk/hooks';
 import type { SessionEvent } from '@grok/agent-sdk';
-import { normalize } from './cursor-agent-sdk.mjs';
+import { normalize } from '../lib/cursor-agent-sdk.mjs';
 
 const KEEP = new Set(['message.received', 'actions.requested', 'action.result', 'turn.completed', 'turn.failed']);
 const buffers = new Map<string, Array<SessionEvent & { purpose: string }>>();
@@ -137,7 +138,7 @@ export default defineHook({
 });
 
 // The `model` string from bot/agent.ts. Turn events do not carry it.
-const MODEL = 'grok-4.5';
+const MODEL = 'grok-4.7';
 
 type Counters = { turn: number; trace: number; replied: boolean };
 
