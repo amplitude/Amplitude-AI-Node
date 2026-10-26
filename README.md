@@ -2795,6 +2795,10 @@ If your agent runs on a hosted platform, the platform makes the LLM calls, so th
 - [Fin (Intercom)](docs/integrations/fin.md)
 - [Agentforce (Salesforce)](docs/integrations/agentforce.md)
 
+### Cursor Agent SDK
+
+Cursor runs the model loop, so there is nothing for this SDK to wrap. A hook posts each live turn. Cursor's built-in evals stay in Cursor. Follow [docs/integrations/cursor-agent-sdk.md](docs/integrations/cursor-agent-sdk.md).
+
 ### LLM tracing tools (Langfuse, LangSmith, Braintrust)
 
 If your conversations are already traced in an LLM tracing tool, a scheduled job can read finished sessions or threads from the tool's API and forward them, including history, with the same forwarder core:

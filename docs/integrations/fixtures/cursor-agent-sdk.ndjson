@@ -1,0 +1,9 @@
+{"type":"message.received","index":1,"sessionId":"ses_montreal","at":"2026-10-26T18:00:00.000Z","purpose":"live","data":{"text":"Find hotels in Montreal under $300 a night."}}
+{"type":"actions.requested","index":3,"sessionId":"ses_montreal","at":"2026-10-26T18:00:01.000Z","purpose":"live","data":{"calls":[{"callId":"call_hotels","toolName":"lookup_hotels","args":{"city":"Montreal","maxNightly":300}}]}}
+{"type":"action.result","index":4,"sessionId":"ses_montreal","at":"2026-10-26T18:00:02.000Z","purpose":"live","data":{"callId":"call_hotels","toolName":"lookup_hotels","isError":false,"output":{"count":3}}}
+{"type":"turn.completed","index":7,"sessionId":"ses_montreal","at":"2026-10-26T18:00:04.000Z","purpose":"live","data":{"result":"Three stays are under $300. The best match is Hotel Saint-Laurent at $189.","usage":{"inputTokens":1200,"outputTokens":80,"cacheReadTokens":400},"cost":{"totalUsd":0.02,"model":"grok-4.5"}}}
+{"type":"turn.failed","index":8,"sessionId":"ses_montreal","at":"2026-10-26T18:00:05.000Z","purpose":"live","data":{"status":"cancelled","message":"turn interrupted"}}
+{"type":"message.received","index":10,"sessionId":"ses_montreal","at":"2026-10-26T18:01:00.000Z","purpose":"live","data":{"text":"Book the Saint-Laurent for Saturday."}}
+{"type":"turn.completed","index":12,"sessionId":"ses_montreal","at":"2026-10-26T18:01:03.000Z","purpose":"live","data":{"result":"Booked Hotel Saint-Laurent for Saturday morning.","usage":{"inputTokens":900,"outputTokens":40},"cost":{"totalUsd":0.01,"model":"grok-4.5"}}}
+{"type":"message.received","index":1,"sessionId":"ses_eval","at":"2026-10-26T18:02:00.000Z","purpose":"eval","data":{"text":"This fixture must not be forwarded."}}
+{"type":"turn.completed","index":2,"sessionId":"ses_eval","at":"2026-10-26T18:02:01.000Z","purpose":"eval","data":{"result":"Eval reply that must stay in Cursor.","usage":{"inputTokens":10,"outputTokens":5},"cost":{"totalUsd":0.001,"model":"grok-4.5"}}}

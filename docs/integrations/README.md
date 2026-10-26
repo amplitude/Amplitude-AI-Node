@@ -1,6 +1,6 @@
 # Agent platforms, tracing tools, and warehouses + Amplitude Agent Analytics
 
-**Amplitude Agent Analytics can ingest agent conversations from hosted agent platforms, LLM tracing tools, agent frameworks that emit OpenTelemetry, and data warehouses, with no SDK required.**
+**Amplitude Agent Analytics can ingest agent conversations from hosted agent platforms, the Cursor Agent SDK, LLM tracing tools, agent frameworks that emit OpenTelemetry, and data warehouses, with no SDK required.**
 
 If you do not run the Amplitude AI SDK in your agent code, you can still get your conversations into Agent Analytics: a small forwarder in your infrastructure reads each finished conversation from where it already lives, turns it into `[Agent]` events, and posts them to Amplitude. Each guide below is a complete recipe for one source, written for both engineers and coding agents: hand a coding agent the page URL and it can build the integration.
 
@@ -14,6 +14,16 @@ The platform runs the agent; the forwarder pulls or receives finished conversati
 | Decagon | [decagon.md](./decagon.md) | Scheduled pull from the conversation export API, windowed on last update | 2026-10-06 |
 | Fin (Intercom) | [fin.md](./fin.md) | Scheduled search and retrieve from the conversations API, plus an optional close webhook | 2026-10-06 |
 | Agentforce (Salesforce) | [agentforce.md](./agentforce.md) | Scheduled SQL over the Session Tracing tables in Data Cloud, once each trace is complete | 2026-10-06 |
+
+## Agent runtimes
+
+The runtime owns the model loop. A hook in the agent posts each live turn. This is not a scheduled pull and not an OpenTelemetry export.
+
+| Runtime | Guide | How conversations are extracted | Last verified |
+|---|---|---|---|
+| Cursor Agent SDK | [cursor-agent-sdk.md](./cursor-agent-sdk.md) | In-process hook on `message.received`, `action.result`, and `turn.completed` | 2026-10-26, public docs only |
+
+Cursor's built-in evals stay in Cursor. The hook drops `purpose: "eval"`. The user id has to be the one product analytics already uses. Cursor's OpenTelemetry export is not this path.
 
 ## LLM tracing tools
 
@@ -71,6 +81,7 @@ Every platform and tracing-tool guide shares the same platform-neutral forwarder
 
 These URLs track `main`. Fetch the raw page for the source and follow "Part 2: Coding agent procedure". If `@amplitude/ai` is installed, the same file is under `node_modules/@amplitude/ai/docs/integrations/`. To instrument a Node app, fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md` and follow it. To instrument a Python app, install `amplitude-ai` and run `amplitude-ai --print-guide`. If your source is not listed, start at this page.
 
+- Cursor Agent SDK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/cursor-agent-sdk.md`
 - Sierra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/sierra.md`
 - Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md`
 - Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md`
@@ -86,7 +97,7 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 
 ## Your source is not listed
 
-The forwarder core on any guide works for any source that can give you a conversation transcript: write a `normalize` function for your source's payload and reuse the rest. For a warehouse table in another shape, see "Bring your own format" in the warehouse guide. If you are running your own agent code, the Amplitude AI SDK is the most complete option ([Node](../../README.md), [Python](https://pypi.org/project/amplitude-ai/)).
+The forwarder core on any guide works for any source that can give you a conversation transcript: write a `normalize` function for your source's payload and reuse the rest. For a warehouse table in another shape, see "Bring your own format" in the warehouse guide. If you are running your own agent code and you call the model yourself, the Amplitude AI SDK is the most complete option ([Node](../../README.md), [Python](https://pypi.org/project/amplitude-ai/)). If Cursor's Agent SDK runs the model loop, use the [Cursor Agent SDK guide](./cursor-agent-sdk.md) instead of `patch()` or `wrap()`.
 
 ## Raw HTML content
 
