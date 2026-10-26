@@ -1410,7 +1410,7 @@
         {
           "name": "[Agent] Taxonomy Version",
           "type": "string",
-          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id)."
+          "description": "ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed."
         },
         {
           "name": "[Agent] Evaluated At",
@@ -1465,7 +1465,7 @@
         {
           "name": "[Agent] Taxonomy Version",
           "type": "string",
-          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).",
+          "description": "ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed.",
           "is_required": true
         },
         {
@@ -1473,6 +1473,12 @@
           "type": "number",
           "description": "Epoch milliseconds when this enrichment/evaluation was computed.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Signal Versions",
+          "type": "string",
+          "description": "Signals (Amplitude's built-in evals) that produced a result for this session, each as '<signal_id>@<version>' (e.g. 'task_completion@2'). Changes only when Amplitude updates one of those signals, unlike [Agent] Taxonomy Version, which changes on every evaluator publish in the org. Custom evaluators carry their version on [Agent] Evaluator Result. JSON array of strings.",
+          "is_array_type": true
         },
         {
           "name": "[Agent] Turn Count",
@@ -1730,7 +1736,7 @@
         {
           "name": "[Agent] Taxonomy Version",
           "type": "string",
-          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).",
+          "description": "ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed.",
           "is_required": true
         },
         {
@@ -1804,10 +1810,14 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Evaluator ID",
+          "type": "string",
+          "description": "Stable ID of the custom evaluator, the same across all of its versions and renames. Set together with [Agent] Evaluator Version."
+        },
+        {
           "name": "[Agent] Evaluator Version",
           "type": "string",
-          "description": "Config version ID that produced this result.",
-          "is_required": true
+          "description": "Version of this evaluator that produced the result (1, 2, 3...), bumped each time it is edited and promoted. Set together with [Agent] Evaluator ID. Events from before evaluator versions were tracked hold an org-wide configuration ID here instead."
         },
         {
           "name": "[Agent] Evaluated At",
