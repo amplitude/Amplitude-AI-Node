@@ -1,8 +1,10 @@
 // Maps Cursor Agent SDK hook envelopes to Amplitude [Agent] events.
 // No network. Copy this file into the agent project and call it from a hook.
 //
-// Envelope: { type, index, sessionId, at, purpose?, data }
-// mapping: { userId, agentId, channel?, mode?, contentMode?, redact?, displayedComponent?, minIdLength?, state? }
+// Envelope: { type, index, sessionId, turnId?, at, data }, from @grok/agent-sdk 0.3.0 SessionEvent.
+// The hook stamps purpose from ctx.session.purpose; the SDK does not put it on the event.
+// turn.completed carries tokens but no cost or model. The model is the agent.ts constant.
+// mapping: { userId, agentId, model?, channel?, mode?, contentMode?, redact?, displayedComponent?, minIdLength?, state? }
 // state, when the hook calls this one turn at a time: { turn, trace, replied }
 
 const FORWARDER_VERSION = 'http-forwarder/1.0';
@@ -14,18 +16,16 @@ function epochMillis(at) {
   return Number.isInteger(time) && String(Math.trunc(time)).length === 13 ? time : undefined;
 }
 
-function assistantProps(text, event, isError, full, redact) {
+function assistantProps(text, event, isError, full, redact, model) {
   const usage = event.data?.usage ?? {};
-  const cost = event.data?.cost ?? {};
   const props = {
     '[Agent] Component Type': 'llm',
     '[Agent] Is Error': isError,
   };
   if (full) props.$llm_message = { text: redact(text) };
-  if (typeof cost.model === 'string' && cost.model) props['[Agent] Model Name'] = cost.model;
+  if (typeof model === 'string' && model) props['[Agent] Model Name'] = model;
   if (usage.inputTokens > 0) props['[Agent] Input Tokens'] = usage.inputTokens;
   if (usage.outputTokens > 0) props['[Agent] Output Tokens'] = usage.outputTokens;
-  if (cost.totalUsd > 0) props['[Agent] Cost USD'] = cost.totalUsd;
   return props;
 }
 
@@ -77,7 +77,7 @@ function emit(event, role, eventType, extra, mapping, state, skipped, full, reda
 /**
  * @param {object[]} events hook envelopes in session order
  * @param {object} [mapping]
- * @returns {{ events: object[], state: { turn: number, trace: number, replied: boolean }, skipped: object }}
+ * @returns {{ events: Array<{ event_type: string, user_id: string, time: number, insert_id: string, event_properties: Record<string, unknown> }>, state: { turn: number, trace: number, replied: boolean }, skipped: Record<string, number> }}
  */
 export function normalize(events, mapping = {}) {
   const redact = mapping.redact ?? ((text) => text);
@@ -87,7 +87,7 @@ export function normalize(events, mapping = {}) {
     trace: mapping.state?.trace ?? 0,
     replied: mapping.state?.replied ?? false,
   };
-  const skipped = { eval: 0, noUser: 0, shortId: 0, emptyUser: 0, noTextOutput: 0, cancelled: 0, badTime: 0 };
+  const skipped = { eval: 0, dryRun: 0, noUser: 0, shortId: 0, emptyUser: 0, noTextOutput: 0, cancelled: 0, badTime: 0 };
   const pendingArgs = new Map();
   const out = [];
   const sorted = [...events].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
@@ -95,6 +95,10 @@ export function normalize(events, mapping = {}) {
   for (const event of sorted) {
     if (event.purpose === 'eval') {
       skipped.eval += 1;
+      continue;
+    }
+    if (event.dryRun === true) {
+      skipped.dryRun += 1;
       continue;
     }
     if (event.type === 'actions.requested') {
@@ -180,7 +184,7 @@ export function normalize(events, mapping = {}) {
         event,
         'assistant',
         '[Agent] AI Response',
-        assistantProps(text, event, isError, full, redact),
+        assistantProps(text, event, isError, full, redact, mapping.model),
         mapping,
         state,
         skipped,

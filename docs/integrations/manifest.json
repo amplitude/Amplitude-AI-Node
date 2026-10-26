@@ -106,7 +106,7 @@
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/cursor-agent-sdk.md",
       "extraction_methods": ["hook"],
       "ingestion_paths": ["http_v2"],
-      "vendor_format_source": "vendor_public_docs_2026_10_26",
+      "vendor_format_source": "vendor_sdk_types_grok_agent_sdk_0_3_0",
       "last_verified": "2026-10-26"
     }
   ],

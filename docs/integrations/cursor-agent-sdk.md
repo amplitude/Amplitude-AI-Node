@@ -2,9 +2,9 @@
 
 **Amplitude Agent Analytics can ingest live Cursor Agent SDK sessions over the Amplitude HTTP API, with no Amplitude SDK inside the agent.**
 
-Last verified: 2026-10-26, against Cursor's public Agent SDK docs only. This mapping has not been compared with a live `agent-sdk session get --view events` trace. Do that comparison in Phase 2 before you send reply text. This is an Amplitude-authored guide. Cursor and the Agent SDK are trademarks of their owner. This guide is not affiliated with or endorsed by Cursor.
+Last verified: 2026-10-26, against `@grok/agent-sdk` 0.3.0. The hook below type-checks against that package's `dist/types.d.ts`, and the event shapes in the fixture come from its `SessionEvent` type. This is an Amplitude-authored guide. Cursor and the Agent SDK are trademarks of their owner. This guide is not affiliated with or endorsed by Cursor.
 
-**Provenance.** Hook event names and payloads are from the [hook reference](https://cursor.com/docs/agent-sdk/reference/hooks) read on 2026-10-26. The reply field on that page is `turn.completed.data.result`. `message.completed` and `session.completed` are session-stream events, not documented hook payloads, so this guide does not subscribe to them. The 2000-character cap is `memoryHook`'s journal limit ([Memory](https://cursor.com/docs/agent-sdk/reference/memory)), not a property of the hook event. Do not read the memory journal. It is truncated and shared across sessions.
+**Provenance.** Event payloads are `SessionEventPayload` in `@grok/agent-sdk/dist/types.d.ts` and the [hook reference](https://cursor.com/docs/agent-sdk/reference/hooks). `ctx.host.kv` is `HostKvApi`: `get`, `put`, `delete`. `turn.completed.data` is `{ result?, usage? }`. It has tokens and no cost or model. Cursor prices a session, not a turn. `purpose` and `dryRun` are on `ctx.session`, not on the event. The 2000-character cap is `memoryHook`'s journal limit ([Memory](https://cursor.com/docs/agent-sdk/reference/memory)), not a property of the hook event. Do not read the memory journal. It is truncated and shared across sessions.
 
 ---
 
@@ -19,7 +19,7 @@ Cursor's built-in evals stay in Cursor. They answer whether a change still does 
 ```text
 bot/hooks/amplitude.ts
   message.received, action.result, turn.completed, turn.failed
-  -> skip purpose === "eval"
+  -> skip ctx.session.purpose === "eval" and ctx.session.dryRun
   -> normalize(...)          hook envelopes -> [Agent] events
   -> POST https://api2.amplitude.com/2/httpapi
   -> Agent Analytics sessions, turns, tool calls, enrichment after idle close
@@ -29,14 +29,13 @@ bot/hooks/amplitude.ts
 
 - Each live session in the session viewer, one turn per user-to-reply exchange.
 - Tool name, success, and, unless you send metadata only, tool input and output.
-- Model, input tokens, output tokens, and cost on the AI Response, from `turn.completed`.
+- Input and output tokens on the AI Response, from `turn.completed`. Model name from the `model` you set in `bot/agent.ts`. No per-turn cost: Cursor does not price turns.
 - Quality signals after the session closes, on that live transcript.
 - A join to product analytics when `user_id` is the id you already send to Amplitude.
 
 ### What this guide does not do
 
-- It does not import Cursor eval results, `t.score`, or judges. Drop every event with `purpose: "eval"`.
-- It does not send Cursor's OpenTelemetry export. That export is traces, metrics, and logs. Prompt text is a log opt-in. Amplitude's direct OTLP path expects GenAI spans. Different payload.
+- It does not import Cursor eval results, `t.score`, or judges. Eval sessions and dry-run sessions are dropped.
 - It does not set `[Agent] Parent Agent ID`. Subagent calls stay tool calls on this agent.
 - It does not send `[Agent] Session End`. `session.completed` is not a documented hook event. Amplitude closes the session after 30 idle minutes, and enrichment runs once on that close.
 - It does not replay events after a process restart. Hooks are not called again for events they missed. A dead process loses those turns. `insert_id`s are stable, so a manual resend does not duplicate.
@@ -47,6 +46,7 @@ bot/hooks/amplitude.ts
 - **Agent ID:** `ctx.agent.name`.
 - **User ID:** a field you name on `ctx.session.auth` or channel state. It must match product analytics. The guide does not guess it. Slack `attributes.user_id` on an approval is the approver, not the default.
 - **Reply text:** `turn.completed.data.result`. Phase 2 checks that this is the full reply.
+- **Model:** the `model` string in `bot/agent.ts`. The default is `grok-4.5`.
 
 Turns with no user id are skipped and counted, not sent.
 
@@ -74,7 +74,8 @@ Stop and ask the user:
 Print:
 
 - That this project is an Agent SDK agent (`bot/agent.ts` or `bot/instructions.md`), not an app that calls OpenAI itself.
-- The method names on `ctx.host.kv`. The sample below calls `get` and `set`. If those names are absent, use the read and write methods that are present. Store only `{ turn, trace, replied }`.
+- The installed `@grok/agent-sdk` version. If it is not 0.3.x, check `HostKvApi` and `turn.completed` in its `dist/types.d.ts` against this guide.
+- The `model` in `bot/agent.ts`.
 - Whether `AMPLITUDE_API_KEY` is available as a hosted secret. Never hard-code it. Read it inside the handler.
 - Whether the user is on Amplitude's EU data center.
 
@@ -82,11 +83,10 @@ Print:
 
 ### Phase 2: Confirm the reply text
 
-Run one `purpose: "live"` turn with a reply longer than 2000 characters. Compare `turn.completed.data.result` with the assistant text from `agent-sdk session get --view events`.
+Run one turn with a reply longer than 2000 characters, for example `agent-sdk run --message "..." --trace turn.ndjson`. Compare `turn.completed.data.result` with the last `message.completed.data.text` in that trace.
 
 - They match: keep `result` as the reply field.
-- `result` is shorter: subscribe the hook to `"*"` for one more turn. Use `message.completed.data.text` only if that event arrives and matches the session event in full. Record the change in this file's provenance.
-- Neither source has the full reply: stop. Do not send `contentMode: "full"`. Quality signals would judge a partial answer.
+- `result` is shorter: stop. Do not send `contentMode: "full"`. Quality signals would judge a partial answer.
 
 Also confirm `actions.requested` carries `calls[].args` and `action.result` carries `output`. The mapper pairs them by `callId`.
 
@@ -103,15 +103,14 @@ The hook posts on `turn.completed` and on `turn.failed`. It retries that in-memo
 
 ### Phase 4: Verify
 
-1. Dry-run. Save the events and run `node cursor-agent-sdk.test.mjs` is for this repo. In the agent project, run `node check-agent-events.mjs events.json` from `@amplitude/ai` (`npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json`).
+1. Dry-run. Save the printed events and run `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json`.
 2. Send one live session. HTTP 200 only means Amplitude received the body.
-3. After the session has been idle long enough to close, check the session viewer: one session, one turn per exchange, text in the thread, tool calls inside the turn, cost only on the AI Response. An eval run from the same agent does not appear. Sending the same insert ids again does not duplicate.
+3. After the session has been idle long enough to close, check the session viewer: one session, one turn per exchange, text in the thread, tool calls inside the turn, tokens only on the AI Response. An eval run from the same agent does not appear. Sending the same insert ids again does not duplicate.
 4. The user is the product user, not `unknown`. If they confirmed there is no product user, the session can still appear, and it does not join conversion or retention.
 
 ### Phase 5: Ship
 
 - Leave Cursor's evals where they are.
-- Do not point `OTEL_EXPORTER_OTLP_ENDPOINT` at Amplitude for this integration.
 - Scrub before the POST if the customer requires it. Amplitude does not scrub after receipt. See [privacy.md](./privacy.md).
 - Ids shorter than 5 characters are skipped unless the customer sets `minIdLength`.
 
@@ -120,11 +119,12 @@ The hook posts on `turn.completed` and on `turn.failed`. It retries that in-memo
 ## Hook
 
 ```ts
-import { defineHook } from '@grok/agent-sdk/hooks';
+import { defineHook, type HookContext } from '@grok/agent-sdk/hooks';
+import type { SessionEvent } from '@grok/agent-sdk';
 import { normalize } from './cursor-agent-sdk.mjs';
 
 const KEEP = new Set(['message.received', 'actions.requested', 'action.result', 'turn.completed', 'turn.failed']);
-const buffers = new Map();
+const buffers = new Map<string, Array<SessionEvent & { purpose: string }>>();
 
 export default defineHook({
   events: {
@@ -136,26 +136,25 @@ export default defineHook({
   },
 });
 
-async function onEvent(event, ctx, flush = false) {
-  if (ctx.session.purpose === 'eval') return;
+// The `model` string from bot/agent.ts. Turn events do not carry it.
+const MODEL = 'grok-4.5';
+
+type Counters = { turn: number; trace: number; replied: boolean };
+
+async function onEvent(event: SessionEvent, ctx: HookContext, flush = false) {
+  if (ctx.session.purpose === 'eval' || ctx.session.dryRun) return;
   if (!KEEP.has(event.type)) return;
   const bucket = buffers.get(ctx.session.id) ?? [];
-  bucket.push({
-    type: event.type,
-    index: event.index,
-    sessionId: event.sessionId,
-    at: event.at,
-    purpose: ctx.session.purpose,
-    data: event.data,
-  });
+  bucket.push({ ...event, purpose: ctx.session.purpose ?? 'live' });
   buffers.set(ctx.session.id, bucket);
   if (!flush) return;
 
   const key = `amplitude:${ctx.session.id}`;
-  const prior = (await ctx.host.kv.get(key)) ?? { turn: 0, trace: 0, replied: false };
+  const prior = ((await ctx.host.kv.get(key)) as Counters | undefined) ?? { turn: 0, trace: 0, replied: false };
   const result = normalize(bucket, {
     userId: userIdFrom(ctx),
     agentId: ctx.agent.name,
+    model: MODEL,
     channel: ctx.channel.id,
     mode: ctx.session.mode,
     state: prior,
@@ -168,18 +167,18 @@ async function onEvent(event, ctx, flush = false) {
     return;
   }
   await postEvents(result.events);
-  await ctx.host.kv.set(key, result.state);
+  await ctx.host.kv.put(key, result.state);
 }
 
-function userIdFrom(ctx) {
+function userIdFrom(ctx: HookContext): string | undefined {
   // Replace this with the path the user named in do-not-guess step 1.
   return undefined;
 }
 
-async function postEvents(events) {
+async function postEvents(events: Array<{ insert_id: string }>) {
   const endpoint = process.env.AMPLITUDE_ENDPOINT ?? 'https://api2.amplitude.com/2/httpapi';
   const body = JSON.stringify({ api_key: process.env.AMPLITUDE_API_KEY, events });
-  let lastError;
+  let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const response = await fetch(endpoint, {
@@ -222,14 +221,14 @@ These are the same rules as the other HTTP forwarders.
 1. Send a user id on every event. Without one, the session lands on `unknown`.
 2. Always set `[Agent] Agent ID`.
 3. One `[Agent] Trace ID` per exchange. A new one when the next user message arrives after a reply.
-4. `[Agent] Turn ID` increases by one per emitted event. The counter lives in `ctx.host.kv` under `amplitude:${sessionId}` so a later turn does not restart at 1. The value stored is `{ turn, trace, replied }` only.
+4. `[Agent] Turn ID` increases by one per emitted event. The counter lives in `ctx.host.kv` (written with `put`) under `amplitude:${sessionId}` so a later turn does not restart at 1. The value stored is `{ turn, trace, replied }` only.
 5. `insert_id` is `${sessionId}:${envelope.index}:${role}` and equals `[Agent] Message ID` or `[Agent] Invocation ID`.
 6. `time` is epoch milliseconds from the envelope `at`.
 7. Do not send `[Agent] Session End`.
 8. Filterable dimensions go in `[Agent] Context` as a JSON string. This guide sends `channel` and `mode`.
 9. `$llm_message` is `{ "text": "..." }`.
 10. Never leave an AI Response empty. An empty `result` becomes `[No text output]`, or `[Displayed: <name>]` when the customer named a component.
-11. Cost and tokens go on the AI Response only, and only when the value is greater than zero. Cache and reasoning tokens are omitted. Provider is omitted.
+11. Tokens and model go on the AI Response only. Tokens only when greater than zero. Cache and reasoning tokens are omitted. Provider and cost are omitted.
 12. Do not build an idle timer. Do not rotate the session id.
 
 `[Agent] Source` is `cursor-agent-sdk`. `[Agent] Ingestion Path` is `http_forwarder`. `[Agent] SDK Version` is `http-forwarder/1.0`. `[Agent] Runtime` is `custom`.
