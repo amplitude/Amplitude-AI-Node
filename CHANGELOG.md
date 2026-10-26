@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.24.2
+
+### Documentation and validation
+- The event catalog and README now describe the version properties that Amplitude's enrichment sets: `[Agent] Signal Versions` on `[Agent] Session Record` (each built-in signal as `<signal_id>@<version>`), and `[Agent] Evaluator ID` with `[Agent] Evaluator Version` on `[Agent] Evaluator Result` (a custom evaluator's stable ID and its 1, 2, 3 version). `[Agent] Taxonomy Version` is described as the org-wide evaluation configuration ID, which changes on any evaluator publish. `amplitude-ai-register-catalog` registers the new descriptions. No SDK tracking changes.
+
 ## 0.24.1
 
 ### Fixed
