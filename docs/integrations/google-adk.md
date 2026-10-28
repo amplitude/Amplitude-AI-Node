@@ -2,7 +2,7 @@
 
 **Python Google ADK 2.13.0 emits OpenTelemetry GenAI spans. TypeScript `@google/adk` 2.3.0 and Java `com.google.adk:google-adk` 1.4.0 emit the legacy `call_llm` attributes, and the exporter in this guide copies them onto `gen_ai.*` before they leave the process. Go `google.golang.org/adk` v1.6.1 emits `generate_content` and `execute_tool` on spans, and puts message text on OTLP logs. Point the exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-28, against `google-adk==2.13.0`, `@google/adk@2.3.0`, `google.golang.org/adk` v1.6.1, and `com.google.adk:google-adk` 1.4.0. The Python capture used ADK's own tracer with LiteLLM against an OpenAI-compatible model. Gemini Developer API calls can be spanned by `opentelemetry-instrumentation-google-genai` instead; that path is the OpenInference guide, not this one.
+Last verified: 2026-10-28, against `google-adk==2.13.0`, `@google/adk@2.3.0`, `google.golang.org/adk` v1.6.1, `com.google.adk:google-adk` 1.4.0, and a Kotlin 2.1.21 caller of that Java library. The Python capture used ADK's own tracer with LiteLLM against an OpenAI-compatible model. Gemini Developer API calls can be spanned by `opentelemetry-instrumentation-google-genai` instead; that path is the OpenInference guide, not this one.
 
 Amplitude reads the span attributes below and turns one ADK session into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -154,7 +154,11 @@ Set `user.id`, `gen_ai.agent.id`, and `gen_ai.conversation.id` on every span bef
 
 `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, and the tool name still arrive. This verification captured message content.
 
-The tool name is the Java method name. Name that method `lookup_order` when that is the product tool name. This capture used `gemini-2.5-flash` with `HttpOptions.baseUrl` pointed at a local model. Kotlin is not in this verification.
+The tool name is the Java method name. Name that method `lookup_order` when that is the product tool name. This capture used `gemini-2.5-flash` with `HttpOptions.baseUrl` pointed at a local model.
+
+## Kotlin
+
+Kotlin callers use the same `com.google.adk:google-adk` 1.4.0 library. A Kotlin 2.1.21 program produced the same `call_llm` spans as Java. Register OpenTelemetry before ADK loads, and use the Java exporter steps above. The tool name is the Kotlin function name. This verification captured message content from that Kotlin program.
 
 ## What arrives in Amplitude
 
@@ -262,7 +266,7 @@ One model span and one tool span from a single turn. Both carry the same session
 
 ## Part 2: Coding agent procedure
 
-1. Pin `google-adk==2.13.0` for Python, `@google/adk@2.3.0` for TypeScript, `google.golang.org/adk` v1.6.1 for Go, or `com.google.adk:google-adk` 1.4.0 for Java.
+1. Pin `google-adk==2.13.0` for Python, `@google/adk@2.3.0` for TypeScript, `google.golang.org/adk` v1.6.1 for Go, or `com.google.adk:google-adk` 1.4.0 for Java and Kotlin.
 2. Set the environment block above before ADK is imported. Use the project API key in `Authorization`, with `%20` between `Bearer` and the key.
 3. On Python, leave the telemetry schema at the default. Do not opt into `call_llm`.
 4. Install the identity processor so every span has `user.id` and `gen_ai.agent.id`. Keep one ADK session id for the conversation. That id is `gen_ai.conversation.id`. On TypeScript, set `gen_ai.conversation.id` in the processor and copy `gcp.vertex.agent.llm_*` onto `gen_ai.*` in the exporter. On Go, set the same three attributes in the processor and copy `gcp.vertex.agent.tool_call_args` onto `gen_ai.tool.call.arguments` in the exporter. Go keeps message text on OTLP logs. On Java, register `GlobalOpenTelemetry` before ADK loads, set the same three attributes, rewrite `call_llm` to `generate_content`, and copy the `gcp.vertex.agent.llm_*` blobs onto `gen_ai.*` in the exporter.
