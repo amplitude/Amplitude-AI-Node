@@ -36,7 +36,7 @@ Do not set `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN` to `1` or `otel_semconv_1_36`. 
 
 ## Identity on every span
 
-ADK writes `gen_ai.conversation.id` from the ADK session id. It does not write the product user id onto spans (that value is log-only). `gen_ai.agent.name` is the Python agent name, and Amplitude does not use it as the agent id. Install a span processor before the app imports the agent, and set `user.id` and `gen_ai.agent.id` on every span.
+ADK writes `gen_ai.conversation.id` from the ADK session id on the model and agent spans. The `execute_tool` span does not get it. It does not write the product user id onto spans (that value is log-only). `gen_ai.agent.name` is the Python agent name, and Amplitude does not use it as the agent id. Install a span processor before the app imports the agent, and set `user.id`, `gen_ai.agent.id`, `gen_ai.conversation.id`, and `session.id` on every span, including the tool span. Without the conversation id on the tool span, that tool call is stored under the trace id.
 
 The agent `name` must be a Python identifier (`order_support`). The product agent id (`order-support`) is the processor attribute.
 
@@ -56,6 +56,8 @@ class IdentityProcessor(SpanProcessor):
         if span.is_recording():
             span.set_attribute("user.id", user_id)
             span.set_attribute("gen_ai.agent.id", "order-support")
+            span.set_attribute("gen_ai.conversation.id", conversation_id)
+            span.set_attribute("session.id", conversation_id)
 
     def on_end(self, span):
         return None

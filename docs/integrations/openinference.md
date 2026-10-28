@@ -94,7 +94,7 @@ Agno, smolagents, and AutoGen pass the session, user, tool, and reply checks wit
 
 ### DSPy
 
-`DSPyInstrumentor().instrument()` before `dspy.configure`. Each model call is a new user message that repeats the question inside the trajectory. This two-question capture produced six `[Agent] User Message` events. There is no assistant role on the input for Amplitude to use as a history anchor.
+`DSPyInstrumentor().instrument()` before `dspy.configure`. Each model call is a new user message that repeats the question inside the trajectory. This two-question capture produced six `[Agent] User Message` events. There is no assistant role on the input for Amplitude to use as a history anchor. The LM spans had `llm.model_name` and did not have `llm.token_count.prompt` or `llm.token_count.completion`, so this capture has no token counts.
 
 TOOL spans are named `lookup_order.__call__` and omit `tool.name`. Set it when you export, only on TOOL spans:
 
