@@ -54,6 +54,9 @@ The agent runs in your own code and already exports OpenTelemetry GenAI spans. S
 | Framework | Guide | How conversations are extracted | Last verified |
 |---|---|---|---|
 | AWS Strands (Python) | [strands.md](./strands.md) | Native OTLP/HTTP from Strands Agents 1.60.0 | 2026-10-14 |
+| Google ADK (Python) | [google-adk.md](./google-adk.md) | Native OTLP/HTTP from google-adk 2.13.0 | 2026-10-27 |
+| Vercel AI SDK | [vercel-ai-sdk.md](./vercel-ai-sdk.md) | Native OTLP/HTTP from ai 7.0.155 and @ai-sdk/otel 1.0.155 | 2026-10-27 |
+| Pydantic AI | [pydantic-ai.md](./pydantic-ai.md) | Native OTLP/HTTP from pydantic-ai 2.63.0 | 2026-10-27 |
 
 Scrub content before it leaves your infrastructure. Amplitude does not scrub after receipt. The shared contract for HTTP, OTLP, Batch, S3, and warehouse imports is [privacy.md](./privacy.md).
 
@@ -92,6 +95,9 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
 - Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
 - AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md`
+- Google ADK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/google-adk.md`
+- Vercel AI SDK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vercel-ai-sdk.md`
+- Pydantic AI: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/pydantic-ai.md`
 - Strands privacy setup: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands-privacy.md`
 - Privacy (non-SDK paths): `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md`
 

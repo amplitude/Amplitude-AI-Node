@@ -68,6 +68,9 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
 - Agent runs on AWS Strands (Python): export native OTLP by following `docs/integrations/strands.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Google ADK: export native OTLP by following `docs/integrations/google-adk.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Vercel AI SDK: export native OTLP by following `docs/integrations/vercel-ai-sdk.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Pydantic AI: export native OTLP by following `docs/integrations/pydantic-ai.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 
 ## MCP Surface
 
@@ -154,6 +157,9 @@ Fetch the public guide for the job. These URLs track `main`.
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
 - `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
 - `docs/integrations/strands.md` — AWS Strands (Python) native OTLP export
+- `docs/integrations/google-adk.md` — Google ADK native OTLP export
+- `docs/integrations/vercel-ai-sdk.md` — Vercel AI SDK native OTLP export
+- `docs/integrations/pydantic-ai.md` — Pydantic AI native OTLP export
 - `docs/integrations/privacy.md` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
 ## Event Schema (names)

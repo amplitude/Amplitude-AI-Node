@@ -1498,6 +1498,24 @@ describe('forwarder core and adapters', () => {
         ingestion_paths: ['otlp'],
         last_verified: '2026-10-14',
       }),
+      expect.objectContaining({
+        id: 'google-adk',
+        pinned_version: '2.13.0',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-27',
+      }),
+      expect.objectContaining({
+        id: 'vercel-ai-sdk',
+        pinned_version: '7.0.155',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-27',
+      }),
+      expect.objectContaining({
+        id: 'pydantic-ai',
+        pinned_version: '2.63.0',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-27',
+      }),
     ]);
     expect(manifest.frameworks[0]?.raw_url.startsWith(RELEASE_RAW_PREFIX)).toBe(true);
     expect(manifest.privacy.raw_url.startsWith(RELEASE_RAW_PREFIX)).toBe(true);
@@ -1552,5 +1570,44 @@ describe('forwarder core and adapters', () => {
     expect(tool?.get('gen_ai.tool.call.arguments')).toContain('order_id');
     expect(tool?.get('gen_ai.tool.call.result')).toContain('shipped');
     expect(page).not.toMatch(/Authorization=Bearer [^%<]/);
+  });
+
+  it.each([
+    ['google-adk.md', 'google-adk==2.13.0', 'generate_content'],
+    ['vercel-ai-sdk.md', 'ai@7.0.155', 'chat'],
+    ['pydantic-ai.md', 'pydantic-ai==2.63.0', 'chat'],
+  ])('validates the %s OTLP example and shared conversation identity', (file, pin, operation) => {
+    const page = readPage(file);
+    expect(page).not.toContain(CORE_START);
+    expect(page).toContain(pin);
+    expect(page).toContain('Bearer%20');
+    expect(page).toContain('[Agent] Session End` is optional and recommended');
+    expect(page).toContain('30 minutes');
+    expect(page).toContain('does not read an idle-timeout attribute');
+    expect(page).not.toMatch(/gen_ai\.[a-z0-9_.]*idle|amplitude\.idle/i);
+    expect(page).not.toMatch(/Authorization=Bearer [^%<]/);
+    const fixture = JSON.parse(
+      extractFencedBlockAfter(page, '### Example: one model span and one tool span', 'json'),
+    ) as OtlpExport;
+    const spans = fixture.resourceSpans[0]?.scopeSpans[0]?.spans ?? [];
+    expect(spans).toHaveLength(2);
+    const attributes = spans.map((span) => {
+      const attrs = new Map<string, string | undefined>();
+      for (const { key, value } of span.attributes ?? []) attrs.set(key, value.stringValue ?? value.intValue);
+      return attrs;
+    });
+    for (const attrs of attributes) {
+      expect(attrs.get('gen_ai.conversation.id') ?? attrs.get('session.id')).toBe('conv_1');
+      expect(attrs.get('user.id')).toBe('user_12345');
+      expect(attrs.get('gen_ai.agent.id')).toBe('order-support');
+    }
+    const model = attributes.find((attrs) => attrs.get('gen_ai.operation.name') === operation);
+    const tool = attributes.find((attrs) => attrs.get('gen_ai.operation.name') === 'execute_tool');
+    expect(model?.get('gen_ai.usage.input_tokens')).toBe('20');
+    expect(model?.get('gen_ai.usage.output_tokens')).toBe('8');
+    expect(model?.get('gen_ai.input.messages')).toContain('Where is order A1?');
+    expect(model?.get('gen_ai.output.messages')).toContain('It arrives Thursday.');
+    expect(tool?.get('gen_ai.tool.name')).toBe('lookup_order');
+    expect(tool?.get('gen_ai.tool.call.arguments')).toContain('A1');
   });
 });

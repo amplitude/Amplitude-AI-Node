@@ -121,6 +121,39 @@
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md",
       "ingestion_paths": ["otlp"],
       "last_verified": "2026-10-14"
+    },
+    {
+      "id": "google-adk",
+      "name": "Google ADK",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "2.13.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/google-adk.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/google-adk.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
+    },
+    {
+      "id": "vercel-ai-sdk",
+      "name": "Vercel AI SDK",
+      "category": "agent_framework",
+      "sdk": "node",
+      "pinned_version": "7.0.155",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/vercel-ai-sdk.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vercel-ai-sdk.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
+    },
+    {
+      "id": "pydantic-ai",
+      "name": "Pydantic AI",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "2.63.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/pydantic-ai.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/pydantic-ai.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
     }
   ],
   "privacy": {
