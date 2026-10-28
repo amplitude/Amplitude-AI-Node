@@ -1516,6 +1516,24 @@ describe('forwarder core and adapters', () => {
         ingestion_paths: ['otlp'],
         last_verified: '2026-10-27',
       }),
+      expect.objectContaining({
+        id: 'mastra',
+        pinned_version: '1.79.0',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-27',
+      }),
+      expect.objectContaining({
+        id: 'microsoft-agent-framework',
+        pinned_version: '1.23.0',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-27',
+      }),
+      expect.objectContaining({
+        id: 'amazon-bedrock-agentcore',
+        pinned_version: 'otlp-http',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-27',
+      }),
     ]);
     expect(manifest.frameworks[0]?.raw_url.startsWith(RELEASE_RAW_PREFIX)).toBe(true);
     expect(manifest.privacy.raw_url.startsWith(RELEASE_RAW_PREFIX)).toBe(true);
@@ -1576,6 +1594,9 @@ describe('forwarder core and adapters', () => {
     ['google-adk.md', 'google-adk==2.13.0', 'generate_content'],
     ['vercel-ai-sdk.md', 'ai@7.0.155', 'chat'],
     ['pydantic-ai.md', 'pydantic-ai==2.63.0', 'chat'],
+    ['mastra.md', '@mastra/core@1.79.0', 'chat'],
+    ['microsoft-agent-framework.md', 'agent-framework-core==1.23.0', 'chat'],
+    ['amazon-bedrock-agentcore.md', 'http/protobuf', 'chat'],
   ])('validates the %s OTLP example and shared conversation identity', (file, pin, operation) => {
     const page = readPage(file);
     expect(page).not.toContain(CORE_START);

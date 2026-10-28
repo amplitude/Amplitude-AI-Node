@@ -712,8 +712,11 @@ OpenAI-compatible gateways and OTEL partners — no special SDK build required:
 | **Requesty** | SDK-through only | No OTLP push today — point the OpenAI client at Requesty's base URL. |
 | **Strands** | OTLP | Python Strands Agents 1.60.0 exports native OTLP/HTTP. Follow [docs/integrations/strands.md](docs/integrations/strands.md). When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process. |
 | **Google ADK** | OTLP | Python google-adk 2.13.0 exports native OTLP/HTTP. Follow [docs/integrations/google-adk.md](docs/integrations/google-adk.md). |
-| **Vercel AI SDK** | OTLP | AI SDK 7.0.155 with `@ai-sdk/otel` 1.0.155 exports native OTLP/HTTP. Follow [docs/integrations/vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md). |
+| **Vercel AI SDK** | OTLP | AI SDK 7.0.155 with `@ai-sdk/otel` 1.0.155, and AI SDK 6.0.317, export native OTLP/HTTP. Follow [docs/integrations/vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md). |
 | **Pydantic AI** | OTLP | pydantic-ai 2.63.0 exports native OTLP/HTTP. Follow [docs/integrations/pydantic-ai.md](docs/integrations/pydantic-ai.md). |
+| **Mastra** | OTLP | `@mastra/core` 1.79.0 exports native OTLP/HTTP. Follow [docs/integrations/mastra.md](docs/integrations/mastra.md). |
+| **Microsoft Agent Framework** | OTLP | agent-framework-core 1.23.0 exports native OTLP/HTTP. Follow [docs/integrations/microsoft-agent-framework.md](docs/integrations/microsoft-agent-framework.md). |
+| **Amazon Bedrock AgentCore** | OTLP | Add an OTLP/HTTP exporter beside CloudWatch. Follow [docs/integrations/amazon-bedrock-agentcore.md](docs/integrations/amazon-bedrock-agentcore.md). |
 
 Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
 
@@ -2810,7 +2813,7 @@ If your conversations are already traced in an LLM tracing tool, a scheduled job
 - [LangSmith](docs/integrations/langsmith.md)
 - [Braintrust](docs/integrations/braintrust.md)
 
-If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). Python Strands Agents, Google ADK, the Vercel AI SDK, and Pydantic AI export native OTLP/HTTP: follow [docs/integrations/strands.md](docs/integrations/strands.md), [google-adk.md](docs/integrations/google-adk.md), [vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md), and [pydantic-ai.md](docs/integrations/pydantic-ai.md). Scrub content before it leaves your infrastructure with [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub after receipt.
+If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). Python Strands Agents, Google ADK, the Vercel AI SDK, Pydantic AI, Mastra, the Microsoft Agent Framework, and Amazon Bedrock AgentCore export native OTLP/HTTP: follow [docs/integrations/strands.md](docs/integrations/strands.md), [google-adk.md](docs/integrations/google-adk.md), [vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md), [pydantic-ai.md](docs/integrations/pydantic-ai.md), [mastra.md](docs/integrations/mastra.md), [microsoft-agent-framework.md](docs/integrations/microsoft-agent-framework.md), and [amazon-bedrock-agentcore.md](docs/integrations/amazon-bedrock-agentcore.md). Scrub content before it leaves your infrastructure with [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub after receipt.
 
 ### Data warehouses (Snowflake, BigQuery, Databricks)
 

@@ -2,7 +2,7 @@
 
 **Vercel AI SDK 7 already emits OpenTelemetry GenAI spans through `@ai-sdk/otel`. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-27, against `ai@7.0.155` and `@ai-sdk/otel@1.0.155`. This page is the SDK 7 `OpenTelemetry` integration. SDK 6 `LegacyOpenTelemetry` (`ai.*` attributes) is not this capture.
+Last verified: 2026-10-27, against `ai@7.0.155` and `@ai-sdk/otel@1.0.155`, and against `ai@6.0.317` with `@ai-sdk/openai@2.0.138`. Use the provider package that matches the `ai` major version.
 
 Amplitude reads the span attributes below and turns one conversation into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -68,6 +68,16 @@ A tool loop needs more than one model call. The default stop condition ends afte
 | `gen_ai.agent.id` | A stable name for this agent. `gen_ai.agent.name` is not read. |
 
 `OTEL_SERVICE_NAME` is the agent id Amplitude uses when a span has no `gen_ai.agent.id`.
+
+## SDK 6
+
+SDK 6 does not use `@ai-sdk/otel`. Enable `experimental_telemetry: { isEnabled: true }` on `generateText` / `streamText`, and install the SDK 6 provider (`@ai-sdk/openai@2`, not `@ai-sdk/openai` 3 or 4). A function id is still not a session id. A span processor sets `user.id`, `gen_ai.conversation.id`, and `gen_ai.agent.id` on every span. `stopWhen: stepCountIs(4)` is required here too. `maxSteps` does not continue the loop far enough for the reply text to land on a later model span.
+
+SDK 6 writes `ai.operationId`, `ai.prompt.messages`, `ai.response.text`, `ai.toolCall.name`, and `ai.toolCall.args`. Amplitude maps `ai.generateText.doGenerate` and `ai.streamText.doStream` to `chat`, and `ai.toolCall` to `execute_tool`. The parent `ai.generateText` span repeats that step, so it stays an `[Agent] Span` and does not emit the user prompt a second time. Message content is `{role, content: [{type, text}]}`. Tokens and the model name are already on `gen_ai.usage.*` and `gen_ai.response.model` of the `doGenerate` span.
+
+```bash
+npm install ai@6.0.317 @ai-sdk/openai@2.0.138 @opentelemetry/sdk-trace-node @opentelemetry/exporter-trace-otlp-proto
+```
 
 ## What arrives in Amplitude
 
@@ -175,9 +185,9 @@ One model span and one tool span from a single turn. Both carry the same session
 
 ## Part 2: Coding agent procedure
 
-1. Pin `ai@7.0.155` and `@ai-sdk/otel@1.0.155`.
+1. Pin `ai@7.0.155` and `@ai-sdk/otel@1.0.155`. On an SDK 6 app, pin `ai@6.0.317` and `@ai-sdk/openai@2.0.138` instead, and enable `experimental_telemetry`. Do not install an SDK 7 provider against `ai@6`.
 2. Set the environment block above. Use the project API key in `Authorization`, with `%20` between `Bearer` and the key.
-3. Call `registerTelemetry(new OpenTelemetry({ enrichSpan }))` before the first model call. `enrichSpan` sets `gen_ai.conversation.id`, `user.id`, and `gen_ai.agent.id`.
+3. Call `registerTelemetry(new OpenTelemetry({ enrichSpan }))` before the first model call. `enrichSpan` sets `gen_ai.conversation.id`, `user.id`, and `gen_ai.agent.id`. On SDK 6, a span processor sets those three attributes.
 4. On tool-using calls, set `stopWhen: stepCountIs(...)` so the final model call carries the reply text.
 5. Scrub content before export. Follow [privacy.md](./privacy.md).
 6. Run two turns with the same conversation id and confirm the checklist below.

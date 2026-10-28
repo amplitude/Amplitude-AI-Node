@@ -154,6 +154,39 @@
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/pydantic-ai.md",
       "ingestion_paths": ["otlp"],
       "last_verified": "2026-10-27"
+    },
+    {
+      "id": "mastra",
+      "name": "Mastra",
+      "category": "agent_framework",
+      "sdk": "node",
+      "pinned_version": "1.79.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/mastra.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/mastra.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
+    },
+    {
+      "id": "microsoft-agent-framework",
+      "name": "Microsoft Agent Framework",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "1.23.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/microsoft-agent-framework.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/microsoft-agent-framework.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
+    },
+    {
+      "id": "amazon-bedrock-agentcore",
+      "name": "Amazon Bedrock AgentCore",
+      "category": "agent_framework",
+      "sdk": "hosting",
+      "pinned_version": "otlp-http",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/amazon-bedrock-agentcore.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/amazon-bedrock-agentcore.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
     }
   ],
   "privacy": {
