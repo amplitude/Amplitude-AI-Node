@@ -1,8 +1,8 @@
 # Google ADK + Amplitude Agent Analytics
 
-**Python Google ADK 2.13.0 emits OpenTelemetry GenAI spans. TypeScript `@google/adk` 2.3.0 emits the legacy `gcp.vertex.agent.llm_*` attributes, and the exporter in this guide copies them onto `gen_ai.*` before they leave the process. Go `google.golang.org/adk` v1.6.1 emits `generate_content` and `execute_tool` on spans, and puts message text on OTLP logs. Point the exporter at Amplitude. No Amplitude SDK is required in the agent process.**
+**Python Google ADK 2.13.0 emits OpenTelemetry GenAI spans. TypeScript `@google/adk` 2.3.0 and Java `com.google.adk:google-adk` 1.4.0 emit the legacy `call_llm` attributes, and the exporter in this guide copies them onto `gen_ai.*` before they leave the process. Go `google.golang.org/adk` v1.6.1 emits `generate_content` and `execute_tool` on spans, and puts message text on OTLP logs. Point the exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-28, against `google-adk==2.13.0`, `@google/adk@2.3.0`, and `google.golang.org/adk` v1.6.1. The Python capture used ADK's own tracer with LiteLLM against an OpenAI-compatible model. Gemini Developer API calls can be spanned by `opentelemetry-instrumentation-google-genai` instead; that path is the OpenInference guide, not this one.
+Last verified: 2026-10-28, against `google-adk==2.13.0`, `@google/adk@2.3.0`, `google.golang.org/adk` v1.6.1, and `com.google.adk:google-adk` 1.4.0. The Python capture used ADK's own tracer with LiteLLM against an OpenAI-compatible model. Gemini Developer API calls can be spanned by `opentelemetry-instrumentation-google-genai` instead; that path is the OpenInference guide, not this one.
 
 Amplitude reads the span attributes below and turns one ADK session into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -139,7 +139,22 @@ span.SetAttributes(
 )
 ```
 
-This capture used `gemini-2.5-flash` with `HTTPOptions.BaseURL` pointed at a local model. Java and Kotlin are not in this verification.
+This capture used `gemini-2.5-flash` with `HTTPOptions.BaseURL` pointed at a local model.
+
+## Java
+
+`com.google.adk:google-adk` 1.4.0 names the model span `call_llm` and sets `gen_ai.operation.name` to `call_llm`. Amplitude does not treat `call_llm` as an AI Response. The prompt and the reply are `gcp.vertex.agent.llm_request` and `gcp.vertex.agent.llm_response`. Tool spans already use `execute_tool` and `gen_ai.tool.name`. Arguments are `gcp.vertex.agent.tool_call_args`.
+
+Set `user.id`, `gen_ai.agent.id`, and `gen_ai.conversation.id` on every span before ADK creates spans. `GlobalOpenTelemetry` must be registered before the ADK classes load. In the exporter:
+
+- Rewrite `gen_ai.operation.name` from `call_llm` to `generate_content`.
+- Copy `gcp.vertex.agent.llm_request` `contents` onto `gen_ai.input.messages`. Map role `model`, and a function-call part, to `assistant`. Map a function-response part with no text to role `tool`.
+- Copy `gcp.vertex.agent.llm_response` `content` onto `gen_ai.output.messages`.
+- Copy `gcp.vertex.agent.tool_call_args` onto `gen_ai.tool.call.arguments` when it is not `{}` or `N/A`.
+
+`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, and the tool name still arrive. This verification captured message content.
+
+The tool name is the Java method name. Name that method `lookup_order` when that is the product tool name. This capture used `gemini-2.5-flash` with `HttpOptions.baseUrl` pointed at a local model. Kotlin is not in this verification.
 
 ## What arrives in Amplitude
 
@@ -247,10 +262,10 @@ One model span and one tool span from a single turn. Both carry the same session
 
 ## Part 2: Coding agent procedure
 
-1. Pin `google-adk==2.13.0` for Python, `@google/adk@2.3.0` for TypeScript, or `google.golang.org/adk` v1.6.1 for Go.
+1. Pin `google-adk==2.13.0` for Python, `@google/adk@2.3.0` for TypeScript, `google.golang.org/adk` v1.6.1 for Go, or `com.google.adk:google-adk` 1.4.0 for Java.
 2. Set the environment block above before ADK is imported. Use the project API key in `Authorization`, with `%20` between `Bearer` and the key.
 3. On Python, leave the telemetry schema at the default. Do not opt into `call_llm`.
-4. Install the identity processor so every span has `user.id` and `gen_ai.agent.id`. Keep one ADK session id for the conversation. That id is `gen_ai.conversation.id`. On TypeScript, set `gen_ai.conversation.id` in the processor and copy `gcp.vertex.agent.llm_*` onto `gen_ai.*` in the exporter. On Go, set the same three attributes in the processor and copy `gcp.vertex.agent.tool_call_args` onto `gen_ai.tool.call.arguments` in the exporter. Go keeps message text on OTLP logs.
+4. Install the identity processor so every span has `user.id` and `gen_ai.agent.id`. Keep one ADK session id for the conversation. That id is `gen_ai.conversation.id`. On TypeScript, set `gen_ai.conversation.id` in the processor and copy `gcp.vertex.agent.llm_*` onto `gen_ai.*` in the exporter. On Go, set the same three attributes in the processor and copy `gcp.vertex.agent.tool_call_args` onto `gen_ai.tool.call.arguments` in the exporter. Go keeps message text on OTLP logs. On Java, register `GlobalOpenTelemetry` before ADK loads, set the same three attributes, rewrite `call_llm` to `generate_content`, and copy the `gcp.vertex.agent.llm_*` blobs onto `gen_ai.*` in the exporter.
 5. Name the agent with an identifier. Put the product agent id on `gen_ai.agent.id`.
 6. Scrub content before export. Follow [privacy.md](./privacy.md).
 7. Run two turns with the same session id and confirm the checklist below.
@@ -264,7 +279,7 @@ In Live Events:
 - Session ID is `gen_ai.conversation.id`, not a trace id.
 - User ID is the product-analytics user, not `unknown`.
 - Agent ID is `gen_ai.agent.id`.
-- The turn shows User Message text, Tool Call name and arguments, and AI Response text. In metadata-only mode, content is absent. On Go, message text is absent because it is an OTLP log. The tool name, tool arguments, model name, and both token counts still arrive.
+- The turn shows User Message text, Tool Call name and arguments, and AI Response text. In metadata-only mode, content is absent. On Go, message text is absent because it is an OTLP log. The tool name, tool arguments, model name, and both token counts still arrive. On Java, `call_llm` has to be rewritten to `generate_content` or the model span stays a generic Span.
 - The AI Response has the model name and both token counts.
 - The second turn does not duplicate the first user message.
 
