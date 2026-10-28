@@ -2,7 +2,7 @@
 
 **AgentCore is the host. The agent framework already emits the spans. Add an OTLP/HTTP exporter beside CloudWatch and follow the framework guide that matches the agent.**
 
-Last verified: 2026-10-27. This page has no separate capture. Strands on AgentCore is [strands.md](./strands.md). Other agents follow the framework page: [google-adk.md](./google-adk.md), [pydantic-ai.md](./pydantic-ai.md), or [microsoft-agent-framework.md](./microsoft-agent-framework.md).
+Last verified: 2026-10-27. This page has no separate capture. Strands on AgentCore is [strands.md](./strands.md). Other agents follow the framework page: [google-adk.md](./google-adk.md), [pydantic-ai.md](./pydantic-ai.md), [microsoft-agent-framework.md](./microsoft-agent-framework.md), or [openinference.md](./openinference.md).
 
 Amplitude reads the span attributes below and turns one conversation into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 

@@ -178,6 +178,17 @@
       "last_verified": "2026-10-27"
     },
     {
+      "id": "openinference",
+      "name": "OpenInference",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "agno==3.1.11",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/openinference.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/openinference.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
       "id": "amazon-bedrock-agentcore",
       "name": "Amazon Bedrock AgentCore",
       "category": "agent_framework",

@@ -1529,6 +1529,12 @@ describe('forwarder core and adapters', () => {
         last_verified: '2026-10-27',
       }),
       expect.objectContaining({
+        id: 'openinference',
+        pinned_version: 'agno==3.1.11',
+        ingestion_paths: ['otlp'],
+        last_verified: '2026-10-28',
+      }),
+      expect.objectContaining({
         id: 'amazon-bedrock-agentcore',
         pinned_version: 'otlp-http',
         ingestion_paths: ['otlp'],
@@ -1596,6 +1602,7 @@ describe('forwarder core and adapters', () => {
     ['pydantic-ai.md', 'pydantic-ai==2.63.0', 'chat'],
     ['mastra.md', '@mastra/core@1.79.0', 'chat'],
     ['microsoft-agent-framework.md', 'agent-framework-core==1.23.0', 'chat'],
+    ['openinference.md', 'agno==3.1.11', 'chat'],
     ['amazon-bedrock-agentcore.md', 'http/protobuf', 'chat'],
   ])('validates the %s OTLP example and shared conversation identity', (file, pin, operation) => {
     const page = readPage(file);

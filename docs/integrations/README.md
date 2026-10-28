@@ -59,6 +59,7 @@ The agent runs in your own code and already exports OpenTelemetry GenAI spans. S
 | Pydantic AI | [pydantic-ai.md](./pydantic-ai.md) | Native OTLP/HTTP from pydantic-ai 2.63.0 | 2026-10-27 |
 | Mastra | [mastra.md](./mastra.md) | Native OTLP/HTTP from @mastra/core 1.79.0 | 2026-10-27 |
 | Microsoft Agent Framework | [microsoft-agent-framework.md](./microsoft-agent-framework.md) | Native OTLP/HTTP from agent-framework-core 1.23.0 | 2026-10-27 |
+| OpenInference | [openinference.md](./openinference.md) | Agno, smolagents, DSPy, Haystack, Google GenAI, AutoGen | 2026-10-28 |
 | Amazon Bedrock AgentCore | [amazon-bedrock-agentcore.md](./amazon-bedrock-agentcore.md) | OTLP/HTTP beside CloudWatch. No separate capture | 2026-10-27 |
 
 Scrub content before it leaves your infrastructure. Amplitude does not scrub after receipt. The shared contract for HTTP, OTLP, Batch, S3, and warehouse imports is [privacy.md](./privacy.md).
@@ -103,6 +104,7 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 - Pydantic AI: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/pydantic-ai.md`
 - Mastra: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/mastra.md`
 - Microsoft Agent Framework: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/microsoft-agent-framework.md`
+- OpenInference: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/openinference.md`
 - Amazon Bedrock AgentCore: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/amazon-bedrock-agentcore.md`
 - Strands privacy setup: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands-privacy.md`
 - Privacy (non-SDK paths): `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/privacy.md`

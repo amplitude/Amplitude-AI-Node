@@ -73,6 +73,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Agent runs on Pydantic AI: export native OTLP by following `docs/integrations/pydantic-ai.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 - Agent runs on Mastra: export native OTLP by following `docs/integrations/mastra.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 - Agent runs on Microsoft Agent Framework: export native OTLP by following `docs/integrations/microsoft-agent-framework.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on OpenInference: export native OTLP by following `docs/integrations/openinference.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 - Agent runs on Amazon Bedrock AgentCore: export native OTLP by following `docs/integrations/amazon-bedrock-agentcore.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 
 ## MCP Surface
@@ -165,6 +166,7 @@ Fetch the public guide for the job. These URLs track `main`.
 - `docs/integrations/pydantic-ai.md` — Pydantic AI native OTLP export
 - `docs/integrations/mastra.md` — Mastra native OTLP export
 - `docs/integrations/microsoft-agent-framework.md` — Microsoft Agent Framework native OTLP export
+- `docs/integrations/openinference.md` — OpenInference native OTLP export
 - `docs/integrations/amazon-bedrock-agentcore.md` — Amazon Bedrock AgentCore native OTLP export
 - `docs/integrations/privacy.md` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
