@@ -1526,7 +1526,7 @@ describe('forwarder core and adapters', () => {
         id: 'microsoft-agent-framework',
         pinned_version: '1.23.0',
         ingestion_paths: ['otlp'],
-        last_verified: '2026-10-27',
+        last_verified: '2026-10-28',
       }),
       expect.objectContaining({
         id: 'openinference',

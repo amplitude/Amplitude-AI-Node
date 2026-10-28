@@ -2,7 +2,7 @@
 
 **The Microsoft Agent Framework already emits OpenTelemetry GenAI spans. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-27, against `agent-framework-core==1.23.0` and `agent-framework-openai==1.17.0` on Python. AutoGen users follow this guide. The .NET capture is not in this verification. Use `EnableSensitiveData` and the same identity exporter once that capture exists. Do not treat this page as a .NET verification.
+Last verified: 2026-10-28, against `agent-framework-core==1.23.0` and `agent-framework-openai==1.17.0` on Python, and `Microsoft.Agents.AI` 1.26.0 with `Microsoft.Agents.AI.OpenAI` 1.26.0 on .NET. AutoGen users follow this guide.
 
 Amplitude reads the span attributes below and turns one conversation into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -198,9 +198,25 @@ One model span and one tool span from a single turn. Both carry the same session
 }
 ```
 
+## .NET
+
+`Microsoft.Agents.AI` 1.26.0 and `Microsoft.Agents.AI.OpenAI` 1.26.0 emit `chat` and `execute_tool` spans on the activity source `Experimental.Microsoft.Agents.AI`. Subscribe the tracer to that source. The OTLP exporter must use HTTP protobuf. gRPC is not accepted.
+
+Wrap the agent with `OpenTelemetryAgent` and set `EnableSensitiveData` so prompts, replies, and tool arguments are span attributes. With `EnableSensitiveData` left at the default, this capture still had the session, the user, the agent, the model, both token counts, and the tool name. The message text and the tool arguments were absent.
+
+Set `user.id`, `gen_ai.agent.id`, and `gen_ai.conversation.id` on every span. The framework's own session id is not the product conversation id until that processor runs. `gen_ai.agent.name` is not the agent id.
+
+```csharp
+activity.SetTag("user.id", userId);
+activity.SetTag("gen_ai.agent.id", "order-support");
+activity.SetTag("gen_ai.conversation.id", sessionId);
+```
+
+This capture used the OpenAI chat completions client against a local model named `local-mock`.
+
 ## Part 2: Coding agent procedure
 
-1. Pin `agent-framework-core==1.23.0` and `agent-framework-openai==1.17.0`.
+1. Pin `agent-framework-core==1.23.0` and `agent-framework-openai==1.17.0` on Python, or `Microsoft.Agents.AI` 1.26.0 and `Microsoft.Agents.AI.OpenAI` 1.26.0 on .NET.
 2. Set the environment block above, including `ENABLE_SENSITIVE_DATA=true` and `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`, before import.
 3. Call `enable_instrumentation(enable_sensitive_data=True)` once. Do not also instrument the chat client.
 4. Construct `Agent(id="order-support")`. Stamp `user.id`, `session.id`, `gen_ai.conversation.id`, and `gen_ai.agent.id` in an exporter wrapper, not only in `on_start`.
