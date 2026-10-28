@@ -121,6 +121,83 @@
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md",
       "ingestion_paths": ["otlp"],
       "last_verified": "2026-10-14"
+    },
+    {
+      "id": "google-adk",
+      "name": "Google ADK",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "2.13.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/google-adk.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/google-adk.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
+      "id": "vercel-ai-sdk",
+      "name": "Vercel AI SDK",
+      "category": "agent_framework",
+      "sdk": "node",
+      "pinned_version": "7.0.155",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/vercel-ai-sdk.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vercel-ai-sdk.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
+      "id": "pydantic-ai",
+      "name": "Pydantic AI",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "2.63.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/pydantic-ai.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/pydantic-ai.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
+      "id": "mastra",
+      "name": "Mastra",
+      "category": "agent_framework",
+      "sdk": "node",
+      "pinned_version": "1.79.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/mastra.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/mastra.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
+      "id": "microsoft-agent-framework",
+      "name": "Microsoft Agent Framework",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "1.23.0",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/microsoft-agent-framework.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/microsoft-agent-framework.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
+      "id": "openinference",
+      "name": "OpenInference",
+      "category": "agent_framework",
+      "sdk": "python",
+      "pinned_version": "agno==3.1.11",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/openinference.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/openinference.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-28"
+    },
+    {
+      "id": "amazon-bedrock-agentcore",
+      "name": "Amazon Bedrock AgentCore",
+      "category": "agent_framework",
+      "sdk": "hosting",
+      "pinned_version": "otlp-http",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/amazon-bedrock-agentcore.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/amazon-bedrock-agentcore.md",
+      "ingestion_paths": ["otlp"],
+      "last_verified": "2026-10-27"
     }
   ],
   "privacy": {

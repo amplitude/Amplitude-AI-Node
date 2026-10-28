@@ -149,6 +149,7 @@ ${runtimes.map((r) => `- Agent built on the ${r.name}: the runtime owns the mode
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
 - Agent runs on AWS Strands (Python): export native OTLP by following \`docs/integrations/strands.md\`. Scrub content before export with \`docs/integrations/privacy.md\`. When the app already runs this SDK, \`AmplitudeAgentExporter\` / \`enableOtel()\` can map spans in process.
+${frameworks.filter((f) => f.id !== 'strands').map((f) => `- Agent runs on ${f.name}: export native OTLP by following \`docs/integrations/${f.id}.md\`. Scrub content before export with \`docs/integrations/privacy.md\`. When the app already runs this SDK, \`AmplitudeAgentExporter\` / \`enableOtel()\` can map spans in process.`).join('\n')}
 
 ## MCP Surface
 
@@ -219,6 +220,7 @@ ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLa
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
 - \`docs/integrations/routers.md\` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
 - \`docs/integrations/strands.md\` — AWS Strands (Python) native OTLP export
+${frameworks.filter((f) => f.id !== 'strands').map((f) => `- \`docs/integrations/${f.id}.md\` — ${f.name} native OTLP export`).join('\n')}
 - \`docs/integrations/privacy.md\` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
 ## Event Schema (names)

@@ -1170,7 +1170,7 @@ OpenAI-compatible gateways and OTEL partners that `@amplitude/ai` already suppor
 | **SDK-through** | Your app constructs an OpenAI-compatible client (or uses an `@amplitude/ai` provider wrapper) | Full `[Agent]` taxonomy, sessions, tools, scores, cache-aware cost when the **canonical** model id is known |
 | **Gateway-only (OTLP)** | The gateway emits GenAI spans and you cannot instrument the app | Model / tokens / cost / latency when the exporter maps spans; thinner coverage than SDK-through |
 
-Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans (LiteLLM) or as a future OpenRouter webhook path. Python Strands exports native OTLP/HTTP: read `node_modules/@amplitude/ai/docs/integrations/strands.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map those spans in process.
+Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans (LiteLLM) or as a future OpenRouter webhook path. Python Strands exports native OTLP/HTTP: read `node_modules/@amplitude/ai/docs/integrations/strands.md`. Google ADK, the Vercel AI SDK, Pydantic AI, Mastra, the Microsoft Agent Framework, OpenInference, and Amazon Bedrock AgentCore do the same: `google-adk.md`, `vercel-ai-sdk.md`, `pydantic-ai.md`, `mastra.md`, `microsoft-agent-framework.md`, `openinference.md`, and `amazon-bedrock-agentcore.md` in that directory. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map those spans in process.
 
 ### Recipes and partner notes
 
