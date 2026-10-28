@@ -1508,19 +1508,19 @@ describe('forwarder core and adapters', () => {
         id: 'vercel-ai-sdk',
         pinned_version: '7.0.155',
         ingestion_paths: ['otlp'],
-        last_verified: '2026-10-27',
+        last_verified: '2026-10-28',
       }),
       expect.objectContaining({
         id: 'pydantic-ai',
         pinned_version: '2.63.0',
         ingestion_paths: ['otlp'],
-        last_verified: '2026-10-27',
+        last_verified: '2026-10-28',
       }),
       expect.objectContaining({
         id: 'mastra',
         pinned_version: '1.79.0',
         ingestion_paths: ['otlp'],
-        last_verified: '2026-10-27',
+        last_verified: '2026-10-28',
       }),
       expect.objectContaining({
         id: 'microsoft-agent-framework',

@@ -2,7 +2,7 @@
 
 **Pydantic AI 2.63 already emits OpenTelemetry GenAI spans through its native instrumentation. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-27, against `pydantic-ai==2.63.0`. Use `Instrumentation()`. The OpenInference Pydantic instrumentor is a fallback, not this path.
+Last verified: 2026-10-28, against `pydantic-ai==2.63.0`. Use `Instrumentation()`. The OpenInference Pydantic instrumentor is a fallback, not this path.
 
 Amplitude reads the span attributes below and turns one conversation into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -105,7 +105,7 @@ When you know the unit of work is finished, you can also send one `[Agent] Sessi
 
 ## Privacy
 
-`Instrumentation(include_content=True)` exports prompt and completion text. That is Pydantic AI content capture. It is not Amplitude scrubbing. Set `include_content=False` for metadata only: the session, user, agent, tool name, model, and token counts still arrive, and the message text does not.
+`Instrumentation(include_content=True)` exports prompt and completion text. That is Pydantic AI content capture. It is not Amplitude scrubbing. `Instrumentation(InstrumentationSettings(include_content=False))` kept the session, user, agent, tool name, model, and both token counts in this capture. Message text and tool arguments were absent. The message attributes that remained were empty role shells, with no prompt or reply text.
 
 Scrub content before export reaches Amplitude. See [privacy.md](./privacy.md).
 
@@ -206,7 +206,7 @@ In Live Events:
 - Session ID is `session.id`, not a trace id.
 - User ID is the product-analytics user, not `unknown`.
 - Agent ID is `gen_ai.agent.id`.
-- The turn shows User Message text, Tool Call name and arguments, and AI Response text. With `include_content=False`, content is absent.
+- The turn shows User Message text, Tool Call name and arguments, and AI Response text. With `include_content=False`, message text and tool arguments are absent. The tool name, model, and both token counts still arrive.
 - The AI Response has the model name and both token counts.
 - The second turn does not duplicate the first user message.
 

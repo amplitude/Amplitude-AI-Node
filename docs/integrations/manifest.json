@@ -142,7 +142,7 @@
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/vercel-ai-sdk.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vercel-ai-sdk.md",
       "ingestion_paths": ["otlp"],
-      "last_verified": "2026-10-27"
+      "last_verified": "2026-10-28"
     },
     {
       "id": "pydantic-ai",
@@ -153,7 +153,7 @@
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/pydantic-ai.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/pydantic-ai.md",
       "ingestion_paths": ["otlp"],
-      "last_verified": "2026-10-27"
+      "last_verified": "2026-10-28"
     },
     {
       "id": "mastra",
@@ -164,7 +164,7 @@
       "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/mastra.md",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/mastra.md",
       "ingestion_paths": ["otlp"],
-      "last_verified": "2026-10-27"
+      "last_verified": "2026-10-28"
     },
     {
       "id": "microsoft-agent-framework",

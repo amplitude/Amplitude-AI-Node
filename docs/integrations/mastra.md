@@ -2,7 +2,7 @@
 
 **Mastra already emits OpenTelemetry GenAI spans through `@mastra/otel-exporter`. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-27, against `@mastra/core@1.79.0`, `@mastra/observability@1.21.0`, and `@mastra/otel-exporter@1.4.9`.
+Last verified: 2026-10-28, against `@mastra/core@1.79.0`, `@mastra/observability@1.21.0`, and `@mastra/otel-exporter@1.4.9`.
 
 Amplitude reads the span attributes below and turns one conversation into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -86,7 +86,7 @@ await agent.generate(prompt, {
 | Tool | `execute_tool` | `[Agent] Tool Call` |
 | Agent, step, and processor spans | `invoke_agent`, `agent_step`, `processor_run`, `model_generation`, `model_chunk` | `[Agent] Span` |
 
-This capture's tool operation was `execute_tool`, which Amplitude already maps. Message text is a JSON string of `{role, parts: [{type, content}]}`. A tool-loop continuation repeats the earlier user text. Amplitude emits a user message only for user-role parts that appear after the last assistant message. This version included prompt and completion text with the default exporter. If a sensitive-data filter is enabled, turn it off or the message text does not arrive.
+This capture's tool operation was `execute_tool`, which Amplitude already maps. Message text is a JSON string of `{role, parts: [{type, content}]}`. A tool-loop continuation repeats the earlier user text. Amplitude emits a user message only for user-role parts that appear after the last assistant message. This version included prompt and completion text with the default exporter. `tracingOptions.hideInput` and `tracingOptions.hideOutput` drop the message text and the tool arguments. This capture still had `mastra.metadata.userId`, `mastra.metadata.sessionId`, the tool name, the model, and both token counts.
 
 Tool spans carry `gen_ai.tool.name`, `gen_ai.tool.call.id`, and `gen_ai.tool.call.arguments`. Model and both token counts come from `gen_ai.response.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`. Cost is recorded only when the span includes `gen_ai.usage.cost`. Mastra does not standardize that attribute.
 

@@ -32,7 +32,7 @@ gRPC is not accepted. Use HTTP with protobuf. Amplitude also accepts OTLP/HTTP J
 
 Do not set `ADK_TELEMETRY_SCHEMA_VERSION_OPT_IN` to `1` or `otel_semconv_1_36`. That legacy schema emits `call_llm` spans with `gcp.vertex.agent.llm_*` attributes. Amplitude does not map those. Leave the schema at ADK's default.
 
-`SPAN_ONLY` and `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS` put prompts and completions on span attributes. Amplitude does not read span events or OTLP logs. Without those two settings, the session, user, model, and token counts can still arrive, and the message text does not.
+`SPAN_ONLY` and `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS` put prompts and completions on span attributes. Amplitude does not read span events or OTLP logs. With `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` and `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=NO_CONTENT`, this capture kept the session, user, agent, model, both token counts, and the tool name. The message text and the tool arguments were absent.
 
 ## Identity on every span
 
@@ -283,7 +283,7 @@ In Live Events:
 - Session ID is `gen_ai.conversation.id`, not a trace id.
 - User ID is the product-analytics user, not `unknown`.
 - Agent ID is `gen_ai.agent.id`.
-- The turn shows User Message text, Tool Call name and arguments, and AI Response text. In metadata-only mode, content is absent. On Go, message text is absent because it is an OTLP log. The tool name, tool arguments, model name, and both token counts still arrive. On Java, `call_llm` has to be rewritten to `generate_content` or the model span stays a generic Span.
+- The turn shows User Message text, Tool Call name and arguments, and AI Response text. With Python content capture off, the session, user, agent, model, token counts, and tool name still arrive, and the message text and tool arguments do not. On Go, message text is absent because it is an OTLP log, and the tool name, tool arguments, model name, and both token counts still arrive. On Java, `call_llm` has to be rewritten to `generate_content` or the model span stays a generic Span.
 - The AI Response has the model name and both token counts.
 - The second turn does not duplicate the first user message.
 

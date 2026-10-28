@@ -55,10 +55,10 @@ The agent runs in your own code and already exports OpenTelemetry GenAI spans. S
 |---|---|---|---|
 | AWS Strands (Python) | [strands.md](./strands.md) | Native OTLP/HTTP from Strands Agents 1.60.0 | 2026-10-14 |
 | Google ADK | [google-adk.md](./google-adk.md) | Python 2.13.0 and TypeScript @google/adk 2.3.0 | 2026-10-28 |
-| Vercel AI SDK | [vercel-ai-sdk.md](./vercel-ai-sdk.md) | Native OTLP/HTTP from ai 7.0.155 and ai 6.0.317 | 2026-10-27 |
-| Pydantic AI | [pydantic-ai.md](./pydantic-ai.md) | Native OTLP/HTTP from pydantic-ai 2.63.0 | 2026-10-27 |
-| Mastra | [mastra.md](./mastra.md) | Native OTLP/HTTP from @mastra/core 1.79.0 | 2026-10-27 |
-| Microsoft Agent Framework | [microsoft-agent-framework.md](./microsoft-agent-framework.md) | Native OTLP/HTTP from agent-framework-core 1.23.0 | 2026-10-27 |
+| Vercel AI SDK | [vercel-ai-sdk.md](./vercel-ai-sdk.md) | Native OTLP/HTTP from ai 7.0.155 and ai 6.0.317 | 2026-10-28 |
+| Pydantic AI | [pydantic-ai.md](./pydantic-ai.md) | Native OTLP/HTTP from pydantic-ai 2.63.0 | 2026-10-28 |
+| Mastra | [mastra.md](./mastra.md) | Native OTLP/HTTP from @mastra/core 1.79.0 | 2026-10-28 |
+| Microsoft Agent Framework | [microsoft-agent-framework.md](./microsoft-agent-framework.md) | Native OTLP/HTTP from agent-framework-core 1.23.0 | 2026-10-28 |
 | OpenInference | [openinference.md](./openinference.md) | Agno, smolagents, DSPy, Haystack, Google GenAI, AutoGen | 2026-10-28 |
 | Amazon Bedrock AgentCore | [amazon-bedrock-agentcore.md](./amazon-bedrock-agentcore.md) | OTLP/HTTP beside CloudWatch. No separate capture | 2026-10-27 |
 

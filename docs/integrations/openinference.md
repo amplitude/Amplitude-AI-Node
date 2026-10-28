@@ -161,7 +161,7 @@ Import `Agent`, `OpenAIChatGenerator`, and `Tool` before `HaystackInstrumentor()
 
 Model and both token counts come from `llm.model_name`, `llm.token_count.prompt`, and `llm.token_count.completion`. Cost is recorded only when the span includes `gen_ai.usage.cost`. These instrumentors do not standardize that attribute.
 
-This verification captured message content. A metadata-only export keeps session, user, and agent, and drops the message text. That metadata-only path was not part of this capture.
+This verification captured message content. A second capture passed `TraceConfig(hide_inputs=True, hide_outputs=True, hide_input_messages=True, hide_output_messages=True, hide_input_text=True, hide_output_text=True)` to each instrumentor. Session, user, and agent stayed. Message attributes were omitted. `input.value` and `output.value` were the placeholder `__REDACTED__`, so tool arguments do not arrive. Agno, smolagents, Haystack, Google GenAI, and AutoGen still had the model name and both token counts. DSPy still had the model name and did not have token counts. Agno, smolagents, DSPy, and AutoGen still had `tool.name`. Haystack and Google GenAI still had no tool span.
 
 ## When the session is ready for enrichment
 

@@ -30,7 +30,7 @@ EU data residency: `https://api.eu.amplitude.com/otlp/v1/traces`.
 
 gRPC is not accepted. Use HTTP with protobuf. Amplitude also accepts OTLP/HTTP JSON.
 
-Do not set the semconv opt-in to `gen_ai_latest_stable` or the v1.36 mode. That mode emits message log events. Amplitude does not read OTLP logs or span events. Without `ENABLE_SENSITIVE_DATA`, the session can still arrive and the message text does not.
+Do not set the semconv opt-in to `gen_ai_latest_stable` or the v1.36 mode. That mode emits message log events. Amplitude does not read OTLP logs or span events. With `ENABLE_SENSITIVE_DATA` unset and `enable_instrumentation(enable_sensitive_data=False)`, this capture kept the session, user, agent, tool name, model, and both token counts. The message text and the tool arguments were absent.
 
 Instrument the agent only. Enabling instrumentation on the chat client and the agent records each prompt twice.
 
@@ -116,7 +116,7 @@ When you know the unit of work is finished, you can also send one `[Agent] Sessi
 
 ## Privacy
 
-`ENABLE_SENSITIVE_DATA=true` exports prompt and completion text. That is framework content capture. It is not Amplitude scrubbing. Leave it unset for metadata only: the session, user, agent, tool name, model, and token counts can still arrive, and the message text does not.
+`ENABLE_SENSITIVE_DATA=true` exports prompt and completion text. That is framework content capture. It is not Amplitude scrubbing. Leave it unset for metadata only. This capture then kept the session, user, agent, tool name, model, and both token counts, and the message text and tool arguments did not arrive.
 
 Scrub content before export reaches Amplitude. See [privacy.md](./privacy.md).
 

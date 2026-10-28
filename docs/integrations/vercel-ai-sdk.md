@@ -2,7 +2,7 @@
 
 **Vercel AI SDK 7 already emits OpenTelemetry GenAI spans through `@ai-sdk/otel`. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-27, against `ai@7.0.155` and `@ai-sdk/otel@1.0.155`, and against `ai@6.0.317` with `@ai-sdk/openai@2.0.138`. Use the provider package that matches the `ai` major version.
+Last verified: 2026-10-28, against `ai@7.0.155` and `@ai-sdk/otel@1.0.155`, and against `ai@6.0.317` with `@ai-sdk/openai@2.0.138`. Use the provider package that matches the `ai` major version.
 
 Amplitude reads the span attributes below and turns one conversation into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -74,6 +74,8 @@ A tool loop needs more than one model call. The default stop condition ends afte
 SDK 6 does not use `@ai-sdk/otel`. Enable `experimental_telemetry: { isEnabled: true }` on `generateText` / `streamText`, and install the SDK 6 provider (`@ai-sdk/openai@2`, not `@ai-sdk/openai` 3 or 4). A function id is still not a session id. A span processor sets `user.id`, `gen_ai.conversation.id`, and `gen_ai.agent.id` on every span. `stopWhen: stepCountIs(4)` is required here too. `maxSteps` does not continue the loop far enough for the reply text to land on a later model span.
 
 SDK 6 writes `ai.operationId`, `ai.prompt.messages`, `ai.response.text`, `ai.toolCall.name`, and `ai.toolCall.args`. Amplitude maps `ai.generateText.doGenerate` and `ai.streamText.doStream` to `chat`, and `ai.toolCall` to `execute_tool`. The parent `ai.generateText` span repeats that step, so it stays an `[Agent] Span` and does not emit the user prompt a second time. Message content is `{role, content: [{type, text}]}`. Tokens and the model name are already on `gen_ai.usage.*` and `gen_ai.response.model` of the `doGenerate` span.
+
+`recordInputs: false` and `recordOutputs: false` drop message text and tool arguments on both SDK 6 and SDK 7. On SDK 6 that is `experimental_telemetry`. On SDK 7 it is the per-call `telemetry` option. This capture still had the session, user, agent, model, both token counts, and the tool name (`ai.toolCall.name` on SDK 6, `gen_ai.tool.name` on SDK 7).
 
 ```bash
 npm install ai@6.0.317 @ai-sdk/openai@2.0.138 @opentelemetry/sdk-trace-node @opentelemetry/exporter-trace-otlp-proto
