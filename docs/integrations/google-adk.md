@@ -123,7 +123,7 @@ On each span, before it is exported:
 - `gcp.vertex.agent.llm_response.content` becomes `gen_ai.output.messages`.
 - `gcp.vertex.agent.tool_call_args` becomes `gen_ai.tool.call.arguments` when it is not `{}`.
 
-`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, and the tool name still arrive. The message text and the tool arguments do not. This verification captured message content.
+`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, the model name, both token counts, and the tool name still arrive. The message text and the tool arguments do not. The empty request is not rewritten, so the model span stays `call_llm` and Amplitude records it as an `[Agent] Span`. This verification captured message content.
 
 The agent name is an identifier (`order_support`). The product agent id stays on `gen_ai.agent.id`. This capture used `gemini-2.5-flash` through the Gemini client with `httpOptions.baseUrl` pointed at a local model.
 
@@ -154,13 +154,13 @@ Set `user.id`, `gen_ai.agent.id`, and `gen_ai.conversation.id` on every span bef
 - Copy `gcp.vertex.agent.llm_response` `content` onto `gen_ai.output.messages`.
 - Copy `gcp.vertex.agent.tool_call_args` onto `gen_ai.tool.call.arguments` when it is not `{}` or `N/A`.
 
-`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, and the tool name still arrive. This verification captured message content.
+`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, the model name, both token counts, and the tool name still arrive. The message text and the tool arguments do not. The empty request is not rewritten, so the model span stays `call_llm` and Amplitude records it as an `[Agent] Span`.
 
 The tool name is the Java method name. Name that method `lookup_order` when that is the product tool name. This capture used `gemini-2.5-flash` with `HttpOptions.baseUrl` pointed at a local model.
 
 ## Kotlin
 
-Kotlin callers use the same `com.google.adk:google-adk` 1.4.0 library. A Kotlin 2.1.21 program produced the same `call_llm` spans as Java. Register OpenTelemetry before ADK loads, and use the Java exporter steps above. The tool name is the Kotlin function name. This verification captured message content from that Kotlin program.
+Kotlin callers use the same `com.google.adk:google-adk` 1.4.0 library. A Kotlin 2.1.21 program produced the same `call_llm` spans as Java, including with content capture off. Session, user, agent, the model name, both token counts, and the tool name still arrive. The message text and the tool arguments do not, and the model span stays `call_llm`. Register OpenTelemetry before ADK loads, and use the Java exporter steps above. The tool name is the Kotlin function name.
 
 ## What arrives in Amplitude
 
