@@ -1,8 +1,8 @@
 # Google ADK + Amplitude Agent Analytics
 
-**Python Google ADK 2.13.0 already emits OpenTelemetry GenAI spans. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
+**Python Google ADK 2.13.0 emits OpenTelemetry GenAI spans. TypeScript `@google/adk` 2.3.0 emits the legacy `gcp.vertex.agent.llm_*` attributes, and the exporter in this guide copies them onto `gen_ai.*` before they leave the process. Point that exporter at Amplitude. No Amplitude SDK is required in the agent process.**
 
-Last verified: 2026-10-27, against `google-adk==2.13.0`. The capture used ADK's own tracer with LiteLLM against an OpenAI-compatible model. Gemini Developer API calls can be spanned by `opentelemetry-instrumentation-google-genai` instead; that path is not this guide.
+Last verified: 2026-10-28, against `google-adk==2.13.0` and `@google/adk@2.3.0`. The Python capture used ADK's own tracer with LiteLLM against an OpenAI-compatible model. Gemini Developer API calls can be spanned by `opentelemetry-instrumentation-google-genai` instead; that path is the OpenInference guide, not this one.
 
 Amplitude reads the span attributes below and turns one ADK session into `[Agent] User Message`, `[Agent] Tool Call`, and `[Agent] AI Response` events joined to the same session and user as the rest of product analytics. Scrub content before it leaves your infrastructure. See [privacy.md](./privacy.md). Amplitude does not scrub after receipt.
 
@@ -97,6 +97,33 @@ await runner.session_service.create_session(
 | `gen_ai.agent.id` | A stable product name for this agent. `gen_ai.agent.name` is not read. |
 
 `OTEL_SERVICE_NAME` is the agent id Amplitude uses when a span has no `gen_ai.agent.id`.
+
+## TypeScript
+
+`@google/adk@2.3.0` does not emit `gen_ai.operation.name` or `gen_ai.input.messages` on a model span. The model span is named `call_llm`. The prompt and the reply are `gcp.vertex.agent.llm_request` and `gcp.vertex.agent.llm_response`. The session id on that span is `gcp.vertex.agent.session_id`. Tool spans already use `execute_tool`, `gen_ai.tool.name`, and `gcp.vertex.agent.tool_call_args`.
+
+Register a tracer provider before the app imports `@google/adk`. Set `user.id`, `gen_ai.agent.id`, and `gen_ai.conversation.id` on every span. Copy the legacy blobs onto the `gen_ai.*` keys in the exporter. Amplitude still does not read `gcp.vertex.agent.llm_*` itself.
+
+```bash
+npm install @google/adk@2.3.0
+```
+
+```typescript
+span.setAttribute("user.id", userId);
+span.setAttribute("gen_ai.agent.id", "order-support");
+span.setAttribute("gen_ai.conversation.id", sessionId);
+```
+
+On each span, before it is exported:
+
+- `gcp.vertex.agent.session_id` becomes `gen_ai.conversation.id` when the conversation id is missing.
+- A `gcp.vertex.agent.llm_request` with `contents` sets `gen_ai.operation.name` to `generate_content` and `gen_ai.input.messages` to those contents. Map role `model` to `assistant`. Map a function-response part with no text to role `tool`, so it does not become another user message.
+- `gcp.vertex.agent.llm_response.content` becomes `gen_ai.output.messages`.
+- `gcp.vertex.agent.tool_call_args` becomes `gen_ai.tool.call.arguments` when it is not `{}`.
+
+`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false` writes `{}` for the request, the response, and the tool arguments. Session, user, agent, and the tool name still arrive. The message text and the tool arguments do not. This verification captured message content.
+
+The agent name is an identifier (`order_support`). The product agent id stays on `gen_ai.agent.id`. This capture used `gemini-2.5-flash` through the Gemini client with `httpOptions.baseUrl` pointed at a local model. Go, Java, and Kotlin are not in this verification.
 
 ## What arrives in Amplitude
 
@@ -204,11 +231,11 @@ One model span and one tool span from a single turn. Both carry the same session
 
 ## Part 2: Coding agent procedure
 
-1. Pin `google-adk==2.13.0`.
+1. Pin `google-adk==2.13.0` for Python, or `@google/adk@2.3.0` for TypeScript.
 2. Set the environment block above before ADK is imported. Use the project API key in `Authorization`, with `%20` between `Bearer` and the key.
-3. Leave the telemetry schema at the default. Do not opt into `call_llm`.
-4. Install the identity processor so every span has `user.id` and `gen_ai.agent.id`. Keep one ADK session id for the conversation. That id is `gen_ai.conversation.id`.
-5. Name the agent with a Python identifier. Put the product agent id on `gen_ai.agent.id`.
+3. On Python, leave the telemetry schema at the default. Do not opt into `call_llm`.
+4. Install the identity processor so every span has `user.id` and `gen_ai.agent.id`. Keep one ADK session id for the conversation. That id is `gen_ai.conversation.id`. On TypeScript, set `gen_ai.conversation.id` in the processor and copy `gcp.vertex.agent.llm_*` onto `gen_ai.*` in the exporter.
+5. Name the agent with an identifier. Put the product agent id on `gen_ai.agent.id`.
 6. Scrub content before export. Follow [privacy.md](./privacy.md).
 7. Run two turns with the same session id and confirm the checklist below.
 

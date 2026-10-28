@@ -1502,7 +1502,7 @@ describe('forwarder core and adapters', () => {
         id: 'google-adk',
         pinned_version: '2.13.0',
         ingestion_paths: ['otlp'],
-        last_verified: '2026-10-27',
+        last_verified: '2026-10-28',
       }),
       expect.objectContaining({
         id: 'vercel-ai-sdk',

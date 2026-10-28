@@ -711,7 +711,7 @@ OpenAI-compatible gateways and OTEL partners — no special SDK build required:
 | **LiteLLM** | SDK-through or OTLP | Set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on OTEL spans. |
 | **Requesty** | SDK-through only | No OTLP push today — point the OpenAI client at Requesty's base URL. |
 | **Strands** | OTLP | Python Strands Agents 1.60.0 exports native OTLP/HTTP. Follow [docs/integrations/strands.md](docs/integrations/strands.md). When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process. |
-| **Google ADK** | OTLP | Python google-adk 2.13.0 exports native OTLP/HTTP. Follow [docs/integrations/google-adk.md](docs/integrations/google-adk.md). |
+| **Google ADK** | OTLP | Python google-adk 2.13.0 and TypeScript `@google/adk` 2.3.0. Follow [docs/integrations/google-adk.md](docs/integrations/google-adk.md). |
 | **Vercel AI SDK** | OTLP | AI SDK 7.0.155 with `@ai-sdk/otel` 1.0.155, and AI SDK 6.0.317, export native OTLP/HTTP. Follow [docs/integrations/vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md). |
 | **Pydantic AI** | OTLP | pydantic-ai 2.63.0 exports native OTLP/HTTP. Follow [docs/integrations/pydantic-ai.md](docs/integrations/pydantic-ai.md). |
 | **Mastra** | OTLP | `@mastra/core` 1.79.0 exports native OTLP/HTTP. Follow [docs/integrations/mastra.md](docs/integrations/mastra.md). |
