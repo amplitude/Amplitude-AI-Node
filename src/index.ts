@@ -233,10 +233,17 @@ export { wrap, AmplitudeAIWrapError } from './wrappers.js';
 // Decorators (tool/observe HOFs + ToolCallTracker)
 export { tool, observe, ToolCallTracker } from './decorators.js';
 export type { ToolWrapped, ObserveWrapped, ObserveSpanType } from './decorators.js';
+export {
+  addExperiments,
+  experimentFromEvaluation,
+  experimentsFromAmplitude,
+} from './core/experiments.js';
 export type {
   ExperimentInput,
   ExperimentOpts,
   ExperimentUnit,
+  ExperimentsFromAmplitudeOptions,
+  FlagEvaluation,
 } from './core/experiments.js';
 
 // Patching

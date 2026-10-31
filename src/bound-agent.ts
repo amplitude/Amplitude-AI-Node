@@ -6,6 +6,7 @@
  */
 
 import type { AmplitudeAI, FlushOptions } from './client.js';
+import { getActiveContext } from './context.js';
 import type { SessionEnrichments } from './core/enrichments.js';
 import {
   type Experiment,
@@ -190,8 +191,18 @@ export class BoundAgent {
         merged[field] = this._defaults[field];
       }
     }
+    // An agent bound to the active session (same sessionId) tracks with the
+    // session's experiments, which `addExperiments()` may have grown since
+    // the call-level chain was built; tracks without that id are not the
+    // session's and are left alone.
+    const ctx = getActiveContext();
+    const sessionExperiments =
+      ctx?.experiments != null && ctx.experiments.length > 0 && merged.sessionId === ctx.sessionId
+        ? ctx.experiments
+        : null;
     const experiments = mergeExperiments(
       this._defaults.experiments as Experiment[],
+      sessionExperiments,
       callExperiments,
     );
     if (experiments.length > 0) {

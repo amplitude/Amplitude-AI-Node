@@ -61,6 +61,10 @@ export function _resetRunSyncWarning(): void {
   _warnedRunSyncAutoFlush = false;
 }
 
+function _sameExperiment(a: Experiment, b: Experiment): boolean {
+  return a.key === b.key && a.variant === b.variant && a.unit === b.unit && a.provider === b.provider;
+}
+
 export interface SessionOptions {
   sessionId?: string | null;
   /**
@@ -126,7 +130,14 @@ export class Session {
   private _agent: BoundAgent;
   private _enrichments: SessionEnrichments | null = null;
   private _sessionReplayId: string | null;
+  // `runAs` children share the root session's experiments: the root owns
+  // `_experiments`; children read through `_root()` and are listed in
+  // `_children` while their delegation is open. `_contexts` holds the live
+  // contexts of this session so `addExperiments()` can refresh them.
   private _experiments: Experiment[];
+  private _parent: Session | null = null;
+  private readonly _children = new Set<Session>();
+  private readonly _contexts = new Set<SessionContext>();
 
   constructor(agent: BoundAgent, opts: SessionOptions = {}) {
     this.sessionId = opts.sessionId ?? randomUUID();
@@ -155,10 +166,10 @@ export class Session {
     const sid = this.sessionId;
     const experiments = mergeExperiments(
       defaults.experiments as Experiment[] | undefined,
-      this._experiments,
+      this._root()._experiments,
     );
 
-    return new SessionContext({
+    const ctx = new SessionContext({
       sessionId: sid,
       traceId: this.traceId,
       userId: (this.userId ?? defaults.userId) as string | null,
@@ -183,6 +194,55 @@ export class Session {
           ._privacyConfig ?? null,
       skipAutoUserTracking: this._skipAutoUserTracking,
     });
+    ctx._session = this;
+    return ctx;
+  }
+
+  /**
+   * The session that owns the experiment list: this one, or the ancestor a
+   * `runAs` chain started from.
+   */
+  private _root(): Session {
+    return this._parent == null ? this : this._parent._root();
+  }
+
+  /**
+   * Record more `experiments` on this session after it was created.
+   *
+   * For assignments the code learns inside the session: a flag read on the
+   * first turn, a hook such as the OpenFeature `AmplitudeAIHook`, or an
+   * experiment chosen by the agent itself. Entries merge with session
+   * precedence (a later entry replaces an earlier one with the same key), so
+   * events tracked from this point on carry them, through this session, a
+   * provider wrapper, `tool()` or a `runAs` child. Adding from a `runAs`
+   * child records on the root session, so the parent's later events and
+   * `[Agent] Session End` carry the entries as well as the child's.
+   */
+  addExperiments(experiments: ExperimentInput[] | null | undefined): void {
+    const root = this._root();
+    const merged = mergeExperiments(root._experiments, experiments);
+    if (
+      merged.length === root._experiments.length &&
+      merged.every((entry, i) => _sameExperiment(entry, root._experiments[i] as Experiment))
+    ) {
+      return;
+    }
+    root._experiments = merged;
+    root._refreshExperiments();
+  }
+
+  /**
+   * Push the root experiment list into every live context of this session
+   * and its open `runAs` children, each merged over its own agent's defaults.
+   */
+  private _refreshExperiments(): void {
+    const experiments = this._root()._experiments;
+    const agentDefaults = this._agent._defaults.experiments as Experiment[] | undefined;
+    for (const ctx of this._contexts) {
+      const merged = mergeExperiments(agentDefaults, experiments);
+      ctx.experiments = merged.length > 0 ? merged : null;
+    }
+    for (const child of this._children) child._refreshExperiments();
   }
 
   newTrace(): string {
@@ -210,10 +270,12 @@ export class Session {
   async run<T>(fn: (session: Session) => T | Promise<T>): Promise<T> {
     if (this.traceId == null) this.traceId = randomUUID();
     const ctx = this._buildSessionContext();
+    this._contexts.add(ctx);
     try {
       const result = await _sessionStorage.run(ctx, () => fn(this));
       return result;
     } finally {
+      this._contexts.delete(ctx);
       if (this.trackSessionEnd) this._autoEnd();
       if (this.autoFlush) {
         await this._flush();
@@ -234,11 +296,29 @@ export class Session {
     }
     if (this.traceId == null) this.traceId = randomUUID();
     const ctx = this._buildSessionContext();
+    this._contexts.add(ctx);
     try {
       return _sessionStorage.run(ctx, () => fn(this));
     } finally {
+      this._contexts.delete(ctx);
       if (this.trackSessionEnd) this._autoEnd();
     }
+  }
+
+  private _childSession(childAgent: BoundAgent): Session {
+    const childSession = new Session(childAgent, {
+      sessionId: this.sessionId,
+      userId: this.userId,
+      deviceId: this.deviceId,
+      browserSessionId: this.browserSessionId,
+      tags: this.tags,
+      trackSessionEnd: false,
+    });
+    childSession.traceId = this.traceId;
+    childSession._skipAutoUserTracking = true;
+    childSession._parent = this;
+    this._children.add(childSession);
+    return childSession;
   }
 
   /**
@@ -263,19 +343,15 @@ export class Session {
     childAgent: BoundAgent,
     fn: (session: Session) => T | Promise<T>,
   ): Promise<T> {
-    const childSession = new Session(childAgent, {
-      sessionId: this.sessionId,
-      userId: this.userId,
-      deviceId: this.deviceId,
-      browserSessionId: this.browserSessionId,
-      tags: this.tags,
-      experiments: this._experiments,
-      trackSessionEnd: false,
-    });
-    childSession.traceId = this.traceId;
-    childSession._skipAutoUserTracking = true;
+    const childSession = this._childSession(childAgent);
     const ctx = childSession._buildSessionContext();
-    return await _sessionStorage.run(ctx, () => fn(childSession));
+    childSession._contexts.add(ctx);
+    try {
+      return await _sessionStorage.run(ctx, () => fn(childSession));
+    } finally {
+      childSession._contexts.delete(ctx);
+      this._children.delete(childSession);
+    }
   }
 
   /**
@@ -285,19 +361,15 @@ export class Session {
     childAgent: BoundAgent,
     fn: (session: Session) => T,
   ): T {
-    const childSession = new Session(childAgent, {
-      sessionId: this.sessionId,
-      userId: this.userId,
-      deviceId: this.deviceId,
-      browserSessionId: this.browserSessionId,
-      tags: this.tags,
-      experiments: this._experiments,
-      trackSessionEnd: false,
-    });
-    childSession.traceId = this.traceId;
-    childSession._skipAutoUserTracking = true;
+    const childSession = this._childSession(childAgent);
     const ctx = childSession._buildSessionContext();
-    return _sessionStorage.run(ctx, () => fn(childSession));
+    childSession._contexts.add(ctx);
+    try {
+      return _sessionStorage.run(ctx, () => fn(childSession));
+    } finally {
+      childSession._contexts.delete(ctx);
+      this._children.delete(childSession);
+    }
   }
 
   private _autoEnd(): void {
@@ -398,8 +470,9 @@ export class Session {
       }
       merged.eventProperties = ep;
     }
-    if (this._experiments.length > 0) {
-      merged.experiments = chainLevels(this._experiments, merged.experiments);
+    const experiments = this._root()._experiments;
+    if (experiments.length > 0) {
+      merged.experiments = chainLevels(experiments, merged.experiments);
     }
     return merged as T;
   }

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { Experiment } from './core/experiments.js';
+import type { Experiment, ExperimentInput } from './core/experiments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
@@ -30,6 +30,11 @@ export interface SessionContextOptions {
   skipAutoUserTracking?: boolean;
 }
 
+/** @internal What `addExperiments()` needs from the session that owns a context. */
+export interface ExperimentOwner {
+  addExperiments(experiments: ExperimentInput[] | null | undefined): void;
+}
+
 export class SessionContext {
   readonly sessionId: string;
   traceId: string | null;
@@ -43,7 +48,13 @@ export class SessionContext {
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
   readonly tags: string[] | null;
-  readonly experiments: Experiment[] | null;
+  /**
+   * Agent and session level, validated and merged. Replaced when the owning
+   * session's `addExperiments()` learns a new assignment.
+   */
+  experiments: Experiment[] | null;
+  /** @internal The `Session` whose `run()` created this context, if any. */
+  _session: ExperimentOwner | null = null;
   readonly idleTimeoutMinutes: number | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;

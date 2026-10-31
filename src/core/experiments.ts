@@ -7,6 +7,7 @@
  * same rules; `test/fixtures/experiment-cases.json` pins them.
  */
 
+import { getActiveContext } from '../context.js';
 import { getLogger } from '../utils/logger.js';
 import {
   PROP_EXPERIMENT_KEY,
@@ -156,6 +157,245 @@ export function experimentProperties(experiments: Experiment[]): Record<string, 
     if (only.provider != null) props[PROP_EXPERIMENT_PROVIDER] = only.provider;
   }
   return props;
+}
+
+export const AMPLITUDE_PROVIDER = 'amplitude';
+// OpenFeature reasons that mean "no assignment happened": the provider
+// returned the caller's default, failed, or the flag is off.
+const _NON_ASSIGNMENT_REASONS = new Set(['DEFAULT', 'ERROR', 'DISABLED']);
+
+function _attr(obj: unknown, name: string): unknown {
+  if (typeof obj !== 'object' || obj == null) return undefined;
+  return (obj as Record<string, unknown>)[name];
+}
+
+/**
+ * `names` as a list of flag keys. A bare string is one flag name, not a
+ * sequence of one-character names: `keys: 'planner'` means `['planner']`.
+ * Non-string members are dropped with a debug log.
+ */
+export function flagNames(names: unknown, what: string): string[] {
+  if (typeof names === 'string') return [names];
+  if (!Array.isArray(names)) {
+    _debug(`${what}: expected an array of flag names; ignored`);
+    return [];
+  }
+  const out: string[] = [];
+  for (const name of names) {
+    if (typeof name === 'string') out.push(name);
+    else _debug(`${what}: ${JSON.stringify(name)} is not a flag name; ignored`);
+  }
+  return out;
+}
+
+/** `String(number)` with any exponent expanded into a plain decimal. */
+function _plainDecimal(text: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (match == null) return text;
+  const [, sign, whole, fraction = '', exponentText] = match as unknown as [
+    string,
+    string,
+    string,
+    string | undefined,
+    string,
+  ];
+  const digits = whole + fraction;
+  const point = whole.length + Number(exponentText);
+  let out: string;
+  if (point <= 0) {
+    out = `0.${'0'.repeat(-point)}${digits}`;
+  } else if (point >= digits.length) {
+    out = digits + '0'.repeat(point - digits.length);
+  } else {
+    out = `${digits.slice(0, point)}.${digits.slice(point)}`;
+  }
+  out = out.replace(/^0+(?=\d)/, '');
+  if (out.includes('.')) out = out.replace(/\.?0+$/, '');
+  return sign + out;
+}
+
+/**
+ * A flag value as the variant string, spelled the same way in every SDK:
+ * strings as they are; booleans as `true` / `false`; integers (bigint
+ * included) and integral numbers as decimal digits (`3`,
+ * `10000000000000000`); other finite numbers as a plain decimal with no
+ * exponent (`0.25`, `0.0000001`); anything else (object flags without a
+ * variant name, NaN, infinity) as nothing.
+ */
+export function variantLabel(value: unknown): string | null {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    if (Number.isInteger(value)) {
+      return Math.abs(value) < 1e21 ? String(value) : BigInt(value).toString();
+    }
+    return _plainDecimal(String(value));
+  }
+  return null;
+}
+
+/** Options for {@link experimentsFromAmplitude}. */
+export interface ExperimentsFromAmplitudeOptions {
+  /**
+   * The experiment flags to record, in this order (a single name may be a
+   * string). Flags absent from `variants` are skipped. Without it every flag
+   * in the result is an entry, configuration flags included.
+   */
+  keys?: string | string[] | null;
+  /** What the flags randomize: `'agent_session'` (default), `'turn'` or `'span'`. */
+  unit?: ExperimentUnit | null;
+  /** Also record variants Amplitude marks as the fallback (`metadata.default`). */
+  includeDefaults?: boolean;
+}
+
+/**
+ * `experiments` entries from an Amplitude Experiment result.
+ *
+ * `variants` is what the Amplitude Experiment SDK returns: the
+ * `Record<string, Variant>` of `RemoteEvaluationClient.fetchV2()`,
+ * `LocalEvaluationClient.evaluateV2()` or `client.all()`. Each flag becomes
+ * `{ key: <flag key>, variant: <variant key>, provider: 'amplitude' }`; the
+ * variant key falls back to the variant value. Variants that Amplitude marks
+ * as the fallback (`metadata.default`) are not assignments and are skipped
+ * unless `includeDefaults` is set.
+ *
+ * `keys` names the experiment flags to record, in that order; flags absent
+ * from `variants` are skipped. Without it every flag in the result is an
+ * entry, configuration flags included, and when more than `MAX_EXPERIMENTS`
+ * would be recorded a warning names the ones the event will not carry.
+ * Entries still go through the usual validation and precedence when they are
+ * passed to `agent()`, `session()` or a `track*` call:
+ *
+ * ```typescript
+ * const variants = await experiment.fetchV2({ user_id: userId });
+ * const session = agent.session({
+ *   userId,
+ *   experiments: experimentsFromAmplitude(variants, { keys: ['planner'] }),
+ * });
+ * ```
+ *
+ * The entries record the arm; they do not send an exposure event.
+ */
+export function experimentsFromAmplitude(
+  variants: unknown,
+  options: ExperimentsFromAmplitudeOptions = {},
+): ExperimentInput[] {
+  if (!_isRecord(variants)) {
+    _debug('experimentsFromAmplitude expects the object of variants the Experiment SDK returns');
+    return [];
+  }
+  const { keys = null, unit = null, includeDefaults = false } = options;
+  const selected: [string, unknown][] =
+    keys == null
+      ? Object.entries(variants)
+      : flagNames(keys, 'experimentsFromAmplitude keys').map((key) => [key, variants[key]]);
+  const entries: ExperimentInput[] = [];
+  for (const [flagKey, variant] of selected) {
+    if (variant == null) continue;
+    const metadata = _attr(variant, 'metadata');
+    if (!includeDefaults && _isRecord(metadata) && metadata.default) continue;
+    const key = _attr(variant, 'key');
+    let label: string | null =
+      typeof key === 'string' && key.replace(_TRIM, '').length > 0 ? key : null;
+    if (label == null) label = variantLabel(_attr(variant, 'value'));
+    if (label == null) {
+      _debug(`Amplitude flag '${flagKey}' has no variant key or value; skipped`);
+      continue;
+    }
+    const entry: ExperimentInput = { key: String(flagKey), variant: label, provider: AMPLITUDE_PROVIDER };
+    if (unit != null) entry.unit = unit;
+    entries.push(entry);
+  }
+  if (keys == null && entries.length > MAX_EXPERIMENTS) {
+    const overflow = entries
+      .slice(MAX_EXPERIMENTS)
+      .map((entry) => entry.key)
+      .join(', ');
+    getLogger().warn(
+      `experimentsFromAmplitude: ${entries.length} flags, but an event carries at most ` +
+        `${MAX_EXPERIMENTS}; pass keys: [...] to name the experiment flags. Not recorded: ${overflow}`,
+    );
+  }
+  return entries;
+}
+
+/** A flag evaluation, in the shape every flag SDK can produce. */
+export interface FlagEvaluation {
+  /** The resolved value. */
+  value?: unknown;
+  /** The variant name, if the provider has one. */
+  variant?: unknown;
+  /** OpenFeature `reason`, or any provider's equivalent. */
+  reason?: unknown;
+  /** OpenFeature `errorCode`; any truthy value means the evaluation failed. */
+  errorCode?: unknown;
+  /** Flag provider's name; recorded lowercased. */
+  provider?: unknown;
+  unit?: ExperimentUnit | null;
+  /** Also record evaluations whose reason is `DEFAULT`. */
+  includeDefaults?: boolean;
+}
+
+/**
+ * One `experiments` entry from a flag evaluation: the flag key, the resolved
+ * value, the variant name if the provider has one, and OpenFeature's `reason`
+ * / `errorCode`.
+ *
+ * Returns `null` when the evaluation was not an assignment: an error, a
+ * disabled flag, or the caller's default (unless `includeDefaults`).
+ */
+export function experimentFromEvaluation(
+  flagKey: unknown,
+  evaluation: FlagEvaluation = {},
+): ExperimentInput | null {
+  const { value, variant, reason, errorCode, provider, unit = null, includeDefaults = false } = evaluation;
+  if (errorCode) return null;
+  const reasonText = typeof reason === 'string' ? reason.replace(_TRIM, '').toUpperCase() : null;
+  if (
+    reasonText != null &&
+    _NON_ASSIGNMENT_REASONS.has(reasonText) &&
+    !(includeDefaults && reasonText === 'DEFAULT')
+  ) {
+    return null;
+  }
+  const label =
+    typeof variant === 'string' && variant.replace(_TRIM, '').length > 0
+      ? variant
+      : variantLabel(value);
+  if (label == null || typeof flagKey !== 'string') return null;
+  const entry: ExperimentInput = { key: flagKey, variant: label };
+  if (typeof provider === 'string' && provider.replace(_TRIM, '').length > 0) {
+    entry.provider = provider.replace(_TRIM, '').toLowerCase();
+  }
+  if (unit != null) entry.unit = unit;
+  return entry;
+}
+
+/**
+ * Record `experiments` on the active session from anywhere in its call
+ * stack: a flag-SDK hook, middleware, or code that learns the assignment
+ * after `session.run()` started.
+ *
+ * Entries merge into the session with session precedence (a later entry
+ * replaces an earlier one with the same key), so events tracked from this
+ * point on carry them. Returns `false` when no session is active, in which
+ * case nothing is recorded.
+ */
+export function addExperiments(experiments: ExperimentInput[] | null | undefined): boolean {
+  const ctx = getActiveContext();
+  if (ctx == null) {
+    _debug('addExperiments called outside a session; nothing recorded');
+    return false;
+  }
+  if (ctx._session != null) {
+    ctx._session.addExperiments(experiments);
+  } else {
+    const merged = mergeExperiments(ctx.experiments, experiments);
+    ctx.experiments = merged.length > 0 ? merged : null;
+  }
+  return true;
 }
 
 /**
