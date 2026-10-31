@@ -28,7 +28,7 @@ export const EXPERIMENT_PROPERTIES = [
   PROP_EXPERIMENT_UNIT,
   PROP_EXPERIMENT_PROVIDER,
 ] as const;
-// ASCII whitespace only, as for Result IDs: Python, JavaScript and Java must
+// ASCII whitespace only: Python, JavaScript and Java must
 // accept exactly the same values.
 const _TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
 

@@ -159,9 +159,6 @@ settled AS (
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
     e.session_id || ':' || e.message_id AS event_key,
-    CASE
-      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
-    END AS result_id_clean,
     CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
     CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
@@ -374,9 +371,6 @@ settled AS (
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
     e.session_id || ':' || e.message_id AS event_key,
-    CASE
-      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
-    END AS result_id_clean,
     CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
     CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
@@ -592,9 +586,6 @@ settled AS (
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
     e.session_id || ':' || e.message_id AS event_key,
-    CASE
-      WHEN e.role = 'tool' AND e.tool_success AND LENGTH(TRIM(e.result_id)) BETWEEN 1 AND 512 THEN TRIM(e.result_id)
-    END AS result_id_clean,
     CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
     CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
