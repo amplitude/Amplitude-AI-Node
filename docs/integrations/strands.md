@@ -92,6 +92,8 @@ Tool spans carry `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.call.ar
 
 Model and both token counts come from `gen_ai.request.model`, `gen_ai.usage.input_tokens`, and `gen_ai.usage.output_tokens`.
 
+A `feature_flag.evaluation` span event, or `feature_flag.key` and `feature_flag.result.variant` attributes, becomes `[Agent] Experiments` (plus the singular `[Agent] Experiment *` properties when one applies), so a chart can be split by arm. When the app already runs the SDK, pass the assignment as `experiments` instead; neither path sends an exposure event.
+
 ## When the session is ready for enrichment
 
 `[Agent] Session End` is optional and recommended. A native Strands export does not send it. Amplitude closes the session with its lifecycle rules: 30 minutes without a qualifying agent event by default, and 24 hours from the session start when no per-session override is set. The first close is the one that counts. Enrichment, including the Session Record and content-based signals, runs once after that close. The record typically arrives 15–20 minutes after the ingestion batch processes the close, and can take longer during a backlog. Events that arrive after the close are stored and do not recompute that record.

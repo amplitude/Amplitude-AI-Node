@@ -18,12 +18,14 @@ import {
   PROP_CACHE_CREATION_TOKENS,
   PROP_CACHE_READ_TOKENS,
   PROP_COST_USD,
+  PROP_EXPERIMENTS,
   PROP_INPUT_TOKENS,
   PROP_OUTPUT_TOKENS,
   PROP_SESSION_ID,
   PROP_TRACE_ID,
   SDK_VERSION,
 } from './core/constants.js';
+import { withExperiments } from './core/experiments.js';
 import { ConfigurationError, CostCalculationError } from './exceptions.js';
 import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
 import type { OtelSpanFilter, SpanEventMapper } from './otel/mapper.js';
@@ -74,6 +76,22 @@ function _warnShortId(event: AmplitudeEvent, logger: Logger): void {
       }
     }
   }
+}
+
+/**
+ * Give events tracked inside a session, but not through it (provider
+ * wrappers, integrations, `tool()`), the session's experiments.
+ */
+function _stampSessionExperiments(event: AmplitudeEvent): void {
+  const ctx = getActiveContext();
+  if (ctx?.experiments == null || ctx.experiments.length === 0) return;
+  if (typeof event.event_type !== 'string' || !event.event_type.startsWith('[Agent]')) {
+    return;
+  }
+  const props = event.event_properties;
+  if (props == null || PROP_EXPERIMENTS in props) return;
+  if (props[PROP_SESSION_ID] !== ctx.sessionId) return;
+  event.event_properties = withExperiments(props, ctx.experiments) ?? props;
 }
 
 /** @internal Exposed for testing only. */
@@ -405,6 +423,7 @@ export class AmplitudeAI {
       // Short-ID warning — Amplitude server rejects user_id/device_id
       // shorter than 5 characters with HTTP 400.
       _warnShortId(event, logger);
+      _stampSessionExperiments(event);
       this._recordEmittedCostFromEvent(event);
 
       if (debug) {

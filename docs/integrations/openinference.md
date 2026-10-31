@@ -161,6 +161,8 @@ Import `Agent`, `OpenAIChatGenerator`, and `Tool` before `HaystackInstrumentor()
 
 Model and both token counts come from `llm.model_name`, `llm.token_count.prompt`, and `llm.token_count.completion`. Cost is recorded only when the span includes `gen_ai.usage.cost`. These instrumentors do not standardize that attribute.
 
+None of these instrumentors records feature flag evaluations. Add a `feature_flag.evaluation` span event (`feature_flag.key`, `feature_flag.result.variant`, `feature_flag.provider.name`) where the app reads the flag, and it arrives as `[Agent] Experiments`, so a chart can be split by arm. Nothing here sends an exposure event.
+
 This verification captured message content. A second capture passed `TraceConfig(hide_inputs=True, hide_outputs=True, hide_input_messages=True, hide_output_messages=True, hide_input_text=True, hide_output_text=True)` to each instrumentor. Session, user, and agent stayed. Message attributes were omitted, so the prompt and reply text do not arrive. `input.value` and `output.value` were the placeholder `__REDACTED__`. Amplitude drops that placeholder, so tool arguments and tool results are empty. Agno and AutoGen still send the arguments on `tool.parameters`. Google GenAI still sends them on `message.tool_calls.0.tool_call.function.arguments`. smolagents still sends the user question on `smolagents.task`. Amplitude stores those attributes. Agno, smolagents, Haystack, Google GenAI, and AutoGen still had the model name and both token counts. DSPy still had the model name and did not have token counts. Agno, smolagents, DSPy, and AutoGen still had `tool.name`. Haystack and Google GenAI still had no tool span.
 
 ## When the session is ready for enrichment

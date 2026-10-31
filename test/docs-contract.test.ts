@@ -508,6 +508,41 @@ describe('forwarder core and adapters', () => {
     expect(second).toEqual(first);
   });
 
+  it('validates experiments exactly like the SDK parity cases', () => {
+    const expand = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(expand);
+      if (typeof value === 'object' && value !== null) {
+        const record = value as Record<string, unknown>;
+        if ('$repeat' in record) return String(record.$repeat).repeat(Number(record.count));
+        if ('$concat' in record) return (record.$concat as unknown[]).map(expand).join('');
+        return Object.fromEntries(Object.entries(record).map(([k, v]) => [k, expand(v)]));
+      }
+      return value;
+    };
+    const { cases } = JSON.parse(
+      readFileSync(resolve(__dirname, 'fixtures/experiment-cases.json'), 'utf8'),
+    ) as { cases: { name: string; levels: Record<string, unknown>; expected: Record<string, unknown> }[] };
+    expect(cases.length).toBeGreaterThan(30);
+    for (const c of cases) {
+      const levels = expand(c.levels) as Record<string, unknown>;
+      const chained = ['agent', 'child', 'session', 'call'].flatMap((level) =>
+        Array.isArray(levels[level]) ? (levels[level] as unknown[]) : [],
+      );
+      expect(core.experimentProperties(chained), c.name).toEqual(expand(c.expected));
+    }
+    const events: AgentEvent[] = core.toAgentEvents({
+      ...fixture,
+      experiments: [{ key: 'planner', variant: 'v2', provider: 'statsig' }],
+    });
+    for (const event of events) {
+      expect(event.event_properties['[Agent] Experiments'], event.event_type).toEqual(['planner:v2']);
+      expect(event.event_properties['[Agent] Experiment Provider']).toBe('statsig');
+    }
+    for (const event of core.toAgentEvents(fixture) as AgentEvent[]) {
+      expect(event.event_properties).not.toHaveProperty('[Agent] Experiments');
+    }
+  });
+
   it('sorts out-of-order transcripts by timestamp', () => {
     const shuffled = { ...fixture, messages: [...fixture.messages].reverse() };
     expect(core.toAgentEvents(shuffled)).toEqual(core.toAgentEvents(fixture));

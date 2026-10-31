@@ -9,6 +9,7 @@ These examples demonstrate the `@amplitude/ai` event model using `MockAmplitudeA
 | `wrap-openai.ts`           | Event model for wrapping a provider client     |
 | `multi-agent.ts`           | Multi-agent hierarchy with parent/child agents |
 | `framework-integration.ts` | BoundAgent + Session lifecycle                 |
+| `experiments.ts`           | Experiment arms from Amplitude Experiment, OpenFeature, and mid-session |
 
 ## Running
 

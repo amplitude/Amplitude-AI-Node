@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.24.2",
+  "version": "0.25.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -37,6 +37,7 @@
     "./context": "./dist/context.js",
     "./core/constants": "./dist/core/constants.js",
     "./core/enrichments": "./dist/core/enrichments.js",
+    "./core/experiments": "./dist/core/experiments.js",
     "./core/privacy": "./dist/core/privacy.js",
     "./core/tracking": "./dist/core/tracking.js",
     "./decorators": "./dist/decorators.js",
@@ -62,6 +63,7 @@
     "./mcp/validate-file": "./dist/mcp/validate-file.js",
     "./middleware": "./dist/middleware.js",
     "./offline-eval": "./dist/offline-eval.js",
+    "./openfeature": "./dist/openfeature.js",
     "./otel": "./dist/otel/index.js",
     "./otel/conventions": "./dist/otel/conventions.js",
     "./otel/mapper": "./dist/otel/mapper.js",

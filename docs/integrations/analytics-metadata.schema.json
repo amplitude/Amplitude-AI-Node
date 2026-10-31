@@ -27,6 +27,23 @@
       "type": "string",
       "minLength": 1,
       "description": "The device ID that product analytics uses, for users who are not logged in. Becomes amplitude.device_id."
+    },
+    "experiment_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^:]+$",
+      "description": "Optional. The experiment or feature flag key the request ran under, without ':'. Send with experiment_variant. Becomes feature_flag.key."
+    },
+    "experiment_variant": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Optional. The variant of experiment_key the request ran under. Becomes feature_flag.result.variant."
     }
+  },
+  "dependentRequired": {
+    "experiment_key": ["experiment_variant"],
+    "experiment_variant": ["experiment_key"]
   }
 }

@@ -824,7 +824,38 @@ export function analyzeFileInstrumentation(fullSource: string): FileAnalysis {
   const source =
     fullSource.length > MAX_ANALYZE_SOURCE_CHARS ? fullSource.slice(0, MAX_ANALYZE_SOURCE_CHARS) : fullSource;
   const sourceLines = source.split('\n');
-  const astResult = analyzeWithAST(source, sourceLines);
-  if (astResult) return astResult;
-  return analyzeWithRegex(source);
+  const analysis = analyzeWithAST(source, sourceLines) ?? analyzeWithRegex(source);
+  analysis.suggestions.push(...experimentSuggestions(source));
+  return analysis;
+}
+
+const LEGACY_EXPERIMENT_CONTEXT_RE = /["']?experiment_variant["']?\s*:/;
+const EXPERIMENTS_FROM_AMPLITUDE_RE = /experimentsFromAmplitude\s*\(/;
+const EXPERIMENTS_FROM_AMPLITUDE_KEYS_RE = /experimentsFromAmplitude\s*\([^)]*\bkeys\s*:/;
+const OPENFEATURE_HOOK_RE = /AmplitudeAIHook\s*\(/;
+const OPENFEATURE_HOOK_FLAGS_RE = /AmplitudeAIHook\s*\([^)]*\bflags\s*:/;
+
+/**
+ * Experiment-recording advice for `validate_file`: the legacy
+ * `context: { experiment_variant }` form, and helpers called without naming
+ * the experiment flags.
+ */
+export function experimentSuggestions(source: string): string[] {
+  const out: string[] = [];
+  if (LEGACY_EXPERIMENT_CONTEXT_RE.test(source)) {
+    out.push(
+      '`experiment_variant` in `context` is the legacy form. Pass the assignment as `experiments: [{ key, variant, provider }]` instead so every event carries `[Agent] Experiments` and the value is recorded once.',
+    );
+  }
+  if (EXPERIMENTS_FROM_AMPLITUDE_RE.test(source) && !EXPERIMENTS_FROM_AMPLITUDE_KEYS_RE.test(source)) {
+    out.push(
+      '`experimentsFromAmplitude(...)` without `keys` records every flag in the result, configuration flags included, and an event carries at most 10. Pass `{ keys: [...] }` naming the experiment flags.',
+    );
+  }
+  if (OPENFEATURE_HOOK_RE.test(source) && !OPENFEATURE_HOOK_FLAGS_RE.test(source)) {
+    out.push(
+      '`new AmplitudeAIHook()` without `flags` records every flag evaluated inside a session. Pass `{ flags: [...] }` naming the experiment flags.',
+    );
+  }
+  return out;
 }

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Experiment, ExperimentInput } from './core/experiments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
@@ -16,6 +17,8 @@ export interface SessionContextOptions {
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
   tags?: string[] | null;
+  /** Agent and session level, already validated and merged. */
+  experiments?: Experiment[] | null;
   idleTimeoutMinutes?: number | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
@@ -25,6 +28,11 @@ export interface SessionContextOptions {
   privacyConfig?: PrivacyConfig | null;
   trackerManaged?: boolean;
   skipAutoUserTracking?: boolean;
+}
+
+/** @internal What `addExperiments()` needs from the session that owns a context. */
+export interface ExperimentOwner {
+  addExperiments(experiments: ExperimentInput[] | null | undefined): void;
 }
 
 export class SessionContext {
@@ -40,6 +48,13 @@ export class SessionContext {
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
   readonly tags: string[] | null;
+  /**
+   * Agent and session level, validated and merged. Replaced when the owning
+   * session's `addExperiments()` learns a new assignment.
+   */
+  experiments: Experiment[] | null;
+  /** @internal The `Session` whose `run()` created this context, if any. */
+  _session: ExperimentOwner | null = null;
   readonly idleTimeoutMinutes: number | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
@@ -74,6 +89,7 @@ export class SessionContext {
     this.context = options.context ?? null;
     this.groups = options.groups ?? null;
     this.tags = options.tags ?? null;
+    this.experiments = options.experiments ?? null;
     this.idleTimeoutMinutes = options.idleTimeoutMinutes ?? null;
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;

@@ -74,6 +74,11 @@ export {
   PROP_SESSION_ID,
   PROP_TRACE_ID,
   PROP_TURN_ID,
+  PROP_EXPERIMENTS,
+  PROP_EXPERIMENT_KEY,
+  PROP_EXPERIMENT_VARIANT,
+  PROP_EXPERIMENT_UNIT,
+  PROP_EXPERIMENT_PROVIDER,
   PROP_MESSAGE_ID,
   PROP_PROVIDER_REQUEST_ID,
   PROP_MODEL_NAME,
@@ -228,6 +233,18 @@ export { wrap, AmplitudeAIWrapError } from './wrappers.js';
 // Decorators (tool/observe HOFs + ToolCallTracker)
 export { tool, observe, ToolCallTracker } from './decorators.js';
 export type { ToolWrapped, ObserveWrapped, ObserveSpanType } from './decorators.js';
+export {
+  addExperiments,
+  experimentFromEvaluation,
+  experimentsFromAmplitude,
+} from './core/experiments.js';
+export type {
+  ExperimentInput,
+  ExperimentOpts,
+  ExperimentUnit,
+  ExperimentsFromAmplitudeOptions,
+  FlagEvaluation,
+} from './core/experiments.js';
 
 // Patching
 export {

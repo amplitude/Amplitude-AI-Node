@@ -12,7 +12,10 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, basename, dirname, isAbsolute, parse, resolve, sep } from 'node:path';
-import { analyzeFileInstrumentation } from './validate-file.js';
+import { EXPERIMENT_DEPS, type FlagCallSite, flagCallSites } from './experiment-deps.js';
+import { analyzeFileInstrumentation, redactSecrets } from './validate-file.js';
+
+const MAX_FLAG_READS = 50; // flag_call_sites entries reported per scan
 
 export interface ScanResult {
   project_name: string | null;
@@ -61,6 +64,10 @@ export interface ScanResult {
   has_frontend_deps: boolean;
   has_otel_deps: boolean;
   otel_packages: string[];
+  /** Feature flag or experimentation SDKs in the dependencies. */
+  experiment_packages: string[];
+  /** Where the code reads a flag or experiment assignment (first 50). */
+  flag_call_sites: FlagCallSite[];
   recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
@@ -409,10 +416,20 @@ export function scanProject(requestedRoot: string): ScanResult {
   const agents: ScanResult['agents'] = [];
   const filesWithCallSites = new Set<string>();
   const providerImportsPerFile = new Map<string, Set<string>>();
+  const flagReads: FlagCallSite[] = [];
 
   for (const filePath of sourceFiles) {
     const content = readRegularFileCapped(filePath, MAX_SCAN_FILE_BYTES);
     if (content == null) continue;
+
+    if (flagReads.length < MAX_FLAG_READS) {
+      flagReads.push(
+        ...flagCallSites(content, relative(rootPath, filePath), redactSecrets).slice(
+          0,
+          MAX_FLAG_READS - flagReads.length,
+        ),
+      );
+    }
 
     const analysis = analyzeFileInstrumentation(content);
     if (analysis.has_amplitude_import) globalHasAmplitudeImport = true;
@@ -583,6 +600,25 @@ export function scanProject(requestedRoot: string): ScanResult {
       'Use session.run() with an awaited stream, not a fire-and-forget pattern.',
     );
   }
+  const experimentPackages = EXPERIMENT_DEPS.filter((dep) => allDeps.has(dep));
+  if (experimentPackages.length > 0 || flagReads.length > 0) {
+    const detected =
+      experimentPackages.length > 0
+        ? `Feature flag or experiment SDKs detected (${experimentPackages.join(', ')})`
+        : 'Feature flag reads detected';
+    let where = '';
+    if (flagReads.length > 0) {
+      const shown = flagReads
+        .slice(0, 5)
+        .map((site) => `${site.file}:${site.line}`)
+        .join(', ');
+      const more = flagReads.length > 5 ? ` and ${flagReads.length - 5} more` : '';
+      where = ` Flag reads at ${shown}${more}; the variants that change agent behavior belong in experiments.`;
+    }
+    recommendations.push(
+      `${detected}: where the app reads a variant that changes agent behavior, pass it as \`experiments: [{ key, variant, provider }]\` on ai.agent(), agent.session() or one track call (or experimentsFromAmplitude(..., { keys: [...] }) / new AmplitudeAIHook({ flags: [...] }) for the experiment flags only), so [Agent] Experiments can split any chart by arm. See "Experiments" in amplitude-ai.md.${where}`,
+    );
+  }
   if (messageQueueDeps.length > 0) {
     recommendations.push(
       `Message queue deps detected (${messageQueueDeps.join(', ')}): enable propagateContext in the bootstrap file and use injectContext/extractContext to correlate events across services.`,
@@ -699,6 +735,8 @@ export function scanProject(requestedRoot: string): ScanResult {
     has_frontend_deps: hasFrontendDeps,
     has_otel_deps: hasOtelDeps,
     otel_packages: otelPackages,
+    experiment_packages: experimentPackages,
+    flag_call_sites: flagReads,
     recommendations,
     recommended_tier: recommendedTier,
   };
