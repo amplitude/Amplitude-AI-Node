@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.25.0
 
 ### Added
 - **Experiments.** An `experiments` option on `ai.agent()`, `agent.child()`, `agent.session()` and single agent or session `track*` calls records A/B test or feature flag assignment as `[{ key, variant, provider?, unit? }]`. Every event carries the new `[Agent] Experiments` property (`"key:variant"` strings) and, when exactly one experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit` and `Provider`, so any chart can be split by arm. Call entries override session entries, which override agent entries, by key; child agents and `runAs()` inherit them. Provider wrappers, `tool()` and OTel-mapped spans inside a session carry the session's experiments. `unit` is `agent_session` (default), `turn` or `span`; key, variant and provider are up to 256 characters, keys can't contain `:`, and at most 10 apply to an event. Invalid entries are dropped with a debug log. `context: { experiment_variant }` keeps working; the docs now point to `experiments`.
