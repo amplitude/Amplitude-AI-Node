@@ -35,7 +35,9 @@ export function generateVerifyTest(scanResult: ScanResult): string {
   }
 
   const firstAgent = scanResult.agents[0];
-  if ((scanResult.experiment_packages ?? []).length > 0 && firstAgent) {
+  const readsFlags =
+    (scanResult.experiment_packages ?? []).length > 0 || (scanResult.flag_call_sites ?? []).length > 0;
+  if (readsFlags && firstAgent) {
     const eid = escapeStr(firstAgent.inferred_id);
     lines.push(
       "  it('session experiments reach every event', () => {",
@@ -51,6 +53,7 @@ export function generateVerifyTest(scanResult: ScanResult): string {
       "      expect(event.event_properties?.['[Agent] Experiments']).toEqual(['verify-experiment:treatment']);",
       "      expect(event.event_properties?.['[Agent] Experiment Variant']).toBe('treatment');",
       '    }',
+      "    expect(mock.summary()).toContain('[Agent] Experiments');",
       '  });',
       '',
     );

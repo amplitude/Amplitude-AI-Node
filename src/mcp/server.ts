@@ -138,7 +138,7 @@ const buildInstrumentationGuidance = (
     '',
     'Next:',
     `- ${nextForTier}`,
-    '- if the app reads an A/B test or feature flag that changes agent behavior, pass the variant as `experiments: [{ key, variant, provider }]` on `ai.agent()` or `agent.session()` so `[Agent] Experiment Variant` can split any chart.',
+    '- if the app reads an A/B test or feature flag that changes agent behavior, pass the variant as `experiments` on `ai.agent()` or `agent.session()`: `experimentsFromAmplitude(variants, { keys: [...] })` for Amplitude Experiment, `new AmplitudeAIHook({ flags: [...] })` from `@amplitude/ai/openfeature` for an OpenFeature provider, or `[{ key, variant, provider }]` built from the flag read. Every event then carries `[Agent] Experiments`, which splits any chart by arm.',
     isManagedAgent
       ? '- refine your poll-and-track loop with deduplication and latency measurement for production reliability.'
       : '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',

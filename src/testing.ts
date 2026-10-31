@@ -8,6 +8,7 @@ import {
   PROP_AGENT_ID,
   PROP_CONTENT_MODE,
   PROP_COST_USD,
+  PROP_EXPERIMENTS,
   PROP_INPUT_TOKENS,
   PROP_LATENCY_MS,
   PROP_MODEL_NAME,
@@ -255,6 +256,24 @@ export class MockAmplitudeAI extends AmplitudeAI {
     lines.push('Event breakdown:');
     for (const [type, count] of byType) {
       lines.push(`  ${type}: ${count}`);
+    }
+
+    // Experiments fill. Not a gate: most agents run under no experiment.
+    // Shown whenever any event carries one, so a partial fill (an assignment
+    // learned after the session started, or a runAs child that missed it) is
+    // visible.
+    const experimentsFilled = this.events.filter(
+      (e) => e.event_properties?.[PROP_EXPERIMENTS] != null,
+    ).length;
+    if (experimentsFilled > 0) {
+      lines.push('');
+      lines.push('Experiments fill:');
+      lines.push(`  ${PROP_EXPERIMENTS}: ${experimentsFilled}/${total} events`);
+      if (experimentsFilled < total) {
+        lines.push(
+          '    note: pass experiments on ai.agent() or agent.session(), or call addExperiments() before the first event, so every event carries the arm',
+        );
+      }
     }
 
     // Gate checks

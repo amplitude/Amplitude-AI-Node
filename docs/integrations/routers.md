@@ -130,7 +130,7 @@ The router copies the metadata onto each span:
 | `agent_id` | `gen_ai.agent.id` | The agent is named after the exporter's `service.name`, which is the router, not your agent |
 | `user_id` | `enduser.id` | Events carry no user, so nothing joins to product analytics unless `device_id` is set |
 | `device_id` | `amplitude.device_id` | The conversation ID stands in as the device, so logged-out users do not join their product events |
-| `experiment_key` | `feature_flag.key` | No `[Agent] Experiment*` properties, so charts can't be split by variant |
+| `experiment_key` | `feature_flag.key` | No `[Agent] Experiments` array (or singular `[Agent] Experiment*` properties), so charts can't be split by arm |
 | `experiment_variant` | `feature_flag.result.variant` | The same; a key without a variant is dropped |
 
 These come from the inference itself, with no change in your application:

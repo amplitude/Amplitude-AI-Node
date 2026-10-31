@@ -59,6 +59,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Cannot modify call sites at all: use `patch()` for aggregate-only monitoring (no per-user analytics).
 - Already emit OTEL GenAI spans: use `AmplitudeAgentExporter({ amplitudeAI: ai })` (or `enableOtel()`) to map them to [Agent] events.
 - LangChain / LangGraph: use `AmplitudeCallbackHandler` (duck-typed; implements `handleChatModelStart` for User Message).
+- App reads an A/B test or feature flag that changes agent behavior: pass the assignment as `experiments` — `experimentsFromAmplitude(variants, { keys: [...] })` for Amplitude Experiment, `new AmplitudeAIHook({ flags: [...] })` from `@amplitude/ai/openfeature` for any OpenFeature provider, or the literal entry — so `[Agent] Experiments` splits any chart by arm (see Experiments in `amplitude-ai.md`).
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
 - HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
@@ -139,6 +140,7 @@ Prompt:
 - `examples/wrap-openai.ts`
 - `examples/multi-agent.ts`
 - `examples/framework-integration.ts`
+- `examples/experiments.ts`
 - `examples/real-openai.ts` (requires OPENAI_API_KEY)
 
 ## Instrumentation Guide

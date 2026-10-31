@@ -713,7 +713,32 @@ await agent
   });
 ```
 
-Every event in the session then carries `[Agent] Experiments` (`["planner:v2"]`) and, when exactly one experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider`, so any goal chart can be split by variant. `unit` says what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. A session entry overrides an agent entry with the same key, and a call entry overrides both. Child agents (`agent.child()`, `session.runAs()`) inherit the experiments. At most 10 apply to an event; invalid entries are dropped with a debug log, never thrown. Earlier code that put `experiment_variant` in `context` keeps working, but use `experiments` for new code so the assignment isn't recorded twice. For model or prompt tests you can also set `agentVersion` on the agent or `promptId` on AI responses.
+Every event in the session then carries `[Agent] Experiments` (`["planner:v2"]`), an array with one `key:variant` string per experiment: split any chart by it to compare arms, or filter on one value. When exactly one experiment applies the event also carries `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider` as plain properties. `unit` says what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. A session entry overrides an agent entry with the same key, and a call entry overrides both. Child agents (`agent.child()`, `session.runAs()`) inherit the experiments. At most 10 apply to an event; invalid entries are dropped with a debug log, never thrown. Earlier code that put `experiment_variant` in `context` keeps working, but use `experiments` for new code so the assignment isn't recorded twice. For model or prompt tests you can also set `agentVersion` on the agent or `promptId` on AI responses.
+
+Take the assignment from the flag tool the app already uses instead of typing it out (requires `@amplitude/ai` 0.25.0 or later):
+
+```typescript
+import { experimentsFromAmplitude } from '@amplitude/ai';
+
+const variants = await experimentClient.fetchV2({ user_id: 'u1' }); // Amplitude Experiment
+await agent
+  .session({ userId: 'u1', experiments: experimentsFromAmplitude(variants, { keys: ['planner'] }) })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+```typescript
+import { OpenFeature } from '@openfeature/server-sdk';
+import { AmplitudeAIHook } from '@amplitude/ai/openfeature';
+
+OpenFeature.addHooks([new AmplitudeAIHook({ flags: ['planner'] })]); // LaunchDarkly, Statsig, GrowthBook, ... via OpenFeature
+await agent.session({ userId: 'u1' }).run(async (s) => {
+  const planner = await OpenFeature.getClient().getStringValue('planner', 'v1', ctx); // recorded as planner:<variant>
+});
+```
+
+Name the experiment flags with `keys` / `flags`: a project's flag result also holds configuration flags that are not experiments, and an event carries at most 10 entries. Without `keys`, `experimentsFromAmplitude` records every non-fallback flag and warns when more than 10 would not fit. It sets `provider: 'amplitude'`. The OpenFeature hook records every flag evaluated inside a session with the provider's name lowercased (a `provider` you pass is stored as given); pass `unit: 'turn'` when flags are evaluated per turn, `includeDefaults: true` to keep evaluations that returned the caller's default, and `variantOf: (key, value) => ...` to name the arm for object-valued flags whose provider sets no variant (Statsig experiments and dynamic configs return their parameters). An assignment learned after the session was entered can be recorded with `s.addExperiments([...])` or the module-level `addExperiments([...])`; events tracked from then on carry it, and a session shares one list with its `runAs()` children. Neither helper sends an exposure event: your flag tool keeps doing that.
 
 ## Works with
 

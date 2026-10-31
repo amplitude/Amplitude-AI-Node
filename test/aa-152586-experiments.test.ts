@@ -395,15 +395,17 @@ describe('coding-agent tools', () => {
       ...options,
       source: handler("import { PostHog } from 'posthog-node';\n"),
     });
-    expect(flagged).toContain('experiments: [{ key, variant, provider }] in agent.session');
-    expect(instrumentFile({ ...options, source: handler('') })).not.toContain('experiments:');
+    expect(flagged).toContain('experiments in agent.session({ ... })');
+    expect(flagged).toContain('[{ key, variant, provider }] built from the flag read');
+    expect(instrumentFile({ ...options, source: handler('') })).not.toContain('experiments');
   });
 
   it('patterns and suggestions show the option', (): void => {
     const pattern = getIntegrationPatterns().find((p) => p.id === 'experiments');
-    expect(pattern?.snippet).toContain('experiments: [{ key: "planner", variant');
+    expect(pattern?.snippet).toContain('experiments: experimentsFromAmplitude(variants, { keys: ["planner"] })');
+    expect(pattern?.snippet).toContain('[{ key: "planner", variant, provider: "statsig" }]');
     expect(buildInstrumentationGuidance('node', 'openai', 'full').join('\n')).toContain(
-      'experiments: [{ key, variant, provider }]',
+      '`[{ key, variant, provider }]` built from the flag read',
     );
   });
 });

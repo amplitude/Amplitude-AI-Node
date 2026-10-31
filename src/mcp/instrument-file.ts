@@ -1,4 +1,4 @@
-import { EXPERIMENT_DEPS } from './experiment-deps.js';
+import { EXPERIMENT_DEPS, FLAG_CLIENT_CALL_RE } from './experiment-deps.js';
 
 export interface InstrumentFileOptions {
   source: string;
@@ -173,8 +173,9 @@ function replaceProviderImports(
 }
 
 function importsFlagClient(source: string): boolean {
-  return EXPERIMENT_DEPS.some(
-    (dep) => source.includes(`'${dep}'`) || source.includes(`"${dep}"`),
+  return (
+    EXPERIMENT_DEPS.some((dep) => source.includes(`'${dep}'`) || source.includes(`"${dep}"`)) ||
+    FLAG_CLIENT_CALL_RE.test(source)
   );
 }
 
@@ -185,7 +186,7 @@ function addSessionWrapping(
 ): string {
   let result = source;
   const experimentsTodo = importsFlagClient(source)
-    ? '// TODO: this file reads a feature flag. Pass the variant that changes agent behavior as\n  // experiments: [{ key, variant, provider }] in agent.session({ ... }).\n  '
+    ? '// TODO: this file reads a feature flag. Pass the variant that changes agent behavior as\n  // experiments in agent.session({ ... }): experimentsFromAmplitude(variants, { keys: [...] }) for\n  // Amplitude Experiment, new AmplitudeAIHook({ flags: [...] }) from @amplitude/ai/openfeature for an\n  // OpenFeature provider, or [{ key, variant, provider }] built from the flag read. Every event then\n  // carries [Agent] Experiments.\n  '
     : '';
 
   const importFromPath = new RegExp(

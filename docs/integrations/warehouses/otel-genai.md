@@ -4,7 +4,7 @@
 
 Amplitude's [OTLP endpoint](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) already turns GenAI spans into `[Agent]` events, so no SQL mapping is needed. [`otlp-replay.mjs`](./otlp-replay.mjs) reads an export of your span table and posts it to that endpoint. For spans you are still producing, point your Collector at the endpoint instead; replay is for spans already stored.
 
-Spans that record a feature flag evaluation, as OpenTelemetry `feature_flag.evaluation` span events or `feature_flag.key` and `feature_flag.result.variant` attributes, become `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant`, `[Agent] Experiment Unit` (`span` unless `amplitude.experiment.unit` says otherwise) and `[Agent] Experiment Provider` (from `feature_flag.provider.name`). Keep those attributes in the export.
+Spans that record a feature flag evaluation, as OpenTelemetry `feature_flag.evaluation` span events or `feature_flag.key` and `feature_flag.result.variant` attributes, become `[Agent] Experiments` (the array to split any chart by) and, for one experiment, `[Agent] Experiment Key`, `[Agent] Experiment Variant`, `[Agent] Experiment Unit` (`span` unless `amplitude.experiment.unit` says otherwise) and `[Agent] Experiment Provider` (from `feature_flag.provider.name`). Keep those attributes in the export. Replaying them records the arm; it does not send an exposure event.
 
 ## Export shape
 
