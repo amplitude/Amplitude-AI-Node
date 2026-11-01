@@ -195,6 +195,7 @@ export class Session {
       skipAutoUserTracking: this._skipAutoUserTracking,
     });
     ctx._session = this;
+    ctx.sessionExperiments = [...this._root()._experiments];
     return ctx;
   }
 
@@ -241,6 +242,7 @@ export class Session {
     for (const ctx of this._contexts) {
       const merged = mergeExperiments(agentDefaults, experiments);
       ctx.experiments = merged.length > 0 ? merged : null;
+      ctx.sessionExperiments = [...experiments];
     }
     for (const child of this._children) child._refreshExperiments();
   }

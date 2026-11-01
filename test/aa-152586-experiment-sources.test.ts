@@ -326,6 +326,36 @@ describe('addExperiments', () => {
     ]);
   });
 
+  it('parent events tracked during runAs do not inherit the child agent’s defaults', (): void => {
+    const mock = new MockAmplitudeAI();
+    const parent = mock.agent('orchestrator', {
+      userId: 'user-1',
+      experiments: [{ key: 'parent-only', variant: 'a' }],
+    });
+    const child = mock.agent('researcher', { experiments: [{ key: 'child-only', variant: 'x' }] });
+    parent.session({ sessionId: 's1' }).runSync((s) => {
+      s.addExperiments([{ key: 'planner', variant: 'v2' }]);
+      s.runAsSync(child, (cs) => {
+        cs.trackUserMessage('child');
+        s.trackUserMessage('parent via session');
+        parent.trackUserMessage('parent via bound agent', { sessionId: 's1' });
+      });
+    });
+    const byAgent = new Map<string, unknown[]>();
+    for (const event of mock.getEvents('[Agent] User Message')) {
+      const props = event.event_properties ?? {};
+      const list = byAgent.get(props['[Agent] Agent ID'] as string) ?? [];
+      list.push(props[PROP_EXPERIMENTS]);
+      byAgent.set(props['[Agent] Agent ID'] as string, list);
+    }
+    expect(byAgent.get('researcher')).toEqual([['child-only:x', 'planner:v2']]);
+    // The session list reaches the parent; the child agent's own default does not.
+    expect(byAgent.get('orchestrator')).toEqual([
+      ['parent-only:a', 'planner:v2'],
+      ['parent-only:a', 'planner:v2'],
+    ]);
+  });
+
   it('a bound agent tracking into its session merges agent, session and call', (): void => {
     const mock = new MockAmplitudeAI();
     const agent = mock.agent('bot', { userId: 'user-1', experiments: [{ key: 'agent-exp', variant: 'a' }] });

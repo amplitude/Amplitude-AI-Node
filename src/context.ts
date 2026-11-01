@@ -53,6 +53,14 @@ export class SessionContext {
    * session's `addExperiments()` learns a new assignment.
    */
   experiments: Experiment[] | null;
+  /**
+   * @internal The session's own list, without this context's agent
+   * defaults, for an agent that tracks into the session from outside the
+   * active context (the parent during `runAs`). A `Session` always sets it
+   * (empty when there are none); contexts created directly leave it `null`
+   * and `experiments` stands in.
+   */
+  sessionExperiments: Experiment[] | null = null;
   /** @internal The `Session` whose `run()` created this context, if any. */
   _session: ExperimentOwner | null = null;
   readonly idleTimeoutMinutes: number | null;

@@ -194,12 +194,15 @@ export class BoundAgent {
     // An agent bound to the active session (same sessionId) tracks with the
     // session's experiments, which `addExperiments()` may have grown since
     // the call-level chain was built; tracks without that id are not the
-    // session's and are left alone.
+    // session's and are left alone. The session's own list, not the active
+    // context's merged one: during `runAs` the active context is the child's
+    // and carries the child agent's defaults, which are not the parent's.
     const ctx = getActiveContext();
-    const sessionExperiments =
-      ctx?.experiments != null && ctx.experiments.length > 0 && merged.sessionId === ctx.sessionId
-        ? ctx.experiments
-        : null;
+    let sessionExperiments: Experiment[] | null = null;
+    if (ctx != null && merged.sessionId === ctx.sessionId) {
+      const list = ctx.sessionExperiments ?? ctx.experiments;
+      sessionExperiments = list != null && list.length > 0 ? list : null;
+    }
     const experiments = mergeExperiments(
       this._defaults.experiments as Experiment[],
       sessionExperiments,
