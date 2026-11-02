@@ -185,6 +185,28 @@ describe('AA-152586 experiment guidance', () => {
       suggestions = analyzeFileInstrumentation(named).suggestions;
       expect(suggestions.some((s) => s.includes('without `keys`') || s.includes('without `flags`'))).toBe(false);
     });
+
+    it('nested calls before the option do not hide it', () => {
+      // The documented form: the flag result comes from a nested call, so a `)` appears before `keys`.
+      const nested = [
+        "const entries = experimentsFromAmplitude(await experiment.fetchV2({ user_id: uid }), { keys: ['planner'] });",
+        "const hook = new AmplitudeAIHook({ variantOf: (key, value) => (value as { arm: string }).arm, flags: ['planner'] });",
+        'const more = experimentsFromAmplitude(',
+        '  client.all(user),',
+        "  { keys: ['planner'] },",
+        ');',
+      ].join('\n');
+      let suggestions = analyzeFileInstrumentation(nested).suggestions;
+      expect(suggestions.some((s) => s.includes('without `keys`') || s.includes('without `flags`'))).toBe(false);
+
+      // An option inside a nested call does not count, and one bare call among named ones still warns.
+      const mixed = [
+        "const a = experimentsFromAmplitude(variants, { keys: ['planner'] });",
+        "const b = experimentsFromAmplitude(fetch({ keys: ['planner'] }));",
+      ].join('\n');
+      suggestions = analyzeFileInstrumentation(mixed).suggestions;
+      expect(suggestions.some((s) => s.includes('without `keys`'))).toBe(true);
+    });
   });
 
   describe('verify', () => {

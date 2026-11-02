@@ -830,10 +830,43 @@ export function analyzeFileInstrumentation(fullSource: string): FileAnalysis {
 }
 
 const LEGACY_EXPERIMENT_CONTEXT_RE = /["']?experiment_variant["']?\s*:/;
-const EXPERIMENTS_FROM_AMPLITUDE_RE = /experimentsFromAmplitude\s*\(/;
-const EXPERIMENTS_FROM_AMPLITUDE_KEYS_RE = /experimentsFromAmplitude\s*\([^)]*\bkeys\s*:/;
-const OPENFEATURE_HOOK_RE = /AmplitudeAIHook\s*\(/;
-const OPENFEATURE_HOOK_FLAGS_RE = /AmplitudeAIHook\s*\([^)]*\bflags\s*:/;
+const EXPERIMENTS_FROM_AMPLITUDE_RE = /\bexperimentsFromAmplitude\s*\(/g;
+const OPENFEATURE_HOOK_RE = /\bAmplitudeAIHook\s*\(/g;
+
+/**
+ * The argument text of the call whose `(` is at `start`, with every nested
+ * parenthesised group blanked out, so an option can be looked for at the
+ * call's own level: `f(g(a, { k: 1 }), { k: 2 })` gives `" , { k: 2 }"`. An
+ * unbalanced call runs to the end of `source`.
+ */
+function topLevelArguments(source: string, start: number): string {
+  let out = '';
+  let depth = 1;
+  for (let i = start + 1; i < source.length; i++) {
+    const ch = source[i] as string;
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) break;
+    }
+    if (depth === 1 || ch === '\n') out += ch;
+  }
+  return out;
+}
+
+/**
+ * True when some call matched by `callRe` has no `option:` at its own level.
+ * Nested calls such as `await experiment.fetchV2(user)` in the argument list
+ * do not hide an option that follows them.
+ */
+function callsMissingOption(source: string, callRe: RegExp, option: string): boolean {
+  const optionRe = new RegExp(`(?:^|[,{(\\s])${option}\\s*:`);
+  callRe.lastIndex = 0;
+  for (let match = callRe.exec(source); match != null; match = callRe.exec(source)) {
+    if (!optionRe.test(topLevelArguments(source, match.index + match[0].length - 1))) return true;
+  }
+  return false;
+}
 
 /**
  * Experiment-recording advice for `validate_file`: the legacy
@@ -847,12 +880,12 @@ export function experimentSuggestions(source: string): string[] {
       '`experiment_variant` in `context` is the legacy form. Pass the assignment as `experiments: [{ key, variant, provider }]` instead so every event carries `[Agent] Experiments` and the value is recorded once.',
     );
   }
-  if (EXPERIMENTS_FROM_AMPLITUDE_RE.test(source) && !EXPERIMENTS_FROM_AMPLITUDE_KEYS_RE.test(source)) {
+  if (callsMissingOption(source, EXPERIMENTS_FROM_AMPLITUDE_RE, 'keys')) {
     out.push(
       '`experimentsFromAmplitude(...)` without `keys` records every flag in the result, configuration flags included, and an event carries at most 10. Pass `{ keys: [...] }` naming the experiment flags.',
     );
   }
-  if (OPENFEATURE_HOOK_RE.test(source) && !OPENFEATURE_HOOK_FLAGS_RE.test(source)) {
+  if (callsMissingOption(source, OPENFEATURE_HOOK_RE, 'flags')) {
     out.push(
       '`new AmplitudeAIHook()` without `flags` records every flag evaluated inside a session. Pass `{ flags: [...] }` naming the experiment flags.',
     );
