@@ -833,39 +833,45 @@ const LEGACY_EXPERIMENT_CONTEXT_RE = /["']?experiment_variant["']?\s*:/;
 const EXPERIMENTS_FROM_AMPLITUDE_RE = /\bexperimentsFromAmplitude\s*\(/g;
 const OPENFEATURE_HOOK_RE = /\bAmplitudeAIHook\s*\(/g;
 
-/**
- * The argument text of the call whose `(` is at `start`, with every nested
- * parenthesised group blanked out, so an option can be looked for at the
- * call's own level: `f(g(a, { k: 1 }), { k: 2 })` gives `" , { k: 2 }"`. An
- * unbalanced call runs to the end of `source`.
- */
-function topLevelArguments(source: string, start: number): string {
-  let out = '';
-  let depth = 1;
-  for (let i = start + 1; i < source.length; i++) {
-    const ch = source[i] as string;
-    if (ch === '(') depth++;
-    else if (ch === ')') {
-      depth--;
-      if (depth === 0) break;
-    }
-    if (depth === 1 || ch === '\n') out += ch;
-  }
-  return out;
-}
+const PAREN_RE = /[()]/g;
 
 /**
  * True when some call matched by `callRe` has no `option:` at its own level.
  * Nested calls such as `await experiment.fetchV2(user)` in the argument list
- * do not hide an option that follows them.
+ * do not hide an option that follows them, and an option inside a nested call
+ * does not count.
+ *
+ * One pass over the parentheses: every `(` opens a frame, text between
+ * parentheses lands in the innermost frame only, and a frame opened by a
+ * matched call is checked when it closes (or at end of input when
+ * unbalanced). Linear in the source, whatever the nesting depth.
  */
 function callsMissingOption(source: string, callRe: RegExp, option: string): boolean {
-  const optionRe = new RegExp(`(?:^|[,{(\\s])${option}\\s*:`);
+  const targets = new Set<number>();
   callRe.lastIndex = 0;
   for (let match = callRe.exec(source); match != null; match = callRe.exec(source)) {
-    if (!optionRe.test(topLevelArguments(source, match.index + match[0].length - 1))) return true;
+    targets.add(match.index + match[0].length - 1);
   }
-  return false;
+  if (targets.size === 0) return false;
+  const optionRe = new RegExp(`(?:^|[,{(\\s])${option}\\s*:`);
+  // One buffer per open frame; null for calls we are not checking.
+  const frames: Array<string[] | null> = [];
+  let last = 0;
+  PAREN_RE.lastIndex = 0;
+  for (let paren = PAREN_RE.exec(source); paren != null; paren = PAREN_RE.exec(source)) {
+    const top = frames[frames.length - 1];
+    if (top != null) top.push(source.slice(last, paren.index));
+    last = paren.index + 1;
+    if (paren[0] === '(') {
+      frames.push(targets.has(paren.index) ? [] : null);
+    } else if (frames.length > 0) {
+      const closed = frames.pop();
+      if (closed != null && !optionRe.test(closed.join(''))) return true;
+    }
+  }
+  const top = frames[frames.length - 1];
+  if (top != null) top.push(source.slice(last));
+  return frames.some((frame) => frame != null && !optionRe.test(frame.join('')));
 }
 
 /**

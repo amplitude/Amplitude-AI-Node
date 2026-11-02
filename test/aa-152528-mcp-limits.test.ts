@@ -87,6 +87,13 @@ describe('validate_file regex fallback stays linear', (): void => {
     ['function-calling blocks', (n) => `${'function:{'.repeat(n)}${BAD}`, 4000],
     ['wrapped constructors', (n) => `${'const a = new OpenAI('.repeat(n)}${BAD}`, 2000],
     ['long dotted receiver', (n) => `${'a.'.repeat(n)} x.chat.completions.create(${BAD}`, 6250],
+    // Every level is a helper call with its own keys; a per-call rescan is quadratic here.
+    [
+      'nested experiment helpers',
+      (n) => `${'experimentsFromAmplitude('.repeat(n)}x${', { keys: [] })'.repeat(n)}${BAD}`,
+      2000,
+    ],
+    ['nested openfeature hooks', (n) => `${'new AmplitudeAIHook('.repeat(n)}x${', { flags: [] })'.repeat(n)}${BAD}`, 2000],
     [
       'many call sites far from any function',
       (n) => `${'\n'.repeat(n)}${'o.chat.completions.create({})\n'.repeat(n)}${BAD}`,
