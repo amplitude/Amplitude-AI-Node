@@ -111,6 +111,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     CAST(NULL AS STRING) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     updated_at
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
@@ -142,6 +144,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     CAST(NULL AS STRING) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r
@@ -203,7 +207,9 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN REGEXP_LIKE(TRIM(e.experiment_key), '[^:]{1,256}') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= SYSDATE()
 )
@@ -227,6 +233,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN ARRAY_CONSTRUCT(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
@@ -268,6 +278,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN ARRAY_CONSTRUCT(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   ),
   import_cursor
@@ -361,6 +375,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     CAST(NULL AS STRING) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     updated_at
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
@@ -392,6 +408,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     CAST(NULL AS STRING) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r
@@ -453,7 +471,9 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN REGEXP_CONTAINS(TRIM(e.experiment_key), '^[^:]{1,256}$') AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= CURRENT_TIMESTAMP()
 )
@@ -477,6 +497,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN JSON_ARRAY(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
@@ -518,6 +542,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN JSON_ARRAY(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   )),
   import_cursor
@@ -609,6 +637,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     CAST(NULL AS STRING) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     updated_at
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
@@ -640,6 +670,8 @@ canonical AS (
     CAST(NULL AS STRING) AS span_input,
     CAST(NULL AS STRING) AS span_output,
     CAST(NULL AS STRING) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
     c.updated_at
   FROM tool_calls c
   LEFT JOIN tool_results r
@@ -701,7 +733,9 @@ settled AS (
   SELECT
     e.*,
     e.session_id || ':trace-' || CAST(e.exchange_number AS STRING) AS trace_id,
-    e.session_id || ':' || e.message_id AS event_key
+    e.session_id || ':' || e.message_id AS event_key,
+    CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_key) END AS experiment_key_clean,
+    CASE WHEN TRIM(e.experiment_key) RLIKE '^[^:]{1,256}$' AND LENGTH(TRIM(e.experiment_variant)) BETWEEN 1 AND 256 THEN TRIM(e.experiment_variant) END AS experiment_variant_clean
   FROM exchanges e
   WHERE e.import_cursor <= current_timestamp()
 )
@@ -725,6 +759,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN array(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id,
     '[Agent] Turn ID', turn_id,
     '[Agent] Message ID', CASE WHEN role IN ('user', 'assistant') THEN event_key END,
@@ -766,6 +804,10 @@ SELECT
     '[Agent] Source', 'warehouse-sql',
     '[Agent] Content Mode', CASE WHEN include_content THEN 'full' ELSE 'metadata_only' END,
     '[Agent] Context', context,
+    '[Agent] Experiments', CASE WHEN experiment_key_clean IS NOT NULL THEN array(experiment_key_clean || ':' || experiment_variant_clean) END,
+    '[Agent] Experiment Key', experiment_key_clean,
+    '[Agent] Experiment Variant', experiment_variant_clean,
+    '[Agent] Experiment Unit', CASE WHEN experiment_key_clean IS NOT NULL THEN 'agent_session' END,
     '[Agent] Trace ID', trace_id
   )),
   import_cursor

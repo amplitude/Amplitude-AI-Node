@@ -13,6 +13,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-1",
       "[Agent] Turn ID": 1,
       "[Agent] Message ID": "conv_1:a0",
@@ -38,6 +44,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-2",
       "[Agent] Turn ID": 2,
       "[Agent] Message ID": "conv_1:u1",
@@ -62,6 +74,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-2",
       "[Agent] Turn ID": 3,
       "[Agent] Invocation ID": "conv_1:c1",
@@ -90,6 +108,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-2",
       "[Agent] Turn ID": 4,
       "[Agent] Message ID": "conv_1:a1",
@@ -120,6 +144,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-2",
       "[Agent] Turn ID": 4,
       "[Agent] Is Error": false,
@@ -144,6 +174,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-3",
       "[Agent] Turn ID": 5,
       "[Agent] Message ID": "conv_1:u2",
@@ -168,6 +204,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-3",
       "[Agent] Turn ID": 6,
       "[Agent] Message ID": "conv_1:a2",
@@ -193,6 +235,12 @@
       "[Agent] Source": "warehouse-sql",
       "[Agent] Content Mode": "full",
       "[Agent] Context": "{\"channel\":\"web_chat\"}",
+      "[Agent] Experiments": [
+        "planner:v2"
+      ],
+      "[Agent] Experiment Key": "planner",
+      "[Agent] Experiment Variant": "v2",
+      "[Agent] Experiment Unit": "agent_session",
       "[Agent] Trace ID": "conv_1:trace-3"
     },
     "import_cursor": "2026-01-15 14:00:11"

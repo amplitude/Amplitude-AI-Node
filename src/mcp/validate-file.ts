@@ -824,7 +824,77 @@ export function analyzeFileInstrumentation(fullSource: string): FileAnalysis {
   const source =
     fullSource.length > MAX_ANALYZE_SOURCE_CHARS ? fullSource.slice(0, MAX_ANALYZE_SOURCE_CHARS) : fullSource;
   const sourceLines = source.split('\n');
-  const astResult = analyzeWithAST(source, sourceLines);
-  if (astResult) return astResult;
-  return analyzeWithRegex(source);
+  const analysis = analyzeWithAST(source, sourceLines) ?? analyzeWithRegex(source);
+  analysis.suggestions.push(...experimentSuggestions(source));
+  return analysis;
+}
+
+const LEGACY_EXPERIMENT_CONTEXT_RE = /["']?experiment_variant["']?\s*:/;
+const EXPERIMENTS_FROM_AMPLITUDE_RE = /\bexperimentsFromAmplitude\s*\(/g;
+const OPENFEATURE_HOOK_RE = /\bAmplitudeAIHook\s*\(/g;
+
+const PAREN_RE = /[()]/g;
+
+/**
+ * True when some call matched by `callRe` has no `option:` at its own level.
+ * Nested calls such as `await experiment.fetchV2(user)` in the argument list
+ * do not hide an option that follows them, and an option inside a nested call
+ * does not count.
+ *
+ * One pass over the parentheses: every `(` opens a frame, text between
+ * parentheses lands in the innermost frame only, and a frame opened by a
+ * matched call is checked when it closes (or at end of input when
+ * unbalanced). Linear in the source, whatever the nesting depth.
+ */
+function callsMissingOption(source: string, callRe: RegExp, option: string): boolean {
+  const targets = new Set<number>();
+  callRe.lastIndex = 0;
+  for (let match = callRe.exec(source); match != null; match = callRe.exec(source)) {
+    targets.add(match.index + match[0].length - 1);
+  }
+  if (targets.size === 0) return false;
+  const optionRe = new RegExp(`(?:^|[,{(\\s])${option}\\s*:`);
+  // One buffer per open frame; null for calls we are not checking.
+  const frames: Array<string[] | null> = [];
+  let last = 0;
+  PAREN_RE.lastIndex = 0;
+  for (let paren = PAREN_RE.exec(source); paren != null; paren = PAREN_RE.exec(source)) {
+    const top = frames[frames.length - 1];
+    if (top != null) top.push(source.slice(last, paren.index));
+    last = paren.index + 1;
+    if (paren[0] === '(') {
+      frames.push(targets.has(paren.index) ? [] : null);
+    } else if (frames.length > 0) {
+      const closed = frames.pop();
+      if (closed != null && !optionRe.test(closed.join(''))) return true;
+    }
+  }
+  const top = frames[frames.length - 1];
+  if (top != null) top.push(source.slice(last));
+  return frames.some((frame) => frame != null && !optionRe.test(frame.join('')));
+}
+
+/**
+ * Experiment-recording advice for `validate_file`: the legacy
+ * `context: { experiment_variant }` form, and helpers called without naming
+ * the experiment flags.
+ */
+export function experimentSuggestions(source: string): string[] {
+  const out: string[] = [];
+  if (LEGACY_EXPERIMENT_CONTEXT_RE.test(source)) {
+    out.push(
+      '`experiment_variant` in `context` is the legacy form. Pass the assignment as `experiments: [{ key, variant, provider }]` instead so every event carries `[Agent] Experiments` and the value is recorded once.',
+    );
+  }
+  if (callsMissingOption(source, EXPERIMENTS_FROM_AMPLITUDE_RE, 'keys')) {
+    out.push(
+      '`experimentsFromAmplitude(...)` without `keys` records every flag in the result, configuration flags included, and an event carries at most 10. Pass `{ keys: [...] }` naming the experiment flags.',
+    );
+  }
+  if (callsMissingOption(source, OPENFEATURE_HOOK_RE, 'flags')) {
+    out.push(
+      '`new AmplitudeAIHook()` without `flags` records every flag evaluated inside a session. Pass `{ flags: [...] }` naming the experiment flags.',
+    );
+  }
+  return out;
 }

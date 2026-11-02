@@ -1,0 +1,982 @@
+{
+  "description": "Shared cases for the experiments option and the [Agent] Experiment* properties. Mirrored byte-for-byte in Amplitude-AI-Node test/fixtures/experiment-cases.json; the nova OTLP receiver and the warehouse converters use the cases whose levels hold only 'call'. Levels apply least specific first: agent, child (BoundAgent.child / child()), session, call. debug_logs is the number of debug lines logged while resolving the levels. A string value written as {\"$repeat\": c, \"count\": n} is c repeated n times, and one written as {\"$concat\": [...]} is its parts joined.",
+  "cases": [
+    {
+      "name": "one_experiment",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "provider_and_unit",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "provider": "statsig",
+            "unit": "turn"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "turn",
+        "[Agent] Experiment Provider": "statsig"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "span_unit",
+      "levels": {
+        "call": [
+          {
+            "key": "router",
+            "variant": "fast",
+            "unit": "span"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "router:fast"
+        ],
+        "[Agent] Experiment Key": "router",
+        "[Agent] Experiment Variant": "fast",
+        "[Agent] Experiment Unit": "span"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "null_provider_and_unit",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "provider": null,
+            "unit": null
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "two_experiments_array_only",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          },
+          {
+            "key": "model",
+            "variant": "gpt-4o"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2",
+          "model:gpt-4o"
+        ]
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "empty_list",
+      "levels": {
+        "call": []
+      },
+      "expected": {},
+      "debug_logs": 0
+    },
+    {
+      "name": "session_overrides_agent",
+      "levels": {
+        "agent": [
+          {
+            "key": "prompt",
+            "variant": "v1"
+          }
+        ],
+        "session": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "call_overrides_session",
+      "levels": {
+        "session": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ],
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v3"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v3"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v3",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "precedence_keeps_first_position",
+      "levels": {
+        "agent": [
+          {
+            "key": "a",
+            "variant": "1"
+          },
+          {
+            "key": "b",
+            "variant": "1"
+          }
+        ],
+        "session": [
+          {
+            "key": "a",
+            "variant": "2"
+          }
+        ],
+        "call": [
+          {
+            "key": "b",
+            "variant": "3"
+          },
+          {
+            "key": "c",
+            "variant": "3"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "a:2",
+          "b:3",
+          "c:3"
+        ]
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "override_replaces_whole_entry",
+      "levels": {
+        "agent": [
+          {
+            "key": "prompt",
+            "variant": "v1",
+            "provider": "statsig",
+            "unit": "turn"
+          }
+        ],
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "child_inherits_parent",
+      "levels": {
+        "agent": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ],
+        "child": [
+          {
+            "key": "router",
+            "variant": "fast"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2",
+          "router:fast"
+        ]
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "child_overrides_parent",
+      "levels": {
+        "agent": [
+          {
+            "key": "prompt",
+            "variant": "v1"
+          }
+        ],
+        "child": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "session_overrides_child",
+      "levels": {
+        "agent": [
+          {
+            "key": "prompt",
+            "variant": "v1"
+          }
+        ],
+        "child": [
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ],
+        "session": [
+          {
+            "key": "prompt",
+            "variant": "v3"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v3"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v3",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "duplicate_key_last_wins",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v1"
+          },
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "ascii_whitespace_trimmed",
+      "levels": {
+        "call": [
+          {
+            "key": " \t\nprompt\r",
+            "variant": "\f v2 \u000b",
+            "provider": " statsig "
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session",
+        "[Agent] Experiment Provider": "statsig"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "non_ascii_whitespace_kept",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "\u00a0v2\u3000"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:\u00a0v2\u3000"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "\u00a0v2\u3000",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "variant_may_contain_colon",
+      "levels": {
+        "call": [
+          {
+            "key": "model",
+            "variant": "openai:gpt-4o"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "model:openai:gpt-4o"
+        ],
+        "[Agent] Experiment Key": "model",
+        "[Agent] Experiment Variant": "openai:gpt-4o",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "key_with_colon_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "a:b",
+            "variant": "v"
+          },
+          {
+            "key": "prompt",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "blank_key_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": " \t ",
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "blank_variant_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "   "
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "missing_variant_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt"
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "missing_key_dropped",
+      "levels": {
+        "call": [
+          {
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "non_string_key_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": 7,
+            "variant": "v2"
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "non_string_variant_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": 2
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "boolean_variant_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "flag",
+            "variant": true
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "non_object_entry_dropped",
+      "levels": {
+        "call": [
+          "prompt:v2",
+          {
+            "key": "model",
+            "variant": "gpt-4o"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "model:gpt-4o"
+        ],
+        "[Agent] Experiment Key": "model",
+        "[Agent] Experiment Variant": "gpt-4o",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "non_list_level_dropped",
+      "levels": {
+        "agent": [
+          {
+            "key": "prompt",
+            "variant": "v1"
+          }
+        ],
+        "call": {
+          "key": "prompt",
+          "variant": "v2"
+        }
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v1"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v1",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "key_at_limit_kept",
+      "levels": {
+        "call": [
+          {
+            "key": {
+              "$repeat": "k",
+              "count": 256
+            },
+            "variant": "v"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          {
+            "$concat": [
+              {
+                "$repeat": "k",
+                "count": 256
+              },
+              ":v"
+            ]
+          }
+        ],
+        "[Agent] Experiment Key": {
+          "$repeat": "k",
+          "count": 256
+        },
+        "[Agent] Experiment Variant": "v",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "key_over_limit_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": {
+              "$repeat": "k",
+              "count": 257
+            },
+            "variant": "v"
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "variant_astral_at_limit_kept",
+      "levels": {
+        "call": [
+          {
+            "key": "emoji",
+            "variant": {
+              "$repeat": "\ud83d\ude00",
+              "count": 256
+            }
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          {
+            "$concat": [
+              "emoji:",
+              {
+                "$repeat": "\ud83d\ude00",
+                "count": 256
+              }
+            ]
+          }
+        ],
+        "[Agent] Experiment Key": "emoji",
+        "[Agent] Experiment Variant": {
+          "$repeat": "\ud83d\ude00",
+          "count": 256
+        },
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 0
+    },
+    {
+      "name": "variant_astral_over_limit_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "emoji",
+            "variant": {
+              "$repeat": "\ud83d\ude00",
+              "count": 257
+            }
+          }
+        ]
+      },
+      "expected": {},
+      "debug_logs": 1
+    },
+    {
+      "name": "provider_over_limit_omitted",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "provider": {
+              "$repeat": "p",
+              "count": 257
+            }
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "blank_provider_omitted",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "provider": " "
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "non_string_provider_omitted",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "provider": 3
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "unknown_unit_falls_back",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "unit": "user"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "unit_is_case_sensitive",
+      "levels": {
+        "call": [
+          {
+            "key": "prompt",
+            "variant": "v2",
+            "unit": "Turn"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "prompt:v2"
+        ],
+        "[Agent] Experiment Key": "prompt",
+        "[Agent] Experiment Variant": "v2",
+        "[Agent] Experiment Unit": "agent_session"
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "eleventh_entry_dropped",
+      "levels": {
+        "call": [
+          {
+            "key": "e0",
+            "variant": "v"
+          },
+          {
+            "key": "e1",
+            "variant": "v"
+          },
+          {
+            "key": "e2",
+            "variant": "v"
+          },
+          {
+            "key": "e3",
+            "variant": "v"
+          },
+          {
+            "key": "e4",
+            "variant": "v"
+          },
+          {
+            "key": "e5",
+            "variant": "v"
+          },
+          {
+            "key": "e6",
+            "variant": "v"
+          },
+          {
+            "key": "e7",
+            "variant": "v"
+          },
+          {
+            "key": "e8",
+            "variant": "v"
+          },
+          {
+            "key": "e9",
+            "variant": "v"
+          },
+          {
+            "key": "e10",
+            "variant": "v"
+          },
+          {
+            "key": "e11",
+            "variant": "v"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "e0:v",
+          "e1:v",
+          "e2:v",
+          "e3:v",
+          "e4:v",
+          "e5:v",
+          "e6:v",
+          "e7:v",
+          "e8:v",
+          "e9:v"
+        ]
+      },
+      "debug_logs": 2
+    },
+    {
+      "name": "limit_applies_after_precedence",
+      "levels": {
+        "agent": [
+          {
+            "key": "e0",
+            "variant": "v"
+          },
+          {
+            "key": "e1",
+            "variant": "v"
+          },
+          {
+            "key": "e2",
+            "variant": "v"
+          },
+          {
+            "key": "e3",
+            "variant": "v"
+          },
+          {
+            "key": "e4",
+            "variant": "v"
+          },
+          {
+            "key": "e5",
+            "variant": "v"
+          },
+          {
+            "key": "e6",
+            "variant": "v"
+          },
+          {
+            "key": "e7",
+            "variant": "v"
+          },
+          {
+            "key": "e8",
+            "variant": "v"
+          },
+          {
+            "key": "e9",
+            "variant": "v"
+          }
+        ],
+        "call": [
+          {
+            "key": "e0",
+            "variant": "new"
+          },
+          {
+            "key": "e10",
+            "variant": "v"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "e0:new",
+          "e1:v",
+          "e2:v",
+          "e3:v",
+          "e4:v",
+          "e5:v",
+          "e6:v",
+          "e7:v",
+          "e8:v",
+          "e9:v"
+        ]
+      },
+      "debug_logs": 1
+    },
+    {
+      "name": "invalid_entries_do_not_count_toward_limit",
+      "levels": {
+        "call": [
+          {
+            "key": "bad:key",
+            "variant": "v"
+          },
+          {
+            "key": "e0",
+            "variant": "v"
+          },
+          {
+            "key": "e1",
+            "variant": "v"
+          },
+          {
+            "key": "e2",
+            "variant": "v"
+          },
+          {
+            "key": "e3",
+            "variant": "v"
+          },
+          {
+            "key": "e4",
+            "variant": "v"
+          },
+          {
+            "key": "e5",
+            "variant": "v"
+          },
+          {
+            "key": "e6",
+            "variant": "v"
+          },
+          {
+            "key": "e7",
+            "variant": "v"
+          },
+          {
+            "key": "e8",
+            "variant": "v"
+          },
+          {
+            "key": "e9",
+            "variant": "v"
+          }
+        ]
+      },
+      "expected": {
+        "[Agent] Experiments": [
+          "e0:v",
+          "e1:v",
+          "e2:v",
+          "e3:v",
+          "e4:v",
+          "e5:v",
+          "e6:v",
+          "e7:v",
+          "e8:v",
+          "e9:v"
+        ]
+      },
+      "debug_logs": 1
+    }
+  ]
+}

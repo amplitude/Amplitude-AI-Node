@@ -26,9 +26,11 @@ export const DIALECTS = {
     now: () => 'SYSDATE()',
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr}) IGNORE NULLS`,
+    fullMatch: (expr, pattern) => `REGEXP_LIKE(${expr}, '${pattern}')`,
     inlineObject: (entries) => `OBJECT_CONSTRUCT(${pairs(entries).join(', ')})`,
     properties: (entries, pad = '') => block('OBJECT_CONSTRUCT', entries, pad),
     jsonText: (entries) => `TO_JSON(OBJECT_CONSTRUCT(${pairs(entries).join(', ')}))`,
+    stringArray: (expr) => `ARRAY_CONSTRUCT(${expr})`,
     timestamp: (literal) => `'${literal}'::TIMESTAMP_NTZ`,
   },
   bigquery: {
@@ -43,10 +45,12 @@ export const DIALECTS = {
     now: () => 'CURRENT_TIMESTAMP()',
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr} IGNORE NULLS)`,
+    fullMatch: (expr, pattern) => `REGEXP_CONTAINS(${expr}, '^${pattern}$')`,
     inlineObject: (entries) => `JSON_OBJECT(${pairs(entries).join(', ')})`,
     properties: (entries, pad = '') => `JSON_STRIP_NULLS(${block('JSON_OBJECT', entries, pad)})`,
     jsonText: (entries) =>
       `TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT(${pairs(entries).join(', ')})))`,
+    stringArray: (expr) => `JSON_ARRAY(${expr})`,
     timestamp: (literal) => `TIMESTAMP '${literal}+00'`,
   },
   databricks: {
@@ -61,11 +65,13 @@ export const DIALECTS = {
     now: () => 'current_timestamp()',
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr}, TRUE)`,
+    fullMatch: (expr, pattern) => `${expr} RLIKE '^${pattern}$'`,
     inlineObject: (entries) => `named_struct(${pairs(entries).join(', ')})`,
     // Stored as JSON text in the staging table; the import query turns it back
     // into a struct with DATABRICKS_EVENT_PROPERTIES_SCHEMA.
     properties: (entries, pad = '') => `to_json(${block('named_struct', entries, pad)})`,
     jsonText: (entries) => `to_json(named_struct(${pairs(entries).join(', ')}))`,
+    stringArray: (expr) => `array(${expr})`,
     timestamp: (literal) => `TIMESTAMP '${literal}'`,
   },
   // Test-only rendering, executed in CI with DuckDB.
@@ -81,9 +87,11 @@ export const DIALECTS = {
     now: () => `CAST(now() AT TIME ZONE 'UTC' AS TIMESTAMP)`,
     toString: (value) => `CAST(${value} AS STRING)`,
     lastNonNull: (expr) => `LAST_VALUE(${expr} IGNORE NULLS)`,
+    fullMatch: (expr, pattern) => `regexp_full_match(${expr}, '${pattern}')`,
     inlineObject: (entries) => `json_object(${pairs(entries).join(', ')})`,
     properties: (entries, pad = '') => block('json_object', entries, pad),
     jsonText: (entries) => `CAST(json_object(${pairs(entries).join(', ')}) AS VARCHAR)`,
+    stringArray: (expr) => `json_array(${expr})`,
     timestamp: (literal) => `TIMESTAMP '${literal}'`,
   },
 };

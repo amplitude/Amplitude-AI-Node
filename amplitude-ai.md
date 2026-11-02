@@ -64,6 +64,7 @@ Only emit requirement lines that apply to the detected environment. Carry this l
    - Delegation patterns (parent calls child → `runAs`)
    - Feedback handlers (thumbs up/down UI components)
    - Tool functions (functions called by the LLM via function calling)
+   - Flag and experiment reads (Amplitude Experiment `fetchV2` / `evaluateV2`, Statsig `checkGate` / `getExperiment`, LaunchDarkly `variation`, OpenFeature `get*Value`, and the like; `scan_project` lists them as `flag_call_sites`) and which of them change agent behavior (prompt, model, router, tool). Those are the ones to pass as `experiments` in Step 3d.
    - **If Frontend: yes was flagged in Phase 1**: also find the client-side file where `sessionId` is generated and stored. Identify whether it uses `localStorage`, a React state, or another mechanism — this is the file that Step 3j will fix.
 4. For each event emission you plan to add, trace **all code paths** that should emit the same event type. Look for error handlers, retry-exhaustion paths, timeout handlers, and fallback branches that represent the same logical operation failing — these should also emit the event (typically with `success: false` or an `errorMessage`).
 
@@ -295,6 +296,29 @@ const result = await s.runAs(recipeAgent, async () => {
   return openai.chat.completions.create({ model: 'gpt-4o', messages: [...] });
 });
 ```
+
+**Experiments.** If the agent runs under an A/B test or feature flag (a prompt, model, router, or tool variant), pass the assignment as `experiments`. Do not put it in `context` or `eventProperties`:
+
+```typescript
+await agent
+  .session({
+    userId,
+    experiments: [{ key: 'planner', variant: flags.getVariant('planner'), provider: 'statsig' }],
+  })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+Rules (follow these, do not guess):
+
+- **Use the assignment the app already computes.** Find the flag client call (Amplitude Experiment, Statsig, LaunchDarkly, PostHog, GrowthBook, Optimizely, or in-house) and pass its key and variant. If there is no experiment, add nothing.
+- **Where to set it:** `ai.agent(id, { experiments })` when the whole agent is under the variant, `agent.session({ experiments })` when it's assigned per session, `{ experiments }` on one `agent.track*` / `s.track*` call for a single turn. A session entry overrides an agent entry with the same key; a call entry overrides both. Child agents (`agent.child()`, `s.runAs()`) inherit them.
+- **`unit`** is what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. **`provider`** is free text; use lowercase `amplitude`, `statsig`, `launchdarkly`, `posthog`, `growthbook`, `optimizely`, or `custom`.
+- **Limits:** key, variant, and provider are non-blank strings of up to 256 characters; keys can't contain `:`. At most 10 experiments per event. Invalid entries are dropped with a debug log, never thrown.
+- **Sent as** `[Agent] Experiments` (`["planner:v2"]`, an array with one `key:variant` string per experiment) on every event and, when exactly one experiment applies, also `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider`. Split any Agent Analytics chart by `[Agent] Experiments` to compare arms; `[Agent] Experiment Variant` works when one experiment applies.
+- **Existing `context: { experiment_variant }` code keeps working**; when you touch it, move the value to `experiments` instead of writing it in both places.
+- **Prefer the helper for the flag tool in use** (requires `@amplitude/ai` 0.25.0 or later). Amplitude Experiment: `experiments: experimentsFromAmplitude(variants, { keys: [...] })` where `variants` is the `fetchV2()` / `evaluateV2()` / `all()` result and `keys` names the experiment flags (sets `provider: 'amplitude'`, skips fallback variants; without `keys` every flag is recorded and more than 10 warns). Any OpenFeature provider (LaunchDarkly, Statsig, GrowthBook, Flagsmith, Unleash, ...): register `new AmplitudeAIHook({ flags: [...] })` from `@amplitude/ai/openfeature` once with `OpenFeature.addHooks([...])` and every listed flag evaluated inside a session is recorded with the provider's name lowercased (without `flags` every evaluation is recorded, configuration flags included); add `variantOf: (key, value) => ...` when the provider returns an object (Statsig experiments and dynamic configs) so the arm name comes out of it. Other SDKs: build the entry from the evaluation and call `s.addExperiments([...])` (or the module-level `addExperiments`) right after the flag read; events tracked from then on carry it. The helpers record the arm; none of them sends an exposure event.
 
 ### Step 3e: Track tools and explicit AI responses
 
@@ -646,6 +670,8 @@ For platform integrations where installing the SDK isn't practical (e.g., Sierra
 **Trace grouping:** Set `[Agent] Trace ID` on every event (see Step 3g-c). Events without it are grouped into a single turn.
 
 **Session lifecycle:** Send `[Agent] Session End` when the unit of work finishes. It is optional and recommended. There is no session context manager on the HTTP path to close it for you. If it never arrives, the server closes the session after 30 idle minutes by default, and after 24 hours from the session start when no per-session override is set. Enrichment runs once after the first close.
+
+**Experiments:** If the conversation ran under an A/B test or feature flag variant, set `"[Agent] Experiments": ["<key>:<variant>"]` on every event (one string per experiment, at most 10) and, only when exactly one applies, `"[Agent] Experiment Key"`, `"[Agent] Experiment Variant"`, `"[Agent] Experiment Unit"` (`agent_session`, `turn` or `span`) and `"[Agent] Experiment Provider"`. Same values and limits as Step 3d; the HTTP API does not validate them for you.
 
 **Batching:** The HTTP V2 API accepts up to 2000 events per request and 20MB payload. For large sessions, batch events in groups (e.g., 10-50 per request). Event ordering is reconstructed from `[Agent] Turn ID` + `time` regardless of batch arrival order.
 
@@ -1059,6 +1085,11 @@ After the PR is merged and deployed:
      + `deviceId` from your frontend for one-click navigation from
      AI session to browser replay.
 
+  8. (If you passed `experiments`) **Compare arms** — open any chart on
+     `[Agent]` events (cost, abandonment, evaluator pass rate), group by
+     `[Agent] Experiments`, or filter it with "contains key:variant" to
+     keep one arm in view. Quality Score by arm reads the same property.
+
 ---
 
 ## API Quick Reference
@@ -1070,10 +1101,13 @@ After the PR is merged and deployed:
 | `new AmplitudeAI({ apiKey, config? })` | Initialize SDK |
 | `new AIConfig({ contentMode?, redactPii?, customRedactionPatterns?, customRedactionFn?, dryRun?, reviewMode?, validate?, onEventCallback?, propagateContext?, debug? })` — `contentMode`: `'full'` (text + PII redaction) \| `'metadata_only'` (tokens/latency/cost, no text) \| `'customer_enriched'` (no text by default, customer sends enriched summaries via `trackSessionEnrichment`). `dryRun`: emit no events (safe for testing the instrumentation path). `reviewMode`: capture complete post-redaction events in sanitized pre-transport request previews without sending them. `validate`: surface schema violations before sending. `onEventCallback(event, statusCode, message)`: fired per tracked event, useful for debugging or secondary sinks. `propagateContext`: auto-propagate session context across async boundaries. | Privacy/debug config |
 | `ai.agent(agentId, opts?)` — `opts`: `{ description?, context?, userId?, env?, agentVersion? }`. `env` tags events with deployment environment (e.g. `'staging'`, `'production'`). `agentVersion` versions the agent for A/B comparison in dashboards. | Create bound agent |
-| `agent.child(agentId, opts?)` — `opts`: `{ description?, context? }` | Create child agent |
-| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush? }`. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Pages Functions). | Create session |
+| `agent.child(agentId, opts?)` — `opts`: `{ description?, context?, experiments? }` | Create child agent (inherits the parent's experiments) |
+| `agent.session(opts?)` — `opts`: `{ userId?, deviceId?, sessionId?, browserSessionId?, idleTimeoutMinutes?, autoFlush?, experiments? }`. `experiments: [{ key, variant, provider?, unit? }]` stamps `[Agent] Experiment*` on every event in the session. `idleTimeoutMinutes` defaults to 30; pass `-1` to disable. `autoFlush` auto-detects serverless (Vercel, Lambda, Netlify, GCP Cloud Functions, Azure Functions, Cloudflare Pages Functions). | Create session |
 | `session.run(fn)` | Execute with session context (auto-flushes in serverless) |
 | `s.runAs(childAgent, fn)` | Delegate to child agent |
+| `s.addExperiments(experiments)` / `addExperiments(experiments)` | Record an assignment learned inside the session; later events carry it |
+| `experimentsFromAmplitude(variants, { keys?, unit?, includeDefaults? })` | `experiments` entries from an Amplitude Experiment result (`provider: 'amplitude'`) |
+| `new AmplitudeAIHook({ unit?, provider?, flags?, includeDefaults?, variantOf? })` from `@amplitude/ai/openfeature` | OpenFeature hook: records every flag evaluated inside a session as an experiment |
 | `ai.flush()` | Flush queued events — required after each session in long-lived servers. Always use `try/finally`: `try { await session.run(...) } finally { await ai.flush() }` — without `finally`, a thrown error inside `session.run()` skips the flush and silently drops all events from that session. |
 
 ### Tracking Methods (on session `s`)

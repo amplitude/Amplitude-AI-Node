@@ -140,6 +140,7 @@ ${mcpJsonGeneric}
 - Cannot modify call sites at all: use \`patch()\` for aggregate-only monitoring (no per-user analytics).
 - Already emit OTEL GenAI spans: use \`AmplitudeAgentExporter({ amplitudeAI: ai })\` (or \`enableOtel()\`) to map them to [Agent] events.
 - LangChain / LangGraph: use \`AmplitudeCallbackHandler\` (duck-typed; implements \`handleChatModelStart\` for User Message).
+- App reads an A/B test or feature flag that changes agent behavior: pass the assignment as \`experiments\` — \`experimentsFromAmplitude(variants, { keys: [...] })\` for Amplitude Experiment, \`new AmplitudeAIHook({ flags: [...] })\` from \`@amplitude/ai/openfeature\` for any OpenFeature provider, or the literal entry — so \`[Agent] Experiments\` splits any chart by arm (see Experiments in \`amplitude-ai.md\`).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
 - Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
 - HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
@@ -204,6 +205,7 @@ Prompt:
 - \`examples/wrap-openai.ts\`
 - \`examples/multi-agent.ts\`
 - \`examples/framework-integration.ts\`
+- \`examples/experiments.ts\`
 - \`examples/real-openai.ts\` (requires OPENAI_API_KEY)
 
 ## Instrumentation Guide
@@ -367,6 +369,7 @@ const agent = ai.agent('shopping-agent', {
   groups?: Record<string, unknown>,
   deviceId?: string,
   browserSessionId?: string,
+  experiments?: { key, variant, provider?, unit? }[], // see Experiments
 });
 \`\`\`
 
@@ -387,6 +390,7 @@ const session = agent.session({
   deviceId?: string,
   browserSessionId?: string, // links to Amplitude browser session
   autoFlush?: boolean,       // auto-flush on completion (default: auto-detect serverless)
+  experiments?: { key, variant, provider?, unit? }[], // overrides the agent's, by key
 });
 \`\`\`
 
@@ -465,6 +469,17 @@ const searchProducts = tool(async (args: { query: string }) => { /* ... */ }, {
 const results = await searchProducts({ query: 'pancakes' });
 // [Agent] Tool Call event is automatically emitted with duration, success, input/output.
 \`\`\`
+
+### Experiments
+Record A/B test or feature flag assignment with \`experiments\`, not \`context\`:
+\`\`\`
+const agent = ai.agent('support-bot', { experiments: [{ key: 'router', variant: 'fast' }] });
+await agent.session({ userId: 'u1', experiments: [{ key: 'prompt', variant: 'v2', provider: 'statsig' }] }).run(async (s) => {
+  s.trackUserMessage('Hi', { experiments: [{ key: 'retry', variant: 'on', unit: 'turn' }] });
+});
+\`\`\`
+Every event carries \`[Agent] Experiments\` (an array of \`"key:variant"\` strings; split charts by it) and, when exactly one experiment applies, also \`[Agent] Experiment Key\` / \`Variant\` / \`Unit\` / \`Provider\`. Call entries override session entries, which override agent entries, by key; \`child()\` and \`runAs()\` inherit them. \`unit\` is \`agent_session\` (default), \`turn\`, or \`span\`. Key, variant, and provider are up to 256 characters, keys without \`:\`; at most 10 per event; invalid entries are dropped with a debug log.
+Take the assignment from the flag tool in use: \`experiments: experimentsFromAmplitude(variants, { keys: [...] })\` for an Amplitude Experiment \`fetchV2()\` / \`evaluateV2()\` result (\`provider: "amplitude"\`, fallback variants skipped; \`keys\` names the experiment flags, otherwise every flag is recorded and more than 10 warns); \`OpenFeature.addHooks([new AmplitudeAIHook({ flags: [...] })])\` from \`@amplitude/ai/openfeature\` for any OpenFeature provider (each listed flag evaluated inside a session is recorded with the provider's name; \`variantOf: (key, value) => ...\` names the arm for object-valued flags such as Statsig experiments); \`s.addExperiments([...])\` for an assignment learned after the session was entered. Neither sends an exposure event. Requires \`@amplitude/ai\` 0.25.0 or later.
 
 ### observe(fn, opts?) / observe(opts)(fn)
 Higher-order function that wraps a function to auto-emit [Agent] Span events.

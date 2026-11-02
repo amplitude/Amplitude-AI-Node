@@ -54,7 +54,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -65,6 +65,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -231,7 +257,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -242,6 +268,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -572,7 +624,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -583,6 +635,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -772,7 +850,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -783,6 +861,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -921,7 +1025,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -932,6 +1036,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -1084,7 +1214,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -1095,6 +1225,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -1203,7 +1359,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -1214,6 +1370,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -1313,7 +1495,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -1324,6 +1506,32 @@
           "name": "[Agent] Tags",
           "type": "string",
           "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
         },
         {
           "name": "[Agent] Git SHA",
@@ -1618,7 +1826,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Task Completed",

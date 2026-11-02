@@ -1,3 +1,5 @@
+import { EXPERIMENT_DEPS, FLAG_CLIENT_CALL_RE } from './experiment-deps.js';
+
 export interface InstrumentFileOptions {
   source: string;
   filePath: string;
@@ -170,12 +172,22 @@ function replaceProviderImports(
   return result;
 }
 
+function importsFlagClient(source: string): boolean {
+  return (
+    EXPERIMENT_DEPS.some((dep) => source.includes(`'${dep}'`) || source.includes(`"${dep}"`)) ||
+    FLAG_CLIENT_CALL_RE.test(source)
+  );
+}
+
 function addSessionWrapping(
   source: string,
   agentId: string,
   bootstrapImportPath: string,
 ): string {
   let result = source;
+  const experimentsTodo = importsFlagClient(source)
+    ? '// TODO: this file reads a feature flag. Pass the variant that changes agent behavior as\n  // experiments in agent.session({ ... }): experimentsFromAmplitude(variants, { keys: [...] }) for\n  // Amplitude Experiment, new AmplitudeAIHook({ flags: [...] }) from @amplitude/ai/openfeature for an\n  // OpenFeature provider, or [{ key, variant, provider }] built from the flag read. Every event then\n  // carries [Agent] Experiments.\n  '
+    : '';
 
   const importFromPath = new RegExp(
     `import\\s*\\{([^}]{0,1024})\\}\\s*from\\s*['"]${escapeRegExp(bootstrapImportPath)}['"]`,
@@ -201,7 +213,7 @@ function addSessionWrapping(
     const handlerMatch = result.match(ROUTE_HANDLER_HEAD_RE);
     result = result.replace(
       ROUTE_HANDLER_HEAD_RE,
-      (head: string) => `${head}\n  ${agentLine}\n  const { messages, userId, sessionId } = await req.json();\n  // TODO(required): Ensure userId comes from auth, not the request body, to prevent spoofing.\n  // sessionId is optional — omit it and the SDK auto-generates a unique UUID per request.\n  const _response = await agent.session({ userId, ...(sessionId && { sessionId }) }).run(async (s) => {`,
+      (head: string) => `${head}\n  ${agentLine}\n  ${experimentsTodo}const { messages, userId, sessionId } = await req.json();\n  // TODO(required): Ensure userId comes from auth, not the request body, to prevent spoofing.\n  // sessionId is optional — omit it and the SDK auto-generates a unique UUID per request.\n  const _response = await agent.session({ userId, ...(sessionId && { sessionId }) }).run(async (s) => {`,
     );
     if (handlerMatch?.index != null) {
       const openBraceIdx = result.indexOf('{', handlerMatch.index);
@@ -220,7 +232,7 @@ function addSessionWrapping(
   } else if (EXPRESS_HANDLER_RE.test(result) || HONO_HANDLER_RE.test(result)) {
     result = result.replace(
       EXPRESS_HANDLER_HEAD_RE,
-      (head: string) => `${head}\n    // TODO(required): Replace with the real user ID from your auth/request context.\n    // Without a real userId, per-user funnels, retention, and cohorts won't work.\n    const _userId = 'anonymous'; // e.g. req.user.id, req.auth.sub, req.session.userId\n    ${agentLine}\n    const _response = await agent.session({ userId: _userId }).run(async (s) => {`,
+      (head: string) => `${head}\n    // TODO(required): Replace with the real user ID from your auth/request context.\n    // Without a real userId, per-user funnels, retention, and cohorts won't work.\n    const _userId = 'anonymous'; // e.g. req.user.id, req.auth.sub, req.session.userId\n    ${agentLine}\n    ${experimentsTodo.replace(/\n {2}/g, '\n    ')}const _response = await agent.session({ userId: _userId }).run(async (s) => {`,
     );
   }
 

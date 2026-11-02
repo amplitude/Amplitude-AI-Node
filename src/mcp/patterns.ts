@@ -38,6 +38,14 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       'import { tool } from "@amplitude/ai";\nconst searchProducts = tool(async (query: string) => ({ items: [] }), {\n  name: "search_products",\n  inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },\n});',
   },
   {
+    id: 'experiments',
+    title: 'Experiment and feature flag assignment',
+    whenToUse:
+      'The agent runs under an A/B test or feature flag (prompt, model, router, or tool variant). Pass the variant the flag client already returned; never put it in context or eventProperties. Amplitude Experiment: experimentsFromAmplitude(variants, { keys: ["planner"] }). OpenFeature providers: new AmplitudeAIHook({ flags: ["planner"] }) from @amplitude/ai/openfeature. Learned later in the session: s.addExperiments([...]).',
+    snippet:
+      'import { experimentsFromAmplitude } from "@amplitude/ai";\nconst variants = await experiment.fetchV2({ user_id: "u1" }); // your existing Amplitude Experiment client\nconst session = ai.agent("assistant", { userId: "u1" }).session({\n  sessionId: "s1",\n  experiments: experimentsFromAmplitude(variants, { keys: ["planner"] }),\n  // or, from any flag client: [{ key: "planner", variant, provider: "statsig" }]\n});\n// Every event carries [Agent] Experiments; [Agent] Experiment Variant too when one experiment applies.',
+  },
+  {
     id: 'express-middleware',
     title: 'Express middleware propagation',
     whenToUse: 'Server app needs per-request context propagation.',

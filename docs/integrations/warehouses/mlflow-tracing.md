@@ -21,6 +21,8 @@ MLflow traces are span trees. [`otlp-replay.mjs`](./otlp-replay.mjs) converts ea
 | Trace metadata `mlflow.trace.user` | The user ID |
 | `--agent-id`, or an `agent_id` field on the row | The agent ID |
 
+MLflow traces carry no feature flag evaluation, so nothing here becomes `[Agent] Experiments`. To split charts by arm, record the assignment where the agent runs: `experiments` on the SDK, or a `feature_flag.evaluation` span event in an OTel export. Neither sends an exposure event.
+
 ## Export shape
 
 One JSON object per trace, in either shape:

@@ -7,9 +7,11 @@
 import { createRequire } from 'node:module';
 import { getActiveContext, isTrackerManaged } from '../context.js';
 import {
+  PROP_EXPERIMENTS,
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
 } from '../core/constants.js';
+import { withExperiments } from '../core/experiments.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { sanitizeStructuredContent } from '../core/privacy.js';
 import {
@@ -217,8 +219,15 @@ export function applySessionContext(
     ) {
       ep[PROP_SESSION_REPLAY_ID] = `${ctx.deviceId}/${ctx.browserSessionId}`;
     }
-    if (Object.keys(ep).length > 0) {
-      result.eventProperties = ep;
+    const withSessionExperiments =
+      ctx.experiments != null &&
+      ctx.experiments.length > 0 &&
+      result.sessionId === ctx.sessionId &&
+      !(PROP_EXPERIMENTS in ep)
+        ? (withExperiments(ep, ctx.experiments) ?? ep)
+        : ep;
+    if (Object.keys(withSessionExperiments).length > 0) {
+      result.eventProperties = withSessionExperiments;
     }
   }
 
