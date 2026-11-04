@@ -888,7 +888,7 @@ export function experimentSuggestions(source: string): string[] {
   }
   if (callsMissingOption(source, EXPERIMENTS_FROM_AMPLITUDE_RE, 'keys')) {
     out.push(
-      '`experimentsFromAmplitude(...)` without `keys` records every flag in the result, configuration flags included, and an event carries at most 10. Pass `{ keys: [...] }` naming the experiment flags.',
+      '`experimentsFromAmplitude(...)` without `keys` records every flag in the result, configuration flags included, and an event carries at most 32. Pass `{ keys: [...] }` naming the experiment flags.',
     );
   }
   if (callsMissingOption(source, OPENFEATURE_HOOK_RE, 'flags')) {

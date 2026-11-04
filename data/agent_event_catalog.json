@@ -69,7 +69,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -272,7 +272,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -639,7 +639,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -865,7 +865,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -1040,7 +1040,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -1229,7 +1229,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -1374,7 +1374,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
@@ -1510,7 +1510,7 @@
         {
           "name": "[Agent] Experiments",
           "type": "string",
-          "description": "Experiments this event ran under, one 'key:variant' string each (at most 10). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
           "is_array_type": true
         },
         {
