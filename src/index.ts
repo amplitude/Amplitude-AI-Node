@@ -207,8 +207,11 @@ export {
 
 // Core - Privacy
 export { PrivacyConfig, normalizeToolDefinitions } from './core/privacy.js';
-export { voiceTurnProperties } from './core/voice.js';
-export type { VoiceTurnOptions } from './core/voice.js';
+export { recordingAttachment, voiceTurnProperties } from './core/voice.js';
+export type {
+  RecordingAttachmentOptions,
+  VoiceTurnOptions,
+} from './core/voice.js';
 
 // Exceptions
 export {

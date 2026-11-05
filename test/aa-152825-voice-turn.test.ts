@@ -8,8 +8,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '../src/exceptions.js';
 import { PrivacyConfig } from '../src/core/privacy.js';
 import { trackAiMessage, trackUserMessage } from '../src/core/tracking.js';
-import { voiceTurnProperties } from '../src/core/voice.js';
+import { recordingAttachment, voiceTurnProperties } from '../src/core/voice.js';
 import {
+  PROP_ATTACHMENTS,
+  PROP_ATTACHMENT_TYPES,
+  PROP_HAS_ATTACHMENTS,
   PROP_CHANNEL,
   PROP_DIRECTION,
   PROP_END_OF_TURN_REASON,
@@ -138,4 +141,82 @@ describe('voice properties on tracked events', () => {
     expect(props[PROP_YIELDED]).toBe(false);
     expect(props[PROP_END_OF_TURN_REASON]).toBe('interrupted');
   });
+});
+
+const SIGNED_URL =
+  'https://cdn.example.com/rec/abc.wav?X-Amz-Signature=sig&X-Amz-Expires=3600';
+
+describe('recordingAttachment', () => {
+  it('keeps the URL exactly as given, query string included', () => {
+    expect(recordingAttachment(SIGNED_URL, { mimeType: 'audio/wav' })).toEqual({
+      type: 'audio',
+      name: 'call-recording',
+      mime_type: 'audio/wav',
+      url: SIGNED_URL,
+    });
+  });
+
+  it('accepts a custom name and mime type', () => {
+    expect(
+      recordingAttachment('http://rec.example.com/a.mp3', {
+        mimeType: 'audio/mpeg',
+        name: 'call-123',
+      }),
+    ).toEqual({
+      type: 'audio',
+      name: 'call-123',
+      mime_type: 'audio/mpeg',
+      url: 'http://rec.example.com/a.mp3',
+    });
+  });
+
+  it.each([
+    ['ftp://host/a.wav'],
+    ['/relative.wav'],
+    [''],
+    [null],
+    ['https://'],
+    ['https:///no-host.wav'],
+  ])('rejects non-http(s) or host-less URLs: %j', (bad) => {
+    expect(() => recordingAttachment(bad as unknown as string)).toThrow(
+      ValidationError,
+    );
+  });
+
+  it.each(['user', 'assistant'] as const)(
+    'URL ships only in full mode on the %s turn',
+    (role) => {
+      for (const mode of ['full', 'metadata_only'] as const) {
+        const amp = mockAmp();
+        const common = {
+          amplitude: amp,
+          userId: 'caller-42',
+          sessionId: 'call-1',
+          attachments: [recordingAttachment(SIGNED_URL)],
+          privacyConfig: new PrivacyConfig({ contentMode: mode }),
+        };
+        if (role === 'user') {
+          trackUserMessage({ ...common, messageContent: 'Bye' });
+        } else {
+          trackAiMessage({
+            ...common,
+            modelName: 'gpt-realtime',
+            provider: 'openai',
+            responseContent: 'Bye',
+          });
+        }
+        const props = amp.events[0]?.event_properties as Record<
+          string,
+          unknown
+        >;
+        expect(props[PROP_HAS_ATTACHMENTS]).toBe(true);
+        expect(props[PROP_ATTACHMENT_TYPES]).toEqual(['audio']);
+        if (mode === 'full') {
+          expect(String(props[PROP_ATTACHMENTS])).toContain(SIGNED_URL);
+        } else {
+          expect(props).not.toHaveProperty(PROP_ATTACHMENTS);
+        }
+      }
+    },
+  );
 });

@@ -1,6 +1,7 @@
 // Voice turn properties (AA-152825). Mirrors voice_turn_properties in the Python SDK.
 // Absent means unknown, never false: a key is included only when the caller set it.
 import { ValidationError } from '../exceptions.js';
+import type { Attachment } from '../types.js';
 import {
   PROP_CHANNEL,
   PROP_DIRECTION,
@@ -119,4 +120,49 @@ export function voiceTurnProperties(
     props[PROP_TRANSCRIPT_CONFIDENCE] = c;
   }
   return props;
+}
+
+export interface RecordingAttachmentOptions {
+  mimeType?: string;
+  name?: string;
+}
+
+/**
+ * Build an attachment that references a call recording by URL. Pass it in
+ * `attachments` on the last turn of the call, user or assistant. The URL is
+ * sent as given and never fetched. Like any attachment body it ships only in
+ * `full` mode. A signed link expires and grants access to whoever holds it;
+ * pass a URL your own access controls protect for a durable reference.
+ *
+ * @throws ValidationError when `url` is not an absolute http(s) URL.
+ */
+export function recordingAttachment(
+  url: string,
+  opts: RecordingAttachmentOptions = {},
+): Attachment & { type: 'audio'; name: string; mime_type: string; url: string } {
+  let parsed: URL | null = null;
+  // WHATWG URL accepts `https:///x` and promotes `x` to the host; Python's
+  // urlparse sees an empty netloc there, so require the authority explicitly.
+  if (typeof url === 'string' && /^https?:\/\/[^/?#]/i.test(url)) {
+    try {
+      parsed = new URL(url);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (
+    parsed === null ||
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    !parsed.host
+  ) {
+    throw new ValidationError(
+      `url must be an absolute http(s) URL, got ${JSON.stringify(url)}`,
+    );
+  }
+  return {
+    type: 'audio',
+    name: opts.name ?? 'call-recording',
+    mime_type: opts.mimeType ?? 'audio/wav',
+    url,
+  };
 }

@@ -399,6 +399,7 @@ export interface Attachment {
   content?: string;
   url?: string;
   size_bytes?: number;
+  mime_type?: string;
 }
 
 /**
