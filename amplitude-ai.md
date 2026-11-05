@@ -829,7 +829,7 @@ ws.on('message', (data) => {
 - **Never use a phone number as `userId` or `deviceId`.** Ask the user which field is their product user ID. If they want to group anonymous callers, use a salted SHA-256 hash of the number as `deviceId`, never the number itself.
 - **Recordings are links only.** `recordingAttachment(url)` sends the URL, never audio. The URL itself is sent only in `full` content mode; `metadata_only` sends `[Agent] Has Attachments` and the count. Amplitude never fetches it. A signed URL expires, and until then it grants access to the recording to anyone who has it.
 - **Do not send call cost as `[Agent] Cost USD`.** A platform's per-call total (telephony, speech, model) is not a model cost, and Cost USD is summed across AI Responses.
-- Amplitude rolls voice turns up into session properties on `[Agent] Session Record`, such as `[Agent] Avg Time To First Audio Ms`, `[Agent] User Interruption Count`, and `[Agent] Final End Of Turn Reason`. Chat sessions omit them.
+- Amplitude rolls voice turns up into session properties on `[Agent] Session Record`, such as `[Agent] Voice Avg Time To First Audio Ms`, `[Agent] Voice User Interruption Count`, and `[Agent] Voice Final End Of Turn Reason`. Chat sessions omit them.
 
 ---
 

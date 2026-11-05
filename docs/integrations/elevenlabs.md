@@ -28,12 +28,12 @@ scheduled job (for example, every 15 minutes)
 ### What you get
 
 - Every conversation as an Agent Analytics session, turn by turn, in the session viewer.
-- Voice properties on every turn: `[Agent] Channel` = `voice`, `[Agent] Direction`, and `[Agent] End Of Turn Reason`; agent turns the user talked over also carry `[Agent] Interrupted` and `[Agent] Interrupted By` = `user`.
-- How the conversation ended, as the `[Agent] End Of Turn Reason` of its last turn (see [End reasons](#end-reasons)).
+- Voice properties on every turn: `[Agent] Channel` = `voice`, `[Agent] Voice Direction`, and `[Agent] Voice End Of Turn Reason`; agent turns the user talked over also carry `[Agent] Voice Interrupted` and `[Agent] Voice Interrupted By` = `user`.
+- How the conversation ended, as the `[Agent] Voice End Of Turn Reason` of its last turn (see [End reasons](#end-reasons)).
 - ElevenLabs' `analysis.call_successful` as an `[Agent] Score` on the session.
 - Automatic quality signals on every closed session, and sessions joined to your product analytics through the same user ID.
 
-ElevenLabs reports transcript times in whole seconds and no per-turn speech or response timing that this guide could verify, so `[Agent] Speech Duration Ms` and `[Agent] Time To First Audio Ms` are not sent (see Phase 2). Model and token data per turn (`llm_usage`) are not mapped. `metadata.cost` (credits) and `metadata.cost_fiat` (USD) are the whole conversation's total, LLM and platform together, not the cost of one reply; `[Agent] Cost USD` is summed across AI Responses, so the adapter does not send them. ElevenLabs serves recordings only as audio bytes behind your API key, not as a URL, so no recording link is sent unless you store recordings yourself (see Phase 2).
+ElevenLabs reports transcript times in whole seconds and no per-turn speech or response timing that this guide could verify, so `[Agent] Voice Speech Duration Ms` and `[Agent] Voice Time To First Audio Ms` are not sent (see Phase 2). Model and token data per turn (`llm_usage`) are not mapped. `metadata.cost` (credits) and `metadata.cost_fiat` (USD) are the whole conversation's total, LLM and platform together, not the cost of one reply; `[Agent] Cost USD` is summed across AI Responses, so the adapter does not send them. ElevenLabs serves recordings only as audio bytes behind your API key, not as a URL, so no recording link is sent unless you store recordings yourself (see Phase 2).
 
 ### What you need before starting
 
@@ -78,7 +78,7 @@ Fetch or read one real finished conversation. Compare it to [fixtures/elevenlabs
 - **Authentication.** Requests send the API key in the `xi-api-key` header. Confirm a `200`.
 - **Turns.** `transcript` entries with `role` `user` or `agent` and a non-empty `message` become turns. Entries with no text (tool calls and results only) and user entries marked `ignored_as_backchannel` are skipped. If the user wants tool calls, map `tool_calls` and `tool_results` into `toolCalls` on the agent turn.
 - **Timestamps.** A turn's time is `metadata.start_time_unix_secs` plus `time_in_call_secs`, both whole seconds. Two turns in the same second share a time; Turn ID still orders them.
-- **Interruptions.** An agent entry with `interrupted: true` gets `[Agent] Interrupted`, `[Agent] Interrupted By` = `user`, and `[Agent] End Of Turn Reason` = `interrupted`. Every other turn is `completed`. Its `message` is what was spoken before the interruption.
+- **Interruptions.** An agent entry with `interrupted: true` gets `[Agent] Voice Interrupted`, `[Agent] Voice Interrupted By` = `user`, and `[Agent] Voice End Of Turn Reason` = `interrupted`. Every other turn is `completed`. Its `message` is what was spoken before the interruption.
 - **Timing.** `conversation_turn_metrics` holds per-turn metrics whose keys this guide could not verify. If a real response has a time-to-first-audio or speech-duration metric in milliseconds, map it into `turns[id]` as `timeToFirstAudioMs` or `speechDurationMs`.
 - **Direction.** `metadata.phone_call.direction` (`inbound` or `outbound`). A conversation without `phone_call` (the web widget or an SDK) is `in_app`.
 - **Voice or text.** A conversation with `metadata.text_only`, `metadata.whatsapp`, or `metadata.sms`, or whose turns are all `source_medium: "text"`, is a chat: it is sent without voice properties.
@@ -96,7 +96,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 ### Phase 4: Verify
 
 1. Run the dry run over a narrow window. Before showing the events, confirm with the user which field is the product user ID (do-not-guess answer 1). If the run reports conversations skipped for a phone-number identity, stop: show the user which field produced it and choose another; never switch it to a raw phone number.
-2. Show the user the exact events. Check that every turn has `[Agent] Channel` = `voice` and the right `[Agent] Direction`, and that interrupted agent turns are marked.
+2. Show the user the exact events. Check that every turn has `[Agent] Channel` = `voice` and the right `[Agent] Voice Direction`, and that interrupted agent turns are marked.
 3. Send a few real conversations. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events.
 4. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each conversation is one session, with messages in order and one "Turn" card per exchange
@@ -137,14 +137,14 @@ Each of these is something a real integration got wrong. The forwarder core impl
 These come on top of the rules above. voice-forwarder.mjs implements them.
 
 1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. A salted hash from `callerDeviceId` is the only phone-derived ID allowed.
-2. **`[Agent] Channel` and `[Agent] Direction` on every turn** of a voice conversation, and on no turn of a text-only one. Amplitude rolls them up into session properties.
-3. **The conversation's end reason goes on the last turn** as `[Agent] End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns are `completed`, or `interrupted` when the user talked over the agent.
+2. **`[Agent] Channel` and `[Agent] Voice Direction` on every turn** of a voice conversation, and on no turn of a text-only one. Amplitude rolls them up into session properties.
+3. **The conversation's end reason goes on the last turn** as `[Agent] Voice End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns are `completed`, or `interrupted` when the user talked over the agent.
 4. **A recording, when there is one, goes on the last turn only**, as one `audio` attachment. `[Agent] Has Attachments`, `[Agent] Attachment Count`, and `[Agent] Attachment Types` are sent in every content mode; the URL itself (`[Agent] Attachments`) only in `full` mode.
 5. **No conversation cost in `[Agent] Cost USD`.** A per-conversation total is not a model cost.
 
 ### End reasons
 
-The first row that matches sets `[Agent] End Of Turn Reason` on the last turn. `termination_reason` is free text, so its rows match on wording, case-insensitively; check them against real values in Phase 2 and add rows for any the user's conversations show. When the first match is a not mapped row, the last turn keeps its own reason (`completed`, or `interrupted`).
+The first row that matches sets `[Agent] Voice End Of Turn Reason` on the last turn. `termination_reason` is free text, so its rows match on wording, case-insensitively; check them against real values in Phase 2 and add rows for any the user's conversations show. When the first match is a not mapped row, the last turn keeps its own reason (`completed`, or `interrupted`).
 
 | ElevenLabs field | Value | End reason |
 |---|---|---|
@@ -169,11 +169,11 @@ ElevenLabs has no field that means the user interrupted the conversation as a wh
 | `[Agent] Score` | `analysis.call_successful` of `success` or `failure` | `[Agent] Score Name` = `call_success`, `[Agent] Score Value` (1 or 0), `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source` = `ai` |
 | `[Agent] Session End` | Once, last, for a `done` or `failed` conversation | `[Agent] Trace ID` of the final exchange |
 
-Voice properties, on User Message and AI Response of a voice conversation: `[Agent] Channel` = `voice`; `[Agent] Direction`; `[Agent] End Of Turn Reason`; and on agent turns the user talked over, `[Agent] Interrupted` and `[Agent] Interrupted By`. With `recordingUrlFor`, the last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments`.
+Voice properties, on User Message and AI Response of a voice conversation: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`; and on agent turns the user talked over, `[Agent] Voice Interrupted` and `[Agent] Voice Interrupted By`. With `recordingUrlFor`, the last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments`.
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID` (the ElevenLabs conversation ID), `[Agent] Agent ID`, `[Agent] Runtime` = `custom`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `elevenlabs`, `[Agent] Content Mode`, and `[Agent] Context` (`platform`, `elevenlabs_agent_id`, `termination_reason`, `phone_provider`).
 
-Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes, with voice rollups such as `[Agent] User Interruption Count` and `[Agent] Final End Of Turn Reason`.
+Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes, with voice rollups such as `[Agent] Voice User Interruption Count` and `[Agent] Voice Final End Of Turn Reason`.
 
 ### Example: one complete session
 
@@ -204,8 +204,8 @@ The events the adapter and forwarder core produce from [fixtures/elevenlabs-conv
         "text": "Hi, this is Acme calling about your order."
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "outbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "outbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -230,8 +230,8 @@ The events the adapter and forwarder core produce from [fixtures/elevenlabs-conv
         "text": "Oh hi. Is it late?"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "outbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "outbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -257,10 +257,10 @@ The events the adapter and forwarder core produce from [fixtures/elevenlabs-conv
         "text": "It shipped yesterday and"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "outbound",
-      "[Agent] Interrupted": true,
-      "[Agent] Interrupted By": "user",
-      "[Agent] End Of Turn Reason": "interrupted"
+      "[Agent] Voice Direction": "outbound",
+      "[Agent] Voice Interrupted": true,
+      "[Agent] Voice Interrupted By": "user",
+      "[Agent] Voice End Of Turn Reason": "interrupted"
     }
   },
   {
@@ -285,8 +285,8 @@ The events the adapter and forwarder core produce from [fixtures/elevenlabs-conv
         "text": "Will it come before Friday?"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "outbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "outbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -312,8 +312,8 @@ The events the adapter and forwarder core produce from [fixtures/elevenlabs-conv
         "text": "Yes, it arrives Thursday."
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "outbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "outbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {

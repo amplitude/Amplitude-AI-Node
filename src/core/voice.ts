@@ -4,14 +4,14 @@ import { ValidationError } from '../exceptions.js';
 import type { Attachment } from '../types.js';
 import {
   PROP_CHANNEL,
-  PROP_DIRECTION,
-  PROP_END_OF_TURN_REASON,
-  PROP_INTERRUPTED,
-  PROP_INTERRUPTED_BY,
-  PROP_SPEECH_DURATION_MS,
-  PROP_TIME_TO_FIRST_AUDIO_MS,
-  PROP_TRANSCRIPT_CONFIDENCE,
-  PROP_YIELDED,
+  PROP_VOICE_DIRECTION,
+  PROP_VOICE_END_OF_TURN_REASON,
+  PROP_VOICE_INTERRUPTED,
+  PROP_VOICE_INTERRUPTED_BY,
+  PROP_VOICE_SPEECH_DURATION_MS,
+  PROP_VOICE_TIME_TO_FIRST_AUDIO_MS,
+  PROP_VOICE_TRANSCRIPT_CONFIDENCE,
+  PROP_VOICE_YIELDED,
   VOICE_CHANNELS,
   VOICE_DIRECTIONS,
   VOICE_END_OF_TURN_REASONS,
@@ -71,39 +71,39 @@ export function voiceTurnProperties(
     VOICE_CHANNELS,
   );
   if (options.direction !== undefined) {
-    props[PROP_DIRECTION] = requireOneOf(
+    props[PROP_VOICE_DIRECTION] = requireOneOf(
       'direction',
       options.direction,
       VOICE_DIRECTIONS,
     );
   }
   if (options.speechDurationMs !== undefined) {
-    props[PROP_SPEECH_DURATION_MS] = requireNonNegativeNumber(
+    props[PROP_VOICE_SPEECH_DURATION_MS] = requireNonNegativeNumber(
       'speechDurationMs',
       options.speechDurationMs,
     );
   }
   if (options.timeToFirstAudioMs !== undefined) {
-    props[PROP_TIME_TO_FIRST_AUDIO_MS] = requireNonNegativeNumber(
+    props[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS] = requireNonNegativeNumber(
       'timeToFirstAudioMs',
       options.timeToFirstAudioMs,
     );
   }
   if (options.interrupted !== undefined) {
-    props[PROP_INTERRUPTED] = requireBoolean('interrupted', options.interrupted);
+    props[PROP_VOICE_INTERRUPTED] = requireBoolean('interrupted', options.interrupted);
   }
   if (options.interruptedBy !== undefined) {
-    props[PROP_INTERRUPTED_BY] = requireOneOf(
+    props[PROP_VOICE_INTERRUPTED_BY] = requireOneOf(
       'interruptedBy',
       options.interruptedBy,
       VOICE_INTERRUPTED_BY,
     );
   }
   if (options.yielded !== undefined) {
-    props[PROP_YIELDED] = requireBoolean('yielded', options.yielded);
+    props[PROP_VOICE_YIELDED] = requireBoolean('yielded', options.yielded);
   }
   if (options.endOfTurnReason !== undefined) {
-    props[PROP_END_OF_TURN_REASON] = requireOneOf(
+    props[PROP_VOICE_END_OF_TURN_REASON] = requireOneOf(
       'endOfTurnReason',
       options.endOfTurnReason,
       VOICE_END_OF_TURN_REASONS,
@@ -117,7 +117,7 @@ export function voiceTurnProperties(
     if (c > 1) {
       throw new ValidationError('transcriptConfidence must be in [0, 1]');
     }
-    props[PROP_TRANSCRIPT_CONFIDENCE] = c;
+    props[PROP_VOICE_TRANSCRIPT_CONFIDENCE] = c;
   }
   return props;
 }

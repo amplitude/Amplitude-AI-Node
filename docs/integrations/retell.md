@@ -28,8 +28,8 @@ scheduled job (for example, every 15 minutes)
 ### What you get
 
 - Every call as an Agent Analytics session, turn by turn, in the session viewer.
-- Voice properties on every turn: `[Agent] Channel` = `voice`, `[Agent] Direction`, `[Agent] Speech Duration Ms` from word timings, `[Agent] Time To First Audio Ms` on replies, and `[Agent] End Of Turn Reason`.
-- How the call ended, as the `[Agent] End Of Turn Reason` of its last turn (see [End reasons](#end-reasons)).
+- Voice properties on every turn: `[Agent] Channel` = `voice`, `[Agent] Voice Direction`, `[Agent] Voice Speech Duration Ms` from word timings, `[Agent] Voice Time To First Audio Ms` on replies, and `[Agent] Voice End Of Turn Reason`.
+- How the call ended, as the `[Agent] Voice End Of Turn Reason` of its last turn (see [End reasons](#end-reasons)).
 - Retell's `call_analysis.call_successful` as an `[Agent] Score` on the session, and user sentiment and p50 latency as filters.
 - A link to the call recording on the last turn, if the user opts in (see [Privacy](#privacy)).
 - Automatic quality signals on every closed session, and sessions joined to your product analytics through the same user ID.
@@ -95,7 +95,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 ### Phase 4: Verify
 
 1. Run the dry run over a narrow window. Before showing the events, confirm with the user which field is the product user ID (do-not-guess answer 1). If the run reports calls skipped for a phone-number identity, stop: show the user which field produced it and choose another; never switch it to a raw phone number.
-2. Show the user the exact events. Check that every turn has `[Agent] Channel` = `voice` and the right `[Agent] Direction`, and that only the last turn carries the recording.
+2. Show the user the exact events. Check that every turn has `[Agent] Channel` = `voice` and the right `[Agent] Voice Direction`, and that only the last turn carries the recording.
 3. Send a few real calls. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events.
 4. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each call is one session, with messages in order and one "Turn" card per exchange
@@ -136,14 +136,14 @@ Each of these is something a real integration got wrong. The forwarder core impl
 These come on top of the rules above. voice-forwarder.mjs implements them.
 
 1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. A salted hash from `callerDeviceId` is the only phone-derived ID allowed.
-2. **`[Agent] Channel` and `[Agent] Direction` on every turn.** Amplitude rolls them up into session properties.
-3. **The call's end reason goes on the last turn** as `[Agent] End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns default to `completed`.
+2. **`[Agent] Channel` and `[Agent] Voice Direction` on every turn.** Amplitude rolls them up into session properties.
+3. **The call's end reason goes on the last turn** as `[Agent] Voice End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns default to `completed`.
 4. **The recording goes on the last turn only**, as one `audio` attachment. `[Agent] Has Attachments`, `[Agent] Attachment Count`, and `[Agent] Attachment Types` are sent in every content mode; the URL itself (`[Agent] Attachments`) only in `full` mode.
 5. **No call cost in `[Agent] Cost USD`.** A per-call total is not a model cost.
 
 ### End reasons
 
-`disconnection_reason` to `[Agent] End Of Turn Reason` on the last turn. Every value in Retell's documented enum is listed. Unmapped values describe calls that never reached a conversation, or were stopped by an operator; for those the last turn keeps its own `completed`, and the raw value is still in the `disconnection_reason` context key.
+`disconnection_reason` to `[Agent] Voice End Of Turn Reason` on the last turn. Every value in Retell's documented enum is listed. Unmapped values describe calls that never reached a conversation, or were stopped by an operator; for those the last turn keeps its own `completed`, and the raw value is still in the `disconnection_reason` context key.
 
 | Retell `disconnection_reason` | End reason |
 |---|---|
@@ -164,11 +164,11 @@ Retell has no end reason that means the caller interrupted the call, so `interru
 | `[Agent] Score` | `call_analysis.call_successful` | `[Agent] Score Name` = `call_success`, `[Agent] Score Value` (1 or 0), `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source` = `ai` |
 | `[Agent] Session End` | Once, last, for an ended call | `[Agent] Trace ID` of the final exchange |
 
-Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Direction`; `[Agent] End Of Turn Reason`; and when word timings are present, `[Agent] Speech Duration Ms` and `[Agent] Time To First Audio Ms` (replies). The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
+Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`; and when word timings are present, `[Agent] Voice Speech Duration Ms` and `[Agent] Voice Time To First Audio Ms` (replies). The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID` (the Retell call ID), `[Agent] Agent ID`, `[Agent] Runtime` = `custom`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `retell`, `[Agent] Content Mode`, and `[Agent] Context` (`platform`, `call_type`, `retell_agent_id`, `disconnection_reason`, `user_sentiment`, `e2e_latency_p50_ms`).
 
-Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes, with voice rollups such as `[Agent] Avg Time To First Audio Ms` and `[Agent] Final End Of Turn Reason`.
+Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes, with voice rollups such as `[Agent] Voice Avg Time To First Audio Ms` and `[Agent] Voice Final End Of Turn Reason`.
 
 ### Example: one complete session
 
@@ -199,9 +199,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
         "text": "How can I help?"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] Speech Duration Ms": 1000,
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice Speech Duration Ms": 1000,
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -226,9 +226,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
         "text": "Where is my order?"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] Speech Duration Ms": 1200,
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice Speech Duration Ms": 1200,
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -254,10 +254,10 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
         "text": "It arrives Thursday."
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] Speech Duration Ms": 1200,
-      "[Agent] Time To First Audio Ms": 700,
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice Speech Duration Ms": 1200,
+      "[Agent] Voice Time To First Audio Ms": 700,
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -282,9 +282,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
         "text": "Thanks, bye."
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] Speech Duration Ms": 800,
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice Speech Duration Ms": 800,
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -310,10 +310,10 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
         "text": "Goodbye!"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] Speech Duration Ms": 550,
-      "[Agent] Time To First Audio Ms": 550,
-      "[Agent] End Of Turn Reason": "completed",
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice Speech Duration Ms": 550,
+      "[Agent] Voice Time To First Audio Ms": 550,
+      "[Agent] Voice End Of Turn Reason": "completed",
       "[Agent] Has Attachments": true,
       "[Agent] Attachment Count": 1,
       "[Agent] Attachment Types": [

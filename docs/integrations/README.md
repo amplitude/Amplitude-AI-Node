@@ -19,7 +19,7 @@ The platform runs the agent; the forwarder pulls or receives finished conversati
 | ElevenLabs Agents (voice) | [elevenlabs.md](./elevenlabs.md) | Scheduled pull of finished conversations from the conversations API, windowed on start time | 2026-11-05 |
 | Bland AI (voice) | [bland.md](./bland.md) | Scheduled pull of finished calls from the calls API, windowed on creation time, then call details for each | 2026-11-05 |
 
-The voice guides also send voice turn properties (`[Agent] Channel`, `[Agent] Direction`, `[Agent] End Of Turn Reason`, and timing where the platform reports it) and, if you opt in, a link to the call recording on the last turn. They never send a phone number as `user_id` or `device_id`.
+The voice guides also send voice turn properties (`[Agent] Channel`, `[Agent] Voice Direction`, `[Agent] Voice End Of Turn Reason`, and timing where the platform reports it) and, if you opt in, a link to the call recording on the last turn. They never send a phone number as `user_id` or `device_id`.
 
 ## Agent runtimes
 

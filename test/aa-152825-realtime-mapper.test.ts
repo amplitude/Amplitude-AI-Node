@@ -6,12 +6,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   PROP_CHANNEL,
-  PROP_END_OF_TURN_REASON,
-  PROP_INTERRUPTED,
-  PROP_INTERRUPTED_BY,
-  PROP_SPEECH_DURATION_MS,
-  PROP_TIME_TO_FIRST_AUDIO_MS,
-  PROP_YIELDED,
+  PROP_VOICE_END_OF_TURN_REASON,
+  PROP_VOICE_INTERRUPTED,
+  PROP_VOICE_INTERRUPTED_BY,
+  PROP_VOICE_SPEECH_DURATION_MS,
+  PROP_VOICE_TIME_TO_FIRST_AUDIO_MS,
+  PROP_VOICE_YIELDED,
 } from '../src/core/constants.js';
 import {
   RealtimeTurnMapper,
@@ -93,16 +93,16 @@ describe('RealtimeTurnMapper', () => {
     const [user, assistant] = turns as [VoiceTurn, VoiceTurn];
     expect(user.role).toBe('user');
     expect(user.text).toBe('Where is my order?');
-    expect(user.eventProperties[PROP_SPEECH_DURATION_MS]).toBe(1800);
+    expect(user.eventProperties[PROP_VOICE_SPEECH_DURATION_MS]).toBe(1800);
     expect(user.eventProperties[PROP_CHANNEL]).toBe('voice');
     expect(assistant.role).toBe('assistant');
     expect(assistant.text).toBe('It ships tomorrow.');
     expect(assistant.model).toBe('gpt-realtime');
     expect(
-      Math.round(assistant.eventProperties[PROP_TIME_TO_FIRST_AUDIO_MS] as number),
+      Math.round(assistant.eventProperties[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS] as number),
     ).toBe(600);
-    expect(assistant.eventProperties[PROP_END_OF_TURN_REASON]).toBe('completed');
-    expect(assistant.eventProperties).not.toHaveProperty(PROP_INTERRUPTED);
+    expect(assistant.eventProperties[PROP_VOICE_END_OF_TURN_REASON]).toBe('completed');
+    expect(assistant.eventProperties).not.toHaveProperty(PROP_VOICE_INTERRUPTED);
   });
 
   it('marks a barge-in as interrupted by the user (beta event names)', () => {
@@ -135,10 +135,10 @@ describe('RealtimeTurnMapper', () => {
     expect(turns).toHaveLength(1);
     const [assistant] = turns as [VoiceTurn];
     expect(assistant.text).toBe('Your order ');
-    expect(assistant.eventProperties[PROP_INTERRUPTED]).toBe(true);
-    expect(assistant.eventProperties[PROP_INTERRUPTED_BY]).toBe('user');
-    expect(assistant.eventProperties[PROP_YIELDED]).toBe(true);
-    expect(assistant.eventProperties[PROP_END_OF_TURN_REASON]).toBe('interrupted');
+    expect(assistant.eventProperties[PROP_VOICE_INTERRUPTED]).toBe(true);
+    expect(assistant.eventProperties[PROP_VOICE_INTERRUPTED_BY]).toBe('user');
+    expect(assistant.eventProperties[PROP_VOICE_YIELDED]).toBe(true);
+    expect(assistant.eventProperties[PROP_VOICE_END_OF_TURN_REASON]).toBe('interrupted');
   });
 
   it('maps a client cancel to interrupted without a cause', () => {
@@ -154,10 +154,10 @@ describe('RealtimeTurnMapper', () => {
     });
     expect(turns).toHaveLength(1);
     const [turn] = turns as [VoiceTurn];
-    expect(turn.eventProperties[PROP_END_OF_TURN_REASON]).toBe('interrupted');
-    expect(turn.eventProperties[PROP_INTERRUPTED]).toBe(true);
-    expect(turn.eventProperties).not.toHaveProperty(PROP_INTERRUPTED_BY);
-    expect(turn.eventProperties).not.toHaveProperty(PROP_YIELDED);
+    expect(turn.eventProperties[PROP_VOICE_END_OF_TURN_REASON]).toBe('interrupted');
+    expect(turn.eventProperties[PROP_VOICE_INTERRUPTED]).toBe(true);
+    expect(turn.eventProperties).not.toHaveProperty(PROP_VOICE_INTERRUPTED_BY);
+    expect(turn.eventProperties).not.toHaveProperty(PROP_VOICE_YIELDED);
   });
 
   it('maps a failed response to error and ignores unknown events', () => {
@@ -173,7 +173,7 @@ describe('RealtimeTurnMapper', () => {
     });
     expect(turns).toHaveLength(1);
     const [turn] = turns as [VoiceTurn];
-    expect(turn.eventProperties[PROP_END_OF_TURN_REASON]).toBe('error');
-    expect(turn.eventProperties).not.toHaveProperty(PROP_TIME_TO_FIRST_AUDIO_MS);
+    expect(turn.eventProperties[PROP_VOICE_END_OF_TURN_REASON]).toBe('error');
+    expect(turn.eventProperties).not.toHaveProperty(PROP_VOICE_TIME_TO_FIRST_AUDIO_MS);
   });
 });

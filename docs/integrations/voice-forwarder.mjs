@@ -58,25 +58,25 @@ const bool = (name, value) => {
 export function voiceTurnProperties(options = {}) {
   /** @type {Record<string, string | number | boolean>} */
   const props = { '[Agent] Channel': 'voice' };
-  if (options.direction !== undefined) props['[Agent] Direction'] = oneOf('direction', options.direction, VOICE_DIRECTIONS);
+  if (options.direction !== undefined) props['[Agent] Voice Direction'] = oneOf('direction', options.direction, VOICE_DIRECTIONS);
   if (options.speechDurationMs !== undefined) {
-    props['[Agent] Speech Duration Ms'] = nonNegative('speechDurationMs', options.speechDurationMs);
+    props['[Agent] Voice Speech Duration Ms'] = nonNegative('speechDurationMs', options.speechDurationMs);
   }
   if (options.timeToFirstAudioMs !== undefined) {
-    props['[Agent] Time To First Audio Ms'] = nonNegative('timeToFirstAudioMs', options.timeToFirstAudioMs);
+    props['[Agent] Voice Time To First Audio Ms'] = nonNegative('timeToFirstAudioMs', options.timeToFirstAudioMs);
   }
-  if (options.interrupted !== undefined) props['[Agent] Interrupted'] = bool('interrupted', options.interrupted);
+  if (options.interrupted !== undefined) props['[Agent] Voice Interrupted'] = bool('interrupted', options.interrupted);
   if (options.interruptedBy !== undefined) {
-    props['[Agent] Interrupted By'] = oneOf('interruptedBy', options.interruptedBy, VOICE_INTERRUPTED_BY);
+    props['[Agent] Voice Interrupted By'] = oneOf('interruptedBy', options.interruptedBy, VOICE_INTERRUPTED_BY);
   }
-  if (options.yielded !== undefined) props['[Agent] Yielded'] = bool('yielded', options.yielded);
+  if (options.yielded !== undefined) props['[Agent] Voice Yielded'] = bool('yielded', options.yielded);
   if (options.endOfTurnReason !== undefined) {
-    props['[Agent] End Of Turn Reason'] = oneOf('endOfTurnReason', options.endOfTurnReason, VOICE_END_OF_TURN_REASONS);
+    props['[Agent] Voice End Of Turn Reason'] = oneOf('endOfTurnReason', options.endOfTurnReason, VOICE_END_OF_TURN_REASONS);
   }
   if (options.transcriptConfidence !== undefined) {
     const confidence = nonNegative('transcriptConfidence', options.transcriptConfidence);
     if (confidence > 1) throw new Error('transcriptConfidence must be in [0, 1]');
-    props['[Agent] Transcript Confidence'] = confidence;
+    props['[Agent] Voice Transcript Confidence'] = confidence;
   }
   return props;
 }

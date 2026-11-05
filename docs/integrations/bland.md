@@ -28,13 +28,13 @@ scheduled job (for example, every 15 minutes)
 ### What you get
 
 - Every call as an Agent Analytics session, turn by turn, in the session viewer.
-- Voice properties on every turn: `[Agent] Channel` = `voice`, `[Agent] Direction` from `inbound`, and `[Agent] End Of Turn Reason`.
-- How the call ended, as the `[Agent] End Of Turn Reason` of its last turn (see [End reasons](#end-reasons)).
+- Voice properties on every turn: `[Agent] Channel` = `voice`, `[Agent] Voice Direction` from `inbound`, and `[Agent] Voice End Of Turn Reason`.
+- How the call ended, as the `[Agent] Voice End Of Turn Reason` of its last turn (see [End reasons](#end-reasons)).
 - A success score on the session, from a post-call analysis field the user chooses (Bland has no built-in success field).
 - A link to the call recording on the last turn, if the user opts in (see [Privacy](#privacy)).
 - Automatic quality signals on every closed session, and sessions joined to your product analytics through the same user ID.
 
-Bland's transcript gives each phrase one timestamp and no duration, so `[Agent] Speech Duration Ms` and `[Agent] Time To First Audio Ms` are not sent. Model, token, and per-reply cost data are not in the call object. Bland's `price` is the whole call's total, not the cost of one reply; `[Agent] Cost USD` is summed across AI Responses, so the adapter does not send it. Pathway actions (`agent-action` transcript entries) are skipped (see Phase 2).
+Bland's transcript gives each phrase one timestamp and no duration, so `[Agent] Voice Speech Duration Ms` and `[Agent] Voice Time To First Audio Ms` are not sent. Model, token, and per-reply cost data are not in the call object. Bland's `price` is the whole call's total, not the cost of one reply; `[Agent] Cost USD` is summed across AI Responses, so the adapter does not send it. Pathway actions (`agent-action` transcript entries) are skipped (see Phase 2).
 
 ### What you need before starting
 
@@ -95,7 +95,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 ### Phase 4: Verify
 
 1. Run the dry run over a narrow window. Before showing the events, confirm with the user which field is the product user ID (do-not-guess answer 1). If the run reports calls skipped for a phone-number identity, stop: show the user which field produced it and choose another; never switch it to a raw phone number.
-2. Show the user the exact events. Check that every turn has `[Agent] Channel` = `voice` and the right `[Agent] Direction`, and that only the last turn carries the recording.
+2. Show the user the exact events. Check that every turn has `[Agent] Channel` = `voice` and the right `[Agent] Voice Direction`, and that only the last turn carries the recording.
 3. Send a few real calls. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events.
 4. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - each call is one session, with messages in order and one "Turn" card per exchange
@@ -136,14 +136,14 @@ Each of these is something a real integration got wrong. The forwarder core impl
 These come on top of the rules above. voice-forwarder.mjs implements them.
 
 1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. A salted hash from `callerDeviceId` is the only phone-derived ID allowed.
-2. **`[Agent] Channel` and `[Agent] Direction` on every turn.** Amplitude rolls them up into session properties.
-3. **The call's end reason goes on the last turn** as `[Agent] End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns default to `completed`.
+2. **`[Agent] Channel` and `[Agent] Voice Direction` on every turn.** Amplitude rolls them up into session properties.
+3. **The call's end reason goes on the last turn** as `[Agent] Voice End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns default to `completed`.
 4. **The recording goes on the last turn only**, as one `audio` attachment. `[Agent] Has Attachments`, `[Agent] Attachment Count`, and `[Agent] Attachment Types` are sent in every content mode; the URL itself (`[Agent] Attachments`) only in `full` mode.
 5. **No call cost in `[Agent] Cost USD`.** A per-call total is not a model cost.
 
 ### End reasons
 
-The first row that matches sets `[Agent] End Of Turn Reason` on the last turn. When the first match is a not mapped row, the last turn keeps its own `completed`.
+The first row that matches sets `[Agent] Voice End Of Turn Reason` on the last turn. When the first match is a not mapped row, the last turn keeps its own `completed`.
 
 | Bland field | Value | End reason |
 |---|---|---|
@@ -168,11 +168,11 @@ Bland reports no silence timeout or caller interruption, so `silence` and `inter
 | `[Agent] Score` | The chosen `analysis` field, if any | `[Agent] Score Name` = `call_success`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source` = `ai` |
 | `[Agent] Session End` | Once, last, for a finished call | `[Agent] Trace ID` of the final exchange |
 
-Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Direction`; `[Agent] End Of Turn Reason`. The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
+Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`. The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID` (the Bland call ID), `[Agent] Agent ID`, `[Agent] Runtime` = `custom`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `bland`, `[Agent] Content Mode`, and `[Agent] Context` (`platform`, `status`, `answered_by`, `call_ended_by`, `pathway_id`).
 
-Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes, with voice rollups such as `[Agent] Direction` and `[Agent] Final End Of Turn Reason`.
+Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes, with voice rollups such as `[Agent] Voice Direction` and `[Agent] Voice Final End Of Turn Reason`.
 
 ### Example: one complete session
 
@@ -203,8 +203,8 @@ The events the adapter and forwarder core produce from [fixtures/bland-call.json
         "text": "Thanks for calling Acme. How can I help?"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -229,8 +229,8 @@ The events the adapter and forwarder core produce from [fixtures/bland-call.json
         "text": "Where is my order?"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -256,8 +256,8 @@ The events the adapter and forwarder core produce from [fixtures/bland-call.json
         "text": "It arrives Thursday."
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -282,8 +282,8 @@ The events the adapter and forwarder core produce from [fixtures/bland-call.json
         "text": "Thanks, bye."
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] End Of Turn Reason": "completed"
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice End Of Turn Reason": "completed"
     }
   },
   {
@@ -309,8 +309,8 @@ The events the adapter and forwarder core produce from [fixtures/bland-call.json
         "text": "Goodbye!"
       },
       "[Agent] Channel": "voice",
-      "[Agent] Direction": "inbound",
-      "[Agent] End Of Turn Reason": "completed",
+      "[Agent] Voice Direction": "inbound",
+      "[Agent] Voice End Of Turn Reason": "completed",
       "[Agent] Has Attachments": true,
       "[Agent] Attachment Count": 1,
       "[Agent] Attachment Types": [

@@ -239,8 +239,8 @@ describe('voice platform guides', () => {
       const last = lastTurn(built);
       for (const event of turns(built)) {
         expect(event.event_properties['[Agent] Channel']).toBe('voice');
-        expect(event.event_properties['[Agent] Direction']).toBe(p.direction);
-        expect(event.event_properties['[Agent] End Of Turn Reason']).toBeDefined();
+        expect(event.event_properties['[Agent] Voice Direction']).toBe(p.direction);
+        expect(event.event_properties['[Agent] Voice End Of Turn Reason']).toBeDefined();
         if (event !== last) expect(event.event_properties).not.toHaveProperty('[Agent] Has Attachments');
       }
       const url = p.recordingUrl(fixture);
@@ -313,23 +313,23 @@ describe('voice platform guides', () => {
 
   it('derives Vapi and Retell speech, time to first audio, and confidence from the fixture', () => {
     const vapi = turns(events(build(PLATFORMS[0], readFixture('vapi-call.json')))).map((e) => e.event_properties);
-    expect(vapi.map((e) => e['[Agent] Speech Duration Ms'])).toEqual([2200, 1800, 3200, 1100, 1650]);
-    expect(vapi.map((e) => e['[Agent] Time To First Audio Ms'])).toEqual([undefined, undefined, 700, undefined, 550]);
-    expect(vapi.map((e) => e['[Agent] Transcript Confidence'])).toEqual([undefined, 0.94, undefined, 0.97, undefined]);
+    expect(vapi.map((e) => e['[Agent] Voice Speech Duration Ms'])).toEqual([2200, 1800, 3200, 1100, 1650]);
+    expect(vapi.map((e) => e['[Agent] Voice Time To First Audio Ms'])).toEqual([undefined, undefined, 700, undefined, 550]);
+    expect(vapi.map((e) => e['[Agent] Voice Transcript Confidence'])).toEqual([undefined, 0.94, undefined, 0.97, undefined]);
 
     const retell = turns(events(build(PLATFORMS[1], readFixture('retell-call.json')))).map((e) => e.event_properties);
-    expect(retell.map((e) => e['[Agent] Speech Duration Ms'])).toEqual([1000, 1200, 1200, 800, 550]);
-    expect(retell.map((e) => e['[Agent] Time To First Audio Ms'])).toEqual([undefined, undefined, 700, undefined, 550]);
+    expect(retell.map((e) => e['[Agent] Voice Speech Duration Ms'])).toEqual([1000, 1200, 1200, 800, 550]);
+    expect(retell.map((e) => e['[Agent] Voice Time To First Audio Ms'])).toEqual([undefined, undefined, 700, undefined, 550]);
   });
 
   it('marks the ElevenLabs agent turn the user talked over', () => {
     const built = turns(events(build(PLATFORMS[2], readFixture('elevenlabs-conversation.json'))));
-    const interrupted = built.filter((e) => e.event_properties['[Agent] Interrupted'] === true);
+    const interrupted = built.filter((e) => e.event_properties['[Agent] Voice Interrupted'] === true);
     expect(interrupted.map((e) => e.event_properties)).toEqual([
       expect.objectContaining({
         $llm_message: { text: 'It shipped yesterday and' },
-        '[Agent] Interrupted By': 'user',
-        '[Agent] End Of Turn Reason': 'interrupted',
+        '[Agent] Voice Interrupted By': 'user',
+        '[Agent] Voice End Of Turn Reason': 'interrupted',
       }),
     ]);
   });
@@ -347,9 +347,9 @@ describe('voice platform guides', () => {
       const fixture = readFixture(p.fixture);
       mutate(fixture);
       const built = events(build(p, fixture));
-      expect(lastTurn(built).event_properties['[Agent] End Of Turn Reason']).toBe(reason);
+      expect(lastTurn(built).event_properties['[Agent] Voice End Of Turn Reason']).toBe(reason);
       for (const event of turns(built).filter((e) => e !== lastTurn(built))) {
-        expect(event.event_properties['[Agent] End Of Turn Reason']).not.toBe(reason);
+        expect(event.event_properties['[Agent] Voice End Of Turn Reason']).not.toBe(reason);
       }
       expect(checkAgentEvents(built, {}).errors).toEqual([]);
     }
@@ -360,7 +360,7 @@ describe('voice platform guides', () => {
     fixture.disconnection_reason = 'voicemail_reached';
     fixture.transcript_object = fixture.transcript_object.slice(0, 1);
     const built = events(build(PLATFORMS[1], fixture));
-    expect(lastTurn(built).event_properties['[Agent] End Of Turn Reason']).toBe('completed');
+    expect(lastTurn(built).event_properties['[Agent] Voice End Of Turn Reason']).toBe('completed');
     expect(JSON.parse(String(built[0]?.event_properties['[Agent] Context']))).toMatchObject({
       disconnection_reason: 'voicemail_reached',
     });
@@ -402,7 +402,7 @@ describe('voice platform guides', () => {
     delete fixture.metadata.phone_call;
     for (const event of events(build(PLATFORMS[2], fixture))) {
       expect(event.event_properties).not.toHaveProperty('[Agent] Channel');
-      expect(event.event_properties).not.toHaveProperty('[Agent] Direction');
+      expect(event.event_properties).not.toHaveProperty('[Agent] Voice Direction');
     }
   });
 
@@ -674,9 +674,9 @@ describe('voice-forwarder.mjs', () => {
       turns: { a: { endOfTurnReason: 'completed' }, c: { endOfTurnReason: 'completed', timeToFirstAudioMs: 400 } },
       endReason: 'transferred',
     });
-    expect(out.map((e) => e.event_properties['[Agent] Direction'])).toEqual(['outbound', 'outbound', 'outbound']);
-    expect(out.map((e) => e.event_properties['[Agent] End Of Turn Reason'])).toEqual(['completed', undefined, 'transferred']);
-    expect(out[2]?.event_properties['[Agent] Time To First Audio Ms']).toBe(400);
+    expect(out.map((e) => e.event_properties['[Agent] Voice Direction'])).toEqual(['outbound', 'outbound', 'outbound']);
+    expect(out.map((e) => e.event_properties['[Agent] Voice End Of Turn Reason'])).toEqual(['completed', undefined, 'transferred']);
+    expect(out[2]?.event_properties['[Agent] Voice Time To First Audio Ms']).toBe(400);
     expect(input[0]?.event_properties).not.toHaveProperty('[Agent] Channel');
   });
 });
