@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Changed
-- **Voice agent guidance.** The coding-agent guide and the Vapi, Retell, ElevenLabs, and Bland guides tell the customer to choose `deviceId`. `callerDeviceId` remains one optional helper.
+- **Voice agent guidance.** The coding-agent guide, the generated `AGENTS.md` routing line, and the Vapi, Retell, ElevenLabs, and Bland guides tell the customer to choose `deviceId`. `callerDeviceId` remains one optional helper.
 
 ## 0.26.0
 
