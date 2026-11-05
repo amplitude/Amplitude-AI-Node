@@ -17,7 +17,13 @@ import {
   PROP_EXPERIMENTS,
 } from './constants.js';
 
-export const MAX_EXPERIMENTS = 10;
+/**
+ * Per-event cap, shared with the Session Record union in enrichment. Sized from
+ * a production read-back (2026-11-04): a session under a feature-flag-heavy
+ * agent carried up to 25 assignments after non-assignments were dropped, and
+ * 38% carried more than 10. 32 covers that with headroom.
+ */
+export const MAX_EXPERIMENTS = 32;
 export const EXPERIMENT_FIELD_MAX_LENGTH = 256;
 export const EXPERIMENT_UNITS = ['agent_session', 'turn', 'span'] as const;
 export type ExperimentUnit = (typeof EXPERIMENT_UNITS)[number];
@@ -128,7 +134,7 @@ export function chainLevels(...levels: unknown[]): unknown[] {
  *
  * A later level's entry replaces an earlier one with the same key, as does a
  * later duplicate within a level; the entry keeps the position where the key
- * first appeared. Entries past the tenth are then dropped.
+ * first appeared. Entries past `MAX_EXPERIMENTS` are then dropped.
  */
 export function mergeExperiments(...levels: unknown[]): Experiment[] {
   const merged = new Map<string, Experiment>();

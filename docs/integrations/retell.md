@@ -497,7 +497,7 @@ function experimentField(value: unknown): string | undefined {
 /**
  * [Agent] Experiment properties, with the SDKs' rules: an entry needs a key
  * (no ':') and a variant of 1 to 256 characters, a later entry with the same
- * key wins, and at most 10 are sent. Invalid entries are dropped.
+ * key wins, and at most 32 are sent. Invalid entries are dropped.
  */
 export function experimentProperties(experiments: unknown): Record<string, unknown> {
   if (!Array.isArray(experiments)) return {};
@@ -516,7 +516,7 @@ export function experimentProperties(experiments: unknown): Record<string, unkno
       ...(provider !== undefined ? { provider } : {}),
     });
   }
-  const entries = [...byKey.values()].slice(0, 10);
+  const entries = [...byKey.values()].slice(0, 32);
   if (entries.length === 0) return {};
   const only = entries.length === 1 ? entries[0] : undefined;
   return {

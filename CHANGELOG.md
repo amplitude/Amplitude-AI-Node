@@ -9,6 +9,11 @@
 - **Voice platform guides.** Pull-job guides for Vapi, Retell AI, ElevenLabs Agents and Bland AI (`docs/integrations/<platform>.md`), each with a tested adapter, a checked-in fixture, an end reason table, the vendor success field as an `[Agent] Score`, the recording URL on the last turn, and direction from the call type. They refuse a raw phone number as `user_id` or `device_id`; `callerDeviceId()` in the new `docs/integrations/voice-forwarder.mjs` gives a salted SHA-256 `device_id` instead. Per-call platform cost is not sent as `[Agent] Cost USD`. `amplitude-ai.md` (Step 3l), `AGENTS.md` and `llms.txt` route voice agents to these guides and APIs.
 - **Event catalog: voice session rollups.** `[Agent] Session Record` and the `[Agent] Evaluator Result` session dimensions describe `[Agent] Channel`, `[Agent] Voice Direction`, `[Agent] Voice Avg Time To First Audio Ms`, `[Agent] Voice Max Time To First Audio Ms`, `[Agent] Voice Interruption Count`, `[Agent] Voice User Interruption Count`, `[Agent] Voice Yield Count`, `[Agent] Voice Final End Of Turn Reason` and `[Agent] Voice Total Speech Duration Ms`, which Amplitude's enrichment sets on voice sessions and omits on chat sessions. Additive only.
 
+## 0.26.0
+
+### Changed
+- **Up to 32 experiments per event** (was 10). `[Agent] Experiments` carries at most 32 `key:variant` entries; `mergeExperiments` drops entries past the 32nd, and `experimentsFromAmplitude(...)` without `keys` warns past 32. A production agent that records every flag it evaluates ran under up to 25 assignments per session once non-assignment evaluations were dropped, and more than 10 on 38% of sessions, so the old cap was dropping arms, including a live 50/50 test, on a fixed set of keys. Session Record enrichment folds arms under the same cap. The MCP `validate_file` guidance, the event catalog, and the forwarder core on every integration page say 32.
+
 ## 0.25.0
 
 ### Added
