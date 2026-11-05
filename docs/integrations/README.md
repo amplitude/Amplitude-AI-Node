@@ -14,6 +14,12 @@ The platform runs the agent; the forwarder pulls or receives finished conversati
 | Decagon | [decagon.md](./decagon.md) | Scheduled pull from the conversation export API, windowed on last update | 2026-10-06 |
 | Fin (Intercom) | [fin.md](./fin.md) | Scheduled search and retrieve from the conversations API, plus an optional close webhook | 2026-10-06 |
 | Agentforce (Salesforce) | [agentforce.md](./agentforce.md) | Scheduled SQL over the Session Tracing tables in Data Cloud, once each trace is complete | 2026-10-06 |
+| Vapi (voice) | [vapi.md](./vapi.md) | Scheduled pull of ended calls from the calls API, windowed on last update | 2026-11-05 |
+| Retell AI (voice) | [retell.md](./retell.md) | Scheduled pull of ended calls from list-calls, windowed on end time, then get-call for each | 2026-11-05 |
+| ElevenLabs Agents (voice) | [elevenlabs.md](./elevenlabs.md) | Scheduled pull of finished conversations from the conversations API, windowed on start time | 2026-11-05 |
+| Bland AI (voice) | [bland.md](./bland.md) | Scheduled pull of finished calls from the calls API, windowed on creation time, then call details for each | 2026-11-05 |
+
+The voice guides also send voice turn properties (`[Agent] Channel`, `[Agent] Direction`, `[Agent] End Of Turn Reason`, and timing where the platform reports it) and, if you opt in, a link to the call recording on the last turn. They never send a phone number as `user_id` or `device_id`.
 
 ## Agent runtimes
 
@@ -79,6 +85,7 @@ As with tracing tools, the import brings in what the table already records, incl
 - [check-agent-events.mjs](./check-agent-events.mjs): checks a file of `[Agent]` events (CSV, JSON, or NDJSON) against the rules every guide shares, before you send or import it. No dependencies: `node check-agent-events.mjs events.json`.
 - [warehouses/otlp-replay.mjs](./warehouses/otlp-replay.mjs): converts exported spans to OTLP and sends them to Amplitude. No dependencies.
 - [redact-pii.mjs](./redact-pii.mjs): applies the SDK's PII patterns to one string. No dependencies. Pass it as `redact` on an HTTP forwarder, or call it from a Collector processor. See [privacy.md](./privacy.md).
+- [voice-forwarder.mjs](./voice-forwarder.mjs): the voice additions the voice platform guides share: voice turn properties, the recording link on the last turn, the phone-number identity check, and an optional salted hash of the caller's number as a device ID. No dependencies.
 
 A machine-readable list of these guides is in [manifest.json](./manifest.json).
 
@@ -93,6 +100,10 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 - Decagon: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/decagon.md`
 - Fin: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/fin.md`
 - Agentforce: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/agentforce.md`
+- Vapi: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vapi.md`
+- Retell AI: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/retell.md`
+- ElevenLabs Agents: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/elevenlabs.md`
+- Bland AI: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/bland.md`
 - Langfuse: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md`
 - LangSmith: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md`
 - Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`

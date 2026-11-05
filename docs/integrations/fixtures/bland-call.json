@@ -1,0 +1,35 @@
+{
+  "call_id": "c1234567-89ab-cdef-0123-456789abcdef",
+  "call_length": 0.25,
+  "batch_id": null,
+  "external_id": "crm-interaction-48213",
+  "to": "+14155550199",
+  "from": "+14155550123",
+  "inbound": true,
+  "completed": true,
+  "created_at": "2026-10-20T16:59:58.000000+00:00",
+  "started_at": "2026-10-20T17:00:00+00:00",
+  "queue_status": "complete",
+  "status": "completed",
+  "error_message": null,
+  "answered_by": "human",
+  "record": true,
+  "recording_url": "https://recordings.bland.example/c1234567-89ab-cdef-0123-456789abcdef.mp3?token=9d2c",
+  "metadata": {
+    "user_id": "user_48213"
+  },
+  "summary": "The caller asked about an order; the agent said it arrives Thursday.",
+  "price": 0.023,
+  "call_ended_by": "USER",
+  "transferred_to": null,
+  "corrected_duration": "15",
+  "concatenated_transcript": "assistant: Thanks for calling Acme. How can I help? \n user: Where is my order? \n assistant: It arrives Thursday. \n user: Thanks, bye. \n assistant: Goodbye!",
+  "transcripts": [
+    { "id": 9100001, "created_at": "2026-10-20T17:00:01.200000+00:00", "text": "Thanks for calling Acme. How can I help?", "user": "assistant" },
+    { "id": 9100002, "created_at": "2026-10-20T17:00:04.100000+00:00", "text": "Where is my order?", "user": "user" },
+    { "id": 9100003, "created_at": "2026-10-20T17:00:05.000000+00:00", "text": "Looked up order status", "user": "agent-action" },
+    { "id": 9100004, "created_at": "2026-10-20T17:00:06.600000+00:00", "text": "It arrives Thursday.", "user": "assistant" },
+    { "id": 9100005, "created_at": "2026-10-20T17:00:11.000000+00:00", "text": "Thanks, bye.", "user": "user" },
+    { "id": 9100006, "created_at": "2026-10-20T17:00:12.650000+00:00", "text": "Goodbye!", "user": "assistant" }
+  ]
+}
