@@ -56,7 +56,7 @@ Typically a few days of engineering: the job, the mapping, and verification in A
 Stop and ask the user for these. Never infer them from field names:
 
 1. **The user identity field.** Whether ElevenLabs' `user_id` (set by your app when it starts the conversation) equals the user ID product analytics uses, or which dynamic variable does. **Never `metadata.phone_call.external_number`.** A phone number is personal data and is not a stable product user; the adapter refuses any conversation whose user or device ID is a phone number or matches one of the call's numbers, and counts it as `phone_identity`.
-2. **Conversations with no user ID: skip or device_id?** Phone callers often have no product user ID. Ask whether to skip them (the default; the run counts them) or send them under a device ID through `resolveDeviceId`, knowing those sessions will not join to product analytics. The only phone-derived device ID allowed is `callerDeviceId(external_number, pepper)` from voice-forwarder.mjs: a SHA-256 hash of the number with a secret pepper.
+2. **Conversations with no user ID: skip or device_id?** Phone callers often have no product user ID. Ask whether to skip them (the default; the run counts them) or send them under a device ID through `resolveDeviceId`, knowing those sessions will not join to product analytics. `callerDeviceId(external_number, pepper)` from voice-forwarder.mjs is one optional helper. It hashes the number with a secret pepper. You choose the device ID, and no algorithm is required.
 3. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the ElevenLabs agent's name as the team refers to it.
 4. **Recordings.** Whether the user keeps their own copy of call audio at a URL they control. If so, and they want the link in Amplitude, map it with `recordingUrlFor`; it is sent only in `full` content mode, and Amplitude never fetches it (see [Privacy](#privacy)).
 
@@ -136,7 +136,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 
 These come on top of the rules above. voice-forwarder.mjs implements them.
 
-1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. A salted hash from `callerDeviceId` is the only phone-derived ID allowed.
+1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. `device_id` is your choice. A hash of the number is allowed, and no algorithm is required. `callerDeviceId(number, pepper)` is one optional helper.
 2. **`[Agent] Channel` and `[Agent] Voice Direction` on every turn** of a voice conversation, and on no turn of a text-only one. Amplitude rolls them up into session properties.
 3. **The conversation's end reason goes on the last turn** as `[Agent] Voice End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns are `completed`, or `interrupted` when the user talked over the agent.
 4. **A recording, when there is one, goes on the last turn only**, as one `audio` attachment. `[Agent] Has Attachments`, `[Agent] Attachment Count`, and `[Agent] Attachment Types` are sent in every content mode; the URL itself (`[Agent] Attachments`) only in `full` mode.
@@ -1079,7 +1079,7 @@ export async function syncElevenLabs(watermark: number, mapping: ElevenLabsMappi
 
 On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); the adapter passes [redact-pii.mjs](./redact-pii.mjs)'s `redactAgentContent` as `redact`, so transcripts are redacted before they leave your infrastructure. `AMPLITUDE_CONTENT_MODE=metadata_only` sends no transcript text at all; sessions, turns, voice properties, scores, and user joins still work.
 
-- **Phone numbers.** `external_number` and `agent_number` are never sent: not as `user_id`, not as `device_id`, not in `[Agent] Context`. The adapter refuses identities that look like phone numbers. `callerDeviceId` sends a salted SHA-256 hash instead, if the user chose that; keep the pepper secret, or anyone can hash candidate numbers and match them.
+- **Phone numbers.** `external_number` and `agent_number` are never sent: not as `user_id`, not as `device_id`, not in `[Agent] Context`. The adapter refuses identities that look like phone numbers. `callerDeviceId` is one optional helper that hashes the number with a secret pepper, if you choose to use it. Keep the pepper secret, or anyone can hash candidate numbers and match them.
 - **Recordings.** No recording is sent by default. With `recordingUrlFor`, the recording is sent as a URL only, never audio bytes, and only in `full` content mode. Amplitude never fetches it. A signed URL expires, after which the link in Amplitude stops working, and until then it grants access to the recording to anyone who has it. Never build a URL that carries your ElevenLabs API key.
 - **Context.** Only the agent ID, termination reason, and phone provider are sent as context. Keep dynamic variables out of `[Agent] Context` unless the user confirms a key is not personal.
 
