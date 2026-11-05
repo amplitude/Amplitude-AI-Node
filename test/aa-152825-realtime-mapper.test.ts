@@ -11,6 +11,7 @@ import {
   PROP_INTERRUPTED_BY,
   PROP_SPEECH_DURATION_MS,
   PROP_TIME_TO_FIRST_AUDIO_MS,
+  PROP_YIELDED,
 } from '../src/core/constants.js';
 import {
   RealtimeTurnMapper,
@@ -136,7 +137,27 @@ describe('RealtimeTurnMapper', () => {
     expect(assistant.text).toBe('Your order ');
     expect(assistant.eventProperties[PROP_INTERRUPTED]).toBe(true);
     expect(assistant.eventProperties[PROP_INTERRUPTED_BY]).toBe('user');
+    expect(assistant.eventProperties[PROP_YIELDED]).toBe(true);
     expect(assistant.eventProperties[PROP_END_OF_TURN_REASON]).toBe('interrupted');
+  });
+
+  it('maps a client cancel to interrupted without a cause', () => {
+    const mapper = new RealtimeTurnMapper();
+    mapper.feed({ type: 'response.created', response: { id: 'r4' } });
+    const turns = mapper.feed({
+      type: 'response.done',
+      response: {
+        id: 'r4',
+        status: 'cancelled',
+        status_details: { reason: 'client_cancelled' },
+      },
+    });
+    expect(turns).toHaveLength(1);
+    const [turn] = turns as [VoiceTurn];
+    expect(turn.eventProperties[PROP_END_OF_TURN_REASON]).toBe('interrupted');
+    expect(turn.eventProperties[PROP_INTERRUPTED]).toBe(true);
+    expect(turn.eventProperties).not.toHaveProperty(PROP_INTERRUPTED_BY);
+    expect(turn.eventProperties).not.toHaveProperty(PROP_YIELDED);
   });
 
   it('maps a failed response to error and ignores unknown events', () => {

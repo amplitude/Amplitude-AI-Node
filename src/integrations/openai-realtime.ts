@@ -190,9 +190,11 @@ export class RealtimeTurnMapper {
 
     const status = response.status;
     const reason = asRecord(response.status_details).reason;
-    const interrupted = status === 'cancelled' && reason === 'turn_detected';
+    const cancelled = status === 'cancelled';
+    // Only turn_detected says the caller spoke; a client cancel has no known cause.
+    const byUser = cancelled && reason === 'turn_detected';
     let endOfTurnReason: VoiceTurnOptions['endOfTurnReason'];
-    if (interrupted) {
+    if (cancelled) {
       endOfTurnReason = 'interrupted';
     } else if (status === 'failed' || status === 'incomplete') {
       endOfTurnReason = 'error';
@@ -209,8 +211,9 @@ export class RealtimeTurnMapper {
     const eventProperties = voiceTurnProperties({
       direction: this._direction,
       timeToFirstAudioMs,
-      interrupted: interrupted ? true : undefined,
-      interruptedBy: interrupted ? 'user' : undefined,
+      interrupted: cancelled ? true : undefined,
+      interruptedBy: byUser ? 'user' : undefined,
+      yielded: byUser ? true : undefined,
       endOfTurnReason,
     });
     const turn: VoiceTurn = {
