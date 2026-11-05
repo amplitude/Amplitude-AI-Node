@@ -57,7 +57,7 @@ Typically a few days of engineering: the job, the mapping, and verification in A
 Stop and ask the user for these. Never infer them from field names:
 
 1. **The user identity field.** Which field holds the user ID that product analytics uses: usually a key in `metadata` or `request_data` that your app sets when it sends the call, or `external_id` if that is your user ID rather than an interaction ID. **Never `from` or `to`.** A phone number is personal data and is not a stable product user; the adapter refuses any call whose user or device ID is a phone number or matches one of the call's numbers, and counts it as `phone_identity`.
-2. **Calls with no user ID: skip or device_id?** Inbound callers often have no product user ID. Ask whether to skip them (the default; the run counts them) or send them under a device ID through `resolveDeviceId`, knowing those sessions will not join to product analytics. The only phone-derived device ID allowed is `callerDeviceId(number, pepper)` from voice-forwarder.mjs: a SHA-256 hash of the number with a secret pepper.
+2. **Calls with no user ID: skip or device_id?** Inbound callers often have no product user ID. Ask whether to skip them (the default; the run counts them) or send them under a device ID through `resolveDeviceId`, knowing those sessions will not join to product analytics. `callerDeviceId(number, pepper)` from voice-forwarder.mjs is one optional helper. It hashes the number with a secret pepper. You choose the device ID, and no algorithm is required.
 3. **The agent ID.** The name to report as `[Agent] Agent ID`. Default suggestion: the Bland pathway or agent name as the team refers to it.
 4. **The success field.** Bland has no built-in success flag. Ask which `analysis` key (from the call's analysis schema) says whether the call succeeded, and whether it is a boolean or a number. Without one, no score is sent.
 5. **The recording link.** Whether to send the recording URL at all. If yes, it is sent only in `full` content mode, and Amplitude never fetches it (see [Privacy](#privacy)).
@@ -135,7 +135,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 
 These come on top of the rules above. voice-forwarder.mjs implements them.
 
-1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. A salted hash from `callerDeviceId` is the only phone-derived ID allowed.
+1. **Never a phone number as `user_id` or `device_id`.** The adapter refuses it. `device_id` is your choice. A hash of the number is allowed, and no algorithm is required. `callerDeviceId(number, pepper)` is one optional helper.
 2. **`[Agent] Channel` and `[Agent] Voice Direction` on every turn.** Amplitude rolls them up into session properties.
 3. **The call's end reason goes on the last turn** as `[Agent] Voice End Of Turn Reason`, using only `completed`, `interrupted`, `silence`, `transferred`, or `error`. Other turns default to `completed`.
 4. **The recording goes on the last turn only**, as one `audio` attachment. `[Agent] Has Attachments`, `[Agent] Attachment Count`, and `[Agent] Attachment Types` are sent in every content mode; the URL itself (`[Agent] Attachments`) only in `full` mode.
@@ -1049,7 +1049,7 @@ export async function syncBland(watermark: number, mapping: BlandMappingOptions 
 
 On the HTTP path you own redaction, and it must run before sending. Amplitude does not scrub content after it arrives. Patterns and the metadata-only and callback choices are in [privacy.md](./privacy.md); the adapter passes [redact-pii.mjs](./redact-pii.mjs)'s `redactAgentContent` as `redact`, so caller transcripts are redacted before they leave your infrastructure. `AMPLITUDE_CONTENT_MODE=metadata_only` sends no transcript text at all; sessions, turns, voice properties, scores, and user joins still work.
 
-- **Phone numbers.** `from` and `to` are never sent: not as `user_id`, not as `device_id`, not in `[Agent] Context`. The adapter refuses identities that look like phone numbers. `callerDeviceId` sends a salted SHA-256 hash instead, if the user chose that; keep the pepper secret, or anyone can hash candidate numbers and match them.
+- **Phone numbers.** `from` and `to` are never sent: not as `user_id`, not as `device_id`, not in `[Agent] Context`. The adapter refuses identities that look like phone numbers. `callerDeviceId` is one optional helper that hashes the number with a secret pepper, if you choose to use it. Keep the pepper secret, or anyone can hash candidate numbers and match them.
 - **Recordings.** The recording is sent as a URL only, never audio bytes, and only in `full` content mode. Amplitude never fetches it. A signed URL expires, after which the link in Amplitude stops working, and until then it grants access to the recording to anyone who has it. If your Bland recording URLs do not expire, decide with the user whether to send them (`sendRecording: false` sends none).
 - **Context.** Only the status, answered-by, ended-by, and pathway ID are sent as context. Keep `metadata`, `request_data`, and `variables` out of `[Agent] Context` unless the user confirms a key is not personal.
 

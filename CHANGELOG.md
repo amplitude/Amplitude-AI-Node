@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Voice agent guidance.** The coding-agent guide and the Vapi, Retell, ElevenLabs, and Bland guides tell the customer to choose `deviceId`. `callerDeviceId` remains one optional helper.
+
 ## 0.26.0
 
 ### Added
