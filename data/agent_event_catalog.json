@@ -1999,6 +1999,51 @@
           "type": "string",
           "description": "Specific data quality issues detected. JSON array.",
           "is_array_type": true
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
+        },
+        {
+          "name": "[Agent] Direction",
+          "type": "string",
+          "description": "Call direction from the first voice turn that reports one ('inbound', 'outbound', or 'in_app'), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Avg Time To First Audio Ms",
+          "type": "number",
+          "description": "Average time to first audio in milliseconds across the session's agent turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Max Time To First Audio Ms",
+          "type": "number",
+          "description": "Slowest time to first audio in the session in milliseconds, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Interruption Count",
+          "type": "number",
+          "description": "Number of voice turns spoken over by either side, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] User Interruption Count",
+          "type": "number",
+          "description": "Number of voice turns the caller spoke over, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Yield Count",
+          "type": "number",
+          "description": "Number of agent turns cut off because the caller spoke, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Final End Of Turn Reason",
+          "type": "string",
+          "description": "End of turn reason of the last voice turn that reports one (completed, interrupted, silence, transferred, or error), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Total Speech Duration Ms",
+          "type": "number",
+          "description": "Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
         }
       ]
     },
@@ -2206,6 +2251,51 @@
           "name": "[Agent] Evaluator Enrichment Cost USD",
           "type": "number",
           "description": "Cost in USD of running this specific evaluator's LLM inference. Customer-attributable enrichment cost for this evaluator; distinct from the session's own LLM cost ([Agent] Session Cost USD)."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Session dimension: Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
+        },
+        {
+          "name": "[Agent] Direction",
+          "type": "string",
+          "description": "Session dimension: Call direction from the first voice turn that reports one ('inbound', 'outbound', or 'in_app'), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Avg Time To First Audio Ms",
+          "type": "number",
+          "description": "Session dimension: Average time to first audio in milliseconds across the session's agent turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Max Time To First Audio Ms",
+          "type": "number",
+          "description": "Session dimension: Slowest time to first audio in the session in milliseconds, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Interruption Count",
+          "type": "number",
+          "description": "Session dimension: Number of voice turns spoken over by either side, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] User Interruption Count",
+          "type": "number",
+          "description": "Session dimension: Number of voice turns the caller spoke over, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Yield Count",
+          "type": "number",
+          "description": "Session dimension: Number of agent turns cut off because the caller spoke, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Final End Of Turn Reason",
+          "type": "string",
+          "description": "Session dimension: End of turn reason of the last voice turn that reports one (completed, interrupted, silence, transferred, or error), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Total Speech Duration Ms",
+          "type": "number",
+          "description": "Session dimension: Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
         }
       ]
     }
