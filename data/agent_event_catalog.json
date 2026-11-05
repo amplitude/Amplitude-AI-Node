@@ -206,6 +206,51 @@
           "name": "[Agent] Message Source",
           "type": "string",
           "description": "Origin of the user message: 'user' for real end-user input, 'agent' for inter-agent delegation (parent agent sending instructions to a child agent). Automatically set by provider wrappers based on parent_agent_id context."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Channel the turn happened on: 'chat' or 'voice'. Omitted means chat. A session is voice if any of its turns is voice."
+        },
+        {
+          "name": "[Agent] Direction",
+          "type": "string",
+          "description": "For voice turns: 'inbound' or 'outbound' phone call, or 'in_app' for an assistant inside the product. Omitted when unknown."
+        },
+        {
+          "name": "[Agent] Speech Duration Ms",
+          "type": "number",
+          "description": "Milliseconds of speech in this turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Time To First Audio Ms",
+          "type": "number",
+          "description": "Milliseconds from the end of the caller's turn until the agent's first audible audio. This is what the caller hears. TTFB Ms is token latency and is a different number."
+        },
+        {
+          "name": "[Agent] Interrupted",
+          "type": "boolean",
+          "description": "Whether this turn was spoken over by the other side. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Interrupted By",
+          "type": "string",
+          "description": "Who spoke over whom: 'user' or 'agent'. Set only when the platform reports the side."
+        },
+        {
+          "name": "[Agent] Yielded",
+          "type": "boolean",
+          "description": "On an agent turn: true if the response was cut off because the caller spoke; false if the caller spoke and the response finished anyway. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] End Of Turn Reason",
+          "type": "string",
+          "description": "Why the turn ended: completed, interrupted, silence, transferred, or error. The platform's raw reason is in [Agent] Context."
+        },
+        {
+          "name": "[Agent] Transcript Confidence",
+          "type": "number",
+          "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
         }
       ]
     },
@@ -573,6 +618,51 @@
           "name": "[Agent] Message Label Map",
           "type": "string",
           "description": "Serialized JSON map of label key to value for quick lookup."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Channel the turn happened on: 'chat' or 'voice'. Omitted means chat. A session is voice if any of its turns is voice."
+        },
+        {
+          "name": "[Agent] Direction",
+          "type": "string",
+          "description": "For voice turns: 'inbound' or 'outbound' phone call, or 'in_app' for an assistant inside the product. Omitted when unknown."
+        },
+        {
+          "name": "[Agent] Speech Duration Ms",
+          "type": "number",
+          "description": "Milliseconds of speech in this turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Time To First Audio Ms",
+          "type": "number",
+          "description": "Milliseconds from the end of the caller's turn until the agent's first audible audio. This is what the caller hears. TTFB Ms is token latency and is a different number."
+        },
+        {
+          "name": "[Agent] Interrupted",
+          "type": "boolean",
+          "description": "Whether this turn was spoken over by the other side. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Interrupted By",
+          "type": "string",
+          "description": "Who spoke over whom: 'user' or 'agent'. Set only when the platform reports the side."
+        },
+        {
+          "name": "[Agent] Yielded",
+          "type": "boolean",
+          "description": "On an agent turn: true if the response was cut off because the caller spoke; false if the caller spoke and the response finished anyway. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] End Of Turn Reason",
+          "type": "string",
+          "description": "Why the turn ended: completed, interrupted, silence, transferred, or error. The platform's raw reason is in [Agent] Context."
+        },
+        {
+          "name": "[Agent] Transcript Confidence",
+          "type": "number",
+          "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
         }
       ]
     },

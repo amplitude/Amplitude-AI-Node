@@ -167,6 +167,19 @@ export {
   PROP_AGENT_CHAIN,
   PROP_ROOT_AGENT_NAME,
   PROP_REQUEST_COMPLEXITY,
+  PROP_CHANNEL,
+  PROP_DIRECTION,
+  PROP_SPEECH_DURATION_MS,
+  PROP_TIME_TO_FIRST_AUDIO_MS,
+  PROP_INTERRUPTED,
+  PROP_INTERRUPTED_BY,
+  PROP_YIELDED,
+  PROP_END_OF_TURN_REASON,
+  PROP_TRANSCRIPT_CONFIDENCE,
+  VOICE_CHANNELS,
+  VOICE_DIRECTIONS,
+  VOICE_INTERRUPTED_BY,
+  VOICE_END_OF_TURN_REASONS,
   SDK_VERSION,
   SDK_RUNTIME,
   MAX_SERIALIZED_LENGTH,
@@ -194,6 +207,8 @@ export {
 
 // Core - Privacy
 export { PrivacyConfig, normalizeToolDefinitions } from './core/privacy.js';
+export { voiceTurnProperties } from './core/voice.js';
+export type { VoiceTurnOptions } from './core/voice.js';
 
 // Exceptions
 export {
