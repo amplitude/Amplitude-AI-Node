@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Voice turn properties.** `voiceTurnProperties({ direction, speechDurationMs, timeToFirstAudioMs, interrupted, interruptedBy, yielded, endOfTurnReason, transcriptConfidence })` builds `[Agent] Channel` (`voice`), `[Agent] Direction`, `[Agent] Speech Duration Ms`, `[Agent] Time To First Audio Ms`, `[Agent] Interrupted`, `[Agent] Interrupted By`, `[Agent] Yielded`, `[Agent] End Of Turn Reason` (`completed`, `interrupted`, `silence`, `transferred`, `error`) and `[Agent] Transcript Confidence` for `eventProperties` on a user message or AI response. An option left out is omitted, never sent as `false` or `0`; invalid values throw `ValidationError`.
+- **`recordingAttachment(url, { mimeType, name })`.** Builds an `audio` attachment that links a call recording, for the last turn of a call. Only the URL is sent, and only in `full` content mode; `metadata_only` sends `[Agent] Has Attachments` and the count. Amplitude never fetches the URL. Signed URLs expire, and until then they grant access to the recording.
+- **`RealtimeTurnMapper`.** Maps OpenAI Realtime API server events (GA and beta event names) to voice turns with text, speech duration, time to first audio, interruptions and end of turn reason set, ready for `trackUserMessage` / `trackAiMessage`.
+- **Voice platform guides.** Pull-job guides for Vapi, Retell AI, ElevenLabs Agents and Bland AI (`docs/integrations/<platform>.md`), each with a tested adapter, a checked-in fixture, an end reason table, the vendor success field as an `[Agent] Score`, the recording URL on the last turn, and direction from the call type. They refuse a raw phone number as `user_id` or `device_id`; `callerDeviceId()` in the new `docs/integrations/voice-forwarder.mjs` gives a salted SHA-256 `device_id` instead. Per-call platform cost is not sent as `[Agent] Cost USD`. `amplitude-ai.md` (Step 3l), `AGENTS.md` and `llms.txt` route voice agents to these guides and APIs.
+- **Event catalog: voice session rollups.** `[Agent] Session Record` and the `[Agent] Evaluator Result` session dimensions describe `[Agent] Channel`, `[Agent] Direction`, `[Agent] Avg Time To First Audio Ms`, `[Agent] Max Time To First Audio Ms`, `[Agent] Interruption Count`, `[Agent] User Interruption Count`, `[Agent] Yield Count`, `[Agent] Final End Of Turn Reason` and `[Agent] Total Speech Duration Ms`, which Amplitude's enrichment sets on voice sessions and omits on chat sessions. Additive only.
+
 ## 0.25.0
 
 ### Added
