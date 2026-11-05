@@ -639,7 +639,7 @@ Sending an `[Agent] AI Response` with empty `$llm_message` content produces **no
 
 For platform integrations where installing the SDK isn't practical (e.g., Sierra's export API or push delivery, Intercom Fin, custom chat platforms), you can send `[Agent]` events directly to the [Amplitude HTTP V2 API](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/).
 
-**Hosted agent platforms:** if the agent runs on Sierra or Decagon, stop here and follow the platform guide instead; each is a complete, self-contained procedure with a tested forwarder: [`docs/integrations/sierra.md`](docs/integrations/sierra.md), [`docs/integrations/decagon.md`](docs/integrations/decagon.md). For other platforms, the same guides' forwarder core works with your own `normalize` function.
+**Hosted agent platforms:** if the agent runs on Sierra or Decagon, stop here and follow the platform guide instead; each is a complete, self-contained procedure with a tested forwarder: [`docs/integrations/sierra.md`](docs/integrations/sierra.md), [`docs/integrations/decagon.md`](docs/integrations/decagon.md). Voice platforms (Vapi, Retell AI, ElevenLabs Agents, Bland AI) have their own guides; see Step 3l. For other platforms, the same guides' forwarder core works with your own `normalize` function.
 
 **Cursor Agent SDK:** Cursor runs the model loop, so `patch()` and `wrap()` never see the call. Forward live sessions from a hook. Cursor's fixture evals stay in Cursor. Follow [`docs/integrations/cursor-agent-sdk.md`](docs/integrations/cursor-agent-sdk.md).
 
@@ -776,6 +776,60 @@ app.use(createAmplitudeAIMiddleware({
   userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 ```
+
+### Step 3l: Voice agents
+
+Skip this step unless the agent talks to users by voice (phone calls, or voice inside the app).
+
+**Hosted voice platforms.** If the agent runs on Vapi, Retell AI, ElevenLabs Agents, or Bland AI, there is no model call to wrap. Stop here and follow the platform's pull-job guide: [`docs/integrations/vapi.md`](docs/integrations/vapi.md), [`docs/integrations/retell.md`](docs/integrations/retell.md), [`docs/integrations/elevenlabs.md`](docs/integrations/elevenlabs.md), [`docs/integrations/bland.md`](docs/integrations/bland.md).
+
+**Your own voice loop.** Track each spoken turn as a normal user message or AI response, and add the voice properties with `voiceTurnProperties()`. Pass only what the voice stack reports; an option you leave out is omitted from the event, never sent as `false` or `0`.
+
+```typescript
+import { recordingAttachment, voiceTurnProperties } from '@amplitude/ai';
+
+s.trackUserMessage(transcript, {
+  eventProperties: voiceTurnProperties({
+    direction: 'inbound', // 'inbound' | 'outbound' | 'in_app'
+    speechDurationMs: 1800,
+    transcriptConfidence: 0.94,
+  }),
+});
+s.trackAiMessage(reply, model, provider, latencyMs, {
+  eventProperties: voiceTurnProperties({
+    direction: 'inbound',
+    timeToFirstAudioMs: 700, // end of the caller's speech to the agent's first audible audio
+    endOfTurnReason: 'completed', // completed | interrupted | silence | transferred | error
+  }),
+  // Last turn only: a link to the call recording.
+  attachments: [recordingAttachment(recordingUrl)],
+});
+```
+
+**OpenAI Realtime API.** `RealtimeTurnMapper` turns Realtime server events into voice turns with speech duration, time to first audio, and interruptions already set:
+
+```typescript
+import { RealtimeTurnMapper } from '@amplitude/ai';
+
+const mapper = new RealtimeTurnMapper({ direction: 'in_app' });
+ws.on('message', (data) => {
+  for (const turn of mapper.feed(JSON.parse(String(data)))) {
+    if (turn.role === 'user') {
+      s.trackUserMessage(turn.text, { eventProperties: turn.eventProperties });
+    } else {
+      s.trackAiMessage(turn.text, turn.model ?? 'gpt-realtime', 'openai', 0, {
+        eventProperties: turn.eventProperties,
+      });
+    }
+  }
+});
+```
+
+**Rules for voice:**
+- **Never use a phone number as `userId` or `deviceId`.** Ask the user which field is their product user ID. If they want to group anonymous callers, use a salted SHA-256 hash of the number as `deviceId`, never the number itself.
+- **Recordings are links only.** `recordingAttachment(url)` sends the URL, never audio. The URL itself is sent only in `full` content mode; `metadata_only` sends `[Agent] Has Attachments` and the count. Amplitude never fetches it. A signed URL expires, and until then it grants access to the recording to anyone who has it.
+- **Do not send call cost as `[Agent] Cost USD`.** A platform's per-call total (telephony, speech, model) is not a model cost, and Cost USD is summed across AI Responses.
+- Amplitude rolls voice turns up into session properties on `[Agent] Session Record`, such as `[Agent] Avg Time To First Audio Ms`, `[Agent] User Interruption Count`, and `[Agent] Final End Of Turn Reason`. Chat sessions omit them.
 
 ---
 
