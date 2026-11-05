@@ -94,7 +94,7 @@ export interface AgentOptions {
    * experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit` and
    * `Provider`. `session({ experiments })` and `experiments` on a `track*`
    * call override entries with the same key; `child()` agents inherit them.
-   * Invalid entries are dropped with a debug log; at most 10 apply to an event.
+   * Invalid entries are dropped with a debug log; at most 32 apply to an event.
    */
   experiments?: ExperimentInput[] | null;
 }

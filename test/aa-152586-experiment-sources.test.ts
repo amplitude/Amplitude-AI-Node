@@ -21,6 +21,8 @@ import {
   addExperiments,
   experimentFromEvaluation,
   experimentsFromAmplitude,
+  MAX_EXPERIMENTS,
+  mergeExperiments,
   variantLabel,
 } from '../src/core/experiments.js';
 import { tool } from '../src/decorators.js';
@@ -102,22 +104,35 @@ describe('experimentsFromAmplitude', () => {
     ]);
   });
 
-  it('more than ten flags without keys warns and names the overflow', (): void => {
+  it('more flags than the cap without keys warns and names the overflow', (): void => {
+    expect(MAX_EXPERIMENTS).toBe(32); // the cap the docs and the Session Record union quote
     const warn = vi.spyOn(getLogger(), 'warn');
     const variants = Object.fromEntries(
-      Array.from({ length: 12 }, (_, i) => [`flag-${String(i).padStart(2, '0')}`, variant({ key: 'on' })]),
+      Array.from({ length: MAX_EXPERIMENTS + 2 }, (_, i) => [
+        `flag-${String(i).padStart(2, '0')}`,
+        variant({ key: 'on' }),
+      ]),
     );
     // The helper returns everything; mergeExperiments applies the cap.
-    expect(experimentsFromAmplitude(variants)).toHaveLength(12);
+    expect(experimentsFromAmplitude(variants)).toHaveLength(MAX_EXPERIMENTS + 2);
     expect(warn).toHaveBeenCalledTimes(1);
     const message = String(warn.mock.calls[0]?.[0]);
     expect(message).toContain('keys:');
-    expect(message).toContain('flag-10, flag-11');
+    expect(message).toContain('flag-32, flag-33');
 
     warn.mockClear();
-    expect(experimentsFromAmplitude(variants, { keys: Object.keys(variants) })).toHaveLength(12);
-    expect(experimentsFromAmplitude(Object.fromEntries(Object.entries(variants).slice(0, 10)))).toHaveLength(10);
+    expect(experimentsFromAmplitude(variants, { keys: Object.keys(variants) })).toHaveLength(MAX_EXPERIMENTS + 2);
+    expect(
+      experimentsFromAmplitude(Object.fromEntries(Object.entries(variants).slice(0, MAX_EXPERIMENTS))),
+    ).toHaveLength(MAX_EXPERIMENTS);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a twenty-five flag session fits under the cap', (): void => {
+    // The production shape that moved the cap from 10: an agent recording every
+    // flag it evaluates ran under 25 assignments on its widest sessions.
+    const entries = Array.from({ length: 25 }, (_, i) => ({ key: `flag-${String(i).padStart(2, '0')}`, variant: 'variant' }));
+    expect(mergeExperiments(entries)).toHaveLength(25);
   });
 
   it('numeric values become decimal labels, spelled as in Python', (): void => {

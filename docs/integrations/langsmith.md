@@ -164,7 +164,7 @@ Each of these is something a real integration got wrong. The forwarder core impl
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path`, `[Agent] Source`, `[Agent] Content Mode`, and `[Agent] Context` when you have dimensions.
 
-**Experiments.** If the conversation ran under an A/B test or feature flag variant and it is recorded in the root run's `extra.metadata` (ask the user which key), or your app's flag client assigned it when the conversation started, set `experiments: [{ key, variant, provider }]` on the normalized conversation. Every event then carries `[Agent] Experiments`, an array of `key:variant` strings that splits any chart by arm, and, for exactly one experiment, `[Agent] Experiment Key`, `Variant`, `Unit` (`agent_session` unless you set `unit`) and `Provider`. Key, variant and provider are trimmed and 1 to 256 characters; keys can't contain `:`; at most 10 are sent; invalid entries are dropped. Don't put the variant in `[Agent] Context`. If nothing records it, leave `experiments` unset. Neither the forwarder nor the SDK sends an exposure event; the flag tool keeps doing that.
+**Experiments.** If the conversation ran under an A/B test or feature flag variant and it is recorded in the root run's `extra.metadata` (ask the user which key), or your app's flag client assigned it when the conversation started, set `experiments: [{ key, variant, provider }]` on the normalized conversation. Every event then carries `[Agent] Experiments`, an array of `key:variant` strings that splits any chart by arm, and, for exactly one experiment, `[Agent] Experiment Key`, `Variant`, `Unit` (`agent_session` unless you set `unit`) and `Provider`. Key, variant and provider are trimmed and 1 to 256 characters; keys can't contain `:`; at most 32 are sent; invalid entries are dropped. Don't put the variant in `[Agent] Context`. If nothing records it, leave `experiments` unset. Neither the forwarder nor the SDK sends an exposure event; the flag tool keeps doing that.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
 
@@ -458,7 +458,7 @@ function experimentField(value: unknown): string | undefined {
 /**
  * [Agent] Experiment properties, with the SDKs' rules: an entry needs a key
  * (no ':') and a variant of 1 to 256 characters, a later entry with the same
- * key wins, and at most 10 are sent. Invalid entries are dropped.
+ * key wins, and at most 32 are sent. Invalid entries are dropped.
  */
 export function experimentProperties(experiments: unknown): Record<string, unknown> {
   if (!Array.isArray(experiments)) return {};
@@ -477,7 +477,7 @@ export function experimentProperties(experiments: unknown): Record<string, unkno
       ...(provider !== undefined ? { provider } : {}),
     });
   }
-  const entries = [...byKey.values()].slice(0, 10);
+  const entries = [...byKey.values()].slice(0, 32);
   if (entries.length === 0) return {};
   const only = entries.length === 1 ? entries[0] : undefined;
   return {

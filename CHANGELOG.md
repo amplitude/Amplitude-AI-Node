@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.0
+
+### Changed
+- **Up to 32 experiments per event** (was 10). `[Agent] Experiments` carries at most 32 `key:variant` entries; `mergeExperiments` drops entries past the 32nd, and `experimentsFromAmplitude(...)` without `keys` warns past 32. A production agent that records every flag it evaluates ran under up to 25 assignments per session once non-assignment evaluations were dropped, and more than 10 on 38% of sessions, so the old cap was dropping arms, including a live 50/50 test, on a fixed set of keys. Session Record enrichment folds arms under the same cap. The MCP `validate_file` guidance, the event catalog, and the forwarder core on every integration page say 32.
+
 ## 0.25.0
 
 ### Added
