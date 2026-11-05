@@ -336,6 +336,11 @@ export {
 export { AmplitudeTracingProcessor } from './integrations/openai-agents.js';
 export { AmplitudeToolLoop } from './integrations/anthropic-tools.js';
 export { AmplitudeCrewAIHooks } from './integrations/crewai.js';
+export { RealtimeTurnMapper } from './integrations/openai-realtime.js';
+export type {
+  RealtimeTurnMapperOptions,
+  VoiceTurn,
+} from './integrations/openai-realtime.js';
 
 // Streaming
 export { StreamingAccumulator } from './utils/streaming.js';
