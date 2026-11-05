@@ -1,0 +1,37 @@
+{
+  "agent_id": "agent_3701k3ttaq12ewp8b7qv5rfyszkz",
+  "agent_name": "Order Support",
+  "conversation_id": "conv_7401k5m9x2p8ec3rqv6dtnhb0fzw",
+  "status": "done",
+  "user_id": "user_48213",
+  "has_audio": true,
+  "has_user_audio": true,
+  "has_response_audio": true,
+  "transcript": [
+    { "role": "agent", "time_in_call_secs": 0, "message": "Hi, this is Acme calling about your order.", "interrupted": false, "source_medium": "audio" },
+    { "role": "user", "time_in_call_secs": 3, "message": "Oh hi. Is it late?", "source_medium": "audio" },
+    { "role": "agent", "time_in_call_secs": 5, "message": "It shipped yesterday and", "interrupted": true, "source_medium": "audio" },
+    { "role": "user", "time_in_call_secs": 7, "message": "Will it come before Friday?", "source_medium": "audio" },
+    { "role": "agent", "time_in_call_secs": 9, "message": "Yes, it arrives Thursday.", "interrupted": false, "source_medium": "audio" }
+  ],
+  "metadata": {
+    "start_time_unix_secs": 1792515600,
+    "call_duration_secs": 14,
+    "cost": 812,
+    "termination_reason": "Call ended by remote party",
+    "phone_call": {
+      "type": "twilio",
+      "direction": "outbound",
+      "agent_number": "+14155550199",
+      "external_number": "+14155550123",
+      "phone_number_id": "phnum_8201k5m9x2p8ec3rqv6dtnhb0abc",
+      "call_sid": "CA5d0d0d8047bf685c3f0ff980fe62c123",
+      "stream_sid": "MZ18ad3ab5a668481ce02b83e7395059f0"
+    }
+  },
+  "analysis": {
+    "call_successful": "success",
+    "transcript_summary": "Acme called about an order; it arrives Thursday.",
+    "call_success_score": 0.9
+  }
+}

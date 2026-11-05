@@ -50,6 +50,50 @@
       "last_verified": "2026-10-06"
     },
     {
+      "id": "vapi",
+      "name": "Vapi",
+      "category": "hosted_agent_platform",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/vapi.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vapi.md",
+      "extraction_methods": ["export_api"],
+      "vendor_format_source": "vendor_public_api_reference_2026_11",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-11-05"
+    },
+    {
+      "id": "retell",
+      "name": "Retell AI",
+      "category": "hosted_agent_platform",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/retell.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/retell.md",
+      "extraction_methods": ["export_api"],
+      "vendor_format_source": "vendor_public_api_reference_2026_11",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-11-05"
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs Agents",
+      "category": "hosted_agent_platform",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/elevenlabs.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/elevenlabs.md",
+      "extraction_methods": ["export_api"],
+      "vendor_format_source": "vendor_public_api_reference_2026_11",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-11-05"
+    },
+    {
+      "id": "bland",
+      "name": "Bland AI",
+      "category": "hosted_agent_platform",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/bland.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/bland.md",
+      "extraction_methods": ["export_api"],
+      "vendor_format_source": "vendor_public_api_reference_2026_11",
+      "ingestion_paths": ["http_v2", "batch_api", "s3_import"],
+      "last_verified": "2026-11-05"
+    },
+    {
       "id": "langfuse",
       "name": "Langfuse",
       "category": "tracing_tool",
@@ -240,6 +284,11 @@
       "id": "redact-pii",
       "description": "Applies the SDK PII patterns to one string for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK.",
       "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/redact-pii.mjs"
+    },
+    {
+      "id": "voice-forwarder",
+      "description": "Voice additions for the hosted voice platform guides: voice turn properties, a recording link on the last turn, and the phone-number identity check. No dependencies.",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/voice-forwarder.mjs"
     }
   ]
 }

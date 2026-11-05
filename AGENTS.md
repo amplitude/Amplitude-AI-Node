@@ -63,7 +63,8 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
 - Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
 - HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
-- Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
+- Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce, Vapi, Retell AI, ElevenLabs Agents, Bland AI): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
+- Voice agent you run yourself: add `voiceTurnProperties({ direction, ... })` as `eventProperties` on each turn, use `RealtimeTurnMapper` for the OpenAI Realtime API, and put `recordingAttachment(url)` on the last turn (a link only; Amplitude never fetches it). Never use a phone number as `userId` or `deviceId`. See Step 3l in `amplitude-ai.md`.
 - Agent built on the Cursor Agent SDK: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following `docs/integrations/cursor-agent-sdk.md`.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
 - Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
@@ -157,6 +158,10 @@ Fetch the public guide for the job. These URLs track `main`.
 - `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/fin.md` — Fin conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/agentforce.md` — Agentforce conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/vapi.md` — Vapi conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/retell.md` — Retell AI conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/elevenlabs.md` — ElevenLabs Agents conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/bland.md` — Bland AI conversation ingestion over the HTTP API (no SDK)
 - `docs/integrations/langfuse.md` — Langfuse trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)

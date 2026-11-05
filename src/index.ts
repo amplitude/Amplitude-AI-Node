@@ -167,6 +167,19 @@ export {
   PROP_AGENT_CHAIN,
   PROP_ROOT_AGENT_NAME,
   PROP_REQUEST_COMPLEXITY,
+  PROP_CHANNEL,
+  PROP_VOICE_DIRECTION,
+  PROP_VOICE_SPEECH_DURATION_MS,
+  PROP_VOICE_TIME_TO_FIRST_AUDIO_MS,
+  PROP_VOICE_INTERRUPTED,
+  PROP_VOICE_INTERRUPTED_BY,
+  PROP_VOICE_YIELDED,
+  PROP_VOICE_END_OF_TURN_REASON,
+  PROP_VOICE_TRANSCRIPT_CONFIDENCE,
+  VOICE_CHANNELS,
+  VOICE_DIRECTIONS,
+  VOICE_INTERRUPTED_BY,
+  VOICE_END_OF_TURN_REASONS,
   SDK_VERSION,
   SDK_RUNTIME,
   MAX_SERIALIZED_LENGTH,
@@ -194,6 +207,11 @@ export {
 
 // Core - Privacy
 export { PrivacyConfig, normalizeToolDefinitions } from './core/privacy.js';
+export { recordingAttachment, voiceTurnProperties } from './core/voice.js';
+export type {
+  RecordingAttachmentOptions,
+  VoiceTurnOptions,
+} from './core/voice.js';
 
 // Exceptions
 export {
@@ -318,6 +336,11 @@ export {
 export { AmplitudeTracingProcessor } from './integrations/openai-agents.js';
 export { AmplitudeToolLoop } from './integrations/anthropic-tools.js';
 export { AmplitudeCrewAIHooks } from './integrations/crewai.js';
+export { RealtimeTurnMapper } from './integrations/openai-realtime.js';
+export type {
+  RealtimeTurnMapperOptions,
+  VoiceTurn,
+} from './integrations/openai-realtime.js';
 
 // Streaming
 export { StreamingAccumulator } from './utils/streaming.js';

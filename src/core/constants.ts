@@ -143,6 +143,27 @@ export const PROP_AGENT_CHAIN = '[Agent] Agent Chain';
 export const PROP_ROOT_AGENT_NAME = '[Agent] Root Agent Name';
 export const PROP_REQUEST_COMPLEXITY = '[Agent] Request Complexity';
 
+// Voice turn properties (AA-152825). Absent means unknown, never false.
+export const PROP_CHANNEL = '[Agent] Channel';
+export const PROP_VOICE_DIRECTION = '[Agent] Voice Direction';
+export const PROP_VOICE_SPEECH_DURATION_MS = '[Agent] Voice Speech Duration Ms';
+export const PROP_VOICE_TIME_TO_FIRST_AUDIO_MS = '[Agent] Voice Time To First Audio Ms';
+export const PROP_VOICE_INTERRUPTED = '[Agent] Voice Interrupted';
+export const PROP_VOICE_INTERRUPTED_BY = '[Agent] Voice Interrupted By';
+export const PROP_VOICE_YIELDED = '[Agent] Voice Yielded';
+export const PROP_VOICE_END_OF_TURN_REASON = '[Agent] Voice End Of Turn Reason';
+export const PROP_VOICE_TRANSCRIPT_CONFIDENCE = '[Agent] Voice Transcript Confidence';
+export const VOICE_CHANNELS = ['chat', 'voice'] as const;
+export const VOICE_DIRECTIONS = ['inbound', 'outbound', 'in_app'] as const;
+export const VOICE_INTERRUPTED_BY = ['user', 'agent'] as const;
+export const VOICE_END_OF_TURN_REASONS = [
+  'completed',
+  'interrupted',
+  'silence',
+  'transferred',
+  'error',
+] as const;
+
 const _require = createRequire(import.meta.url);
 let _sdkVersion = '0.1.0';
 try {

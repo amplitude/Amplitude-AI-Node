@@ -206,6 +206,51 @@
           "name": "[Agent] Message Source",
           "type": "string",
           "description": "Origin of the user message: 'user' for real end-user input, 'agent' for inter-agent delegation (parent agent sending instructions to a child agent). Automatically set by provider wrappers based on parent_agent_id context."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Channel the turn happened on: 'chat' or 'voice'. Omitted means chat. A session is voice if any of its turns is voice."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "For voice turns: 'inbound' or 'outbound' phone call, or 'in_app' for an assistant inside the product. Omitted when unknown."
+        },
+        {
+          "name": "[Agent] Voice Speech Duration Ms",
+          "type": "number",
+          "description": "Milliseconds of speech in this turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Time To First Audio Ms",
+          "type": "number",
+          "description": "Milliseconds from the end of the caller's turn until the agent's first audible audio. This is what the caller hears. TTFB Ms is token latency and is a different number."
+        },
+        {
+          "name": "[Agent] Voice Interrupted",
+          "type": "boolean",
+          "description": "Whether this turn was spoken over by the other side. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Interrupted By",
+          "type": "string",
+          "description": "Who spoke over whom: 'user' or 'agent'. Set only when the platform reports the side."
+        },
+        {
+          "name": "[Agent] Voice Yielded",
+          "type": "boolean",
+          "description": "On an agent turn: true if the response was cut off because the caller spoke; false if the caller spoke and the response finished anyway. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice End Of Turn Reason",
+          "type": "string",
+          "description": "Why the turn ended: completed, interrupted, silence, transferred, or error. The platform's raw reason is in [Agent] Context."
+        },
+        {
+          "name": "[Agent] Voice Transcript Confidence",
+          "type": "number",
+          "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
         }
       ]
     },
@@ -573,6 +618,51 @@
           "name": "[Agent] Message Label Map",
           "type": "string",
           "description": "Serialized JSON map of label key to value for quick lookup."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Channel the turn happened on: 'chat' or 'voice'. Omitted means chat. A session is voice if any of its turns is voice."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "For voice turns: 'inbound' or 'outbound' phone call, or 'in_app' for an assistant inside the product. Omitted when unknown."
+        },
+        {
+          "name": "[Agent] Voice Speech Duration Ms",
+          "type": "number",
+          "description": "Milliseconds of speech in this turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Time To First Audio Ms",
+          "type": "number",
+          "description": "Milliseconds from the end of the caller's turn until the agent's first audible audio. This is what the caller hears. TTFB Ms is token latency and is a different number."
+        },
+        {
+          "name": "[Agent] Voice Interrupted",
+          "type": "boolean",
+          "description": "Whether this turn was spoken over by the other side. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Interrupted By",
+          "type": "string",
+          "description": "Who spoke over whom: 'user' or 'agent'. Set only when the platform reports the side."
+        },
+        {
+          "name": "[Agent] Voice Yielded",
+          "type": "boolean",
+          "description": "On an agent turn: true if the response was cut off because the caller spoke; false if the caller spoke and the response finished anyway. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice End Of Turn Reason",
+          "type": "string",
+          "description": "Why the turn ended: completed, interrupted, silence, transferred, or error. The platform's raw reason is in [Agent] Context."
+        },
+        {
+          "name": "[Agent] Voice Transcript Confidence",
+          "type": "number",
+          "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
         }
       ]
     },
@@ -1909,6 +1999,51 @@
           "type": "string",
           "description": "Specific data quality issues detected. JSON array.",
           "is_array_type": true
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "Call direction from the first voice turn that reports one ('inbound', 'outbound', or 'in_app'), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Avg Time To First Audio Ms",
+          "type": "number",
+          "description": "Average time to first audio in milliseconds across the session's agent turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Max Time To First Audio Ms",
+          "type": "number",
+          "description": "Slowest time to first audio in the session in milliseconds, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Interruption Count",
+          "type": "number",
+          "description": "Number of voice turns spoken over by either side, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice User Interruption Count",
+          "type": "number",
+          "description": "Number of voice turns the caller spoke over, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Yield Count",
+          "type": "number",
+          "description": "Number of agent turns cut off because the caller spoke, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Final End Of Turn Reason",
+          "type": "string",
+          "description": "End of turn reason of the last voice turn that reports one (completed, interrupted, silence, transferred, or error), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Total Speech Duration Ms",
+          "type": "number",
+          "description": "Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
         }
       ]
     },
@@ -2116,6 +2251,51 @@
           "name": "[Agent] Evaluator Enrichment Cost USD",
           "type": "number",
           "description": "Cost in USD of running this specific evaluator's LLM inference. Customer-attributable enrichment cost for this evaluator; distinct from the session's own LLM cost ([Agent] Session Cost USD)."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Session dimension: Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "Session dimension: Call direction from the first voice turn that reports one ('inbound', 'outbound', or 'in_app'), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Avg Time To First Audio Ms",
+          "type": "number",
+          "description": "Session dimension: Average time to first audio in milliseconds across the session's agent turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Max Time To First Audio Ms",
+          "type": "number",
+          "description": "Session dimension: Slowest time to first audio in the session in milliseconds, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Interruption Count",
+          "type": "number",
+          "description": "Session dimension: Number of voice turns spoken over by either side, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice User Interruption Count",
+          "type": "number",
+          "description": "Session dimension: Number of voice turns the caller spoke over, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Yield Count",
+          "type": "number",
+          "description": "Session dimension: Number of agent turns cut off because the caller spoke, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Final End Of Turn Reason",
+          "type": "string",
+          "description": "Session dimension: End of turn reason of the last voice turn that reports one (completed, interrupted, silence, transferred, or error), omitted (not empty) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Total Speech Duration Ms",
+          "type": "number",
+          "description": "Session dimension: Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
         }
       ]
     }

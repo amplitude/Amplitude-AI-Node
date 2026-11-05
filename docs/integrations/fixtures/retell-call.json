@@ -1,0 +1,82 @@
+{
+  "call_type": "phone_call",
+  "from_number": "+14155550123",
+  "to_number": "+14155550199",
+  "direction": "inbound",
+  "call_id": "Jabr9TXYYJHfvl6Syypi88rdAHYHmcq6",
+  "agent_id": "oBeDLoLOeuAbiuaMFXRtDOLriTJ5tSxD",
+  "agent_name": "Order Support",
+  "agent_version": 3,
+  "call_status": "ended",
+  "metadata": {
+    "customer_id": "user_48213"
+  },
+  "start_timestamp": 1792515600000,
+  "end_timestamp": 1792515609500,
+  "duration_ms": 9500,
+  "transcript": "Agent: How can I help?\nUser: Where is my order?\nAgent: It arrives Thursday.\nUser: Thanks, bye.\nAgent: Goodbye!",
+  "transcript_object": [
+    {
+      "role": "agent",
+      "content": "How can I help?",
+      "words": [
+        { "word": "How", "start": 0.4, "end": 0.6 },
+        { "word": "can", "start": 0.6, "end": 0.8 },
+        { "word": "I", "start": 0.8, "end": 0.9 },
+        { "word": "help?", "start": 0.9, "end": 1.4 }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Where is my order?",
+      "words": [
+        { "word": "Where", "start": 2.2, "end": 2.5 },
+        { "word": "is", "start": 2.5, "end": 2.6 },
+        { "word": "my", "start": 2.6, "end": 2.8 },
+        { "word": "order?", "start": 2.8, "end": 3.4 }
+      ]
+    },
+    {
+      "role": "agent",
+      "content": "It arrives Thursday.",
+      "words": [
+        { "word": "It", "start": 4.1, "end": 4.2 },
+        { "word": "arrives", "start": 4.2, "end": 4.6 },
+        { "word": "Thursday.", "start": 4.6, "end": 5.3 }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Thanks, bye.",
+      "words": [
+        { "word": "Thanks,", "start": 7.0, "end": 7.4 },
+        { "word": "bye.", "start": 7.4, "end": 7.8 }
+      ]
+    },
+    {
+      "role": "agent",
+      "content": "Goodbye!",
+      "words": [{ "word": "Goodbye!", "start": 8.35, "end": 8.9 }]
+    }
+  ],
+  "recording_url": "https://retellai.s3.us-west-2.amazonaws.com/Jabr9TXYYJHfvl6Syypi88rdAHYHmcq6/recording.wav?X-Amz-Expires=86400&X-Amz-Signature=3f9a",
+  "opt_in_signed_url": true,
+  "latency": {
+    "e2e": { "p50": 625, "p90": 685, "p95": 692, "p99": 698, "max": 700, "min": 550, "num": 2, "values": [700, 550] }
+  },
+  "disconnection_reason": "user_hangup",
+  "call_analysis": {
+    "call_summary": "The caller asked about an order; the agent said it arrives Thursday.",
+    "in_voicemail": false,
+    "user_sentiment": "Positive",
+    "call_successful": true,
+    "custom_analysis_data": {}
+  },
+  "call_cost": {
+    "product_costs": [{ "product": "elevenlabs_tts", "unit_price": 0.12, "cost": 1.14 }],
+    "total_duration_seconds": 9.5,
+    "total_duration_unit_price": 0.12,
+    "combined_cost": 1.14
+  },
+  "data_storage_setting": "everything"
+}
