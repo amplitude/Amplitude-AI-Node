@@ -141,6 +141,32 @@ describe('RealtimeTurnMapper', () => {
     expect(assistant.eventProperties[PROP_VOICE_END_OF_TURN_REASON]).toBe('interrupted');
   });
 
+  it('measures a follow-up response from its own start, not the caller stop', () => {
+    const clock = makeClock();
+    const mapper = new RealtimeTurnMapper({ clock: clock.fn });
+    const turns = feedAll(mapper, clock, [
+      [
+        100.0,
+        { type: 'input_audio_buffer.speech_stopped', item_id: 'u1', audio_end_ms: 1000 },
+      ],
+      [100.2, { type: 'response.created', response: { id: 'r1' } }],
+      [100.5, { type: 'response.output_audio.delta', response_id: 'r1', delta: 'AAA=' }],
+      [100.8, { type: 'response.done', response: { id: 'r1', status: 'completed' } }],
+      [110.0, { type: 'response.created', response: { id: 'r2' } }],
+      [110.4, { type: 'response.output_audio.delta', response_id: 'r2', delta: 'AAA=' }],
+      [110.6, { type: 'response.done', response: { id: 'r2', status: 'completed' } }],
+    ]);
+
+    expect(turns).toHaveLength(2);
+    const [first, followUp] = turns as [VoiceTurn, VoiceTurn];
+    expect(Math.round(first.eventProperties[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS] as number)).toBe(
+      500,
+    );
+    expect(
+      Math.round(followUp.eventProperties[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS] as number),
+    ).toBe(400);
+  });
+
   it('maps a client cancel to interrupted without a cause', () => {
     const mapper = new RealtimeTurnMapper();
     mapper.feed({ type: 'response.created', response: { id: 'r4' } });

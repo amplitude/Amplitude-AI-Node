@@ -133,8 +133,12 @@ export class RealtimeTurnMapper {
     } else if (etype === 'response.created') {
       const rid = asString(asRecord(event.response).id);
       if (rid) {
+        // One caller stop times the next response only. A tool follow-up
+        // with no new utterance measures from its own response.created.
+        const startedAt = this._userStoppedAt || this._clock();
+        this._userStoppedAt = undefined;
         this._responses.set(rid, {
-          startedAt: this._userStoppedAt || this._clock(),
+          startedAt,
           transcript: [],
         });
       }
