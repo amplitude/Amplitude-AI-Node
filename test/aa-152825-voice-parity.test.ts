@@ -27,7 +27,7 @@ import { type VoiceTurnOptions, voiceTurnProperties } from '../src/core/voice.js
 import { ValidationError } from '../src/exceptions.js';
 import * as sdk from '../src/index.js';
 
-export const NEW_KEYS = new Set([
+const NEW_KEYS = new Set([
   PROP_VOICE_STT_MS,
   PROP_VOICE_LLM_TTFT_MS,
   PROP_VOICE_TTS_TTFB_MS,
@@ -39,7 +39,7 @@ export const NEW_KEYS = new Set([
 
 type Turn = ['user' | 'assistant', string, Record<string, string | number | boolean>];
 
-export function samCall(): Turn[] {
+function samCall(): Turn[] {
   const voice: VoiceTurnOptions = { channel: 'voice', direction: 'inbound' };
   return [
     [
