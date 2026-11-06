@@ -616,9 +616,27 @@ describe('voice-forwarder.mjs', () => {
       {},
       { direction: 'inbound' as const, speechDurationMs: 1200, timeToFirstAudioMs: 0, endOfTurnReason: 'silence' as const },
       { interrupted: true, interruptedBy: 'user' as const, yielded: false, transcriptConfidence: 0.5 },
+      {
+        sttMs: 310,
+        llmTtftMs: 680,
+        ttsTtfbMs: 360,
+        turnStartOffsetMs: 10600,
+        turnEndOffsetMs: 10900,
+        preReplySilenceMs: 4400,
+        overlapMs: 0,
+      },
     ];
-    for (const options of cases) expect(docsVoiceTurnProperties(options)).toEqual(voiceTurnProperties(options));
-    for (const bad of [{ direction: 'sideways' }, { speechDurationMs: -1 }, { transcriptConfidence: 1.5 }]) {
+    for (const options of cases) {
+      expect(JSON.stringify(docsVoiceTurnProperties(options))).toBe(JSON.stringify(voiceTurnProperties(options)));
+    }
+    for (const bad of [
+      { direction: 'sideways' },
+      { speechDurationMs: -1 },
+      { transcriptConfidence: 1.5 },
+      { sttMs: -1 },
+      { overlapMs: '3' },
+      { turnStartOffsetMs: 500, turnEndOffsetMs: 499 },
+    ]) {
       expect(() => docsVoiceTurnProperties(bad as Any)).toThrow();
       expect(() => voiceTurnProperties(bad as Any)).toThrow();
     }

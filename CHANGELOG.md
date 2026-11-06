@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **Voice stage latency and call timing.** `voiceTurnProperties` takes `sttMs`, `llmTtftMs`, `ttsTtfbMs`, `turnStartOffsetMs`, `turnEndOffsetMs`, `preReplySilenceMs` and `overlapMs`, which set `[Agent] Voice STT Ms`, `[Agent] Voice LLM TTFT Ms`, `[Agent] Voice TTS TTFB Ms`, `[Agent] Voice Turn Start Offset Ms`, `[Agent] Voice Turn End Offset Ms`, `[Agent] Voice Pre Reply Silence Ms` and `[Agent] Voice Overlap Ms`. Each is a non-negative number of milliseconds, offsets are from the start of the call, and an end offset before the start offset throws `ValidationError`. Calls that set none of them send exactly the properties they sent before. The `PROP_VOICE_*` constants are exported, `docs/integrations/voice-forwarder.mjs` accepts the same options, and the event catalog lists the turn properties and the new voice session rollups. Same names and rules as the Python SDK.
+
 ### Changed
 - **Voice agent guidance.** The coding-agent guide, the generated `AGENTS.md` routing line, and the Vapi, Retell, ElevenLabs, and Bland guides tell the customer to choose `deviceId`. `callerDeviceId` remains one optional helper.
 
