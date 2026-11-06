@@ -800,11 +800,51 @@ s.trackAiMessage(reply, model, provider, latencyMs, {
     direction: 'inbound',
     timeToFirstAudioMs: 700, // end of the caller's speech to the agent's first audible audio
     endOfTurnReason: 'completed', // completed | interrupted | silence | transferred | error
+    sttMs: 310, // speech-to-text for the caller turn this reply answers
+    llmTtftMs: 280, // model time to first token
+    ttsTtfbMs: 110, // speech synthesizer time to first byte
+    turnStartOffsetMs: 10600, // ms from the start of the call
+    turnEndOffsetMs: 12900, // not before turnStartOffsetMs
+    preReplySilenceMs: 700, // silence the caller heard before the reply
   }),
   // Last turn only: a link to the call recording.
   attachments: [recordingAttachment(recordingUrl)],
 });
 ```
+
+Stage latency (`sttMs`, `llmTtftMs`, `ttsTtfbMs`) splits time to first audio into speech-to-text, the model's first token, and the synthesizer's first byte; set them on the agent turn they delayed. `turnStartOffsetMs` / `turnEndOffsetMs` place a turn on the call timeline. `overlapMs` is how long a turn's speech overlapped the other side's previous turn; set it on the turn that started while the other side was still speaking. All are non-negative milliseconds and ship in every content mode.
+
+**LiveKit Agents.** `attach` subscribes to the `AgentSession`'s `conversation_item_added` and tracks every user and assistant message with speech duration, offsets, pre-reply silence, overlap, time to first audio, stage latency, and barge-in. It does not import LiveKit:
+
+```typescript
+import { attach } from '@amplitude/ai/integrations/livekit'; // or attachLiveKit from '@amplitude/ai'
+
+const agent = ai.agent('support-voice', { userId: productUserId, sessionId: ctx.room.name });
+attach(session, agent, { model: 'gpt-4o-mini', provider: 'openai' }); // direction defaults to 'inbound'
+```
+
+**Pipecat.** `PipecatVoiceTracker` reads Pipecat frames (user and bot started / stopped speaking, transcription, TTS text, TTFB metrics, end and cancel) and tracks one user and one assistant turn per exchange; a caller who starts speaking over the bot ends the agent turn as interrupted by the user. Feed it each frame once, with `tracker.onFrame(frame)` or the `onPushFrame({ frame })` observer from `amplitudeObserver(tracker)`:
+
+```typescript
+import { PipecatVoiceTracker, amplitudeObserver } from '@amplitude/ai/integrations/pipecat';
+
+const tracker = new PipecatVoiceTracker(agent, { direction: 'in_app', model: 'gpt-4o', provider: 'openai' });
+const observer = amplitudeObserver(tracker);
+```
+
+**Amazon Nova Sonic.** `NovaSonicTurnMapper` reads Bedrock `InvokeModelWithBidirectionalStream` output events and returns voice turns like `RealtimeTurnMapper`; it keeps the `FINAL` assistant transcript and drops the `SPECULATIVE` preview:
+
+```typescript
+import { NovaSonicTurnMapper } from '@amplitude/ai';
+
+const mapper = new NovaSonicTurnMapper({ direction: 'inbound' });
+for (const turn of mapper.feed(event)) {
+  if (turn.role === 'user') s.trackUserMessage(turn.text, { eventProperties: turn.eventProperties });
+  else s.trackAiMessage(turn.text, 'amazon.nova-sonic-v1:0', 'bedrock', 0, { eventProperties: turn.eventProperties });
+}
+```
+
+Send each turn through one path only: use one of these integrations or your own `voiceTurnProperties` calls, not both.
 
 **OpenAI Realtime API.** `RealtimeTurnMapper` turns Realtime server events into voice turns with speech duration, time to first audio, and interruptions already set:
 
@@ -829,7 +869,7 @@ ws.on('message', (data) => {
 - **Never use a phone number as `userId` or `deviceId`.** When the caller is known, `userId` is the product's own customer id. `deviceId` is the customer's choice. A hash of the number is allowed, and no algorithm is required.
 - **Recordings are links only.** `recordingAttachment(url)` sends the URL, never audio. The URL itself is sent only in `full` content mode; `metadata_only` sends `[Agent] Has Attachments` and the count. Amplitude never fetches it. A signed URL expires, and until then it grants access to the recording to anyone who has it.
 - **Do not send call cost as `[Agent] Cost USD`.** A platform's per-call total (telephony, speech, model) is not a model cost, and Cost USD is summed across AI Responses.
-- Amplitude rolls voice turns up into session properties on `[Agent] Session Record`, such as `[Agent] Voice Avg Time To First Audio Ms`, `[Agent] Voice User Interruption Count`, and `[Agent] Voice Final End Of Turn Reason`. Chat sessions omit them.
+- Amplitude rolls voice turns up into session properties on `[Agent] Session Record`, such as `[Agent] Voice Avg Time To First Audio Ms`, `[Agent] Voice User Interruption Count`, `[Agent] Voice Final End Of Turn Reason`, `[Agent] Voice Slowest Stage`, and `[Agent] Voice Long Silence Count`. Chat sessions omit them.
 
 ---
 
