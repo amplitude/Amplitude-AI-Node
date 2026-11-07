@@ -154,6 +154,82 @@
       "last_verified": "2026-10-26"
     }
   ],
+  "coding_agents": {
+    "description": "Coding agents engineers run on a repo, and agents built on their SDKs. Sessions go to Amplitude; agent commits carry Agent-Session-Id trailers so merged, reverted and deployed outcomes join back.",
+    "harnesses": [
+      {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "category": "coding_agent",
+        "pinned_version": "v2.1.310",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/claude-code.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/claude-code.md",
+        "paths": ["claude_agent_sdk_tracker", "otlp_logs"],
+        "ingestion_paths": ["sdk", "otlp"],
+        "last_verified": "pending_live_capture"
+      },
+      {
+        "id": "codex",
+        "name": "Codex",
+        "category": "coding_agent",
+        "pinned_version": "openai/codex@e6bf88ae",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/codex.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/codex.md",
+        "paths": ["codex_sdk_tracker", "stop_hook_rollout"],
+        "ingestion_paths": ["sdk", "http_v2"],
+        "last_verified": "pending_live_capture"
+      },
+      {
+        "id": "goose",
+        "name": "goose",
+        "category": "coding_agent",
+        "pinned_version": "v1.28.0",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/goose.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/goose.md",
+        "paths": ["otlp_traces"],
+        "ingestion_paths": ["otlp"],
+        "last_verified": "pending_live_capture"
+      },
+      {
+        "id": "buzz",
+        "name": "Buzz",
+        "category": "coding_agent",
+        "pinned_version": "block/buzz@12f3d51",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/buzz.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/buzz.md",
+        "paths": ["archive_forwarder", "goose_sessions_db"],
+        "extraction_methods": ["archive_read"],
+        "ingestion_paths": ["http_v2"],
+        "last_verified": "pending_live_capture"
+      }
+    ],
+    "recipes": [
+      {
+        "id": "code-outcomes",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/recipes/code-outcomes.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/recipes/code-outcomes.md"
+      }
+    ],
+    "templates": [
+      {
+        "id": "prepare-commit-msg",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/examples/coding-agents/prepare-commit-msg"
+      },
+      {
+        "id": "agent-outcomes-workflow",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/examples/coding-agents/agent-outcomes.yml"
+      },
+      {
+        "id": "claude-settings",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/examples/coding-agents/claude-settings.json"
+      },
+      {
+        "id": "codex-hooks",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/examples/coding-agents/codex-hooks.json"
+      }
+    ],
+    "cli": "npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run"
+  },
   "frameworks": [
     {
       "id": "strands",

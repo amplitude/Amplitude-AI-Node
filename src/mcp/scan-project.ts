@@ -764,8 +764,7 @@ export function scanProject(requestedRoot: string): ScanResult {
   const codingAgents = scanCodingAgents(rootPath, allDeps);
   if (codingAgents.agent_sdks.length > 0) {
     recommendations.push(
-      `Agent SDK detected (${codingAgents.agent_sdks.join(', ')}): use CodexSDKTracker from @amplitude/ai/integrations/codex-sdk ` +
-        'or ClaudeAgentSDKTracker from @amplitude/ai/integrations/claude-agent-sdk inside agent.session(). See "Coding agents" in amplitude-ai.md.',
+      `Agent SDK detected (${codingAgents.agent_sdks.join(', ')}): use CodexSDKTracker from @amplitude/ai/integrations/codex-sdk or ClaudeAgentSDKTracker from @amplitude/ai/integrations/claude-agent-sdk inside agent.session(). See "Coding agents" in amplitude-ai.md.`,
     );
   }
   if (codingAgents.harnesses.length > 0 && !codingAgents.has_amplitude_setup) {
@@ -773,9 +772,7 @@ export function scanProject(requestedRoot: string): ScanResult {
       ? ` An existing ${codingAgents.existing_prepare_commit_msg} was found: add the Agent-Session-Id trailer lines to it instead of replacing it.`
       : '';
     recommendations.push(
-      `Coding agents configured (${codingAgents.harnesses.join(', ')}): run \`npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\`, ` +
-        `then without --dry-run, to send their sessions and stamp agent commits for merge, revert and deploy outcomes.${merge} ` +
-        'See "Coding agents" in amplitude-ai.md.',
+      `Coding agents configured (${codingAgents.harnesses.join(', ')}): run \`npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\`, then without --dry-run, to send their sessions and stamp agent commits for merge, revert and deploy outcomes.${merge} See "Coding agents" in amplitude-ai.md.`,
     );
   }
 
