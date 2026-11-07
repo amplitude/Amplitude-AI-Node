@@ -93,6 +93,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 - [Configuration](#configuration)
 - [Context Dict Conventions](#context-dict-conventions)
 - [Works with](#works-with)
+- [Coding agents](#coding-agents)
 - [Privacy & Content Control](#privacy-content-control)
 - [Cache-Aware Cost Tracking](#cache-aware-cost-tracking)
 - [Semantic Cache Tracking](#semantic-cache-tracking)
@@ -761,6 +762,26 @@ OpenAI-compatible gateways and OTEL partners — no special SDK build required:
 Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
 
 Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: [routers and gateways guide](docs/integrations/routers.md).
+
+## Coding agents
+
+Send the sessions of the coding agents your engineers run, and the commits they make, to Agent Analytics. `amplitude-ai coding-agents init` sets up the repo, and `amplitude-ai coding-agents doctor` checks it. The commit hook and the outcomes workflow join each session to `Commit Merged`, `Commit Reverted` and `Deploy Succeeded`.
+
+| Harness | Path | Guide |
+| --- | --- | --- |
+| **Claude Code** | Claude Agent SDK: `ClaudeAgentSDKTracker`. CLI: native OpenTelemetry logs | [docs/integrations/claude-code.md](docs/integrations/claude-code.md) |
+| **Codex** | Codex SDK: `CodexSDKTracker`. CLI: a `Stop` hook running `amplitude-ai hook codex` | [docs/integrations/codex.md](docs/integrations/codex.md) |
+| **goose** | Native OpenTelemetry traces | [docs/integrations/goose.md](docs/integrations/goose.md) |
+| **Buzz** | Forward the relay archive (no SDK) | [docs/integrations/buzz.md](docs/integrations/buzz.md) |
+| **Google ADK BigQuery Agent Analytics** | SQL warehouse import | [docs/integrations/warehouses/adk-bigquery-agent-analytics.md](docs/integrations/warehouses/adk-bigquery-agent-analytics.md) |
+
+```bash
+npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run
+printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --api-key-stdin
+npx -y -p @amplitude/ai amplitude-ai coding-agents doctor
+```
+
+Commit evaluators and the session-to-commit join: [code outcomes recipe](docs/integrations/recipes/code-outcomes.md). Templates: [examples/coding-agents](examples/coding-agents). Agents that call each other over A2A or ACP keep one session with `injectA2aMetadata` / `extractA2aMetadata` and `injectAcpMeta` / `extractAcpMeta`, in the same wire format as the Python SDK.
 
 ## Privacy & Content Control
 

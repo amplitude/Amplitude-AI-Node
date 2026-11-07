@@ -18,6 +18,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 5 phases: **Detect → Di
 8. Determine whether the server delivers a browser UI. Ask: does any route or static handler send HTML to a browser? Evidence: an `index.html` anywhere in the project, a static file directory (`public/`, `static/`, `dist/`), HTML template files, or any response with `Content-Type: text/html`. Framework-specific deps (`react`, `vue`, `svelte`) are one signal but not the only one. If yes, flag `Frontend: yes` — a browser client is generating or persisting `sessionId`
 9. Check for Vercel AI SDK: `@ai-sdk/*` in deps
 10. Check for edge runtime: `runtime = 'edge'` in route files
+11. Check for coding agents: `.claude/` or `CLAUDE.md` (Claude Code), `.codex/` (Codex), `.goosehints` or `.goose/` (goose), and `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` in deps. `scan_project` reports these as `coding_agents`. If found, flag `Coding agents: [list]` and do Step 3m
 
 **Output to the developer:**
 
@@ -31,6 +32,7 @@ Detected environment:
   Multi-agent signals: [yes/no]
   Streaming: [yes/no]
   Frontend deps: [yes/no]
+  Coding agents: [list or "none"]
   Recommended: full instrumentation
 ```
 
@@ -877,6 +879,29 @@ ws.on('message', (data) => {
 
 ---
 
+### Step 3m: Coding agents
+
+Skip this step unless Phase 1 found coding agents. There are two different jobs; do only the ones that apply.
+
+**Agents you ship, built on an agent SDK.** If the app runs `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` for its own users, instrument it like any other agent: `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk` (see "Claude Agent SDK" below) or `CodexSDKTracker` from `@amplitude/ai/integrations/codex-sdk` (see "Codex SDK" below), inside `ai.agent(...).session(...)`. These sessions belong to the app's end users.
+
+**Coding agents your engineers run on this repo.** Claude Code, Codex and goose sessions, and the commits they make, can go to Agent Analytics so you can see which sessions ship code that merges, gets reverted or deploys. This does not touch application code:
+
+1. Preview, then write the setup. `--dry-run` prints every file it would write and changes nothing:
+   ```bash
+   npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run
+   printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --api-key-stdin
+   ```
+   Pass `--harness claude-code|codex|goose` (repeatable) to limit it, `--privacy metadata` to send no prompt or response text, `--region eu` for EU projects, and `--api-key-env NAME` when the key is in another variable. The key is read as `AMPLITUDE_AI_API_KEY`, falling back to `AMPLITUDE_API_KEY`. Never put it on the command line or in a committed file: init writes it only to gitignored files (`.claude/settings.local.json`, `.amplitude-ai/local.env`).
+2. Init writes:
+   - `.githooks/prepare-commit-msg` and `git config core.hooksPath .githooks` (plus a `package.json` `prepare` script that sets it on install), which add `Agent-Session-Id` and `Agent-Name` trailers to commits an agent makes. Human commits are untouched. If the repo already has a hook manager (husky, another `core.hooksPath`), init leaves it alone and says so; add the trailer lines to the existing hook instead.
+   - `.github/workflows/agent-outcomes.yml`, which sends `Commit Merged`, `Commit Reverted` and `Deploy Succeeded` with `agent_session_id`. Tell the developer to add the `AMPLITUDE_API_KEY` repository secret; the workflow does nothing without it.
+   - Claude Code: OpenTelemetry settings in `.claude/settings.json`. Codex: a `Stop` hook in `.codex/hooks.json` running `amplitude-ai hook codex`, which each developer approves once with `/hooks`. goose: the environment block to export, printed rather than written.
+3. Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor` and fix every failure it reports.
+4. Point the developer at `docs/integrations/claude-code.md`, `codex.md` and `goose.md` for the content gates and verification, and at `docs/integrations/recipes/code-outcomes.md` for the commit evaluators and the session-to-commit join.
+
+**Agents calling agents.** If agents call each other over A2A or ACP, carry the session across the call so child sessions link to the parent: `injectA2aMetadata(metadata)` / `extractA2aMetadata(metadata)` or `injectAcpMeta(meta)` / `extractAcpMeta(meta)` from `@amplitude/ai`. The wire format matches the Python SDK, so a Node agent and a Python agent can call each other.
+
 ## Phase 4: Verify
 
 > **Do not report instrumentation as complete until you have executed Steps 4b, 4c, and 4d and all checks pass.** Wiring the code is not done — verification is part of the task.
@@ -980,6 +1005,10 @@ node --env-file=.env node_modules/@amplitude/ai/bin/amplitude-ai.mjs doctor --ke
 ```
 
 All doctor failures are mandatory to resolve before proceeding. **Exception:** if your Phase 1 list included `REQUIRED: Local LLM`, doctor will report `provider_dependency` — this is expected and not a failure. Ignore that check only; all other doctor checks still apply.
+
+### Step 4c-2: Check coding agents (Step 3m only)
+
+Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor --json` and confirm every check passes. For Codex, pipe a recorded hook input to `amplitude-ai hook codex --dry-run` to see the events without sending them. Make one commit from an agent session and confirm `git log -1` shows the `Agent-Session-Id` trailer.
 
 ### Step 4d: Run project checks
 
@@ -1109,6 +1138,8 @@ PR body should include:
     - [ ] Agent defined at module level (not inside request handler)
     - [ ] (Local LLM only) `totalCostUsd: 0` passed on every `trackAiMessage` call
     - [ ] (Frontend: yes only) `sessionId` reset on new conversation — not persisted indefinitely in `localStorage`
+    - [ ] (Coding agents only) `coding-agents doctor` passes; `.claude/settings.local.json` and `.amplitude-ai/` are gitignored and not committed
+    - [ ] (Coding agents only) `AMPLITUDE_API_KEY` repository secret added for `agent-outcomes.yml`
 
 ### Step 5b: Reviewer guide
 
@@ -1476,6 +1507,32 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
     tracker.process(s, message);
   }
 });
+```
+
+---
+
+### Codex SDK
+- Use `CodexSDKTracker` from `@amplitude/ai/integrations/codex-sdk` for agents built on `@openai/codex-sdk` (or `codex exec --json`)
+- `tracker.track(session, events, input)` wraps the `runStreamed` event stream and yields every event unchanged
+- The session ID defaults to the Codex thread ID (`sessionId: 'thread'`), so it matches `CODEX_THREAD_ID` in commit trailers
+- Codex events don't carry the model: pass `model` from your `ThreadOptions`. Cost is never invented
+
+```typescript
+import { Codex } from '@openai/codex-sdk';
+import { AmplitudeAI } from '@amplitude/ai';
+import { CodexSDKTracker } from '@amplitude/ai/integrations/codex-sdk';
+
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
+const threadOptions = { model: 'gpt-5.5' };
+const thread = new Codex().startThread(threadOptions);
+const tracker = new CodexSDKTracker({ model: threadOptions.model });
+
+const session = ai.agent('release-bot', { userId }).session({ trackSessionEnd: false });
+const input = 'Fix the failing test';
+const { events } = await thread.runStreamed(input);
+for await (const event of tracker.track(session, events, input)) {
+  // your own handling of each event
+}
 ```
 
 ---
