@@ -134,6 +134,7 @@
     "amplitude-ai.md",
     "AGENTS.md",
     "docs/integrations",
+    "!docs/integrations/*.test.mjs",
     "dist",
     "examples/coding-agents",
     "bin/amplitude-ai*.mjs",
