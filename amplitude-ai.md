@@ -1514,6 +1514,7 @@ await agent.session({ userId: 'u1', sessionId: 'sess-abc' }).run(async (s) => {
 ### Codex SDK
 - Use `CodexSDKTracker` from `@amplitude/ai/integrations/codex-sdk` for agents built on `@openai/codex-sdk` (or `codex exec --json`)
 - `tracker.track(session, events, input)` wraps the `runStreamed` event stream and yields every event unchanged
+- One tracker can serve many sessions (state is kept per session); call `tracker.endSession(session)` when a session is done, so its last reply is flushed and its state released
 - The session ID defaults to the Codex thread ID (`sessionId: 'thread'`), so it matches `CODEX_THREAD_ID` in commit trailers
 - Codex events don't carry the model: pass `model` from your `ThreadOptions`. Cost is never invented
 
@@ -1533,6 +1534,7 @@ const { events } = await thread.runStreamed(input);
 for await (const event of tracker.track(session, events, input)) {
   // your own handling of each event
 }
+tracker.endSession(session);
 ```
 
 ---

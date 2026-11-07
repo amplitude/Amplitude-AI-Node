@@ -151,6 +151,51 @@ describe('CodexSDKTracker', () => {
     expect(opts.sessionId).toBeUndefined();
   });
 
+  it('keeps turn state per session when one tracker serves several', () => {
+    const a = mockSession();
+    const b = mockSession();
+    const tracker = new CodexSDKTracker({ model: 'gpt-5.5' });
+    tracker.process(a, { type: 'thread.started', thread_id: 'thr_a' });
+    tracker.process(b, { type: 'thread.started', thread_id: 'thr_b' });
+    tracker.setInput('for a', a);
+    tracker.setInput('for b', b);
+    tracker.process(a, { type: 'turn.started' });
+    tracker.process(b, { type: 'turn.started' });
+    tracker.process(a, { type: 'item.completed', item: { id: 'ma', type: 'agent_message', text: 'reply a' } });
+    tracker.process(b, { type: 'item.completed', item: { id: 'mb', type: 'agent_message', text: 'reply b' } });
+    tracker.process(b, { type: 'turn.completed', usage });
+    tracker.process(a, { type: 'turn.completed', usage });
+
+    const user = (s: ReturnType<typeof mockSession>) =>
+      (s.trackUserMessage.mock.calls as unknown as Array<[string, Record<string, unknown>]>).map((c) => [c[0], c[1].sessionId]);
+    const ai = (s: ReturnType<typeof mockSession>) =>
+      (s.trackAiMessage.mock.calls as unknown as Array<[string, string, string, number, Record<string, unknown>]>).map((c) => [
+        c[0],
+        c[4].sessionId,
+        c[4].inputTokens,
+      ]);
+    expect(user(a)).toEqual([['for a', 'thr_a']]);
+    expect(user(b)).toEqual([['for b', 'thr_b']]);
+    expect(ai(a)).toEqual([['reply a', 'thr_a', 1200]]);
+    expect(ai(b)).toEqual([['reply b', 'thr_b', 1200]]);
+  });
+
+  it('endSession flushes the open reply and an untracked prompt, then forgets the session', () => {
+    const session = mockSession();
+    const tracker = new CodexSDKTracker({ model: 'gpt-5.5' });
+    tracker.process(session, { type: 'turn.started' });
+    tracker.process(session, { type: 'item.completed', item: { id: 'm', type: 'agent_message', text: 'last words' } });
+    tracker.setInput('never ran', session);
+    tracker.endSession(session);
+    expect(session.trackAiMessage.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['last words']);
+    expect(session.trackUserMessage.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['never ran']);
+
+    tracker.endSession(session);
+    tracker.process(session, { type: 'turn.completed' });
+    expect(session.trackAiMessage).toHaveBeenCalledTimes(1);
+    expect(session.trackUserMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('never throws on malformed events', () => {
     const session = mockSession();
     const tracker = new CodexSDKTracker();

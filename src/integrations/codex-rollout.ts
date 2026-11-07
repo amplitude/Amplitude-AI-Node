@@ -53,6 +53,8 @@ export type CodexRolloutState = {
   pendingCalls: Record<string, PendingCall>;
   /** Byte offset of the next string line, for callers that pass lines without offsets. */
   byteOffset: number;
+  /** Error by call ID from MCP / patch end events, which Codex writes before the call's output. */
+  toolFailures?: Record<string, string>;
 };
 
 export type CodexTrackCall =
@@ -164,6 +166,77 @@ function toolName(payload: Record<string, unknown>): string {
   const namespace = typeof payload.namespace === 'string' ? payload.namespace : '';
   if (!namespace) return name;
   return namespace.endsWith('__') ? `${namespace}${name}` : `${namespace}__${name}`;
+}
+
+function firstLine(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const [line = ''] = value.trim().split(/\r?\n/);
+  return line.slice(0, 500) || null;
+}
+
+/**
+ * `[callId, error]` from an MCP or patch end event, or null when it succeeded.
+ * Function outputs don't persist their success flag; these events (legacy
+ * `mcp_tool_call_end` / `patch_apply_end`, paginated `item_completed`) carry it.
+ */
+export function codexToolFailure(payload: Record<string, unknown>): [string, string] | null {
+  if (payload.type === 'item_completed') {
+    const item = payload.item as Record<string, unknown> | null | undefined;
+    if (!item || typeof item.id !== 'string') return null;
+    const status = String(item.status ?? '');
+    if (item.type === 'McpToolCall') {
+      const error = item.error as { message?: unknown } | null | undefined;
+      const message = error && typeof error === 'object' ? error.message : null;
+      if (status === 'failed' || message) return [item.id, String(message || 'tool call failed')];
+    } else if (item.type === 'FileChange' && (status === 'failed' || status === 'declined')) {
+      return [item.id, firstLine(item.stderr) ?? `patch ${status}`];
+    }
+    return null;
+  }
+  const callId = payload.call_id;
+  if (typeof callId !== 'string' || !callId) return null;
+  if (payload.type === 'mcp_tool_call_end') {
+    const result = payload.result as Record<string, unknown> | null | undefined;
+    if (result && typeof result === 'object' && 'Err' in result) return [callId, String(result.Err || 'tool call failed')];
+    const ok = result && typeof result === 'object' ? (result.Ok as Record<string, unknown> | null | undefined) : null;
+    if (ok && typeof ok === 'object' && (ok.isError || ok.is_error)) return [callId, 'tool returned an error'];
+    return null;
+  }
+  const status = payload.status;
+  if (payload.success === false || status === 'failed' || status === 'declined') {
+    return [callId, firstLine(payload.stderr) ?? `patch ${typeof status === 'string' && status ? status : 'failed'}`];
+  }
+  return null;
+}
+
+/** Text of an `agent_message` item; null when any part is encrypted. */
+function plaintextAgentMessage(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const parts: string[] = [];
+  for (const part of content as Array<Record<string, unknown> | null>) {
+    if (!part || part.type !== 'input_text' || typeof part.text !== 'string') return null;
+    parts.push(part.text);
+  }
+  return parts.join('') || null;
+}
+
+/** Older rollouts store an inter-agent message as an assistant message whose text is its JSON. */
+function legacyInterAgentMessage(content: unknown): Record<string, unknown> | null {
+  if (!Array.isArray(content) || content.length !== 1) return null;
+  const part = content[0] as Record<string, unknown> | null;
+  if (!part || typeof part !== 'object') return null;
+  if ((part.type !== 'input_text' && part.type !== 'output_text') || typeof part.text !== 'string') return null;
+  if (!part.text.startsWith('{')) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(part.text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const message = parsed as Record<string, unknown>;
+  if (!['author', 'recipient', 'content'].every((k) => typeof message[k] === 'string')) return null;
+  return typeof message.trigger_turn === 'boolean' ? message : null;
 }
 
 function usageOf(value: unknown): CodexUsage | null {
@@ -292,6 +365,19 @@ export function mapCodexRollout(
     flushReply(true, message);
   };
 
+  /** A message from another agent, if this thread is a recipient (Codex writes it to the author's rollout too). */
+  const interAgent = (message: Record<string, unknown>, opts: Record<string, unknown>, time: number, key: string) => {
+    const own = state.meta?.agentPath ?? (state.meta?.isSubagent ? null : '/root');
+    const others = Array.isArray(message.other_recipients) ? message.other_recipients : [];
+    if (own != null && message.recipient !== own && !others.includes(own)) return skip('inter_agent_not_addressed');
+    if (message.author === own) return skip('inter_agent_own_message');
+    if (typeof message.content !== 'string' || !message.content) return;
+    flushReply(false);
+    state.lastEventAt = time;
+    const id = insertId('user', key);
+    calls.push({ kind: 'user', insertId: id, time, content: message.content, opts: { ...opts, messageId: id, messageSource: 'agent' } });
+  };
+
   const startTurn = (turnId: string, time: number) => {
     if (state.turnId === turnId) return;
     flushReply(true);
@@ -380,6 +466,13 @@ export function mapCodexRollout(
             if (total) state.lastTotal = total;
             break;
           }
+          case 'mcp_tool_call_end':
+          case 'patch_apply_end':
+          case 'item_completed': {
+            const failure = codexToolFailure(payload);
+            if (failure) (state.toolFailures ??= {})[failure[0]] = failure[1];
+            break;
+          }
           default:
             break;
         }
@@ -411,12 +504,23 @@ export function mapCodexRollout(
               const id = insertId('user', lineKey);
               calls.push({ kind: 'user', insertId: id, time, content: text, opts: { ...opts, messageId: id } });
             } else if (payload.role === 'assistant') {
+              const legacy = legacyInterAgentMessage(payload.content);
+              if (legacy) {
+                interAgent(legacy, opts, time, lineKey);
+                break;
+              }
               flushReply(false);
               state.pendingReply = { text, time, key: lineKey, reasoning: state.reasoning, latencyMs: sinceLast(time) };
               state.reasoning = null;
             } else {
               skip(`message_role_${String(payload.role)}`);
             }
+            break;
+          }
+          case 'agent_message': {
+            const content = plaintextAgentMessage(payload.content);
+            if (content != null) interAgent({ author: payload.author, recipient: payload.recipient, content }, opts, time, lineKey);
+            else skip('agent_message_encrypted');
             break;
           }
           case 'reasoning': {
@@ -454,9 +558,13 @@ export function mapCodexRollout(
             const output = outputText(payload.output);
             const exitCode = codexExitCode(output);
             const explicit = (payload.output as { success?: unknown } | null)?.success;
-            const success = explicit === false ? false : exitCode == null || exitCode === 0;
+            let failure = state.toolFailures?.[callId] ?? null;
+            if (state.toolFailures) delete state.toolFailures[callId];
+            if (failure == null && exitCode != null && exitCode !== 0) failure = `exit code ${exitCode}`;
+            if (failure == null && explicit === false) failure = 'tool call failed';
+            const success = failure == null;
             const toolOpts: Record<string, unknown> = { ...opts, invocationId: insertId('tool', callId), input: call.input, output };
-            if (!success) toolOpts.errorMessage = exitCode != null ? `exit code ${exitCode}` : 'tool call failed';
+            if (failure != null) toolOpts.errorMessage = failure;
             if (success) {
               const commit = commitShaProperties(call.name, call.input, output);
               if (commit.commit_sha) {
@@ -504,28 +612,7 @@ export function mapCodexRollout(
           skip('outside_turn');
           break;
         }
-        // Delivered to this thread: Codex writes it to the recipient's rollout and to the author's.
-        const own = state.meta.agentPath ?? (state.meta.isSubagent ? null : '/root');
-        const others = Array.isArray(payload.other_recipients) ? payload.other_recipients : [];
-        if (own != null && payload.recipient !== own && !others.includes(own)) {
-          skip('inter_agent_not_addressed');
-          break;
-        }
-        if (payload.author === own) {
-          skip('inter_agent_own_message');
-          break;
-        }
-        if (typeof payload.content !== 'string' || !payload.content) break;
-        flushReply(false);
-        state.lastEventAt = time;
-        const id = insertId('user', lineKey);
-        calls.push({
-          kind: 'user',
-          insertId: id,
-          time,
-          content: payload.content,
-          opts: { ...opts, messageId: id, messageSource: 'agent' },
-        });
+        interAgent(payload, opts, time, lineKey);
         break;
       }
       default:

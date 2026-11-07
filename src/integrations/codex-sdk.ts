@@ -70,6 +70,16 @@ type PendingResponse = {
   reasoning: string | null;
 };
 
+type TurnState = {
+  threadId: string | null;
+  traceId: string | null;
+  pendingInput: string | null;
+  pending: PendingResponse | null;
+  reasoning: string | null;
+  lastMark: number;
+  itemStarts: Map<string, number>;
+};
+
 type CodexEvent = { type?: unknown; [key: string]: unknown };
 type CodexItem = { id?: unknown; type?: unknown; [key: string]: unknown };
 
@@ -88,12 +98,8 @@ export class CodexSDKTracker {
   private readonly _provider: string;
   private readonly _useThreadId: boolean;
   private _threadId: string | null = null;
-  private _traceId: string | null = null;
-  private _pendingInput: string | null = null;
-  private _pending: PendingResponse | null = null;
-  private _reasoning: string | null = null;
-  private _lastMark = 0;
-  private _itemStarts = new Map<string, number>();
+  private _unboundInput: string | null = null;
+  private _states = new WeakMap<SessionLike, TurnState>();
 
   constructor(options: CodexSDKTrackerOptions = {}) {
     this._model = options.model || 'unknown';
@@ -101,20 +107,24 @@ export class CodexSDKTracker {
     this._useThreadId = (options.sessionId ?? 'thread') === 'thread';
   }
 
-  /** Codex `thread_id`, once `thread.started` has been seen. */
+  /** Codex `thread_id` of the last `thread.started` seen. */
   get threadId(): string | null {
     return this._threadId;
   }
 
-  /** The input of the next `run` / `runStreamed`; tracked as a User Message at `turn.started`. */
-  setInput(input: unknown): void {
-    const text = codexInputText(input);
-    this._pendingInput = text || null;
+  /**
+   * The input of the next `run` / `runStreamed`; tracked as a User Message at
+   * `turn.started`. Pass the session when one tracker serves several.
+   */
+  setInput(input: unknown, session?: SessionLike): void {
+    const text = codexInputText(input) || null;
+    if (session) this._state(session).pendingInput = text;
+    else this._unboundInput = text;
   }
 
   /** Passes `events` through unchanged while tracking each one. */
   async *track<T>(session: SessionLike, events: AsyncIterable<T>, input?: unknown): AsyncGenerator<T> {
-    if (input !== undefined) this.setInput(input);
+    if (input !== undefined) this.setInput(input, session);
     for await (const event of events) {
       this.process(session, event);
       yield event;
@@ -128,26 +138,29 @@ export class CodexSDKTracker {
     try {
       switch (ev.type) {
         case 'thread.started':
-          if (typeof ev.thread_id === 'string' && ev.thread_id) this._threadId = ev.thread_id;
+          if (typeof ev.thread_id === 'string' && ev.thread_id) {
+            this._threadId = ev.thread_id;
+            this._state(session).threadId = ev.thread_id;
+          }
           break;
         case 'turn.started':
           this._startTurn(session);
           break;
         case 'item.started':
-          this._itemStarted(ev.item as CodexItem);
+          this._itemStarted(session, ev.item as CodexItem);
           break;
         case 'item.completed':
           this._itemCompleted(session, ev.item as CodexItem);
           break;
         case 'turn.completed':
           this._flush(session, (ev.usage as CodexUsage | undefined) ?? null);
-          this._endTurn();
+          this._endTurn(session);
           break;
         case 'turn.failed': {
           this._flush(session, null);
           const error = ev.error as { message?: unknown } | undefined;
           this._trackError(session, typeof error?.message === 'string' ? error.message : 'Turn failed');
-          this._endTurn();
+          this._endTurn(session);
           break;
         }
         case 'error':
@@ -162,46 +175,82 @@ export class CodexSDKTracker {
     }
   }
 
-  private _common(): Record<string, unknown> {
+  /**
+   * Flushes the session's open turn and pending prompt, then forgets it, so a
+   * long-lived tracker doesn't keep its state. Never throws.
+   */
+  endSession(session: SessionLike): void {
+    const state = this._states.get(session);
+    if (!state) return;
+    try {
+      if (state.pendingInput) {
+        const input = state.pendingInput;
+        state.pendingInput = null;
+        safeTrack(() => session.trackUserMessage(input, this._common(session)));
+      }
+      this._flush(session, null);
+    } catch (err) {
+      logger.warn(`Failed to flush Codex SDK session: ${err}`);
+    } finally {
+      this._states.delete(session);
+    }
+  }
+
+  private _state(session: SessionLike): TurnState {
+    let state = this._states.get(session);
+    if (!state) {
+      state = { threadId: null, traceId: null, pendingInput: null, pending: null, reasoning: null, lastMark: 0, itemStarts: new Map() };
+      this._states.set(session, state);
+    }
+    return state;
+  }
+
+  private _common(session: SessionLike): Record<string, unknown> {
+    const state = this._state(session);
     const opts: Record<string, unknown> = {};
-    if (this._traceId) opts.traceId = this._traceId;
-    if (this._useThreadId && this._threadId) opts.sessionId = this._threadId;
+    if (state.traceId) opts.traceId = state.traceId;
+    if (this._useThreadId && state.threadId) opts.sessionId = state.threadId;
     return opts;
   }
 
   private _startTurn(session: SessionLike): void {
-    this._traceId = randomUUID();
-    this._pending = null;
-    this._reasoning = null;
-    this._itemStarts.clear();
-    this._lastMark = performance.now();
-    const input = this._pendingInput;
-    this._pendingInput = null;
-    if (input) safeTrack(() => session.trackUserMessage(input, this._common()));
+    const state = this._state(session);
+    state.traceId = randomUUID();
+    state.pending = null;
+    state.reasoning = null;
+    state.itemStarts.clear();
+    state.lastMark = performance.now();
+    const input = state.pendingInput ?? this._unboundInput;
+    state.pendingInput = null;
+    this._unboundInput = null;
+    if (input) safeTrack(() => session.trackUserMessage(input, this._common(session)));
   }
 
-  private _endTurn(): void {
-    this._traceId = null;
-    this._itemStarts.clear();
+  private _endTurn(session: SessionLike): void {
+    const state = this._state(session);
+    state.traceId = null;
+    state.itemStarts.clear();
   }
 
-  private _sinceMark(): number {
+  private _sinceMark(session: SessionLike): number {
+    const state = this._state(session);
     const now = performance.now();
-    const elapsed = this._lastMark ? now - this._lastMark : 0;
-    this._lastMark = now;
+    const elapsed = state.lastMark ? now - state.lastMark : 0;
+    state.lastMark = now;
     return Math.max(0, elapsed);
   }
 
-  private _itemStarted(item: CodexItem | undefined): void {
-    if (item && typeof item.id === 'string') this._itemStarts.set(item.id, performance.now());
+  private _itemStarted(session: SessionLike, item: CodexItem | undefined): void {
+    if (item && typeof item.id === 'string') this._state(session).itemStarts.set(item.id, performance.now());
   }
 
-  private _itemLatency(item: CodexItem): number {
+  private _itemLatency(session: SessionLike, item: CodexItem): number {
+    const state = this._state(session);
     const id = typeof item.id === 'string' ? item.id : null;
-    const started = id ? this._itemStarts.get(id) : undefined;
-    if (id) this._itemStarts.delete(id);
+    const started = id ? state.itemStarts.get(id) : undefined;
+    if (id) state.itemStarts.delete(id);
     const now = performance.now();
-    this._lastMark = now;
+    state.lastMark = now;
     return started != null ? Math.max(0, now - started) : 0;
   }
 
@@ -210,18 +259,20 @@ export class CodexSDKTracker {
     switch (item.type) {
       case 'agent_message': {
         this._flush(session, null);
-        this._pending = {
+        const state = this._state(session);
+        state.pending = {
           text: typeof item.text === 'string' ? item.text : '',
-          latencyMs: this._sinceMark(),
+          latencyMs: this._sinceMark(session),
           messageId: randomUUID(),
-          reasoning: this._reasoning,
+          reasoning: state.reasoning,
         };
-        this._reasoning = null;
+        state.reasoning = null;
         break;
       }
       case 'reasoning':
         if (typeof item.text === 'string' && item.text) {
-          this._reasoning = this._reasoning ? `${this._reasoning}\n${item.text}` : item.text;
+          const state = this._state(session);
+          state.reasoning = state.reasoning ? `${state.reasoning}\n${item.text}` : item.text;
         }
         break;
       case 'command_execution':
@@ -236,7 +287,7 @@ export class CodexSDKTracker {
   }
 
   private _trackTool(session: SessionLike, item: CodexItem): void {
-    const latencyMs = this._itemLatency(item);
+    const latencyMs = this._itemLatency(session, item);
     let toolName = String(item.type);
     let input: string | undefined;
     let output: string | undefined;
@@ -268,7 +319,7 @@ export class CodexSDKTracker {
       input = typeof item.query === 'string' ? item.query : undefined;
     }
 
-    const opts: Record<string, unknown> = { ...this._common() };
+    const opts: Record<string, unknown> = { ...this._common(session) };
     if (typeof item.id === 'string') opts.invocationId = item.id;
     if (input != null) opts.input = input;
     if (output != null) opts.output = output;
@@ -282,18 +333,19 @@ export class CodexSDKTracker {
 
   /** Emits the buffered AI Response, with the turn's usage when given. */
   private _flush(session: SessionLike, usage: CodexUsage | null): void {
-    const pending = this._pending;
-    this._pending = null;
+    const state = this._state(session);
+    const pending = state.pending;
+    state.pending = null;
     if (pending == null && usage == null) return;
-    const opts: Record<string, unknown> = { ...this._common(), ...codexUsageOpts(usage) };
+    const opts: Record<string, unknown> = { ...this._common(session), ...codexUsageOpts(usage) };
     if (pending?.reasoning) opts.reasoningContent = pending.reasoning;
     opts.messageId = pending?.messageId ?? randomUUID();
-    const latencyMs = pending?.latencyMs ?? this._sinceMark();
+    const latencyMs = pending?.latencyMs ?? this._sinceMark(session);
     safeTrack(() => session.trackAiMessage(pending?.text ?? '', this._model, this._provider, latencyMs, opts));
   }
 
   private _trackError(session: SessionLike, message: string): void {
-    const opts: Record<string, unknown> = { ...this._common(), isError: true, errorMessage: message };
-    safeTrack(() => session.trackAiMessage('', this._model, this._provider, this._sinceMark(), opts));
+    const opts: Record<string, unknown> = { ...this._common(session), isError: true, errorMessage: message };
+    safeTrack(() => session.trackAiMessage('', this._model, this._provider, this._sinceMark(session), opts));
   }
 }

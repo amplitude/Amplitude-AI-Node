@@ -86,11 +86,99 @@ describe('Codex inter_agent_communication', () => {
     expect(skipped).toMatchObject({ inter_agent_not_addressed: 1, inter_agent_own_message: 1 });
   });
 
+  const responseItem = (payload: Record<string, unknown>) => JSON.stringify({ type: 'response_item', payload });
+
+  it('reads plaintext agent_message items and skips encrypted ones', () => {
+    const { calls, skipped } = mapCodexRollout([
+      meta('/root/reviewer', 'root'),
+      turn,
+      responseItem({
+        type: 'agent_message',
+        author: '/root',
+        recipient: '/root/reviewer',
+        content: [
+          { type: 'input_text', text: 'Check ' },
+          { type: 'input_text', text: 'the tests.' },
+        ],
+      }),
+      responseItem({
+        type: 'agent_message',
+        author: '/root',
+        recipient: '/root/reviewer',
+        content: [{ type: 'encrypted_content', encrypted_content: 'gAAA' }],
+      }),
+    ]);
+    expect(calls.map((c) => [c.kind, c.kind === 'user' ? c.content : null, c.opts.messageSource])).toEqual([
+      ['user', 'Check the tests.', 'agent'],
+    ]);
+    expect(skipped.agent_message_encrypted).toBe(1);
+  });
+
+  it('reads the legacy format: an assistant message whose text is the inter-agent JSON', () => {
+    const legacy = (body: Record<string, unknown>) =>
+      responseItem({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(body) }] });
+    const { calls } = mapCodexRollout([
+      meta(null, null),
+      turn,
+      legacy({ author: '/root/reviewer', recipient: '/root', other_recipients: [], content: 'Found 2 issues.', trigger_turn: true }),
+      legacy({ author: '/root/reviewer', recipient: '/root', content: 'no trigger flag' }),
+    ]);
+    expect(calls.map((c) => [c.kind, c.kind === 'ai' ? c.content : c.kind === 'user' ? c.content : null])).toEqual([
+      ['user', 'Found 2 issues.'],
+      ['ai', JSON.stringify({ author: '/root/reviewer', recipient: '/root', content: 'no trigger flag' })],
+    ]);
+  });
+
   it('treats the root thread as /root', () => {
     const { calls } = mapCodexRollout([meta(null, null), turn, message('/root/reviewer', '/root', 'Looks good.')]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ kind: 'user', content: 'Looks good.' });
     expect(calls[0]!.opts.agentId).toBe('codex');
+  });
+});
+
+describe('Codex tool failures from end events', () => {
+  it('reads MCP and patch failures from the end events Codex writes before the output (Python test vectors)', () => {
+    const ts = '2026-11-06T10:00:50.000Z';
+    const line = (type: string, payload: Record<string, unknown>) => JSON.stringify({ timestamp: ts, type, payload });
+    const call = (callId: string, name: string, namespace?: string) =>
+      line('response_item', { type: 'function_call', name, arguments: '{}', call_id: callId, ...(namespace && { namespace }) });
+    const output = (callId: string, text: string) => line('response_item', { type: 'function_call_output', call_id: callId, output: text });
+    const event = (payload: Record<string, unknown>) => line('event_msg', payload);
+    const turnId = 'turn-1';
+    const { calls } = mapCodexRollout([
+      line('session_meta', { id: 'root', timestamp: ts, cwd: '/repo', source: 'cli' }),
+      event({ type: 'task_started', turn_id: turnId }),
+      line('turn_context', { turn_id: turnId, model: 'gpt-5.5' }),
+      call('mcp_err', 'get_issue', 'mcp__linear__'),
+      event({ type: 'mcp_tool_call_end', call_id: 'mcp_err', result: { Err: 'server unavailable' } }),
+      output('mcp_err', 'server unavailable'),
+      call('mcp_is_error', 'get_issue', 'mcp__linear__'),
+      event({ type: 'mcp_tool_call_end', call_id: 'mcp_is_error', result: { Ok: { content: [], isError: true } } }),
+      output('mcp_is_error', '[{"type":"text","text":"not found"}]'),
+      call('mcp_ok', 'get_issue', 'mcp__linear__'),
+      event({ type: 'mcp_tool_call_end', call_id: 'mcp_ok', result: { Ok: { content: [], isError: false } } }),
+      output('mcp_ok', '[{"type":"text","text":"ok"}]'),
+      call('patch_bad', 'apply_patch'),
+      event({ type: 'patch_apply_end', call_id: 'patch_bad', stdout: '', stderr: 'hunk failed\nmore', success: false }),
+      output('patch_bad', 'apply_patch verification failed'),
+      call('paged_mcp', 'get_issue', 'mcp__linear__'),
+      event({ type: 'item_completed', turn_id: turnId, item: { type: 'McpToolCall', id: 'paged_mcp', status: 'failed', error: { message: 'timeout' } } }),
+      output('paged_mcp', 'timeout'),
+      call('paged_patch', 'apply_patch'),
+      event({ type: 'item_completed', turn_id: turnId, item: { type: 'FileChange', id: 'paged_patch', status: 'declined' } }),
+      output('paged_patch', 'patch rejected by user'),
+      event({ type: 'task_complete', turn_id: turnId }),
+    ]);
+    const tools = calls.flatMap((c) => (c.kind === 'tool' ? [[c.toolName, c.success, c.opts.errorMessage ?? null]] : []));
+    expect(tools).toEqual([
+      ['mcp__linear__get_issue', false, 'server unavailable'],
+      ['mcp__linear__get_issue', false, 'tool returned an error'],
+      ['mcp__linear__get_issue', true, null],
+      ['apply_patch', false, 'hunk failed'],
+      ['mcp__linear__get_issue', false, 'timeout'],
+      ['apply_patch', false, 'patch declined'],
+    ]);
   });
 });
 
