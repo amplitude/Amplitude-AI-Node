@@ -205,6 +205,69 @@ describe('Sierra guide', () => {
     );
   });
 
+  it('maps experiment:<name>:<arm> tags to assignments and drops gates and flag state, as the Experiments table says', () => {
+    const tags = [
+      'experiment:greeting:warm',
+      'experiment:planner:v2:fast',
+      'experiment:greeting',
+      'gate:new_tools',
+      'experiment:greeting:skipped',
+      'experiment:greeting:off',
+      'experiment:greeting:on',
+      'experiment:greeting:true',
+      'experiment:greeting:false',
+      'experiment:greeting:eligible:true',
+      'experiment:greeting:eligible',
+      'channel:web_chat',
+      'experiment::warm',
+      'experiment:greeting: ',
+    ];
+    expect(skeleton.experimentsFromSierraTags(tags)).toEqual([
+      { key: 'greeting', variant: 'warm', provider: 'sierra' },
+      { key: 'planner', variant: 'v2:fast', provider: 'sierra' },
+    ]);
+    expect(skeleton.experimentsFromSierraTags([])).toEqual([]);
+
+    const page = readPage('sierra.md');
+    const section = page.slice(page.indexOf('### Experiments'), page.indexOf('### Example: one complete session'));
+    expect(section).toContain("`{ key: 'greeting', variant: 'warm', provider: 'sierra' }`");
+    expect(section).toContain("`{ key: 'planner', variant: 'v2:fast', provider: 'sierra' }`");
+    expect(section).toContain('| `[Agent] Experiment Source` | `http`');
+    expect(section).toContain('| `[Agent] Experiment Overflow` |');
+    expect(section).toContain('at most 32');
+
+    // The tokens the core sends for the mapped entries pass the checker with no warning;
+    // a later tag for the same key wins, and `[Agent] Experiment Provider` is `sierra`.
+    const events: AgentEvent[] = core.toAgentEvents(
+      {
+        ...documentedConversation,
+        experiments: skeleton.experimentsFromSierraTags([...tags, 'experiment:planner:v1']),
+      },
+      { source: 'sierra' },
+    );
+    for (const event of events) {
+      expect(event.event_properties['[Agent] Experiments']).toEqual(['greeting:warm', 'planner:v1']);
+      expect(event.event_properties['[Agent] Experiment Provider']).toBeUndefined();
+    }
+    expect(checkAgentEvents(events)).toMatchObject({ errors: [], warnings: [] });
+
+    const single: AgentEvent[] = core.toAgentEvents(
+      conversationEndingAt('conv_single', t0 + 60_000, {
+        experiments: skeleton.experimentsFromSierraTags(['experiment:greeting:cool']),
+      }),
+      { source: 'sierra' },
+    );
+    expect(single[0]?.event_properties).toMatchObject({
+      '[Agent] Experiments': ['greeting:cool'],
+      '[Agent] Experiment Key': 'greeting',
+      '[Agent] Experiment Variant': 'cool',
+      '[Agent] Experiment Unit': 'agent_session',
+      '[Agent] Experiment Provider': 'sierra',
+    });
+    // Two conversations under different arms of one key: a split, so no rollout warning.
+    expect(checkAgentEvents([...events, ...single])).toMatchObject({ errors: [], warnings: [] });
+  });
+
   it('fails loudly on an unfinished mapping instead of skipping the conversation', async () => {
     process.env.AMPLITUDE_DRY_RUN = '1';
     const fetchImpl = vi.fn();

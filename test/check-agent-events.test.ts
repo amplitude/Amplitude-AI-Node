@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { checkAgentEvents, parseEvents } from '../docs/integrations/check-agent-events.mjs';
+import { checkAgentEvents, experimentEntryProblem, parseEvents } from '../docs/integrations/check-agent-events.mjs';
 
 const CHECKER = resolve(__dirname, '../docs/integrations/check-agent-events.mjs');
 const t0 = Date.UTC(2026, 0, 15, 12, 0, 0);
@@ -131,6 +131,103 @@ describe('check-agent-events', () => {
     });
     expect(messages(rows)).toEqual([]);
     expect(messages(rows, { metadataOnly: true })).toEqual([]);
+  });
+
+  describe('[Agent] Experiments', () => {
+    const withExperiments = (rows: ReturnType<typeof session>, entries: unknown, sessionId = 's1') =>
+      rows.map((e) => ({
+        ...e,
+        insert_id: e.insert_id.replace(/^s1/, sessionId),
+        event_properties: Object.fromEntries(
+          Object.entries({ ...e.event_properties, '[Agent] Experiments': entries }).map(([k, v]) => [
+            k,
+            typeof v === 'string' ? v.replace(/^s1/, sessionId) : v,
+          ]),
+        ),
+      }));
+    const warningsOf = (rows: unknown[]) =>
+      checkAgentEvents(rows as Record<string, unknown>[]).warnings.map((w) => w.message);
+
+    it('accepts assignments, including an arm that contains a colon, with no warning', () => {
+      const rows = withExperiments(session(), ['greeting:warm', 'planner:v2:fast']);
+      expect(checkAgentEvents(rows)).toMatchObject({ errors: [], warnings: [] });
+    });
+
+    it('tells an assignment from flag state', () => {
+      expect(experimentEntryProblem('greeting:warm')).toBeUndefined();
+      expect(experimentEntryProblem('greeting:control')).toBeUndefined();
+      expect(experimentEntryProblem('greeting')).toContain('has no arm');
+      expect(experimentEntryProblem('greeting:')).toContain('empty arm');
+      expect(experimentEntryProblem(':warm')).toContain('empty key');
+      expect(experimentEntryProblem(42)).toContain('not a "key:arm" string');
+      for (const arm of ['on', 'off', 'true', 'false', 'skipped', 'OFF', 'eligible', 'eligible:true']) {
+        expect(experimentEntryProblem(`greeting:${arm}`)).toContain('records flag state');
+      }
+    });
+
+    it('warns once per non-assignment entry, at the first row that carries it', () => {
+      const rows = withExperiments(session(), ['greeting:warm', 'planner:on', 'new_tools', 'k:skipped', 'k:eligible:false']);
+      const result = checkAgentEvents(rows);
+      expect(result.errors).toEqual([]);
+      expect(result.warnings.map((w) => w.row)).toEqual([1, 1, 1, 1]);
+      expect(result.warnings.map((w) => w.message)).toEqual([
+        expect.stringContaining('entry "planner:on" records flag state ("on"), not an assignment'),
+        expect.stringContaining('entry "new_tools" has no arm'),
+        expect.stringContaining('entry "k:skipped" records flag state ("skipped")'),
+        expect.stringContaining('entry "k:eligible:false" records flag state ("eligible:false")'),
+      ]);
+      for (const message of result.warnings.map((w) => w.message)) {
+        expect(message).toContain('(on 4 events)');
+        expect(message).toContain('gates, skipped, on/off and eligible:* are flag state, not arms');
+      }
+    });
+
+    it('warns when [Agent] Experiments is not an array', () => {
+      expect(warningsOf(withExperiments(session(), 'greeting:warm'))).toEqual(
+        Array(4).fill(expect.stringContaining('must be a JSON array of "key:arm" strings')),
+      );
+    });
+
+    it('warns on a key with one arm across sessions, not on one session or a real split', () => {
+      const oneSession = withExperiments(session(), ['greeting:warm']);
+      expect(warningsOf(oneSession)).toEqual([]);
+
+      const rollout = [...oneSession, ...withExperiments(session(), ['greeting:warm'], 's2')];
+      const warnings = checkAgentEvents(rollout as Record<string, unknown>[]).warnings;
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({ row: 1, insertId: 's1:u1' });
+      expect(warnings[0]?.message).toContain(
+        '[Agent] Experiments key "greeting" has the same arm "warm" on every event in this file (2 sessions): one arm is a rollout, not a split',
+      );
+
+      const split = [...oneSession, ...withExperiments(session(), ['greeting:cool'], 's2')];
+      expect(warningsOf(split)).toEqual([]);
+
+      // Flag-state entries do not count as an arm for the rollout check.
+      const stateOnly = [
+        ...withExperiments(session(), ['planner:on']),
+        ...withExperiments(session(), ['planner:on'], 's2'),
+      ];
+      expect(warningsOf(stateOnly)).toEqual([expect.stringContaining('entry "planner:on" records flag state')]);
+    });
+
+    it('prints the warnings in the CLI format and still exits 0', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'aa-checker-exp-'));
+      try {
+        const rows = [
+          ...withExperiments(session(), ['greeting:warm', 'planner:on']),
+          ...withExperiments(session(), ['greeting:warm'], 's2'),
+        ];
+        writeFileSync(join(dir, 'exp.json'), JSON.stringify(rows));
+        const run = spawnSync(process.execPath, [CHECKER, join(dir, 'exp.json')], { encoding: 'utf8' });
+        expect(run.status).toBe(0);
+        expect(run.stdout).toContain('WARNING row 1 (s1:u1): [Agent] Experiments entry "planner:on" records flag state');
+        expect(run.stdout).toContain('WARNING row 1 (s1:u1): [Agent] Experiments key "greeting" has the same arm "warm"');
+        expect(run.stdout).toContain('Checked 8 events in 2 sessions: 0 errors, 2 warnings.');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('reads warehouse CSV exports with uppercase headers and JSON text properties', () => {
