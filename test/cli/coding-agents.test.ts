@@ -98,6 +98,7 @@ describe('coding-agents init', () => {
     init({ harnesses: ['claude-code'], privacy: 'metadata', region: 'eu' });
     const env = readJson('.claude/settings.json').env;
     expect(env.OTEL_LOG_USER_PROMPTS).toBeUndefined();
+    expect(env.OTEL_LOG_ASSISTANT_RESPONSES).toBeUndefined();
     expect(env.OTEL_LOG_TOOL_DETAILS).toBeUndefined();
     expect(env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).toBe('https://api.eu.amplitude.com/otlp/v1/logs');
   });

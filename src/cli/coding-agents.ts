@@ -40,7 +40,7 @@ export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
  */
 export const CODEX_STOP_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook codex';
 
-const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_TOOL_DETAILS'];
+const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_TOOL_DETAILS'];
 const GOOSE_TRACES_PATH = '/otlp/v1/traces';
 
 export type CodingAgentsPrivacy = 'full' | 'metadata';

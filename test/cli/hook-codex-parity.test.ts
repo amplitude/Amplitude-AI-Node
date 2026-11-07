@@ -129,6 +129,31 @@ describe('Codex inter_agent_communication', () => {
     ]);
   });
 
+  it('follows the Python rule for a subagent without an agent path', () => {
+    const spawnOnly = JSON.stringify({
+      type: 'session_meta',
+      payload: { id: 'child', source: { subagent: { thread_spawn: { parent_thread_id: 'root', agent_role: 'explorer' } } } },
+    });
+    const spawned = mapCodexRollout([
+      spawnOnly,
+      turn,
+      message('/root/explorer', '/root', 'to root'),
+      message('/root', '/root/explorer', 'to explorer'),
+    ]);
+    // No agent path and no top-level parent_thread_id: the thread is addressed as /root.
+    expect(spawned.calls.map((c) => (c.kind === 'user' ? c.content : c.kind))).toEqual(['to root']);
+    expect(spawned.skipped.inter_agent_not_addressed).toBe(1);
+
+    const withParent = mapCodexRollout([
+      meta(null, 'root'),
+      turn,
+      message('/root', '/root/explorer', 'to explorer'),
+      message('/root', '/root/other', 'to other'),
+    ]);
+    // A top-level parent_thread_id and no path: every message from another agent is accepted.
+    expect(withParent.calls.map((c) => (c.kind === 'user' ? c.content : c.kind))).toEqual(['to explorer', 'to other']);
+  });
+
   it('treats the root thread as /root', () => {
     const { calls } = mapCodexRollout([meta(null, null), turn, message('/root/reviewer', '/root', 'Looks good.')]);
     expect(calls).toHaveLength(1);

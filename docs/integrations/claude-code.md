@@ -61,15 +61,15 @@ npx -y -p @amplitude/ai amplitude-ai coding-agents doctor
 - `.claude/settings.local.json` (gitignored, mode 0600): `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <key>` and `OTEL_RESOURCE_ATTRIBUTES=enduser.id=<git email>`. The key never goes in the committed file or on the command line.
 - `.githooks/prepare-commit-msg` and `.github/workflows/agent-outcomes.yml` (see [Connect to outcomes](#connect-to-outcomes)).
 
-Flags: `--privacy metadata` drops `OTEL_LOG_USER_PROMPTS` and `OTEL_LOG_TOOL_DETAILS`; `--region eu` uses the EU host; `--force` overwrites changed files.
+Flags: `--privacy metadata` drops `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES` and `OTEL_LOG_TOOL_DETAILS`; `--region eu` uses the EU host; `--force` overwrites changed files.
 
 ### Content gates
 
 | Variable | Sends | `init` default |
 |---|---|---|
 | `OTEL_LOG_USER_PROMPTS=1` | Prompt text on User Messages | on (`--privacy full`) |
+| `OTEL_LOG_ASSISTANT_RESPONSES=1` | Reply text on AI Responses. When unset, Claude Code falls back to `OTEL_LOG_USER_PROMPTS`, so set it to `0` to send prompts without replies | on (`--privacy full`) |
 | `OTEL_LOG_TOOL_DETAILS=1` | Tool input, so evaluators can see `git commit` and test commands | on (`--privacy full`) |
-| `OTEL_LOG_ASSISTANT_RESPONSES=1` | Reply text on AI Responses | off; add it to `env` to send replies |
 
 These are your choice. Metadata only still sends tool names, success, tokens, cost and `commit_sha`. See [privacy.md](privacy.md).
 

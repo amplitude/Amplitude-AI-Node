@@ -42,6 +42,8 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import * as zlib from 'node:zlib';
+import { decompress as fzstdDecompress } from 'fzstd';
 import { AmplitudeAI } from '../client.js';
 import { AIConfig, type ContentMode } from '../config.js';
 import type { AmplitudeEvent } from '../types.js';
@@ -173,12 +175,24 @@ function defaultGitEmail(cwd: string | undefined): string | null {
   }
 }
 
-const ROLLOUT_UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+const ROLLOUT_UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i;
+
+const withoutZst = (path: string) => path.replace(/\.zst$/, '');
+
+/**
+ * Decompresses a cold `.zst` rollout: `zlib.zstdDecompressSync` where Node has
+ * it (22.15+), else the pure-JS `fzstd` decoder.
+ */
+export function zstdDecompress(data: Buffer): Buffer {
+  const native = (zlib as unknown as { zstdDecompressSync?: (input: Buffer) => Buffer }).zstdDecompressSync;
+  if (typeof native === 'function') return native(data);
+  return Buffer.from(fzstdDecompress(new Uint8Array(data.buffer, data.byteOffset, data.byteLength)));
+}
 
 /** Cursor file for a transcript: the thread ID from Codex's rollout file name, else a path hash. */
 export function cursorFileFor(dir: string, transcriptPath: string): string {
   const match = ROLLOUT_UUID.exec(basename(transcriptPath));
-  const key = match?.[1] ?? createHash('sha256').update(transcriptPath).digest('hex').slice(0, 32);
+  const key = match?.[1] ?? createHash('sha256').update(withoutZst(transcriptPath)).digest('hex').slice(0, 32);
   return join(dir, `${key.toLowerCase()}.json`);
 }
 
@@ -193,7 +207,14 @@ function loadCursor(file: string, transcriptPath: string): Cursor {
   if (!existsSync(file)) return fresh;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as Cursor;
-    if (parsed?.version !== CURSOR_VERSION || parsed.transcriptPath !== transcriptPath || typeof parsed.offset !== 'number') return fresh;
+    if (
+      parsed?.version !== CURSOR_VERSION ||
+      typeof parsed.transcriptPath !== 'string' ||
+      withoutZst(parsed.transcriptPath) !== withoutZst(transcriptPath) ||
+      typeof parsed.offset !== 'number'
+    ) {
+      return fresh;
+    }
     return parsed;
   } catch {
     return fresh;
@@ -268,12 +289,17 @@ export async function acquireLock(lockPath: string, timeoutMs = LOCK_TIMEOUT_MS)
   }
 }
 
-/** New complete lines after `offset` with their byte offsets, and the offset just past the last newline. */
+/**
+ * New complete lines after `offset` with their byte offsets, and the offset
+ * just past the last newline. Offsets are in the uncompressed transcript, so a
+ * rollout that Codex later compresses to `.zst` keeps its cursor.
+ */
 export function readNewLines(
   path: string,
   offset: number,
 ): { lines: string[]; records: CodexRolloutLine[]; offset: number; reset: boolean } {
-  const size = statSync(path).size;
+  const whole = path.endsWith('.zst') ? zstdDecompress(readFileSync(path)) : null;
+  const size = whole ? whole.length : statSync(path).size;
   let start = offset;
   let reset = false;
   if (size < start) {
@@ -282,12 +308,17 @@ export function readNewLines(
   }
   const length = Math.min(size - start, MAX_READ_BYTES);
   if (length <= 0) return { lines: [], records: [], offset: start, reset };
-  const buffer = Buffer.alloc(length);
-  const fd = openSync(path, 'r');
-  try {
-    readSync(fd, buffer, 0, length, start);
-  } finally {
-    closeSync(fd);
+  let buffer: Buffer;
+  if (whole) {
+    buffer = whole.subarray(start, start + length);
+  } else {
+    buffer = Buffer.alloc(length);
+    const fd = openSync(path, 'r');
+    try {
+      readSync(fd, buffer, 0, length, start);
+    } finally {
+      closeSync(fd);
+    }
   }
   const lastNewline = buffer.lastIndexOf(0x0a);
   if (lastNewline < 0) return { lines: [], records: [], offset: start, reset };
@@ -424,12 +455,8 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
       return result;
     }
 
-    for (const path of paths) {
-      if (path.endsWith('.zst') || (!existsSync(path) && existsSync(`${path}.zst`))) {
-        result.skipped.transcript_compressed = (result.skipped.transcript_compressed ?? 0) + 1;
-        stderr('amplitude-ai hook codex: rollout is compressed (.zst); skipping\n');
-        continue;
-      }
+    for (const given of paths) {
+      const path = !existsSync(given) && existsSync(`${given}.zst`) ? `${given}.zst` : given;
       if (!existsSync(path)) {
         result.skipped.transcript_missing = (result.skipped.transcript_missing ?? 0) + 1;
         continue;
@@ -443,8 +470,16 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
       }
       try {
         let cursor = loadCursor(cursorFile, path);
-        await waitForQuiescence(path, { ...DEFAULT_QUIESCENCE, ...options.quiescence });
-        const read = readNewLines(path, cursor.offset);
+        if (!path.endsWith('.zst')) await waitForQuiescence(path, { ...DEFAULT_QUIESCENCE, ...options.quiescence });
+        let read: ReturnType<typeof readNewLines>;
+        try {
+          read = readNewLines(path, cursor.offset);
+        } catch (err) {
+          if (!path.endsWith('.zst')) throw err;
+          result.skipped.transcript_compressed_unreadable = (result.skipped.transcript_compressed_unreadable ?? 0) + 1;
+          stderr(`amplitude-ai hook codex: could not decompress ${basename(path)}; skipping\n`);
+          continue;
+        }
         if (read.reset) cursor = { ...cursor, offset: 0, turnCounter: 0, state: initialCodexRolloutState() };
         const mapped = mapCodexRollout(read.records, cursor.state, { agentId });
         for (const [k, v] of Object.entries(mapped.skipped)) result.skipped[k] = (result.skipped[k] ?? 0) + v;

@@ -2,7 +2,8 @@ import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync, re
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cursorFileFor, runCodexHook } from '../../src/cli/hook-codex.js';
+import { decompress as fzstdDecompress } from 'fzstd';
+import { cursorFileFor, runCodexHook, zstdDecompress } from '../../src/cli/hook-codex.js';
 import {
   codexAgentIds,
   isContextualCodexUserMessage,
@@ -258,14 +259,49 @@ describe('amplitude-ai hook codex', () => {
     expect(second.bodies[0]!.api_key).toBe('plain-key');
   });
 
-  it('skips compressed (.zst) rollouts without sending', async () => {
+  it('decompresses a cold .zst rollout with the native decoder or fzstd, to the same bytes', () => {
+    const compressed = readFileSync(join(FIXTURES, `${ROOT}.zst`));
+    const plain = readFileSync(join(FIXTURES, ROOT));
+    expect(zstdDecompress(compressed).equals(plain)).toBe(true);
+    expect(Buffer.from(fzstdDecompress(new Uint8Array(compressed))).equals(plain)).toBe(true);
+  });
+
+  it('forwards a rollout Codex compressed to .zst, with the same insert IDs', async () => {
     const transcript = join(work, ROOT);
-    writeFileSync(`${transcript}.zst`, 'compressed');
+    copyFileSync(join(FIXTURES, `${ROOT}.zst`), `${transcript}.zst`);
+    const { fetchImpl, bodies } = mockFetch();
+    const { result } = await run(transcript, {}, fetchImpl);
+    const plain = mapCodexRollout(lines(ROOT)).calls.map((c) => c.insertId);
+    expect(result.sent).toBe(plain.length);
+    expect(bodies.flatMap((b) => b.events.map((e) => e.insert_id))).toEqual(plain);
+  });
+
+  it('keeps the cursor when the rollout is compressed between hook runs', async () => {
+    const transcript = join(work, ROOT);
+    copyFileSync(join(FIXTURES, ROOT), transcript);
+    const first = mockFetch();
+    expect((await run(transcript, {}, first.fetchImpl)).result.sent).toBe(5);
+
+    rmSync(transcript);
+    copyFileSync(join(FIXTURES, 'both-turns.jsonl.zst'), `${transcript}.zst`);
+    const second = mockFetch();
+    const { result } = await run(transcript, {}, second.fetchImpl);
+    const all = mapCodexRollout([...lines(ROOT), ...lines('rollout-turn2.jsonl.part')]).calls.map((c) => c.insertId);
+    const sentFirst = first.bodies.flatMap((b) => b.events.map((e) => e.insert_id));
+    const sentSecond = second.bodies.flatMap((b) => b.events.map((e) => e.insert_id));
+    expect(result.sent).toBeGreaterThan(0);
+    expect(sentSecond.some((id) => sentFirst.includes(id))).toBe(false);
+    expect(new Set([...sentFirst, ...sentSecond])).toEqual(new Set(all));
+  });
+
+  it('skips a .zst rollout it cannot decompress without sending', async () => {
+    const transcript = join(work, ROOT);
+    writeFileSync(`${transcript}.zst`, 'not zstd');
     const { fetchImpl, bodies } = mockFetch();
     const { result, err } = await run(transcript, {}, fetchImpl);
     expect(result.sent).toBe(0);
-    expect(result.skipped.transcript_compressed).toBe(1);
-    expect(err).toContain('.zst');
+    expect(result.skipped.transcript_compressed_unreadable).toBe(1);
+    expect(err).toContain('could not decompress');
     expect(bodies).toHaveLength(0);
   });
 

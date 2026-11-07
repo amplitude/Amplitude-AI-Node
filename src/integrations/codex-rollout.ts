@@ -31,6 +31,12 @@ export type CodexRolloutMeta = {
   agentPath: string | null;
   isSubagent: boolean;
   historyStartOrdinal: number | null;
+  /**
+   * The path inter-agent messages must be addressed to, as in the Python
+   * forwarder: the agent path, else `/root` unless the top-level
+   * `parent_thread_id` is set (then every message is accepted).
+   */
+  interAgentPath?: string | null;
 };
 
 type PendingCall = { name: string; input: string; time: number; invocationId: string };
@@ -263,15 +269,17 @@ export function parseCodexSessionMeta(payload: Record<string, unknown>): CodexRo
       ? (source.subagent.thread_spawn ?? null)
       : null;
   const parentThreadId = str(payload.parent_thread_id) ?? str(spawn?.parent_thread_id);
+  const agentPath = str(payload.agent_path) ?? str(spawn?.agent_path);
   return {
     threadId: id,
     sessionId: str(payload.session_id) ?? id,
     parentThreadId,
     agentNickname: str(payload.agent_nickname) ?? str(spawn?.agent_nickname),
     agentRole: str(payload.agent_role) ?? str(spawn?.agent_role),
-    agentPath: str(payload.agent_path) ?? str(spawn?.agent_path),
+    agentPath,
     isSubagent: Boolean(parentThreadId || spawn),
     historyStartOrdinal: typeof ordinal === 'number' ? ordinal : null,
+    interAgentPath: agentPath ?? (payload.parent_thread_id ? null : '/root'),
   };
 }
 
@@ -367,7 +375,11 @@ export function mapCodexRollout(
 
   /** A message from another agent, if this thread is a recipient (Codex writes it to the author's rollout too). */
   const interAgent = (message: Record<string, unknown>, opts: Record<string, unknown>, time: number, key: string) => {
-    const own = state.meta?.agentPath ?? (state.meta?.isSubagent ? null : '/root');
+    const meta = state.meta;
+    const own =
+      meta?.interAgentPath !== undefined
+        ? meta.interAgentPath
+        : (meta?.agentPath ?? (meta?.parentThreadId ? null : '/root'));
     const others = Array.isArray(message.other_recipients) ? message.other_recipients : [];
     if (own != null && message.recipient !== own && !others.includes(own)) return skip('inter_agent_not_addressed');
     if (message.author === own) return skip('inter_agent_own_message');
