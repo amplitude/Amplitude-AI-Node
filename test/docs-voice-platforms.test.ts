@@ -320,6 +320,18 @@ describe('voice platform guides', () => {
     const retell = turns(events(build(PLATFORMS[1], readFixture('retell-call.json')))).map((e) => e.event_properties);
     expect(retell.map((e) => e['[Agent] Voice Speech Duration Ms'])).toEqual([1000, 1200, 1200, 800, 550]);
     expect(retell.map((e) => e['[Agent] Voice Time To First Audio Ms'])).toEqual([undefined, undefined, 700, undefined, 550]);
+    expect(retell.map((e) => [e['[Agent] Voice Turn Start Offset Ms'], e['[Agent] Voice Turn End Offset Ms']])).toEqual([
+      [400, 1400],
+      [2200, 3400],
+      [4100, 5300],
+      [7000, 7800],
+      [8350, 8900],
+    ]);
+    for (const e of vapi) {
+      expect(Number(e['[Agent] Voice Turn End Offset Ms']) - Number(e['[Agent] Voice Turn Start Offset Ms'])).toBe(
+        e['[Agent] Voice Speech Duration Ms'],
+      );
+    }
   });
 
   it('marks the ElevenLabs agent turn the user talked over', () => {

@@ -79,7 +79,7 @@ Fetch or read one real ended call. Compare it to [fixtures/retell-call.json](./f
 - **Get-call path.** The adapter calls `/v2/get-call/{call_id}`. If it returns `404` for a call the list returned, try `/v1/get-call/{call_id}` (the path the List Calls page links to) and update `RETELL_GET_CALL_URL`.
 - **Utterances.** `transcript_object` holds one entry per utterance with `role` `agent`, `user`, or `transfer_target`, `content`, and `words` (`word`, `start`, `end`, in seconds from the call's start). `transfer_target` utterances are skipped. If the user wants tool calls, read `transcript_with_tool_calls` and map them into `toolCalls` on the next agent turn.
 - **Timestamps.** A turn's time is `start_timestamp` (epoch milliseconds) plus its first word's `start`. Confirm that `start` is seconds; if your call's `words` are missing, turns fall back to the previous turn's time.
-- **Speech and latency.** Speech duration is the last word's `end` minus the first word's `start`. Time to first audio on a reply is its first word's `start` minus the previous caller utterance's last word `end`; it is derived from word timings, not reported per turn by Retell. The call-level `latency.e2e.p50` is sent as the `e2e_latency_p50_ms` context key.
+- **Speech and latency.** Speech duration is the last word's `end` minus the first word's `start`. Time to first audio on a reply is its first word's `start` minus the previous caller utterance's last word `end`; it is derived from word timings, not reported per turn by Retell. The turn's start and end offsets are its first word's `start` and last word's `end`, which Retell documents as seconds of relative audio time in the call (re-read on 2026-11-06). The call-level `latency.e2e.p50` is sent as the `e2e_latency_p50_ms` context key.
 - **Direction.** `web_call` is `in_app`. A `phone_call` uses `direction` (`inbound` or `outbound`).
 - **End reason.** `disconnection_reason` maps through the table in [End reasons](#end-reasons); the raw value is also sent as the `disconnection_reason` context key.
 - **Success.** `call_analysis.call_successful` (boolean) becomes score `call_success` = 1 or 0. Post-call analysis runs after the call ends; a call fetched before it finishes has no score, which is why the sync waits `SETTLE_MS`.
@@ -164,7 +164,7 @@ Retell has no end reason that means the caller interrupted the call, so `interru
 | `[Agent] Score` | `call_analysis.call_successful` | `[Agent] Score Name` = `call_success`, `[Agent] Score Value` (1 or 0), `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source` = `ai` |
 | `[Agent] Session End` | Once, last, for an ended call | `[Agent] Trace ID` of the final exchange |
 
-Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`; and when word timings are present, `[Agent] Voice Speech Duration Ms` and `[Agent] Voice Time To First Audio Ms` (replies). The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
+Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`; and when word timings are present, `[Agent] Voice Speech Duration Ms`, `[Agent] Voice Turn Start Offset Ms`, `[Agent] Voice Turn End Offset Ms`, and `[Agent] Voice Time To First Audio Ms` (replies). The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID` (the Retell call ID), `[Agent] Agent ID`, `[Agent] Runtime` = `custom`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `retell`, `[Agent] Content Mode`, and `[Agent] Context` (`platform`, `call_type`, `retell_agent_id`, `disconnection_reason`, `user_sentiment`, `e2e_latency_p50_ms`).
 
@@ -201,7 +201,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
       "[Agent] Channel": "voice",
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 1000,
-      "[Agent] Voice End Of Turn Reason": "completed"
+      "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 400,
+      "[Agent] Voice Turn End Offset Ms": 1400
     }
   },
   {
@@ -228,7 +230,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
       "[Agent] Channel": "voice",
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 1200,
-      "[Agent] Voice End Of Turn Reason": "completed"
+      "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 2200,
+      "[Agent] Voice Turn End Offset Ms": 3400
     }
   },
   {
@@ -257,7 +261,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 1200,
       "[Agent] Voice Time To First Audio Ms": 700,
-      "[Agent] Voice End Of Turn Reason": "completed"
+      "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 4100,
+      "[Agent] Voice Turn End Offset Ms": 5300
     }
   },
   {
@@ -284,7 +290,9 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
       "[Agent] Channel": "voice",
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 800,
-      "[Agent] Voice End Of Turn Reason": "completed"
+      "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 7000,
+      "[Agent] Voice Turn End Offset Ms": 7800
     }
   },
   {
@@ -314,6 +322,8 @@ The events the adapter and forwarder core produce from [fixtures/retell-call.jso
       "[Agent] Voice Speech Duration Ms": 550,
       "[Agent] Voice Time To First Audio Ms": 550,
       "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 8350,
+      "[Agent] Voice Turn End Offset Ms": 8900,
       "[Agent] Has Attachments": true,
       "[Agent] Attachment Count": 1,
       "[Agent] Attachment Types": [
@@ -898,7 +908,11 @@ export function normalizeRetellCall(
     const id = `t${index}`;
     messages.push({ id, role, text, timestamp });
     const turn: VoiceTurnOptions = { endOfTurnReason: 'completed' };
-    if (first && last) turn.speechDurationMs = ms(last.end - first.start);
+    if (first && last) {
+      turn.speechDurationMs = ms(last.end - first.start);
+      turn.turnStartOffsetMs = ms(first.start);
+      turn.turnEndOffsetMs = Math.max(turn.turnStartOffsetMs, ms(last.end));
+    }
     if (role === 'assistant' && first && previousUserEnd !== undefined) {
       turn.timeToFirstAudioMs = ms(first.start - previousUserEnd);
     }

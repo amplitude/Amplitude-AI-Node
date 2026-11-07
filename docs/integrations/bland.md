@@ -80,6 +80,7 @@ Fetch or read one real finished call. Compare it to [fixtures/bland-call.json](.
 - **Authentication.** Bland takes the API key as the raw `authorization` header value, with no `Bearer` prefix. Confirm a `200`.
 - **Turns.** `transcripts` entries with `user` = `user` become caller turns, and `assistant` become agent turns. `robot` (system audio) and `agent-action` (pathway steps) are skipped. If the user wants pathway steps, map `agent-action` entries into `spans` on the next agent turn.
 - **Timestamps.** Each entry's `created_at` is ISO 8601 with microseconds and an offset. Confirm it is when the phrase was spoken, not when it was written later.
+- **Turn offsets and stage latency.** Not sent. The [Call Details](https://docs.bland.ai/api-v1/get/calls-id) reference (re-read on 2026-11-06) has no per-turn speech start, end, or latency fields: only each transcript's `created_at` and the call's `started_at`, `end_at`, `corrected_duration`, and `recording_url`.
 - **Direction.** `inbound: true` is `inbound`; otherwise `outbound`. If the user runs Bland web agents, confirm what `inbound` is for those calls; they may need `in_app`.
 - **End reason.** See [End reasons](#end-reasons). The raw `status`, `answered_by`, and `call_ended_by` are also sent as context keys.
 - **Success.** The `analysis` key from do-not-guess answer 4, through `resolveSuccess`. A boolean becomes score `call_success` = 1 or 0; a number is sent as is.
