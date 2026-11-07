@@ -98,6 +98,16 @@ describe('AIConfig', () => {
       expect(config.customRedactionFn).toBe(fn);
     });
 
+    it('uses captureStackTrace=false by default', (): void => {
+      const config = new AIConfig();
+      expect(config.captureStackTrace).toBe(false);
+    });
+
+    it('accepts captureStackTrace=true', (): void => {
+      const config = new AIConfig({ captureStackTrace: true });
+      expect(config.captureStackTrace).toBe(true);
+    });
+
     it('accepts named replacement patterns', (): void => {
       const patterns = [
         'foo',

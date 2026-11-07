@@ -1,5 +1,6 @@
 // Client
 export { AmplitudeAI } from './client.js';
+export type { FlushOptions } from './client.js';
 export { BoundAgent } from './bound-agent.js';
 export type {
   AgentOptions,
@@ -22,6 +23,7 @@ export { TenantHandle } from './tenant.js';
 // Config
 export { AIConfig, ContentMode } from './config.js';
 export type { AIConfigOptions } from './config.js';
+export type { ReviewRequest } from './review.js';
 
 // Shared types
 export { resolveAmplitude } from './types.js';
@@ -51,6 +53,7 @@ export type {
 export {
   SessionContext,
   getActiveContext,
+  pushContext,
   isTrackerManaged,
   runWithContext,
   runWithContextAsync,
@@ -71,7 +74,13 @@ export {
   PROP_SESSION_ID,
   PROP_TRACE_ID,
   PROP_TURN_ID,
+  PROP_EXPERIMENTS,
+  PROP_EXPERIMENT_KEY,
+  PROP_EXPERIMENT_VARIANT,
+  PROP_EXPERIMENT_UNIT,
+  PROP_EXPERIMENT_PROVIDER,
   PROP_MESSAGE_ID,
+  PROP_PROVIDER_REQUEST_ID,
   PROP_MODEL_NAME,
   PROP_PROVIDER,
   PROP_LATENCY_MS,
@@ -89,6 +98,7 @@ export {
   PROP_FINISH_REASON,
   PROP_TOOL_CALLS,
   PROP_TOOL_NAME,
+  PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
   PROP_INVOCATION_ID,
@@ -99,6 +109,7 @@ export {
   PROP_TOOL_OUTPUT,
   PROP_SDK_VERSION,
   PROP_RUNTIME,
+  PROP_CONTENT_MODE,
   PROP_ENV,
   PROP_LOCALE,
   PROP_SPAN_KIND,
@@ -156,6 +167,19 @@ export {
   PROP_AGENT_CHAIN,
   PROP_ROOT_AGENT_NAME,
   PROP_REQUEST_COMPLEXITY,
+  PROP_CHANNEL,
+  PROP_VOICE_DIRECTION,
+  PROP_VOICE_SPEECH_DURATION_MS,
+  PROP_VOICE_TIME_TO_FIRST_AUDIO_MS,
+  PROP_VOICE_INTERRUPTED,
+  PROP_VOICE_INTERRUPTED_BY,
+  PROP_VOICE_YIELDED,
+  PROP_VOICE_END_OF_TURN_REASON,
+  PROP_VOICE_TRANSCRIPT_CONFIDENCE,
+  VOICE_CHANNELS,
+  VOICE_DIRECTIONS,
+  VOICE_INTERRUPTED_BY,
+  VOICE_END_OF_TURN_REASONS,
   SDK_VERSION,
   SDK_RUNTIME,
   MAX_SERIALIZED_LENGTH,
@@ -183,11 +207,17 @@ export {
 
 // Core - Privacy
 export { PrivacyConfig, normalizeToolDefinitions } from './core/privacy.js';
+export { recordingAttachment, voiceTurnProperties } from './core/voice.js';
+export type {
+  RecordingAttachmentOptions,
+  VoiceTurnOptions,
+} from './core/voice.js';
 
 // Exceptions
 export {
   AmplitudeAIError,
   ConfigurationError,
+  CostCalculationError,
   TrackingError,
   ProviderError,
   ValidationError,
@@ -220,7 +250,19 @@ export { wrap, AmplitudeAIWrapError } from './wrappers.js';
 
 // Decorators (tool/observe HOFs + ToolCallTracker)
 export { tool, observe, ToolCallTracker } from './decorators.js';
-export type { ToolWrapped, ObserveWrapped } from './decorators.js';
+export type { ToolWrapped, ObserveWrapped, ObserveSpanType } from './decorators.js';
+export {
+  addExperiments,
+  experimentFromEvaluation,
+  experimentsFromAmplitude,
+} from './core/experiments.js';
+export type {
+  ExperimentInput,
+  ExperimentOpts,
+  ExperimentUnit,
+  ExperimentsFromAmplitudeOptions,
+  FlagEvaluation,
+} from './core/experiments.js';
 
 // Patching
 export {
@@ -247,6 +289,7 @@ export {
   OPENAI_AVAILABLE,
   WrappedResponses,
   extractSystemPrompt,
+  resolveOpenAIProvider,
 } from './providers/openai.js';
 export {
   Anthropic,
@@ -293,6 +336,11 @@ export {
 export { AmplitudeTracingProcessor } from './integrations/openai-agents.js';
 export { AmplitudeToolLoop } from './integrations/anthropic-tools.js';
 export { AmplitudeCrewAIHooks } from './integrations/crewai.js';
+export { RealtimeTurnMapper } from './integrations/openai-realtime.js';
+export type {
+  RealtimeTurnMapperOptions,
+  VoiceTurn,
+} from './integrations/openai-realtime.js';
 
 // Streaming
 export { StreamingAccumulator } from './utils/streaming.js';
@@ -303,6 +351,8 @@ export {
   stripProviderPrefix,
   inferProvider,
   getGenaiPriceLookupCandidates,
+  fireworksExplicitPriceCost,
+  fireworksFastTierCost,
 } from './utils/costs.js';
 export {
   countTokens,
@@ -317,3 +367,17 @@ export {
 } from './utils/model-tiers.js';
 export { inferProviderFromModel } from './utils/providers.js';
 export { enableLivePriceUpdates } from './utils/costs.js';
+export { reportOfflineEval, OfflineEvalUploadError } from './offline-eval.js';
+export type { OfflineEvalValidationError } from './offline-eval.js';
+export type {
+  OfflineEvalServerZone,
+  OfflineEvalUploadResult,
+  ReportOfflineEvalOptions,
+} from './offline-eval.js';
+export { braintrustExperimentsToDocument } from './integrations/braintrust-experiment.js';
+export type {
+  BraintrustExperiment,
+  BraintrustExperimentRow,
+} from './integrations/braintrust-experiment.js';
+export { getGitMetadata, _resetCache as _resetGitCache } from './utils/git_metadata.js';
+export type { GitMetadata } from './utils/git_metadata.js';

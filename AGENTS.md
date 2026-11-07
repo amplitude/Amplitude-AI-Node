@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.11.0
+Package: `@amplitude/ai` v0.26.0
 
 ## Install
 
@@ -13,42 +13,40 @@ pnpm add @amplitude/ai
 The SDK ships an MCP server for AI coding agents. It provides project scanning,
 file validation, instrumentation, test generation, and the complete API reference.
 
+Install `@amplitude/ai` in the project first, and configure the server per
+project (not in a global config) so it runs the version installed in that project.
+Always name the scoped package in `npx` (`npx -y -p @amplitude/ai amplitude-ai ...`):
+`amplitude-ai` is only a bin name, and `npx` without `-p` looks it up as a separate package.
+
 ### Cursor
 
 Add to `.cursor/mcp.json` in your project root:
 ```json
-{
-  "mcpServers": {
-    "amplitude-ai": {
-      "command": "npx",
-      "args": ["amplitude-ai", "mcp"]
-    }
-  }
-}
+{ "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"] } } }
 ```
 Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
 
 ### Claude Code
 
 ```bash
-claude mcp add amplitude-ai -- npx amplitude-ai mcp
+claude mcp add --scope project amplitude-ai -- npx -y -p @amplitude/ai amplitude-ai mcp
 ```
-Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
+This writes `.mcp.json` in the project root. Then point the agent at the instrumentation guide: `node_modules/@amplitude/ai/amplitude-ai.md`
 
 ### OpenAI Codex CLI
 
-Add to `~/.codex/config.toml`:
+Add to `.codex/config.toml` in your project root (Codex reads project config for trusted projects):
 ```toml
 [mcp_servers.amplitude-ai]
 command = "npx"
-args = ["amplitude-ai", "mcp"]
+args = ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"]
 ```
 Codex auto-reads this `AGENTS.md` file for context.
 
 ### Generic (any MCP-compatible agent)
 
 ```json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+{ "amplitude-ai": { "command": "npx", "args": ["-y", "-p", "@amplitude/ai", "amplitude-ai", "mcp"] } }
 ```
 
 ## Decision Tree
@@ -59,7 +57,26 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Need tool telemetry: use `tool()`.
 - Need span/observability: use `observe()`.
 - Cannot modify call sites at all: use `patch()` for aggregate-only monitoring (no per-user analytics).
+- Already emit OTEL GenAI spans: use `AmplitudeAgentExporter({ amplitudeAI: ai })` (or `enableOtel()`) to map them to [Agent] events.
+- LangChain / LangGraph: use `AmplitudeCallbackHandler` (duck-typed; implements `handleChatModelStart` for User Message).
+- App reads an A/B test or feature flag that changes agent behavior: pass the assignment as `experiments` — `experimentsFromAmplitude(variants, { keys: [...] })` for Amplitude Experiment, `new AmplitudeAIHook({ flags: [...] })` from `@amplitude/ai/openfeature` for any OpenFeature provider, or the literal entry — so `[Agent] Experiments` splits any chart by arm (see Experiments in `amplitude-ai.md`).
 - Need agent-assistant guidance: run MCP prompt `instrument_app`.
+- Want local verification: use `MockAmplitudeAI().summary()` for fill-rate report.
+- HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
+- Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce, Vapi, Retell AI, ElevenLabs Agents, Bland AI): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
+- Voice agent you run yourself: add `voiceTurnProperties({ direction, ... })` as `eventProperties` on each turn, use `RealtimeTurnMapper` for the OpenAI Realtime API, and put `recordingAttachment(url)` on the last turn (a link only; Amplitude never fetches it). Never put a raw phone number in `userId` or `deviceId`; `deviceId` is the customer's choice, a hash is allowed, and no algorithm is required. See Step 3l in `amplitude-ai.md`.
+- Agent built on the Cursor Agent SDK: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following `docs/integrations/cursor-agent-sdk.md`.
+- Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
+- Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
+- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
+- Agent runs on AWS Strands (Python): export native OTLP by following `docs/integrations/strands.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Google ADK: export native OTLP by following `docs/integrations/google-adk.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Vercel AI SDK: export native OTLP by following `docs/integrations/vercel-ai-sdk.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Pydantic AI: export native OTLP by following `docs/integrations/pydantic-ai.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Mastra: export native OTLP by following `docs/integrations/mastra.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Microsoft Agent Framework: export native OTLP by following `docs/integrations/microsoft-agent-framework.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on OpenInference: export native OTLP by following `docs/integrations/openinference.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
+- Agent runs on Amazon Bedrock AgentCore: export native OTLP by following `docs/integrations/amazon-bedrock-agentcore.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 
 ## MCP Surface
 
@@ -101,7 +118,8 @@ Prompt:
 - `session.run()` relies on `AsyncLocalStorage`; not available in Edge Runtime. **Cloudflare Workers:** do NOT import `AmplitudeAI`, `AIConfig`, or any runtime export from `@amplitude/ai` in Worker bundles — they pull in `node:async_hooks` / `node:module` which break Workers Builds. Use the SDK-free `FetchAmplitudeClient` pattern with direct `[Agent]` event construction (see "Edge Runtime / Cloudflare Workers" in amplitude-ai.md). Only `import type { ... } from '@amplitude/ai/types'` is safe.
 - **User message text:** `trackUserMessage(content, opts?)` — put human-readable intent in `content`; large JSON / RAG / pipeline state in `opts.context` (preferred — maps to the registered `[Agent] Context` property, always queryable in charts), not as the only `content`, or session labels and segmentation show raw JSON. Avoid `opts.eventProperties` for custom dimensions on `[Agent]` events — unregistered properties may be silently dropped by schema enforcement.
 - **Turns vs spans:** `[Agent] User Message` + `[Agent] AI Response` drive turn-level analytics; `observe()` / `trackSpan()` complement them — do not use spans alone for conversation metrics.
-- **Gateways / custom `baseURL`:** use `trackAiMessage` with `usage` fields, the **real** routed model id, and `totalCostUsd` when genai-prices cannot resolve the model string (install `@pydantic/genai-prices` for automatic cost when supported).
+- **Gateways / custom `baseURL`:** use `trackAiMessage` with `usage` fields, the **real** routed model id, and `totalCostUsd` when genai-prices cannot resolve the model string (install `@pydantic/genai-prices` for automatic cost when supported). Tag gateway traffic with `context: { ingestion_path: 'gateway', gateway: 'openrouter'|'litellm'|'requesty' }`.
+- **LangChain callbacks:** `AmplitudeCallbackHandler` is duck-typed (no hard `@langchain/core` dep). Prefer `handleChatModelStart` coverage for chat models.
 
 ## CLI
 
@@ -123,12 +141,41 @@ Prompt:
 - `examples/wrap-openai.ts`
 - `examples/multi-agent.ts`
 - `examples/framework-integration.ts`
+- `examples/experiments.ts`
 - `examples/real-openai.ts` (requires OPENAI_API_KEY)
 
 ## Instrumentation Guide
 
-- `amplitude-ai.md` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+Fetch the public guide for the job. These URLs track `main`.
+
+- Node app: fetch `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md` and follow it, then install `@amplitude/ai` as that guide says.
+- Python app: `python3 -m pip install amplitude-ai`, then run `amplitude-ai --print-guide`.
+- Hosted platform, Cursor Agent SDK, tracing tool, warehouse, gateway, or AWS Strands: start at `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/README.md` and follow the linked page, including privacy.
+- `amplitude-ai.md` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is `node_modules/@amplitude/ai/amplitude-ai.md`.
 - `llms-full.txt` — Extended API reference with MCP tools and patterns
+- `docs/integrations/cursor-agent-sdk.md` — Cursor Agent SDK live sessions over the HTTP API, from a hook (no SDK)
+- `docs/integrations/sierra.md` — Sierra conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/decagon.md` — Decagon conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/fin.md` — Fin conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/agentforce.md` — Agentforce conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/vapi.md` — Vapi conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/retell.md` — Retell AI conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/elevenlabs.md` — ElevenLabs Agents conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/bland.md` — Bland AI conversation ingestion over the HTTP API (no SDK)
+- `docs/integrations/langfuse.md` — Langfuse trace forwarding over the HTTP API (no SDK)
+- `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
+- `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
+- `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
+- `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
+- `docs/integrations/strands.md` — AWS Strands (Python) native OTLP export
+- `docs/integrations/google-adk.md` — Google ADK native OTLP export
+- `docs/integrations/vercel-ai-sdk.md` — Vercel AI SDK native OTLP export
+- `docs/integrations/pydantic-ai.md` — Pydantic AI native OTLP export
+- `docs/integrations/mastra.md` — Mastra native OTLP export
+- `docs/integrations/microsoft-agent-framework.md` — Microsoft Agent Framework native OTLP export
+- `docs/integrations/openinference.md` — OpenInference native OTLP export
+- `docs/integrations/amazon-bedrock-agentcore.md` — Amazon Bedrock AgentCore native OTLP export
+- `docs/integrations/privacy.md` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
 ## Event Schema (names)
 
@@ -142,5 +189,4 @@ Prompt:
 - `[Agent] Session Record`
 - `[Agent] Span`
 - `[Agent] Tool Call`
-- `[Agent] Topic Classification`
 - `[Agent] User Message`

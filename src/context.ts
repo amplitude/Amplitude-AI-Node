@@ -1,5 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Experiment, ExperimentInput } from './core/experiments.js';
+import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
+import { getLogger } from './utils/logger.js';
 
 export interface SessionContextOptions {
   sessionId: string;
@@ -13,13 +16,23 @@ export interface SessionContextOptions {
   description?: string | null;
   context?: Record<string, unknown> | null;
   groups?: Record<string, unknown> | null;
+  tags?: string[] | null;
+  /** Agent and session level, already validated and merged. */
+  experiments?: Experiment[] | null;
   idleTimeoutMinutes?: number | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
   nextTurnIdFn?: (() => number) | null;
   amplitude?: AmplitudeLike | null;
+  /** Privacy config of the `AmplitudeAI` that owns this session. */
+  privacyConfig?: PrivacyConfig | null;
   trackerManaged?: boolean;
   skipAutoUserTracking?: boolean;
+}
+
+/** @internal What `addExperiments()` needs from the session that owns a context. */
+export interface ExperimentOwner {
+  addExperiments(experiments: ExperimentInput[] | null | undefined): void;
 }
 
 export class SessionContext {
@@ -34,10 +47,27 @@ export class SessionContext {
   readonly description: string | null;
   readonly context: Record<string, unknown> | null;
   readonly groups: Record<string, unknown> | null;
+  readonly tags: string[] | null;
+  /**
+   * Agent and session level, validated and merged. Replaced when the owning
+   * session's `addExperiments()` learns a new assignment.
+   */
+  experiments: Experiment[] | null;
+  /**
+   * @internal The session's own list, without this context's agent
+   * defaults, for an agent that tracks into the session from outside the
+   * active context (the parent during `runAs`). A `Session` always sets it
+   * (empty when there are none); contexts created directly leave it `null`
+   * and `experiments` stands in.
+   */
+  sessionExperiments: Experiment[] | null = null;
+  /** @internal The `Session` whose `run()` created this context, if any. */
+  _session: ExperimentOwner | null = null;
   readonly idleTimeoutMinutes: number | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
   readonly amplitude: AmplitudeLike | null;
+  readonly privacyConfig: PrivacyConfig | null;
   readonly trackerManaged: boolean;
   readonly skipAutoUserTracking: boolean;
   private readonly _nextTurnIdFn: (() => number) | null;
@@ -66,10 +96,13 @@ export class SessionContext {
     this.description = options.description ?? null;
     this.context = options.context ?? null;
     this.groups = options.groups ?? null;
+    this.tags = options.tags ?? null;
+    this.experiments = options.experiments ?? null;
     this.idleTimeoutMinutes = options.idleTimeoutMinutes ?? null;
     this.deviceId = options.deviceId ?? null;
     this.browserSessionId = options.browserSessionId ?? null;
     this.amplitude = options.amplitude ?? null;
+    this.privacyConfig = options.privacyConfig ?? null;
     this.trackerManaged = options.trackerManaged ?? false;
     this.skipAutoUserTracking = options.skipAutoUserTracking ?? false;
     this._nextTurnIdFn = options.nextTurnIdFn ?? null;
@@ -107,6 +140,61 @@ export function runWithContextAsync<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   return _sessionStorage.run(ctx, fn);
+}
+
+let _warnedUnscopedPush = false;
+
+/** @internal Reset the one-time warning flag. For test isolation only. */
+export function _resetPushContextWarning(): void {
+  _warnedUnscopedPush = false;
+}
+
+/**
+ * Run `fn` with `ctx` as the active SessionContext.
+ *
+ * The context is visible to `fn` and everything it awaits or schedules, and
+ * is gone once `fn` returns (same semantics as {@link runWithContext}). Use
+ * this in middleware by wrapping the downstream handler:
+ *
+ * ```typescript
+ * app.use((req, res, next) => pushContext(ctxFor(req), next));
+ * ```
+ *
+ * For Express-style apps, `createAmplitudeAIMiddleware()` does this for you.
+ */
+export function pushContext<T>(ctx: SessionContext | null, fn: () => T): T;
+/**
+ * @deprecated Set the context for the rest of the current async scope and
+ * return a cleanup function that restores the previous context. Logs a
+ * one-time warning.
+ *
+ * Unsafe on HTTP servers: `AsyncLocalStorage.enterWith()` attaches the
+ * context to the socket's execution context, so later requests on the same
+ * keep-alive connection that never call `pushContext` inherit the previous
+ * caller's identity, and the cleanup does not undo that. Prefer
+ * `pushContext(ctx, fn)`, `runWithContext()` or `session.run()`.
+ */
+export function pushContext(ctx: SessionContext | null): () => void;
+export function pushContext<T>(
+  ctx: SessionContext | null,
+  fn?: () => T,
+): T | (() => void) {
+  if (typeof fn === 'function') {
+    return _sessionStorage.run(ctx, fn);
+  }
+  if (!_warnedUnscopedPush) {
+    _warnedUnscopedPush = true;
+    getLogger().warn(
+      'pushContext(ctx) without a callback is deprecated: on HTTP servers the context can carry over ' +
+        'to later requests on the same connection. Use pushContext(ctx, fn), runWithContext(ctx, fn), ' +
+        'or session.run(fn).',
+    );
+  }
+  const previous = _sessionStorage.getStore() ?? null;
+  _sessionStorage.enterWith(ctx);
+  return () => {
+    _sessionStorage.enterWith(previous);
+  };
 }
 
 export { _sessionStorage };

@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 23,
-    "generated_at": "2026-06-07T05:47:18.214979+00:00",
+    "schema_version": 49,
+    "generated_at": "2026-11-05T07:05:39.561309+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -54,7 +54,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -62,10 +62,71 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -145,6 +206,51 @@
           "name": "[Agent] Message Source",
           "type": "string",
           "description": "Origin of the user message: 'user' for real end-user input, 'agent' for inter-agent delegation (parent agent sending instructions to a child agent). Automatically set by provider wrappers based on parent_agent_id context."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Channel the turn happened on: 'chat' or 'voice'. Omitted means chat. A session is voice if any of its turns is voice."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "For voice turns: 'inbound' or 'outbound' phone call, or 'in_app' for an assistant inside the product. Omitted when unknown."
+        },
+        {
+          "name": "[Agent] Voice Speech Duration Ms",
+          "type": "number",
+          "description": "Milliseconds of speech in this turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Time To First Audio Ms",
+          "type": "number",
+          "description": "Milliseconds from the end of the caller's turn until the agent's first audible audio. This is what the caller hears. TTFB Ms is token latency and is a different number."
+        },
+        {
+          "name": "[Agent] Voice Interrupted",
+          "type": "boolean",
+          "description": "Whether this turn was spoken over by the other side. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Interrupted By",
+          "type": "string",
+          "description": "Who spoke over whom: 'user' or 'agent'. Set only when the platform reports the side."
+        },
+        {
+          "name": "[Agent] Voice Yielded",
+          "type": "boolean",
+          "description": "On an agent turn: true if the response was cut off because the caller spoke; false if the caller spoke and the response finished anyway. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice End Of Turn Reason",
+          "type": "string",
+          "description": "Why the turn ended: completed, interrupted, silence, transferred, or error. The platform's raw reason is in [Agent] Context."
+        },
+        {
+          "name": "[Agent] Voice Transcript Confidence",
+          "type": "number",
+          "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
         }
       ]
     },
@@ -196,7 +302,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -204,10 +310,71 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -228,6 +395,16 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
+        },
+        {
           "name": "[Agent] Model Name",
           "type": "string",
           "description": "LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514').",
@@ -238,6 +415,11 @@
           "type": "string",
           "description": "LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock').",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Provider Request ID",
+          "type": "string",
+          "description": "Provider-owned inference identifier. On AI Response this is captured from the provider response; on Score it is present only when explicitly supplied."
         },
         {
           "name": "[Agent] Latency Ms",
@@ -436,6 +618,51 @@
           "name": "[Agent] Message Label Map",
           "type": "string",
           "description": "Serialized JSON map of label key to value for quick lookup."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Channel the turn happened on: 'chat' or 'voice'. Omitted means chat. A session is voice if any of its turns is voice."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "For voice turns: 'inbound' or 'outbound' phone call, or 'in_app' for an assistant inside the product. Omitted when unknown."
+        },
+        {
+          "name": "[Agent] Voice Speech Duration Ms",
+          "type": "number",
+          "description": "Milliseconds of speech in this turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Time To First Audio Ms",
+          "type": "number",
+          "description": "Milliseconds from the end of the caller's turn until the agent's first audible audio. This is what the caller hears. TTFB Ms is token latency and is a different number."
+        },
+        {
+          "name": "[Agent] Voice Interrupted",
+          "type": "boolean",
+          "description": "Whether this turn was spoken over by the other side. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Interrupted By",
+          "type": "string",
+          "description": "Who spoke over whom: 'user' or 'agent'. Set only when the platform reports the side."
+        },
+        {
+          "name": "[Agent] Voice Yielded",
+          "type": "boolean",
+          "description": "On an agent turn: true if the response was cut off because the caller spoke; false if the caller spoke and the response finished anyway. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice End Of Turn Reason",
+          "type": "string",
+          "description": "Why the turn ended: completed, interrupted, silence, transferred, or error. The platform's raw reason is in [Agent] Context."
+        },
+        {
+          "name": "[Agent] Voice Transcript Confidence",
+          "type": "number",
+          "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
         }
       ]
     },
@@ -487,7 +714,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -495,10 +722,81 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -642,7 +940,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -650,10 +948,71 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -756,7 +1115,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -764,10 +1123,81 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Stack Trace",
+          "type": "string",
+          "description": "Error stack trace when Is Error is true and captureStackTrace is enabled. Opt-in only — may contain file paths."
+        },
+        {
+          "name": "[Agent] Error Source",
+          "type": "string",
+          "description": "Origin of the error: 'provider' (LLM API error), 'tool' (tool execution failure), 'agent' (agent logic error)."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -874,7 +1304,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -882,10 +1312,71 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -958,7 +1449,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -966,10 +1457,71 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -987,7 +1539,7 @@
     },
     {
       "event_type": "[Agent] Score",
-      "description": "Quality signal attached to a message or session. Covers user feedback (source='user', e.g., thumbs up/down), automated evals (source='ai', e.g., LLM-as-judge), human annotations (source='reviewer'), and server-generated rubric scores. All quality signals share this event type, enabling unified queries across signal sources.",
+      "description": "Quality signal attached to a message or session, sent by the customer via the SDK's score() method. Covers user feedback (source='user', e.g., thumbs up/down), customer-run automated evals (source='ai', e.g., LLM-as-judge), and human annotations (source='reviewer'). Server-side enrichment rubric scores are emitted as [Agent] Evaluator Result (output_type='score'), not this event type.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1033,7 +1585,7 @@
         {
           "name": "[Agent] Context",
           "type": "string",
-          "description": "Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.)."
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
           "name": "[Agent] Env",
@@ -1041,10 +1593,71 @@
           "description": "Deployment environment: 'production', 'staging', or 'dev'."
         },
         {
+          "name": "[Agent] Tags",
+          "type": "string",
+          "description": "User-defined tags for filtering/segmentation. Serialized JSON array of strings."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Experiment or flag key. Sent only when exactly one experiment applies to the event."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set."
+        },
+        {
+          "name": "[Agent] Git SHA",
+          "type": "string",
+          "description": "Git commit SHA of the deployed agent code. Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Ref",
+          "type": "string",
+          "description": "Git branch or tag name (e.g., 'main', 'v1.2.3'). Auto-captured from environment or git CLI."
+        },
+        {
+          "name": "[Agent] Git Repo",
+          "type": "string",
+          "description": "Git repository URL. Auto-captured from environment or git CLI."
+        },
+        {
           "name": "[Agent] SDK Version",
           "type": "string",
           "description": "Version of the amplitude-ai SDK that produced this event.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Ingestion Path",
+          "type": "string",
+          "description": "How the events were written: 'sdk', 'http_forwarder', 'warehouse_import', or 'otlp'."
+        },
+        {
+          "name": "[Agent] Source",
+          "type": "string",
+          "description": "Writer that produced the events, for example 'node-sdk', 'python-sdk', 'sierra', 'warehouse-sql', or 'databricks'."
+        },
+        {
+          "name": "[Agent] Content Mode",
+          "type": "string",
+          "description": "Privacy posture: 'full', 'metadata_only', or 'customer_enriched'. Stamped even when message text is omitted."
         },
         {
           "name": "[Agent] Runtime",
@@ -1083,6 +1696,11 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Provider Request ID",
+          "type": "string",
+          "description": "Provider-owned inference identifier. On AI Response this is captured from the provider response; on Score it is present only when explicitly supplied."
+        },
+        {
           "name": "[Agent] Comment",
           "type": "string",
           "description": "Optional text explanation for the score (respects content_mode)."
@@ -1090,7 +1708,7 @@
         {
           "name": "[Agent] Taxonomy Version",
           "type": "string",
-          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id)."
+          "description": "ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed."
         },
         {
           "name": "[Agent] Evaluated At",
@@ -1111,7 +1729,7 @@
     },
     {
       "event_type": "[Agent] Session Record",
-      "description": "Fired once per enriched session by the server-side enrichment pipeline, when the session is recorded -- on whichever comes first, an explicit session.close() or a timeout ([Agent] Close Reason distinguishes the two). Contains session-level facts: overall outcome, turn count, boolean flags (has_task_failure, has_negative_feedback, has_technical_failure, has_data_quality_issues), cost, and behavioral patterns. Enables cohorts like 'users with 3+ task failures in 30 days'.",
+      "description": "Fired once per enriched session by the server-side enrichment pipeline, when the session is recorded -- on whichever comes first, an explicit session.close() or a timeout ([Agent] Close Reason distinguishes the two). Contains session-level metrics (turn count, tokens, latency, cost), boolean flags (has_negative_feedback, has_technical_failure, has_data_quality_issues), OOTB evaluator results de-normalized from defaults.json (task completion, response quality, session safety, user intent, user friction, negative feedback, data quality), and optional [Agent] Context echoed from SDK events.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1145,7 +1763,7 @@
         {
           "name": "[Agent] Taxonomy Version",
           "type": "string",
-          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).",
+          "description": "ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed.",
           "is_required": true
         },
         {
@@ -1153,6 +1771,12 @@
           "type": "number",
           "description": "Epoch milliseconds when this enrichment/evaluation was computed.",
           "is_required": true
+        },
+        {
+          "name": "[Agent] Signal Versions",
+          "type": "string",
+          "description": "Signals (Amplitude's built-in evals) that produced a result for this session, each as '<signal_id>@<version>' (e.g. 'task_completion@2'). Changes only when Amplitude updates one of those signals, unlike [Agent] Taxonomy Version, which changes on every evaluator publish in the org. Custom evaluators carry their version on [Agent] Evaluator Result. JSON array of strings.",
+          "is_array_type": true
         },
         {
           "name": "[Agent] Turn Count",
@@ -1295,6 +1919,47 @@
           "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         },
         {
+          "name": "[Agent] Context",
+          "type": "string",
+          "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
+        },
+        {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Every experiment arm the session ran under, one 'key:variant' string each (at most 32), as the union of [Agent] Experiments across the session's SDK events in first-seen order. A turn-unit experiment that changed arm mid-session contributes each arm. Keys and variants are matched case-sensitively, as the SDK sends them. Split a session-grain metric by it to compare arms.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Session dimension: the experiment key, present only when the session ran under exactly one arm (one 'key:variant'). A session that saw two arms of the same experiment does not carry it."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Session dimension: the variant, present only when the session ran under exactly one arm (one 'key:variant')."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "Session dimension: the unit of the one arm the session ran under ('agent_session', 'turn' or 'span'), when the SDK events named it."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Session dimension: the provider of the one arm the session ran under, when the SDK events named it."
+        },
+        {
+          "name": "[Agent] Experiment Source",
+          "type": "string",
+          "description": "Where the session's experiment arms came from: 'sdk', 'otel', 'http' or 'warehouse' when the events carried [Agent] Experiments over that transport; 'context' when they were read from the session's [Agent] Context tags. Present only when the session ran under an experiment and the transport is known; a session whose metadata names no transport carries the arms without this property."
+        },
+        {
+          "name": "[Agent] Experiment Overflow",
+          "type": "number",
+          "description": "Distinct experiment arms dropped because the session ran under more than 32. Present only when nonzero; the arms listed in [Agent] Experiments understate the session by this many. At least 1 when the span read stopped at its size bound, so the count is a lower bound."
+        },
+        {
           "name": "[Agent] Task Completed",
           "type": "string",
           "description": "OOTB detector result: 'True' if agent completed user's request, 'False' otherwise."
@@ -1327,12 +1992,12 @@
         {
           "name": "[Agent] Session Outcome",
           "type": "string",
-          "description": "OOTB classifier result for how the session ended (e.g., 'Response Provided', 'Unable to Complete', 'Escalated')."
+          "description": "OOTB classifier result for how the session ended (e.g., 'Response Provided', 'Unable to Complete', 'Escalated'). Only emitted when the outcome evaluator is enabled; disabled in defaults.json."
         },
         {
           "name": "[Agent] Session Outcome Rationale",
           "type": "string",
-          "description": "Brief rationale for the session outcome classification."
+          "description": "Brief rationale for the session outcome classification. Only emitted when the outcome evaluator is enabled; disabled in defaults.json."
         },
         {
           "name": "[Agent] Session Safety",
@@ -1375,6 +2040,67 @@
           "type": "string",
           "description": "Specific data quality issues detected. JSON array.",
           "is_array_type": true
+        },
+        {
+          "name": "[Agent] Data Quality Rationale",
+          "type": "string",
+          "description": "Brief rationale for the data quality determination, including typed tool-call leaves."
+        },
+        {
+          "name": "[Agent] Data Quality Evidence",
+          "type": "string",
+          "description": "Supporting evidence for the data quality determination. Truncated when written to Nova."
+        },
+        {
+          "name": "[Agent] Detected Negative Feedback",
+          "type": "string",
+          "description": "Specific negative-feedback signals detected (e.g., explicit complaint phrases). JSON array.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "'voice' when any turn in the session is a voice turn. Omitted on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "Call direction from the first voice turn that reports one: 'inbound', 'outbound', or 'in_app'."
+        },
+        {
+          "name": "[Agent] Voice Avg Time To First Audio Ms",
+          "type": "number",
+          "description": "Average time to first audio across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Max Time To First Audio Ms",
+          "type": "number",
+          "description": "Slowest time to first audio in the session, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Interruption Count",
+          "type": "number",
+          "description": "Number of voice turns that were spoken over by either side."
+        },
+        {
+          "name": "[Agent] Voice User Interruption Count",
+          "type": "number",
+          "description": "Number of voice turns the caller spoke over (barge-in)."
+        },
+        {
+          "name": "[Agent] Voice Yield Count",
+          "type": "number",
+          "description": "Number of agent turns cut off because the caller spoke."
+        },
+        {
+          "name": "[Agent] Voice Final End Of Turn Reason",
+          "type": "string",
+          "description": "End of turn reason of the last voice turn that reports one: completed, interrupted, silence, transferred, or error."
+        },
+        {
+          "name": "[Agent] Voice Total Speech Duration Ms",
+          "type": "number",
+          "description": "Total milliseconds of speech across the session's voice turns that report it."
         }
       ]
     },
@@ -1410,7 +2136,7 @@
         {
           "name": "[Agent] Taxonomy Version",
           "type": "string",
-          "description": "Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id).",
+          "description": "ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed.",
           "is_required": true
         },
         {
@@ -1457,7 +2183,7 @@
     },
     {
       "event_type": "[Agent] Evaluator Result",
-      "description": "Fired once per custom evaluator per session. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on [Agent] Session Record). Each row also carries this evaluator's own enrichment cost ([Agent] Evaluator Enrichment Cost USD) and a denormalized copy of the session-context dimensions (turns, tokens, latency, session cost, flags, agent metadata, close reason) so a session dimension can be cross-queried against an evaluator outcome without a join. Those dimensions are session-level, identical across the session's evaluators — filter to one evaluator and AVG / view distributions; never SUM a dimension across a session's evaluators.",
+      "description": "Fired once per custom evaluator per session. Replaces the deprecated [Agent] Topic Classification event for custom classifiers. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on [Agent] Session Record). Each row also carries this evaluator's own enrichment cost ([Agent] Evaluator Enrichment Cost USD) and a denormalized copy of the session-context dimensions (turns, tokens, latency, session cost, flags, agent metadata, close reason) so a session dimension can be cross-queried against an evaluator outcome without a join. Those dimensions are session-level, identical across the session's evaluators — filter to one evaluator and AVG / view distributions; never SUM a dimension across a session's evaluators.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1484,10 +2210,14 @@
           "is_required": true
         },
         {
+          "name": "[Agent] Evaluator ID",
+          "type": "string",
+          "description": "Stable ID of the custom evaluator, the same across all of its versions and renames. Set together with [Agent] Evaluator Version."
+        },
+        {
           "name": "[Agent] Evaluator Version",
           "type": "string",
-          "description": "Config version ID that produced this result.",
-          "is_required": true
+          "description": "Version of this evaluator that produced the result (1, 2, 3...), bumped each time it is edited and promoted. Set together with [Agent] Evaluator ID. Events from before evaluator versions were tracked hold an org-wide configuration ID here instead."
         },
         {
           "name": "[Agent] Evaluated At",
@@ -1540,6 +2270,27 @@
           "description": "Numeric mirror of Binary Label (1=True, 0=False) for uniform charting. Binary only."
         },
         {
+          "name": "[Agent] Decision Probability",
+          "type": "number",
+          "description": "Calibrated P(true) for binary Decision evaluators or P(chosen) for categorical Decision evaluators."
+        },
+        {
+          "name": "[Agent] Decision Confidence",
+          "type": "number",
+          "description": "TypeSafe confidence statistic for categorical Decision evaluators."
+        },
+        {
+          "name": "[Agent] Class Probabilities",
+          "type": "any",
+          "description": "Full label/probability distribution returned by a categorical Decision evaluator.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Evaluation Method",
+          "type": "string",
+          "description": "Evaluator execution method: llm, code, or decision_model."
+        },
+        {
           "name": "[Agent] Score Value",
           "type": "number",
           "description": "Numeric score assigned by the evaluator. Score only."
@@ -1567,7 +2318,7 @@
         {
           "name": "[Agent] Rationale",
           "type": "string",
-          "description": "LLM-generated explanation for the result."
+          "description": "Explanation or calibrated distribution summary for the result."
         },
         {
           "name": "[Agent] Evidence",
@@ -1671,9 +2422,80 @@
           "description": "Session dimension: why the session record fired ('explicit_close' or 'timeout')."
         },
         {
+          "name": "[Agent] Experiments",
+          "type": "string",
+          "description": "Every experiment arm the session ran under, one 'key:variant' string each (at most 32), as the union of [Agent] Experiments across the session's SDK events in first-seen order. A turn-unit experiment that changed arm mid-session contributes each arm. Keys and variants are matched case-sensitively, as the SDK sends them. Split a session-grain metric by it to compare arms.",
+          "is_array_type": true
+        },
+        {
+          "name": "[Agent] Experiment Key",
+          "type": "string",
+          "description": "Session dimension: the experiment key, present only when the session ran under exactly one arm (one 'key:variant'). A session that saw two arms of the same experiment does not carry it."
+        },
+        {
+          "name": "[Agent] Experiment Variant",
+          "type": "string",
+          "description": "Session dimension: the variant, present only when the session ran under exactly one arm (one 'key:variant')."
+        },
+        {
+          "name": "[Agent] Experiment Unit",
+          "type": "string",
+          "description": "Session dimension: the unit of the one arm the session ran under ('agent_session', 'turn' or 'span'), when the SDK events named it."
+        },
+        {
+          "name": "[Agent] Experiment Provider",
+          "type": "string",
+          "description": "Session dimension: the provider of the one arm the session ran under, when the SDK events named it."
+        },
+        {
           "name": "[Agent] Topic Summary",
           "type": "string",
           "description": "Session dimension: concise one-sentence factual summary of what the user was trying to accomplish. Produced by the OOTB batched eval pass-1 at zero marginal cost."
+        },
+        {
+          "name": "[Agent] Channel",
+          "type": "string",
+          "description": "Session dimension: 'voice' when any turn in the session is a voice turn. Omitted on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Direction",
+          "type": "string",
+          "description": "Session dimension: Call direction from the first voice turn that reports one: 'inbound', 'outbound', or 'in_app'."
+        },
+        {
+          "name": "[Agent] Voice Avg Time To First Audio Ms",
+          "type": "number",
+          "description": "Session dimension: Average time to first audio across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Max Time To First Audio Ms",
+          "type": "number",
+          "description": "Session dimension: Slowest time to first audio in the session, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Interruption Count",
+          "type": "number",
+          "description": "Session dimension: Number of voice turns that were spoken over by either side."
+        },
+        {
+          "name": "[Agent] Voice User Interruption Count",
+          "type": "number",
+          "description": "Session dimension: Number of voice turns the caller spoke over (barge-in)."
+        },
+        {
+          "name": "[Agent] Voice Yield Count",
+          "type": "number",
+          "description": "Session dimension: Number of agent turns cut off because the caller spoke."
+        },
+        {
+          "name": "[Agent] Voice Final End Of Turn Reason",
+          "type": "string",
+          "description": "Session dimension: End of turn reason of the last voice turn that reports one: completed, interrupted, silence, transferred, or error."
+        },
+        {
+          "name": "[Agent] Voice Total Speech Duration Ms",
+          "type": "number",
+          "description": "Session dimension: Total milliseconds of speech across the session's voice turns that report it."
         }
       ]
     },

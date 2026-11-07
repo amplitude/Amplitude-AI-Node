@@ -40,9 +40,11 @@ app.post('/chat', async (req, res) => {
 
 ### Instrument with a coding agent (recommended)
 
+Fetch and follow [amplitude-ai.md](https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md), then install the SDK as that guide says:
+
 ```bash
 npm install @amplitude/ai
-npx amplitude-ai
+npx -y -p @amplitude/ai amplitude-ai
 ```
 
 The CLI prints a prompt to paste into any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.):
@@ -68,7 +70,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 | Property        | Value                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name            | @amplitude/ai                                                                                                                                                                    |
-| Version         | 0.11.0                                                                                                                                                                           |
+| Version         | 0.23.0                                                                                                                                                                           |
 | Runtime         | Node.js                                                                                                                                                                          |
 | Peer dependency | @amplitude/analytics-node >= 1.3.0                                                                                                                                               |
 | Dependency      | @pydantic/genai-prices (cost calculation — installed automatically)                                                                                                              |
@@ -90,6 +92,7 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
   - [Session](#session)
 - [Configuration](#configuration)
 - [Context Dict Conventions](#context-dict-conventions)
+- [Works with](#works-with)
 - [Privacy & Content Control](#privacy-content-control)
 - [Cache-Aware Cost Tracking](#cache-aware-cost-tracking)
 - [Semantic Cache Tracking](#semantic-cache-tracking)
@@ -119,6 +122,9 @@ Follow the [code example above](#amplitude-ai) to get started. The pattern is:
 - [Event Property Reference](#event-property-reference)
 - [Event JSON Examples](#event-json-examples)
 - [Sending Events Without the SDK](#sending-events-without-the-sdk)
+  - [Hosted agent platforms (Sierra, Decagon, Fin, Agentforce)](#hosted-agent-platforms-sierra-decagon-fin-agentforce)
+  - [LLM tracing tools (Langfuse, LangSmith, Braintrust)](#llm-tracing-tools-langfuse-langsmith-braintrust)
+  - [Data warehouses (Snowflake, BigQuery, Databricks)](#data-warehouses-snowflake-bigquery-databricks)
 - [Register Event Schema in Your Data Catalog](#register-event-schema-in-your-data-catalog)
 - [Utilities and Type Exports](#utilities-and-type-exports)
 - [Constants](#constants)
@@ -143,7 +149,7 @@ Install provider SDKs based on what you use (for example: `openai`, `@anthropic-
 
 1. **Install:** `npm install @amplitude/ai @amplitude/analytics-node`
 2. **Get your API key:** In Amplitude, go to **Settings > Projects** and copy the API key.
-3. **Instrument:** Run `npx amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
+3. **Instrument:** Run `npx -y -p @amplitude/ai amplitude-ai` and paste the printed prompt into your AI coding agent. Or follow the [manual setup](#manual-setup) steps — the goal is the same: agents + sessions + provider wrappers.
 4. **Set your API key** in the generated `.env` file and replace the placeholder `userId`/`sessionId`.
 5. **Run your app.** You should see `[Agent] User Message`, `[Agent] AI Response`, and `[Agent] Session End` within 30 seconds.
 
@@ -166,7 +172,6 @@ const ai = new AmplitudeAI({
 | Runtime | Node.js only (no browser). Python SDK available separately ([amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)). |
 | Zero-code patching | OpenAI, Anthropic, Azure OpenAI, Gemini, Mistral, Bedrock (Converse, ConverseStream, and InvokeModel). |
 | CrewAI | Python-only; the Node.js export throws `ProviderError` by design. Use LangChain or OpenTelemetry integrations instead. |
-| OTEL scope filtering | Not yet supported (Python SDK has `allowed_scopes`/`blocked_scopes`). |
 | Streaming cost tracking | Automatic for OpenAI and Anthropic. Manual token counts required for other providers' streamed responses. |
 
 ### Is this for me?
@@ -187,9 +192,9 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Every AI event carries your product `user_id`.** No separate identity system, no data joining required. Build a funnel from "user opens chat" to "AI responds" to "user upgrades" directly in Amplitude.
 
-**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. You get topic classifications, quality rubrics, behavioral flags, and session outcomes without writing or maintaining any eval code. Define your own topics and scoring rubrics; the pipeline applies them to every session automatically. Results appear as `[Agent] Score` events with rubric scores, `[Agent] Topic Classification` events with category labels, and `[Agent] Session Record` summaries, all queryable in charts, cohorts, and funnels alongside your product events.
+**Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. Built-in signals (task completion, response quality, user intent, session safety, user friction, negative feedback, data quality) land as properties on one `[Agent] Session Record` event per session, alongside a one-sentence `[Agent] Topic Summary`. Custom evaluators you define in Amplitude produce `[Agent] Evaluator Result` events. No eval code to write or maintain, and everything is queryable in charts, cohorts, and funnels alongside your product events.
 
-**Quality signals from every source in one event type.** User thumbs up/down (`source: 'user'`), automated rubric scores from the enrichment pipeline (`source: 'ai'`), and reviewer assessments (`source: 'reviewer'`) all produce `[Agent] Score` events differentiated by `[Agent] Evaluation Source`. One chart shows all three side by side. Filter by source or view them together. Filter by `[Agent] Agent ID` for per-agent quality attribution.
+**Your own feedback stays yours.** User thumbs up/down and your own evals produce `[Agent] Score` events through `score()` / `trackScore()` (`source: 'user'`, `'ai'`, or `'reviewer'`). Amplitude never emits Score events. Filter by `[Agent] Evaluation Source` or `[Agent] Agent ID` for per-agent quality attribution.
 
 **Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
 
@@ -226,18 +231,21 @@ ai.trackScore({
 | Edit | `[Agent] Is Edit` | `[Agent] User Message` | User refined their prompt — friction |
 | Abandonment | `[Agent] Abandonment Turn` | `[Agent] Session End` | User left after N turns — potential failure |
 
-**3. Automated server-side evaluation** — When `contentMode: 'full'`, Amplitude's enrichment pipeline runs LLM-as-judge evaluators on every session after it closes. No eval code to write or maintain:
+**3. Automated server-side evaluation** — When `contentMode: 'full'`, Amplitude's enrichment pipeline judges every session after it closes. No eval code to write or maintain:
 
-| Rubric | What it measures | Scale |
-|--------|-----------------|-------|
-| `task_completion` | Did the agent accomplish what the user asked? | 0–2 |
-| `response_quality` | Was the response clear, accurate, and helpful? | 0–2 |
-| `user_satisfaction` | Did the user seem satisfied based on conversation signals? | 0–2 |
-| `agent_confusion` | Did the agent misunderstand or go off track? | 0–2 |
+| Signal | Session Record property | Result |
+|--------|------------------------|--------|
+| Task Completed | `[Agent] Task Completed` | boolean, with rationale and evidence |
+| Response Quality | `[Agent] Response Quality` | boolean, with rationale and evidence |
+| User Intent | `[Agent] User Intent` | classification, with rationale |
+| Session Safety | `[Agent] Session Safety` | classification, with rationale |
+| User Friction | `[Agent] Has User Friction` | boolean, with rationale and the detected patterns |
+| Negative Feedback | `[Agent] Has Negative Feedback` | boolean, with rationale and the detected phrases |
+| Data Quality Issues | `[Agent] Has Data Quality Issues` | boolean (rule-based, no LLM), with the detected issues |
 
-Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure` (agent failed to deliver), `data_quality_issues`, and `user_friction` (clarification loops, topic drift). All results are emitted as `[Agent] Score` events with `source: 'ai'`.
+Signals land as properties on the session's `[Agent] Session Record` event, not as separate events. Custom evaluators you define in Amplitude add one `[Agent] Evaluator Result` event per evaluator per session.
 
-**All three layers use the same `[Agent] Score` event type**, differentiated by `[Agent] Evaluation Source` (`'user'`, `'ai'`, or `'reviewer'`). One chart shows user feedback alongside automated evals. No joins, no separate tables.
+**Where each layer lands:** your feedback is `[Agent] Score` (sent by your app only), implicit signals are properties on the events above, built-in signals are on `[Agent] Session Record`, and custom evaluators are `[Agent] Evaluator Result`. Read [Signals: where quality lands](https://amplitude.com/docs/amplitude-ai/agent-analytics/taxonomy#signals-where-quality-lands) for the full property list.
 
 ## What You Set vs What You Get
 
@@ -246,7 +254,7 @@ Plus boolean detectors: `negative_feedback` (frustration phrases), `task_failure
 | API key | Amplitude project settings | Events reach Amplitude |
 | userId | Your auth layer (JWT, session cookie, API token) | Per-user analytics, cohorts, retention |
 | agentId | Your choice (e.g. `'chat-handler'`) | Per-agent cost, latency, quality dashboards |
-| sessionId | Your conversation/thread/ticket ID | Multi-turn analysis, session enrichment, quality scores |
+| sessionId | Agent session ID — your thread, ticket, call, or run ID (see [What is an agent session?](#what-is-an-agent-session)) | Multi-turn analysis, session enrichment, quality scores |
 | *description* | *Your choice (e.g. `'Handles support queries via GPT-4o'`)* | *Human-readable agent registry from event streams* |
 | *contentMode + redactPii* | *Config (defaults work)* | *Server enrichment (automatic), PII scrubbing* |
 | *model, tokens, cost* | *Auto-captured by provider wrappers* | *Cost analytics, latency monitoring* |
@@ -401,7 +409,7 @@ await session.run(async (s) => {
 Main client that wraps Amplitude `analytics-node`. Create it with an API key or an existing Amplitude instance:
 
 ```typescript
-const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 // Or with existing client:
 const ai = new AmplitudeAI({ amplitude: existingAmplitudeClient });
 ```
@@ -474,12 +482,44 @@ agent.trackUserMessage('Hello', {
 app.use(
   createAmplitudeAIMiddleware({
     amplitudeAI: ai,
-    userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+    userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
   }),
 );
 ```
 
 ### Session
+
+#### What is an agent session?
+
+An **agent session** is not the same as Amplitude's standard analytics session.
+
+| | Agent session | Analytics session |
+|--|---------------|-------------------|
+| Property | `[Agent] Session ID` | `$session_id` (Browser SDK) |
+| SDK parameter | `sessionId` on `agent.session()` | `browserSessionId` on `agent.session()` |
+| Meaning | One unit of work the user hands the agent — a job with a real outcome | The user's app or web visit; powers Session Replay and standard product analytics |
+
+You can have **multiple agent sessions inside one analytics session**. For example: when you open Amplitude, you start an analytics session; when you launch Global Agent from within Amplitude, you start an agent session.
+
+**What counts as one agent session:** one job from start to finish. Pass the ID you already track as `sessionId`:
+
+- Chatbot / copilot → thread or conversation ID
+- Support agent → ticket ID
+- Coding agent → task or ticket ID
+- Voice agent → call ID
+- Background / autonomous agent → run or job ID
+
+You're not inventing a new identifier — use the thread, ticket, call, or run ID your app already has. Quickstart examples that omit `sessionId` (UUID auto-generation) are for demos only; production apps should pass your real job ID.
+
+##### When does an agent session end?
+
+**Close explicitly when the job is done (recommended).** Call `trackSessionEnd()` or let `session.run()` complete when the unit of work is finished (ticket resolved, call ended, run completed). `[Agent] Session End` is optional. Sending it is the explicit close. If it never arrives, the server closes the session after 30 idle minutes by default, and after 24 hours from the session start when no per-session override is set. Enrichment runs once after the first close. The Session Record typically arrives 15–20 minutes after the ingestion batch processes that close, and can take longer during a backlog.
+
+Closing does not block later events with the same `sessionId` — it is a completion marker, not a hard lock. If the user continues the **same job** (same thread or ticket), reusing the same `sessionId` is fine.
+
+**Idle timeout (automatic fallback).** If you don't close explicitly, the server marks the session eligible for enrichment after `idleTimeoutMinutes` of inactivity (default **30 minutes**). Raise it for jobs with long natural gaps — e.g. `240` for support tickets or coding agents with pauses between turns.
+
+**New goal → new session.** When the user starts a **different job**, use a **new `sessionId`**.
 
 Async context manager using `AsyncLocalStorage`. Use `session.run()` to execute a callback within session context; session end is tracked automatically on exit:
 
@@ -512,19 +552,14 @@ const session = agent.session({
 
 Without this, sessions with long idle periods may be closed and enrichment may run earlier than expected. The default is 30 minutes.
 
-**Session lifecycle and enrichment.** You do **not** need to call `trackSessionEnd()` for sessions to work. Amplitude's server automatically closes sessions after 30 minutes of inactivity and queues them for enrichment (topic classification, quality scoring, session evaluation) at that point. The only reason to call `trackSessionEnd()` is to **trigger enrichment sooner** — for example, if you know the conversation is over and want evaluation results immediately rather than waiting for the idle timeout.
-
-"Closed" is a server-side concept meaning "queued for enrichment" — it does **not** prevent new events from flowing into the same session. If the user resumes a conversation after session end, new messages with the same `sessionId` are still associated with that session.
-
-If you use `session.run()`, session end is tracked automatically when the callback completes. For long-lived conversations (chatbots, support agents), you can skip explicit session end entirely and let the server handle it.
-
-**Link to Session Replay**: If your frontend uses Amplitude's [Session Replay](https://www.docs.developers.amplitude.com/session-replay/), pass the browser's `deviceId` and `browserSessionId` to link AI sessions to browser recordings:
+**Link to Session Replay**: If your frontend uses Amplitude's [Session Replay](https://www.docs.developers.amplitude.com/session-replay/), pass the browser's analytics `$session_id` as `browserSessionId` (separate from agent `sessionId`) plus `deviceId` to link agent sessions to browser recordings:
 
 ```typescript
 const session = agent.session({
   userId: 'user-123',
+  sessionId: req.headers['x-thread-id'], // agent job ID (thread, ticket, call, or run)
   deviceId: req.headers['x-amp-device-id'],
-  browserSessionId: req.headers['x-amp-session-id'],
+  browserSessionId: req.headers['x-amp-session-id'], // analytics $session_id for replay
 });
 
 await session.run(async (s) => {
@@ -590,9 +625,10 @@ const config = new AIConfig({
   customRedactionPatterns: ['sensitive-\\d+'],
   debug: false,
   dryRun: false,
+  reviewMode: false,
 });
 
-const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY!, config });
 ```
 
 | Option                    | Description                                                                                                 |
@@ -603,6 +639,7 @@ const ai = new AmplitudeAI({ apiKey: 'YOUR_API_KEY', config });
 | `customRedactionFn`       | Optional `(text: string) => string` callback for custom redaction logic (e.g. compromise.js NER). Called after all regex-based redaction. |
 | `debug`                   | Log events to stderr                                                                                        |
 | `dryRun`                  | Log without sending to Amplitude                                                                            |
+| `reviewMode`              | Capture full post-redaction events and sanitized upload previews without sending. Default `false`.          |
 | `validate`                | Enable strict validation of required fields                                                                 |
 | `onEventCallback`         | Callback invoked exactly once per tracked event `(event, statusCode, message) => void` — fired from the underlying Amplitude client's delivery path, so it is not double-invoked by provider wrappers or `patch()` |
 | `propagateContext`        | Enable cross-service context propagation                                                                    |
@@ -616,12 +653,13 @@ The `context` parameter on `ai.agent()` accepts an arbitrary `Record<string, unk
 | Key | Example Values | Use Case |
 | --- | --- | --- |
 | `agent_type` | `"planner"`, `"executor"`, `"retriever"`, `"router"` | Filter/group analytics by agent role in multi-agent systems. |
-| `experiment_variant` | `"control"`, `"treatment-v2"`, `"prompt-rewrite-a"` | Segment AI sessions by A/B test variant. Compare quality scores, abandonment rates, or cost across experiment arms. |
 | `feature_flag` | `"new-rag-pipeline"`, `"reasoning-model-enabled"` | Track which feature flags were active during the session. |
 | `surface` | `"chat"`, `"search"`, `"copilot"`, `"email-draft"` | Identify which UI surface or product area triggered the AI interaction. |
 | `prompt_revision` | `"v7"`, `"abc123"`, `"2026-02-15"` | Track which prompt version was used. Detect prompt regression when combined with `agentVersion`. |
 | `deployment_region` | `"us-east-1"`, `"eu-west-1"` | Segment by deployment region for latency analysis or compliance tracking. |
 | `canary_group` | `"canary"`, `"stable"` | Identify canary vs. stable deployments for progressive rollout monitoring. |
+| `ingestion_path` | `"gateway"` | Tag traffic that routed through an OpenAI-compatible gateway (pair with `gateway`). |
+| `gateway` | `"openrouter"`, `"litellm"`, `"requesty"` | Which partner gateway handled the call. Existing `[Agent] Context` keys — no new schema fields. |
 
 **Example:**
 
@@ -632,7 +670,6 @@ const agent = ai.agent('support-bot', {
   agentVersion: '4.2.0',
   context: {
     agent_type: 'executor',
-    experiment_variant: 'reasoning-enabled',
     surface: 'chat',
     feature_flag: 'new-rag-pipeline',
     prompt_revision: 'v7',
@@ -647,25 +684,87 @@ const agent = ai.agent('support-bot', {
 
 ```typescript
 const parent = ai.agent('orchestrator', {
-  context: { experiment_variant: 'treatment', surface: 'chat' },
+  context: { surface: 'chat', prompt_revision: 'v7' },
 });
 const child = parent.child('researcher', {
   context: { agent_type: 'retriever' },
 });
-// child context = { experiment_variant: 'treatment', surface: 'chat', agent_type: 'retriever' }
+// child context = { surface: 'chat', prompt_revision: 'v7', agent_type: 'retriever' }
 // Child keys override parent keys; parent keys absent from the child are preserved.
 ```
 
 **Querying in Amplitude:** The `[Agent] Context` property is a JSON string. To query individual keys:
-- **Group-by**: Select `[Agent] Context` as the property, then use dot notation (e.g., `[Agent] Context.agent_type`) to extract a specific key.
 - **Derived properties**: For frequently-used keys, create a derived event property in Amplitude (Data → Properties → Derived → New) that extracts the value permanently.
 - **Filter**: Use `[Agent] Context contains "key":"value"` for string matching in chart filters.
 
-> **Note on `experiment_variant` and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). Server-generated events (`[Agent] Session Record`, `[Agent] Score` with `source="ai"`) do not yet inherit context keys. To segment server-generated quality scores by experiment arm, use Amplitude Derived Properties to extract from `[Agent] Context` on SDK events.
+> **Note on context keys and server-generated events:** Context keys appear on all SDK-emitted events (`[Agent] User Message`, `[Agent] AI Response`, etc.). `[Agent] Session Record` also carries `[Agent] Context` — the enrichment pipeline echoes it from the session's SDK events onto the server-generated record, so you can segment session-level quality, outcomes, and flags directly by a context key (e.g., `surface`). Other server-generated events (e.g. `[Agent] Score` with `source="ai"`) do not yet inherit context keys; to segment those, use Amplitude Derived Properties to extract from `[Agent] Context` on the SDK events.
+
+> Record experiment assignment with the [`experiments` option](#report-experiment-arms), not a context key.
+
+## Report experiment arms
+
+Pass the assignment as `experiments` on the agent, the session, or a single agent or session `track*` call:
+
+```typescript
+await agent
+  .session({ userId: 'u1', experiments: [{ key: 'planner', variant: 'v2', provider: 'statsig' }] })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+Every event in the session then carries `[Agent] Experiments` (`["planner:v2"]`), an array with one `key:variant` string per experiment: split any chart by it to compare arms, or filter on one value. When exactly one experiment applies the event also carries `[Agent] Experiment Key`, `Variant`, `Unit`, and `Provider` as plain properties. `unit` says what was randomized: `'agent_session'` (the default), `'turn'`, or `'span'`. A session entry overrides an agent entry with the same key, and a call entry overrides both. Child agents (`agent.child()`, `session.runAs()`) inherit the experiments. At most 32 apply to an event; invalid entries are dropped with a debug log, never thrown. Earlier code that put `experiment_variant` in `context` keeps working, but use `experiments` for new code so the assignment isn't recorded twice. For model or prompt tests you can also set `agentVersion` on the agent or `promptId` on AI responses.
+
+Take the assignment from the flag tool the app already uses instead of typing it out (requires `@amplitude/ai` 0.25.0 or later):
+
+```typescript
+import { experimentsFromAmplitude } from '@amplitude/ai';
+
+const variants = await experimentClient.fetchV2({ user_id: 'u1' }); // Amplitude Experiment
+await agent
+  .session({ userId: 'u1', experiments: experimentsFromAmplitude(variants, { keys: ['planner'] }) })
+  .run(async (s) => {
+    // ...
+  });
+```
+
+```typescript
+import { OpenFeature } from '@openfeature/server-sdk';
+import { AmplitudeAIHook } from '@amplitude/ai/openfeature';
+
+OpenFeature.addHooks([new AmplitudeAIHook({ flags: ['planner'] })]); // LaunchDarkly, Statsig, GrowthBook, ... via OpenFeature
+await agent.session({ userId: 'u1' }).run(async (s) => {
+  const planner = await OpenFeature.getClient().getStringValue('planner', 'v1', ctx); // recorded as planner:<variant>
+});
+```
+
+Name the experiment flags with `keys` / `flags`: a project's flag result also holds configuration flags that are not experiments, and an event carries at most 32 entries. Without `keys`, `experimentsFromAmplitude` records every non-fallback flag and warns when more than 32 would not fit. It sets `provider: 'amplitude'`. The OpenFeature hook records every flag evaluated inside a session with the provider's name lowercased (a `provider` you pass is stored as given); pass `unit: 'turn'` when flags are evaluated per turn, `includeDefaults: true` to keep evaluations that returned the caller's default, and `variantOf: (key, value) => ...` to name the arm for object-valued flags whose provider sets no variant (Statsig experiments and dynamic configs return their parameters). An assignment learned after the session was entered can be recorded with `s.addExperiments([...])` or the module-level `addExperiments([...])`; events tracked from then on carry it, and a session shares one list with its `runAs()` children. Neither helper sends an exposure event: your flag tool keeps doing that.
+
+## Works with
+
+OpenAI-compatible gateways and OTEL partners — no special SDK build required:
+
+| Partner | Path | Notes |
+| --- | --- | --- |
+| **OpenRouter** | SDK-through (`baseURL`) | Pass the **canonical** routed model id (e.g. `gpt-4o-mini`), not `openrouter/auto`. Align Amplitude `contentMode` with OpenRouter Privacy Mode. |
+| **LiteLLM** | SDK-through or OTLP | Set `CAPTURE_MESSAGE_CONTENT=true` when you need message bodies on OTEL spans. |
+| **Requesty** | SDK-through only | No OTLP push today — point the OpenAI client at Requesty's base URL. |
+| **Strands** | OTLP | Python Strands Agents 1.60.0 exports native OTLP/HTTP. Follow [docs/integrations/strands.md](docs/integrations/strands.md). When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process. |
+| **Google ADK** | OTLP | Python google-adk 2.13.0 and TypeScript `@google/adk` 2.3.0. Follow [docs/integrations/google-adk.md](docs/integrations/google-adk.md). |
+| **Vercel AI SDK** | OTLP | AI SDK 7.0.155 with `@ai-sdk/otel` 1.0.155, and AI SDK 6.0.317, export native OTLP/HTTP. Follow [docs/integrations/vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md). |
+| **Pydantic AI** | OTLP | pydantic-ai 2.63.0 exports native OTLP/HTTP. Follow [docs/integrations/pydantic-ai.md](docs/integrations/pydantic-ai.md). |
+| **Mastra** | OTLP | `@mastra/core` 1.79.0 exports native OTLP/HTTP. Follow [docs/integrations/mastra.md](docs/integrations/mastra.md). |
+| **Microsoft Agent Framework** | OTLP | agent-framework-core 1.23.0 exports native OTLP/HTTP. Follow [docs/integrations/microsoft-agent-framework.md](docs/integrations/microsoft-agent-framework.md). |
+| **OpenInference** | OTLP | Agno 3.1.11, smolagents 1.26.0, DSPy 3.4.1, Haystack 3.4.1, google-genai 2.33.0, and AutoGen AgentChat 0.7.5. Follow [docs/integrations/openinference.md](docs/integrations/openinference.md). |
+| **Amazon Bedrock AgentCore** | OTLP | Add an OTLP/HTTP exporter beside CloudWatch. Follow [docs/integrations/amazon-bedrock-agentcore.md](docs/integrations/amazon-bedrock-agentcore.md). |
+
+Prefer **SDK-through** whenever you control the call site. Use gateway-only OTLP as a bridge for partners that already export GenAI spans.
+
+Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: [routers and gateways guide](docs/integrations/routers.md).
 
 ## Privacy & Content Control
 
-Three content modes control what data is sent to Amplitude:
+Three content modes control what data is sent to Amplitude. `redactPii` runs in this SDK process. Paths that never load the SDK — HTTP forwarders, native OTLP, Batch, S3, and warehouse import — follow [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub content after receipt.
 
 | Mode                | Message Content           | Token/Cost/Latency | Session Grouping | Server Enrichments |
 | ------------------- | ------------------------- | ------------------ | ---------------- | ------------------ |
@@ -685,6 +784,8 @@ const config = new AIConfig({
 ```
 
 With the default `redactPii: true`, a message like `"Contact me at john@example.com or 555-123-4567"` is sanitized to `"Contact me at [email] or [phone]"` before being sent.
+
+Structured content channels, including tool input/output, attachments, and span state, recognize complete JSON object/array strings up to 100,000 characters, within the runtime parser limits. Within serialized JSON strings, built-in PII redaction scans decoded string values and object keys. Numeric tokens under recognized phone, card, and SSN field names (for example, `phone_number`, `creditCardNumber`, and `ssn`, ignoring case and punctuation) become string placeholders; that context extends through nested objects, arrays, and serialized JSON strings. Other numeric tokens, including timestamps and large integers, remain verbatim. Distinct original keys that would collapse to the same redacted key fail the entire serialized document closed. This field-sensitive handling does not change native object/array sanitization. Ambiguous unlabeled numbers require producer-selected content or configured custom redaction. Custom patterns and callbacks retain their original string boundary and run once after built-in redaction, followed by base64 redaction. If these later steps make an originally valid JSON document invalid, the SDK emits `[content redacted]`. Native parser limits or excessive nested JSON-string depth also fail closed. Numeric-looking strings, including timestamps embedded in HTML source, remain ordinary redaction. Malformed or oversized JSON follows the ordinary text-redaction and truncation path; existing final size limits can still truncate output.
 
 > **Upgrading to 0.7.0 with `redactPii: true`?** This release adds IPv4/IPv6 → `[ip_address]`, international phone → `[phone]`, and space-separated SSN → `[ssn]` placeholders. If any downstream pipeline or dashboard regex matches on raw IP or phone content in event properties, update those filters before upgrading.
 
@@ -734,7 +835,7 @@ function redactNames(text: string): string {
 }
 
 const ai = new AmplitudeAI({
-  apiKey: 'YOUR_KEY',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({
     redactPii: true,
     customRedactionFn: redactNames,
@@ -823,7 +924,7 @@ The SDK tracks four token categories:
 - `[Agent] Cache Read Tokens` — tokens read from provider cache (cheap)
 - `[Agent] Cache Creation Tokens` — tokens written to provider cache (slightly expensive)
 
-Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If the package fails to load (e.g. in certain bundler environments), `calculateCost()` returns `0` and logs a warning. You can also pass `totalCostUsd` directly if you compute cost yourself:
+Cost is auto-calculated when token counts are provided. The `@pydantic/genai-prices` package is included as a dependency and installed automatically with the SDK. If a model cannot be priced, `calculateCost()` returns `null`, logs a bounded warning, and the SDK omits `[Agent] Cost USD`. You can also pass `totalCostUsd` directly if you compute cost yourself:
 
 ```typescript
 s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
@@ -831,7 +932,7 @@ s.trackAiMessage(response.content, 'gpt-4o', 'openai', latencyMs, {
 });
 ```
 
-> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may return `$0` until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
+> **Note — pricing data freshness.** Cost calculation relies on pricing data bundled in the installed `@pydantic/genai-prices` package. Newly released models may have no cost until the package is updated. To get the latest pricing between package releases, opt in to live updates at startup:
 >
 > ```typescript
 > import { enableLivePriceUpdates } from '@amplitude/ai';
@@ -909,6 +1010,20 @@ Use instrumented provider wrappers for automatic tracking:
 
 > `Gemini` targets the legacy `@google/generative-ai` SDK (`getGenerativeModel(...).generateContent(...)`). `GoogleGenAI` targets the new unified `@google/genai` SDK (`ai.models.generateContent({ model, contents, config })`). Pick the class that matches the package you installed.
 
+### Fireworks (OpenAI compatibility)
+
+Use the OpenAI-compatible wrapper with a Fireworks endpoint. The SDK validates the URL hostname, labels events with `[Agent] Provider = "fireworks"`, and captures the Fireworks `response.id` as `[Agent] Provider Request ID` on AI response events for Chat Completions and Responses, including streams.
+
+```typescript
+const fireworks = new OpenAI({
+  amplitude: ai,
+  apiKey: process.env.FIREWORKS_API_KEY,
+  baseUrl: 'https://api.fireworks.ai/inference/v1',
+});
+```
+
+You can set `provider: 'fireworks'` explicitly for a private proxy. Cost calculation uses public Fireworks/genai-prices data; unknown models omit cost, and no private Amplitude contract rates are included. How router and FireRouter calls are priced: [routers and gateways guide](docs/integrations/routers.md).
+
 **Feature coverage by provider:**
 
 | Feature               | OpenAI | Anthropic | Gemini | AzureOpenAI | Bedrock | Mistral |
@@ -916,13 +1031,15 @@ Use instrumented provider wrappers for automatic tracking:
 | Streaming             | Yes    | Yes       | Yes    | Yes         | Yes     | Yes     |
 | Tool call tracking    | Yes    | Yes       | No     | Yes         | Yes     | No      |
 | TTFB measurement      | Yes    | Yes       | No     | Yes         | No      | No      |
-| Cache token stats     | Yes    | Yes       | No     | No          | No      | No      |
+| Cache token stats     | Yes    | Yes       | Yes    | Yes         | Yes     | No      |
 | Responses API         | Yes    | -         | -      | -           | -       | -       |
 | Reasoning content     | Yes    | Yes       | No     | Yes         | No      | No      |
 | System prompt capture | Yes    | Yes       | Yes    | Yes         | Yes     | Yes     |
 | Cost estimation       | Yes    | Yes       | Yes    | Yes         | Yes     | Yes     |
 
 Provider wrappers use injected `TrackFn` callbacks instead of class hierarchy casts, enabling easier composition and custom tracking logic.
+
+**Provider wrappers + delegation:** Inside `session.runAs()`, provider wrappers suppress auto `[Agent] User Message` emission so that internal `role: "user"` prompts in delegation calls don't create spurious user turns.
 
 Bedrock model IDs like `us.anthropic.claude-3-5-sonnet` are automatically normalized for price lookup (e.g., to `claude-3-5-sonnet`).
 
@@ -966,7 +1083,7 @@ const instrumented = wrap(client, ai);
 Provider wrappers (`OpenAI`, `AzureOpenAI`, `Anthropic`, `Gemini`, `Mistral`, `Bedrock`) automatically detect supported streaming responses and track them transparently. The wrapper intercepts the `AsyncIterable`, accumulates chunks, measures TTFB, and emits an `[Agent] AI Response` event after the stream is fully consumed:
 
 ```typescript
-const openai = new OpenAI({ amplitude: ai, apiKey: '...' });
+const openai = new OpenAI({ amplitude: ai, apiKey: process.env.OPENAI_API_KEY });
 
 // Streaming is handled automatically — just iterate the result
 const stream = await openai.chat.completions.create({
@@ -1130,6 +1247,23 @@ const fetchWeather = tool(
   },
 );
 ```
+
+#### Business attribution for agent actions
+
+When a tool performs a real business action (add to cart, purchase, signup), emit **two** events on two planes: the `[Agent] Tool Call` above for operational health, **and** the standard product event via the base Amplitude SDK for business attribution:
+
+```typescript
+import { track } from '@amplitude/analytics-node'; // or @amplitude/analytics-browser client-side
+
+// inside the tool, after the action succeeds:
+track(
+  'Product Added',                                              // reuse the product's existing event/property names
+  { product_id: productId, journey_type: 'agent' },
+  { user_id: currentUserId },                                   // same user_id as the [Agent] events
+);
+```
+
+The `journey_type` discriminator (`agent` / `web` / `mobile`) makes agent-driven and click-driven journeys comparable in the **same funnel** with no joining. This is the one case where the base SDK's `track()` is correct — it stays a non-`[Agent]` event so it lands in the standard product taxonomy. Only for actions with a click-driven equivalent (not read-only tools), and reuse the existing event name/properties — don't invent them. See Step 3e of `amplitude-ai.md`.
 
 ### observe()
 
@@ -1416,7 +1550,7 @@ Prints a colored (ANSI) summary of every tracked event to stderr. All 8 event ty
 
 ```typescript
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ debug: true }),
 });
 
@@ -1432,7 +1566,7 @@ Logs the full event JSON to stderr WITHOUT sending to Amplitude. Events are neve
 
 ```typescript
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ dryRun: true }),
 });
 
@@ -1440,12 +1574,30 @@ const ai = new AmplitudeAI({
 // Useful for local development, CI pipelines, and validating event shape
 ```
 
+### Review mode
+
+Use review mode when a security team needs to inspect the events instrumentation would upload. It records the event passed to `track()` after redaction, groups those events into previews of at most 100, and does not send them. Each preview is labeled `pre-transport`: the analytics SDK may still add fields such as `insert_id`, library metadata, gzip, and retries after this point. The envelope API key is replaced with `[REDACTED]`. Prompt and message content is left intact, so do not commit the artifact.
+
+```typescript
+const ai = new AmplitudeAI({
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+  config: new AIConfig({ reviewMode: true, validate: true }),
+});
+
+// Exercise one representative session, then:
+await ai.flush();
+console.log(ai.getReviewTraffic());
+```
+
+`onEventCallback` fires once per captured event with status `-1` and message `review-mode`. `ai.flush()` still flushes the underlying Amplitude client, so unrelated product events on a shared client are not stranded. Zero-code instrumentation honors `AMPLITUDE_AI_REVIEW=true`. `AMPLITUDE_AI_DEBUG` does not enable review mode.
+
 ### Environment Variable Configuration
 
-Both modes can be enabled via environment variables when using auto-instrumentation:
+Debug and review can be enabled via environment variables when using auto-instrumentation:
 
 ```bash
 AMPLITUDE_AI_DEBUG=true amplitude-ai-instrument node app.js
+AMPLITUDE_AI_REVIEW=true amplitude-ai-instrument node app.js
 ```
 
 ## Patching
@@ -1477,6 +1629,8 @@ unpatchOpenAI();
 Available patch functions: `patchOpenAI`, `patchAnthropic`, `patchAzureOpenAI`, `patchGemini`, `patchMistral`, `patchBedrock`. Corresponding unpatch for each: `unpatchOpenAI`, `unpatchAnthropic`, `unpatchAzureOpenAI`, `unpatchGemini`, `unpatchMistral`, `unpatchBedrock`.
 
 `patch()` returns a `string[]` of providers where at least one supported surface was successfully patched (e.g., `['openai', 'anthropic']`), matching the Python SDK's return signature.
+
+**Multiple `AmplitudeAI` instances:** a provider can be patched by one `AmplitudeAI` at a time. Calls made inside another instance's `session.run()` are recorded by that session's instance (its API key, privacy settings and transport); calls outside any session are recorded by the instance that patched. Use either `wrap()` or `patch()` for a given client, not both, or calls are tracked twice.
 
 **Automatic tool call extraction:** `patch()` automatically extracts `[Agent] Tool Call` events from LLM message arrays — no manual `trackToolCall()` needed for basic tool tracking. For OpenAI Chat Completions, it scans `role: "assistant"` messages with `tool_calls` arrays and correlates with `role: "tool"` result messages. For OpenAI Responses API, it extracts `type: "function_call"` and `type: "function_call_output"` entries. For Anthropic Messages, it scans `type: "tool_use"` content blocks in assistant messages and correlates with `type: "tool_result"` blocks in subsequent user messages.
 
@@ -1523,6 +1677,9 @@ Environment variables:
 | `AMPLITUDE_AI_AUTO_PATCH`   | Must be `"true"` to enable                      |
 | `AMPLITUDE_AI_CONTENT_MODE` | `full`, `metadata_only`, or `customer_enriched` |
 | `AMPLITUDE_AI_DEBUG`        | `"true"` for debug output to stderr             |
+| `AMPLITUDE_AI_INSTRUMENT_CHILDREN` | `"true"` to also instrument child Node processes (default: only the launched process) |
+
+`amplitude-ai-instrument` forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to your app and exits with its exit code or signal. Like any environment variable, `AMPLITUDE_AI_API_KEY` is inherited by every process your app starts, even ones that are not instrumented. If your app runs untrusted child processes, start them with an environment that leaves it out.
 
 ### Doctor CLI
 
@@ -1584,7 +1741,7 @@ Prompt: `instrument_app` — guided walkthrough for instrumenting an application
 
 ### Examples and AI Coding Agent Guide
 
-- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx amplitude-ai` to see the prompt that points your agent to this file.
+- **`amplitude-ai.md`** — self-contained instrumentation guide for any AI coding agent (Cursor, Claude Code, Windsurf, Copilot, Codex, etc.). Run `npx -y -p @amplitude/ai amplitude-ai` to see the prompt that points your agent to this file.
 - Mock-based examples demonstrating the event model (also used as CI smoke tests):
   - `examples/zero-code.ts`
   - `examples/wrap-openai.ts`
@@ -1606,10 +1763,15 @@ const handler = new AmplitudeCallbackHandler({
   amplitudeAI: ai,
   userId: 'user-123',
   sessionId: 'sess-1',
+  privacyConfig: { contentMode: 'full' }, // applied to AI + tool events
 });
 
-// Pass handler to LangChain callbacks
+// Pass handler to LangChain callbacks (duck-typed — no hard @langchain/core dep).
+// Chat models call handleChatModelStart (tracks [Agent] User Message); LLMs use handleLLMStart.
+chain.invoke(input, { callbacks: [handler] });
 ```
+
+A handler records one agent unless it runs inside `session.runAs()`. Delegation supplies `[Agent] Parent Agent ID` and suppresses the internal prompt so it is not recorded as an end-user turn.
 
 ### OpenTelemetry
 
@@ -1617,6 +1779,7 @@ Two exporters add Amplitude as a destination alongside your existing trace backe
 
 ```typescript
 import {
+  AmplitudeAI,
   AmplitudeAgentExporter,
   AmplitudeGenAIExporter,
 } from '@amplitude/ai';
@@ -1626,13 +1789,15 @@ import {
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const provider = new NodeTracerProvider();
 
 // GenAI exporter — converts gen_ai.* spans into Amplitude AI events
 provider.addSpanProcessor(
   new BatchSpanProcessor(
     new AmplitudeGenAIExporter({
-      apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+      amplitudeAI: ai,
+      // optional: privacyConfig, allowedScopes, blockedScopes
     }),
   ),
 );
@@ -1641,7 +1806,7 @@ provider.addSpanProcessor(
 provider.addSpanProcessor(
   new SimpleSpanProcessor(
     new AmplitudeAgentExporter({
-      apiKey: process.env.AMPLITUDE_AI_API_KEY!,
+      amplitudeAI: ai,
     }),
   ),
 );
@@ -1649,7 +1814,9 @@ provider.addSpanProcessor(
 provider.register();
 ```
 
-Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are processed; all other spans are silently ignored. This means it's safe to add the exporter to a pipeline that produces mixed (GenAI + HTTP + DB) spans.
+Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are processed; all other spans are silently ignored. This means it's safe to add the exporter to a pipeline that produces mixed (GenAI + HTTP + DB) spans. Use `allowedScopes` / `blockedScopes` to further filter by OpenTelemetry instrumentation scope name.
+
+If the same `AmplitudeAI` also called `enableOtel()`, each span is recorded once: whichever path handles it first wins, and the other skips it. Re-exporting the same span (same trace and span ID) is also recorded once.
 
 **Attribute mapping reference:**
 
@@ -1662,6 +1829,8 @@ Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are process
 | `gen_ai.usage.total_tokens` | `[Agent] Total Tokens` | Derived if not present |
 | `gen_ai.usage.cache_read.input_tokens` | `[Agent] Cache Read Tokens` | |
 | `gen_ai.usage.cache_creation.input_tokens` | `[Agent] Cache Creation Tokens` | |
+| `gen_ai.usage.reasoning.output_tokens` | `[Agent] Reasoning Tokens` | |
+| `gen_ai.usage.cost` | `[Agent] Cost USD` | Preferred over automatic pricing when present |
 | `gen_ai.request.temperature` | `[Agent] Temperature` | |
 | `gen_ai.request.top_p` | `[Agent] Top P` | |
 | `gen_ai.request.max_output_tokens` | `[Agent] Max Output Tokens` | |
@@ -1670,7 +1839,7 @@ Only spans with `gen_ai.provider.name` or `gen_ai.system` attributes are process
 | Span duration | `[Agent] Latency Ms` | |
 | Span status ERROR | `[Agent] Is Error`, `[Agent] Error Message` | |
 
-**Not available via OTEL (use native wrappers):** reasoning content/tokens, TTFB, streaming detection, implicit feedback, file attachments, event graph linking (parent_message_id).
+**Not available via OTEL (use native wrappers):** reasoning content, TTFB, streaming detection, implicit feedback, file attachments, event graph linking (parent_message_id).
 
 **When to use OTEL vs. native wrappers:** If you already have `@opentelemetry/instrumentation-openai` or similar producing GenAI spans, the OTEL bridge gives you Amplitude analytics with zero code changes. For richer tracking (implicit feedback, streaming metrics, attachments), use the native `wrapOpenAI()`/`wrapAnthropic()` wrappers alongside OTEL.
 
@@ -1718,7 +1887,7 @@ Track tool calls with execution latency and AI messages from Claude Agent SDK.
 import { AmplitudeAI } from '@amplitude/ai';
 import { ClaudeAgentSDKTracker } from '@amplitude/ai/integrations/claude-agent-sdk';
 
-const ai = new AmplitudeAI({ apiKey: 'YOUR_KEY' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const agent = ai.agent({ agentId: 'code-reviewer' });
 const tracker = new ClaudeAgentSDKTracker();
 
@@ -1771,14 +1940,14 @@ Your Application
                                                   │
                                                   ▼
                                         [Agent] Session Record
-                                        [Agent] Score events
+                                        [Agent] Evaluator Result events
                                         (topic, rubric, outcome)
 ```
 
 **Key points:**
 - All paths converge at the `AmplitudeAI` client, which batches and sends events.
 - Events are available for charting within seconds of ingestion.
-- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Record` and `[Agent] Score`.
+- The LLM Enrichment Pipeline runs asynchronously after session close (only when `contentMode: 'full'`). It produces server-side events like `[Agent] Session Record` and `[Agent] Evaluator Result`.
 - With `contentMode: 'customer_enriched'`, the enrichment pipeline is skipped — you provide your own enrichments via `trackSessionEnrichment()`.
 
 ## Integration Approaches
@@ -1943,10 +2112,30 @@ await session.run(async (s) => {
 
 - Shares the parent session's `sessionId`, `traceId`, and turn counter
 - Overrides `agentId` and `parentAgentId` in `AsyncLocalStorage` for the callback's duration
+- **Suppresses auto user-message tracking** — provider wrappers will not emit `[Agent] User Message` for `role: "user"` messages in internal delegation LLM calls
 - Provider wrappers automatically read the child's identity — no `amplitudeOverrides` needed
 - Does **not** emit `[Agent] Session End` (the child operates within the parent session)
 - Restores the parent context when the callback completes, even on errors
 - Supports nesting: `s.runAs(child, (cs) => cs.runAs(grandchild, ...))`
+
+### Pattern D: Fan-out LLM (parallel child calls, single user turn)
+
+When a single user action triggers multiple parallel LLM calls, use `runAs()` for each:
+
+```typescript
+await orchestrator.session({ sessionId }).run(async (s) => {
+  s.trackUserMessage('Generate plan from quiz results', { context: structuredState });
+
+  const [a, b] = await Promise.all([
+    s.runAs(scorer, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+    s.runAs(matcher, () => openai.chat.completions.create({ model: 'gpt-4o', messages: [...] })),
+  ]);
+
+  s.trackAiMessage(assemble(a, b), { model: 'gpt-4o', provider: 'openai' });
+});
+```
+
+This ensures one trace, one user turn, one AI response — regardless of how many internal LLM calls are dispatched. See [Step 3g-b in the instrumentation guide](amplitude-ai.md) for details.
 
 ## Serverless Environments
 
@@ -1997,6 +2186,7 @@ export async function handler(event: APIGatewayEvent) {
 ### Flush vs Shutdown
 
 - `ai.flush()` — sends all buffered events and returns a promise. Use in serverless handlers and API endpoints where you need to ensure delivery before responding.
+- `ai.flush({ timeoutMs: 2000 })` — same, but stops waiting after `timeoutMs` and never rejects. Use when a slow network must not hold up the response.
 - `ai.shutdown()` — flushes and closes the underlying Amplitude client. Only needed if you created the client via `apiKey` (not when passing your own instance). Call on process exit (e.g., `SIGTERM` handler).
 
 ```typescript
@@ -2061,7 +2251,7 @@ export async function POST(req: Request) {
 import { AIConfig, AmplitudeAI, ValidationError } from '@amplitude/ai';
 
 const ai = new AmplitudeAI({
-  apiKey: 'xxx',
+  apiKey: process.env.AMPLITUDE_AI_API_KEY!,
   config: new AIConfig({ validate: true }),
 });
 
@@ -2104,7 +2294,7 @@ mock.reset();
 | Symptom                                            | Cause                                                             | Fix                                                                                                                                                                                          |
 | -------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No events in Amplitude                             | API key not set or incorrect                                      | Run `amplitude-ai doctor` — it checks `AMPLITUDE_AI_API_KEY` and reports a fix command                                                                                                       |
-| Events tracked but `[Agent] Cost USD` is $0        | Model not in the pricing database, or `total_cost_usd` not passed | Pass `totalCostUsd` explicitly. If you see a `@pydantic/genai-prices not available` warning at startup, the pricing package failed to load (common in bundler environments) — check your build config |
+| Events tracked but `[Agent] Cost USD` is missing   | Pricing is unavailable for the model and `totalCostUsd` was not passed | Check the bounded pricing warning, use the canonical provider model ID, or pass `totalCostUsd` explicitly |
 | `patch()` doesn't instrument calls                 | `patch()` called after the provider client was created            | Call `patch()` before importing or instantiating provider clients                                                                                                                            |
 | Session context missing on events                  | LLM calls made outside `session.run()`                            | Wrap your LLM calls inside `session.run(async () => { ... })`                                                                                                                                |
 | `flush()` hangs or times out in serverless         | Process exits before flush completes                              | Use `await ai.flush()` before returning from your Lambda/Cloud Function handler                                                                                                              |
@@ -2159,9 +2349,9 @@ const app = express();
 app.use(
   createAmplitudeAIMiddleware({
     amplitudeAI: ai,
-    userIdResolver: (req) =>
-      (req as { headers: { 'x-user-id'?: string } }).headers['x-user-id'] ??
-      null,
+    // The authenticated user from your auth middleware. Don't read it from a
+    // request header: any caller could then send events as any user.
+    userIdResolver: (req) => (req as { user?: { id?: string } }).user?.id ?? null,
     sessionIdResolver: (req) =>
       (req as { headers: { 'x-session-id'?: string } }).headers[
         'x-session-id'
@@ -2227,6 +2417,7 @@ trackConversation({
 
 This is useful for backfilling historical conversations or importing data from external systems. The function accepts all the same context fields (`agentId`, `env`, `customerOrgId`, etc.) as the individual tracking methods.
 
+
 ## Event Schema
 
 | Event Type                     | Source | Description                                                                     |
@@ -2238,10 +2429,10 @@ This is useful for backfilling historical conversations or importing data from e
 | `[Agent] Span`                 | SDK    | Span (e.g. RAG step, transform)                                                 |
 | `[Agent] Session End`          | SDK    | Session ended                                                                   |
 | `[Agent] Session Enrichment`   | SDK    | Session-level enrichment data                                                   |
-| `[Agent] Score`                | Both   | Evaluation score (quality, sentiment, etc.)                                     |
+| `[Agent] Score`                | SDK    | Feedback your app records (thumbs, your own judge, a reviewer). Amplitude never emits it. |
 | `[Agent] Session Record`       | Server | Session-level summary: outcome, turn count, flags, cost. Emitted automatically. |
 | `[Agent] Evaluator Result`     | Server | One event per custom evaluator per session. Covers classifiers, detectors, scorers. |
-| `[Agent] Topic Classification` | Server | **Deprecated.** Replaced by `[Agent] Evaluator Result`. One event per topic model per session. |
+| `[Agent] Topic Classification` | Server | **Deprecated; no longer fires.** Topic outputs land on `[Agent] Evaluator Result` and `[Agent] Topic Summary`. |
 
 ## Event Property Reference
 
@@ -2254,17 +2445,22 @@ All event properties are prefixed with `[Agent]` (except `[Amplitude] Session Re
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
-| `[Agent] Trace ID` | string | No | Identifies one user-message-to-AI-response cycle within a session. |
+| `[Agent] Trace ID` | string | No | Groups events into a single "Turn" in the trace viewer. All events in one user-to-AI-response exchange share the same trace ID. Each distinct trace ID becomes a collapsible turn card. Events without a trace ID fall back to the session ID and collapse into Turn 1. |
 | `[Agent] Turn ID` | number | No | Monotonically increasing counter for event ordering within a session. |
-| `[Agent] Agent ID` | string | No | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
+| `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). Events without it are accepted by the HTTP API but never appear in Agent Analytics. |
 | `[Agent] Parent Agent ID` | string | No | For multi-agent orchestration: the agent that delegated to this agent. |
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
-| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (experiment_variant, surface, feature_flag, prompt_revision, etc.). |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties. |
 | `[Agent] Env` | string | No | Deployment environment: 'production', 'staging', or 'dev'. |
 | `[Agent] SDK Version` | string | Yes | Version of the amplitude-ai SDK that produced this event. |
 | `[Agent] Runtime` | string | Yes | SDK runtime: 'python' or 'node'. |
+| `[Agent] Experiments` | string[] | No | Experiments this event ran under, one 'key:variant' string each (at most 32). Set by the SDK experiments option on agent(), session() or a single call, or from OTel feature_flag evaluations. Sent whenever at least one experiment applies. |
+| `[Agent] Experiment Key` | string | No | Experiment or flag key. Sent only when exactly one experiment applies to the event. |
+| `[Agent] Experiment Variant` | string | No | Variant this event ran under. Sent only when exactly one experiment applies; split any chart by it to compare variants. |
+| `[Agent] Experiment Unit` | string | No | What the experiment randomized: 'agent_session' (default), 'turn' or 'span'. Sent only when exactly one experiment applies. |
+| `[Agent] Experiment Provider` | string | No | Experimentation tool that assigned the variant, such as 'amplitude', 'statsig' or 'launchdarkly'. Sent only when exactly one experiment applies and the provider is set. |
 
 ### User Message Properties
 
@@ -2294,6 +2490,7 @@ Event-specific properties for `[Agent] AI Response` (in addition to common prope
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `[Agent] Message ID` | string | Yes | Unique identifier for this message event (UUID). Used to link scores and tool calls back to specific messages. |
+| `[Agent] Provider Request ID` | string | No | Provider-owned inference identifier. For Fireworks OpenAI-compatible calls, this is captured from `response.id`. |
 | `[Agent] Component Type` | string | Yes | Type of component that produced this event: 'user_input', 'llm', 'tool', 'embedding'. |
 | `[Agent] Model Name` | string | Yes | LLM model identifier (e.g., 'gpt-4o', 'claude-sonnet-4-20250514'). |
 | `[Agent] Provider` | string | Yes | LLM provider name (e.g., 'openai', 'anthropic', 'google', 'mistral', 'bedrock'). |
@@ -2353,7 +2550,8 @@ Event-specific properties for `[Agent] Tool Call` (in addition to common propert
 | `[Amplitude] Session Replay ID` | string | No | Links to Amplitude Session Replay (format: device_id/session_id). Enables one-click navigation from AI session to browser replay. |
 | `[Agent] Invocation ID` | string | Yes | Unique identifier for this tool invocation (UUID). Used to link tool calls to parent messages. |
 | `[Agent] Tool Name` | string | Yes | Name of the tool/function that was invoked (e.g., 'search_docs', 'web_search'). |
-| `[Agent] Tool Type` | string | No | Origin/class of the tool: 'python' (native in-process tool), 'mcp' (tool from an Amplitude-owned MCP server), 'mcp_customer' (tool from a customer-connected MCP server, e.g. a user's own server via the MCP gateway), 'flow' (sub-agent delegation), or 'unknown'. Lets you segment Amplitude-internal vs. customer-connected tool usage without parsing the tool name or Context. |
+| `[Agent] Tool Type` | string | No | Origin/class of the tool: 'python' (native in-process tool), 'mcp' (tool served by a connected MCP server), 'flow' (sub-agent delegation), or 'unknown'. Lets you segment native vs. MCP-connected tool usage without parsing the tool name or Context. |
+| `[Agent] Tool Owner` | string | No | Who owns the tool: 'amplitude' (Amplitude-built/operated — native tools, sub-agents, and Amplitude's own MCP servers) or 'customer' (a server the customer connected, e.g. their own MCP server via the gateway). Segments Amplitude-internal vs. customer-connected tool usage as a first-class property, without overloading [Agent] Tool Type. |
 | `[Agent] Tool Success` | boolean | Yes | Whether the tool call completed successfully. |
 | `[Agent] Tool Input` | string | No | Serialized JSON of the tool's input arguments. Only sent when content_mode='full'. |
 | `[Agent] Tool Output` | string | No | Serialized JSON of the tool's output/return value. Only sent when content_mode='full'. |
@@ -2420,7 +2618,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Target Type` | string | Yes | What is being scored: 'message' or 'session'. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
 | `[Agent] Comment` | string | No | Optional text explanation for the score (respects content_mode). |
-| `[Agent] Taxonomy Version` | string | No | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Taxonomy Version` | string | No | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | No | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Evaluator Model` | string | No | LLM model identifier used to produce this evaluator output. |
 | `[Agent] Score Label` | string | No | Direction-neutral magnitude label derived from score value. Default 5-tier: very_high (>=0.8), high (>=0.6), moderate (>=0.4), low (>=0.2), very_low (>=0.0). Server-side only. |
@@ -2436,8 +2634,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
-| `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Taxonomy Version` | string | Yes | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
+| `[Agent] Signal Versions` | string[] | No | Signals (Amplitude's built-in evals) that produced a result for this session, each as '<signal_id>@<version>' (e.g. 'task_completion@2'). Changes only when Amplitude updates one of those signals, unlike [Agent] Taxonomy Version, which changes on every evaluator publish in the org. Custom evaluators carry their version on [Agent] Evaluator Result. JSON array of strings. |
 | `[Agent] Turn Count` | number | Yes | Number of conversation turns in this session. |
 | `[Agent] Session Total Tokens` | number | No | Total LLM tokens consumed across all turns in this session. |
 | `[Agent] Session Avg Latency Ms` | number | No | Average AI response latency in milliseconds across the session. |
@@ -2448,7 +2647,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Has Data Quality Issues` | boolean | Yes | Whether the AI output had data quality problems (wrong data, hallucinations, etc.). |
 | `[Agent] Models Used` | string[] | No | LLM models used in this session. JSON array of strings. |
 | `[Agent] Root Agent Name` | string | No | Entry-point agent in multi-agent flows. |
-| `[Agent] Agent Chain Depth` | number | No | Number of agents in the delegation chain. |
+| `[Agent] Agent Chain Depth` | number | No | Agents on the longest delegation path. 1 is a single agent, 2 is one hop, and 3 or more is deeper nesting. Depth greater than 1 still means multi-agent. |
 | `[Agent] Task Failure Type` | string | No | Specific failure type when has_task_failure is true (e.g., 'wrong_answer', 'unable_to_complete'). |
 | `[Agent] Technical Error Count` | number | No | Count of technical errors that occurred during the session. |
 | `[Agent] Error Categories` | string[] | No | Categorized error types (e.g., 'chart_not_found', 'timeout'). JSON array of strings. |
@@ -2464,6 +2663,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] User Score` | number | No | Aggregate user feedback score for the session (0.0-1.0). Present only when has_user_feedback is true. |
 | `[Agent] Agent Version` | string | No | Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison. |
 | `[Agent] Agent Description` | string | No | Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams. |
+| `[Agent] Context` | string | No | Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties. |
 | `[Agent] Task Completed` | string | No | OOTB detector result: 'True' if agent completed user's request, 'False' otherwise. |
 | `[Agent] Task Completed Rationale` | string | No | Brief rationale for the task completion determination. |
 | `[Agent] Task Completed Evidence` | string | No | Supporting evidence for the task completion determination. |
@@ -2483,9 +2683,9 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 
 ### Server-Side: Topic Classification Properties (Deprecated)
 
-> **Deprecated:** `[Agent] Topic Classification` is replaced by `[Agent] Evaluator Result`. It is still emitted for backward compatibility but will be removed in a future version.
+> **Deprecated:** `[Agent] Topic Classification` no longer fires. Topic and classification outputs land on `[Agent] Evaluator Result` (classification type) and in `[Agent] Topic Summary` on the Session Record. These properties remain only on historical events.
 
-`[Agent] Topic Classification` is emitted automatically by the server-side enrichment pipeline — do not send this event from your code.
+Do not send this event from your code.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -2493,7 +2693,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
-| `[Agent] Taxonomy Version` | string | Yes | Which taxonomy config version produced this enrichment (from ai_category_config.config_version_id). |
+| `[Agent] Taxonomy Version` | string | Yes | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Topic` | string | Yes | Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain'). |
 | `[Agent] Selection Mode` | string | Yes | Whether this topic model uses 'single' (MECE) or 'multiple' (multi-label) selection. |
@@ -2512,7 +2712,8 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
-| `[Agent] Evaluator Version` | string | Yes | Config version ID that produced this result. |
+| `[Agent] Evaluator ID` | string | No | Stable ID of the custom evaluator, the same across all of its versions and renames. Set together with [Agent] Evaluator Version. |
+| `[Agent] Evaluator Version` | string | No | Version of this evaluator that produced the result (1, 2, 3...), bumped each time it is edited and promoted. Set together with [Agent] Evaluator ID. Events from before evaluator versions were tracked hold an org-wide configuration ID here instead. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Evaluator Name` | string | Yes | Human-readable evaluator name (primary group-by for users). |
 | `[Agent] Evaluator Output Type` | string | Yes | Discriminator for the evaluator kind: 'classification', 'score', or 'binary'. |
@@ -2636,6 +2837,33 @@ A realistic example of what gets sent to Amplitude for an AI response:
 
 The `[Agent]` event schema is not tied to this SDK. If your stack doesn't have an Amplitude AI SDK, you can send the same events directly via Amplitude's ingestion APIs.
 
+### Hosted agent platforms (Sierra, Decagon, Fin, Agentforce)
+
+If your agent runs on a hosted platform, the platform makes the LLM calls, so there is nothing for the SDK to wrap. Forward each finished conversation to Amplitude over HTTP instead. Step-by-step guides, written for engineers and coding agents alike, are in [`docs/integrations/`](docs/integrations/README.md):
+
+- [Sierra](docs/integrations/sierra.md)
+- [Decagon](docs/integrations/decagon.md)
+- [Fin (Intercom)](docs/integrations/fin.md)
+- [Agentforce (Salesforce)](docs/integrations/agentforce.md)
+
+### Cursor Agent SDK
+
+Cursor runs the model loop, so there is nothing for this SDK to wrap. A hook posts each live turn. Cursor's built-in evals stay in Cursor. Follow [docs/integrations/cursor-agent-sdk.md](docs/integrations/cursor-agent-sdk.md).
+
+### LLM tracing tools (Langfuse, LangSmith, Braintrust)
+
+If your conversations are already traced in an LLM tracing tool, a scheduled job can read finished sessions or threads from the tool's API and forward them, including history, with the same forwarder core:
+
+- [Langfuse](docs/integrations/langfuse.md)
+- [LangSmith](docs/integrations/langsmith.md)
+- [Braintrust](docs/integrations/braintrust.md)
+
+If your application already emits OpenTelemetry, you can instead add Amplitude as a second OTLP exporter; see [Send OpenTelemetry traces directly](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly). Python Strands Agents, Google ADK, the Vercel AI SDK, Pydantic AI, Mastra, the Microsoft Agent Framework, OpenInference, and Amazon Bedrock AgentCore export native OTLP/HTTP: follow [docs/integrations/strands.md](docs/integrations/strands.md), [google-adk.md](docs/integrations/google-adk.md), [vercel-ai-sdk.md](docs/integrations/vercel-ai-sdk.md), [pydantic-ai.md](docs/integrations/pydantic-ai.md), [mastra.md](docs/integrations/mastra.md), [microsoft-agent-framework.md](docs/integrations/microsoft-agent-framework.md), [openinference.md](docs/integrations/openinference.md), and [amazon-bedrock-agentcore.md](docs/integrations/amazon-bedrock-agentcore.md). Scrub content before it leaves your infrastructure with [docs/integrations/privacy.md](docs/integrations/privacy.md). Amplitude does not scrub after receipt.
+
+### Data warehouses (Snowflake, BigQuery, Databricks)
+
+If conversations or traces already land in a warehouse, a SQL view turns them into `[Agent]` events for Amplitude's warehouse import, and exported spans can be replayed to the OTLP endpoint. See the [warehouse guide](docs/integrations/warehouses/README.md). [`check-agent-events.mjs`](docs/integrations/check-agent-events.mjs) checks any file of `[Agent]` events before you send or import it.
+
 ### What the SDK handles for you
 
 When you use this SDK, the following are managed automatically. If you send events directly, you are responsible for these:
@@ -2643,16 +2871,20 @@ When you use this SDK, the following are managed automatically. If you send even
 | Concern                      | SDK behavior                                                                                                                                                              | DIY equivalent                                                                                                                                |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Session ID**               | Generated once per `session()` and propagated to every event                                                                                                              | Generate a UUID per conversation and include it as `[Agent] Session ID` on every event                                                        |
-| **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set a unique `insert_id` per event to prevent duplicates on retry                                                                             |
+| **Deduplication**            | Automatic `insert_id` on each event                                                                                                                                       | Set an `insert_id` per event derived from your source IDs (not a fresh UUID per send), so retries and re-imports deduplicate                  |
 | **Property prefixing**       | All properties are prefixed with `[Agent]`                                                                                                                                | You must include the `[Agent] ` prefix in every property name                                                                                 |
 | **Cost / token calculation** | Auto-computed from model and token counts                                                                                                                                 | Compute and send `[Agent] Cost USD`, `[Agent] Input Tokens`, etc. yourself                                                                    |
-| **Server-side enrichment**   | `[Agent] Session Record`, `[Agent] Topic Classification`, and `[Agent] Score` events are emitted automatically by the enrichment pipeline after `[Agent] Session End` | These fire automatically — you do **not** need to send them. Just send the SDK-level events and close the session with `[Agent] Session End`. |
+| **Server-side enrichment**   | `[Agent] Session Record` and `[Agent] Evaluator Result` are emitted after the session closes, whether the close is an explicit `[Agent] Session End` or the idle-timeout fallback | These fire automatically — you do **not** need to send them. Send `[Agent] Score` yourself when you have feedback; Amplitude never emits it. |
 
 ### Ingestion methods
 
 | Method                     | Best for                                          | Docs                                                                                               |
 | -------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | **HTTP V2 API**            | Real-time, low-to-medium volume                   | [HTTP V2 API docs](https://www.docs.developers.amplitude.com/analytics/apis/http-v2-api/)          |
+| **Batch API**              | Scheduled syncs, higher volume                    | [Batch Event Upload API docs](https://amplitude.com/docs/apis/analytics/batch-event-upload)        |
+| **Amazon S3 Import**       | Bulk historical backfill                          | [Amazon S3 Import docs](https://amplitude.com/docs/data/source-catalog/amazon-s3)                  |
+
+All three are processed identically by Agent Analytics, and historical `time` values are kept as sent.
 
 ### Minimal HTTP API example
 
@@ -2681,7 +2913,7 @@ curl -X POST https://api2.amplitude.com/2/httpapi \
         "event_properties": {
           "[Agent] Session ID": "sess-abc123",
           "[Agent] Trace ID": "trace-def456",
-          "[Agent] Turn ID": 1,
+          "[Agent] Turn ID": 2,
           "[Agent] Message ID": "msg-002",
           "[Agent] Agent ID": "support-bot",
           "[Agent] Model Name": "gpt-4o",
@@ -2709,20 +2941,15 @@ Amplitude's [Data Catalog](https://amplitude.com/docs/data/data-catalog) documen
 
 ### Option A: Generate curl commands (JS-native, no dependencies)
 
-The bundled CLI reads `data/agent_event_catalog.json` and prints executable curl commands — it makes **no network requests** itself.
+The bundled CLI reads `data/agent_event_catalog.json` and prints executable curl commands — it makes **no network requests** itself. Credentials are never embedded in the output: the generated script reads `AMPLITUDE_API_KEY` and `AMPLITUDE_SECRET_KEY` from the environment when it runs, so the script is safe to save, share, or commit. Never pass credentials on the command line — argv is visible to other local users via `ps` and persists in shell history and CI logs.
 
 ```bash
-# Preview the curl commands (uses placeholder keys)
-npx amplitude-ai-register-catalog
+# Write the script to a file (add --eu for EU data residency)
+npx -y -p @amplitude/ai amplitude-ai-register-catalog > register.sh
 
-# Generate with your real keys
-npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET
-
-# Pipe to bash to execute immediately
-npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET | bash
-
-# EU data residency
-npx amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET --eu | bash
+# Review register.sh, then run it with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY
+# already exported in your shell (for example from your secret manager)
+bash register.sh
 ```
 
 ### Option B: Python CLI (direct execution)
@@ -2731,7 +2958,8 @@ If you have Python available, the `amplitude-ai` package provides a CLI that cal
 
 ```bash
 pip install amplitude-ai
-amplitude-ai-register-catalog --api-key YOUR_KEY --secret-key YOUR_SECRET
+# with AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY exported in your shell:
+amplitude-ai-register-catalog
 ```
 
 ### What gets registered
@@ -2742,7 +2970,7 @@ All 10 `[Agent]` event types and their properties (see [Event Property Reference
 
 ### Token and cost utilities
 
-- **`calculateCost()`** — Returns cost in USD when `@pydantic/genai-prices` is installed; otherwise returns `0` (never `null`).
+- **`calculateCost()`** — Returns cost in USD when pricing is available, `0` for zero-token usage, or `null` when the model cannot be priced.
 - **`countTokens(text, model?)`** — Uses tiktoken when available. For unknown models, tries `o200k_base` encoding before falling back to `cl100k_base` (matching the Python SDK).
 - **`estimateTokens(text)`** — Heuristic fallback: `ceil(chars/3.5 + words*0.1)` (matching the Python SDK).
 - **`stripProviderPrefix(modelName)`** — Splits on `:` (e.g., `openai:gpt-4o` → `gpt-4o`). Use for normalizing model IDs before cost lookup. Import from `@amplitude/ai/internals`.
@@ -2791,9 +3019,11 @@ This SDK is designed to be discovered and used by any AI coding agent — Cursor
 
 **The fastest path:**
 
+Fetch and follow https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md, then install the SDK as that guide says:
+
 ```bash
 npm install @amplitude/ai
-npx amplitude-ai
+npx -y -p @amplitude/ai amplitude-ai
 ```
 
 The CLI prints a prompt to paste into your agent:
@@ -2840,9 +3070,11 @@ Features that do not map 1:1 because of platform/runtime constraints:
 
 ```python
 # Python
+import os
+
 from amplitude_ai import AmplitudeAI, tool, observe
 
-ai = AmplitudeAI(api_key="xxx")
+ai = AmplitudeAI(api_key=os.environ["AMPLITUDE_AI_API_KEY"])
 agent = ai.agent("my-agent", user_id="u1")
 
 with agent.session(user_id="u1") as s:
@@ -2858,7 +3090,7 @@ def search(query: str) -> str:
 // TypeScript
 import { AmplitudeAI, tool } from '@amplitude/ai';
 
-const ai = new AmplitudeAI({ apiKey: 'xxx' });
+const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 const agent = ai.agent('my-agent', { userId: 'u1' });
 
 const session = agent.session({ userId: 'u1' });
@@ -2874,6 +3106,7 @@ const search = tool(async (args: { query: string }) => db.search(args.query), {
 
 ## Need Help?
 
+- **Documentation**: [Agent Analytics SDK reference](https://amplitude.com/docs/sdks/agent-analytics/sdk) and [Set up Agent Analytics](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup)
 - **Bug reports and feature requests**: [Open an issue](https://github.com/amplitude/Amplitude-AI-Node/issues)
 - **General questions**: [Amplitude Support](https://help.amplitude.com)
 - **Python SDK**: Looking for the Python version? See [amplitude-ai on PyPI](https://pypi.org/project/amplitude-ai/)

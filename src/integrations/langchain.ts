@@ -2,29 +2,42 @@
  * LangChain integration — AmplitudeCallbackHandler.
  *
  * Tracks LLM calls, tool calls, and chain events via LangChain's
- * callback system.
+ * callback system. Duck-typed compatible with LangChain's BaseCallbackHandler
+ * (no hard dependency on @langchain/core) — pass the handler in `callbacks`.
+ *
+ * Identity is resolved per callback (constructor options, then the active
+ * session context, then the run's own identity), so one handler can be shared
+ * across requests. Runs with no identity get an anonymous per-run session and
+ * device ID. If LangChain dispatches callbacks in the background
+ * (`LANGCHAIN_CALLBACKS_BACKGROUND=true`) on a concurrent server, the active
+ * context may belong to another request: pass `userId`/`sessionId` explicitly
+ * on a per-request handler instead.
  */
 
 import type { AmplitudeAI } from '../client.js';
-import { getActiveContext } from '../context.js';
 import type { PrivacyConfig } from '../core/privacy.js';
 import { calculateCost, inferProvider } from '../utils/costs.js';
+import { type ResolvedIdentity, RunIdentities } from './identity.js';
 
 export interface CallbackHandlerOptions {
   amplitudeAI: AmplitudeAI;
   userId?: string;
   sessionId?: string;
   agentId?: string;
+  parentAgentId?: string;
   env?: string;
   privacyConfig?: PrivacyConfig | null;
 }
 
+/**
+ * Runs that start but never end or error (cancelled chains, dropped
+ * callbacks) are evicted oldest-first beyond this many open runs.
+ */
+const MAX_OPEN_RUNS = 10_000;
+
 export class AmplitudeCallbackHandler {
   private _ai: AmplitudeAI;
-  private _userId: string | null;
-  private _sessionId: string | null;
-  private _agentId: string | null;
-  private _env: string | null;
+  private _identities: RunIdentities;
   private _privacyConfig: PrivacyConfig | null;
   private _runStartTimes: Map<string, number> = new Map();
   private _runModelNames: Map<string, string> = new Map();
@@ -33,30 +46,36 @@ export class AmplitudeCallbackHandler {
 
   constructor(options: CallbackHandlerOptions) {
     this._ai = options.amplitudeAI;
-    this._userId = options.userId ?? null;
-    this._sessionId = options.sessionId ?? null;
-    this._agentId = options.agentId ?? null;
-    this._env = options.env ?? null;
+    this._identities = new RunIdentities({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      agentId: options.agentId,
+      parentAgentId: options.parentAgentId,
+      env: options.env,
+    });
     this._privacyConfig = options.privacyConfig ?? null;
   }
 
-  private _getContext() {
-    const ctx = getActiveContext();
-    return {
-      userId: this._userId ?? ctx?.userId ?? 'unknown',
-      sessionId: this._sessionId ?? ctx?.sessionId ?? undefined,
-      agentId: this._agentId ?? ctx?.agentId ?? undefined,
-      env: this._env ?? ctx?.env ?? undefined,
-      traceId: ctx?.traceId ?? undefined,
-    };
+  private _startRun(runId: string): void {
+    while (this._runStartTimes.size >= MAX_OPEN_RUNS) {
+      const oldest = this._runStartTimes.keys().next().value;
+      if (oldest === undefined) break;
+      this._forgetRun(oldest);
+    }
+    this._runStartTimes.set(runId, performance.now());
   }
 
-  handleLLMStart(
+  private _forgetRun(runId: string): void {
+    this._runStartTimes.delete(runId);
+    this._runModelNames.delete(runId);
+    this._toolInputs.delete(runId);
+    this._toolNames.delete(runId);
+  }
+
+  private _rememberModelName(
     serialized: Record<string, unknown>,
-    prompts: string[],
     runId: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
     const kwargs = serialized.kwargs as Record<string, unknown> | undefined;
     const idModel = Array.isArray(serialized.id)
       ? serialized.id.find(
@@ -72,29 +91,63 @@ export class AmplitudeCallbackHandler {
       kwargs?.model ?? kwargs?.modelName ?? kwargs?.model_name ?? idModel ?? '',
     );
     if (modelName) this._runModelNames.set(runId, modelName);
+  }
 
-    const trackUserMessage = (
-      this._ai as unknown as {
-        trackUserMessage?: (opts: Record<string, unknown>) => void;
-      }
-    ).trackUserMessage;
-    if (typeof trackUserMessage === 'function') {
-      const ctx = this._getContext();
-      for (const prompt of prompts) {
-        if (!prompt) continue;
-        trackUserMessage({
-          userId: ctx.userId,
-          content: prompt,
-          sessionId: ctx.sessionId ?? 'langchain-session',
-          traceId: ctx.traceId,
-          agentId: ctx.agentId,
-          env: ctx.env,
-        });
-      }
+  private _trackUserContents(contents: string[], ctx: ResolvedIdentity): void {
+    if (ctx.skipAutoUserTracking) return;
+    for (const content of contents) {
+      if (!content) continue;
+      this._ai.trackUserMessage({
+        userId: ctx.userId,
+        deviceId: ctx.deviceId,
+        content,
+        sessionId: ctx.sessionId,
+        traceId: ctx.traceId,
+        agentId: ctx.agentId,
+        parentAgentId: ctx.parentAgentId,
+        env: ctx.env,
+        privacyConfig: this._privacyConfig,
+      });
     }
   }
 
-  handleLLMEnd(output: Record<string, unknown>, runId: string): void {
+  handleLLMStart(
+    serialized: Record<string, unknown>,
+    prompts: string[],
+    runId: string,
+    parentRunId?: string,
+  ): void {
+    this._startRun(runId);
+    this._rememberModelName(serialized, runId);
+    this._trackUserContents(prompts, this._identities.resolve(runId, parentRunId));
+  }
+
+  /**
+   * Chat-model path (ChatOpenAI, ChatAnthropic, …). Without this, modern
+   * LangChain stacks never emit `[Agent] User Message` because they call
+   * `handleChatModelStart` instead of `handleLLMStart`.
+   */
+  handleChatModelStart(
+    serialized: Record<string, unknown>,
+    messages: unknown[][],
+    runId: string,
+    parentRunId?: string,
+  ): void {
+    this._startRun(runId);
+    this._rememberModelName(serialized, runId);
+
+    const userContents = messages.flatMap((batch) => _newChatUserTexts(batch));
+    this._trackUserContents(
+      userContents,
+      this._identities.resolve(runId, parentRunId),
+    );
+  }
+
+  handleLLMEnd(
+    output: Record<string, unknown>,
+    runId: string,
+    parentRunId?: string,
+  ): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
     this._runStartTimes.delete(runId);
     const latencyMs = performance.now() - startTime;
@@ -112,7 +165,8 @@ export class AmplitudeCallbackHandler {
     const modelFromStart = this._runModelNames.get(runId);
     this._runModelNames.delete(runId);
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     const modelName = String(
       llmOutput?.modelName ?? modelFromStart ?? 'unknown',
     );
@@ -134,7 +188,7 @@ export class AmplitudeCallbackHandler {
           cacheCreationInputTokens: cacheCreationTokens,
           defaultProvider: inferProvider(modelName),
         });
-        if (cost > 0) costUsd = cost;
+        if (cost != null) costUsd = cost;
       } catch {
         // cost calculation is best-effort
       }
@@ -142,13 +196,15 @@ export class AmplitudeCallbackHandler {
 
     this._ai.trackAiMessage({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       content,
-      sessionId: ctx.sessionId ?? 'langchain-session',
+      sessionId: ctx.sessionId,
       model: modelName,
       provider: 'langchain',
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       inputTokens,
       outputTokens,
@@ -162,8 +218,10 @@ export class AmplitudeCallbackHandler {
     serialized: Record<string, unknown>,
     input: string,
     runId: string,
+    parentRunId?: string,
   ): void {
-    this._runStartTimes.set(runId, performance.now());
+    this._identities.resolve(runId, parentRunId);
+    this._startRun(runId);
     this._toolInputs.set(runId, input);
     const name = String(
       serialized.name ??
@@ -173,7 +231,7 @@ export class AmplitudeCallbackHandler {
     this._toolNames.set(runId, name);
   }
 
-  handleToolEnd(output: string, runId: string): void {
+  handleToolEnd(output: string, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
     this._runStartTimes.delete(runId);
     const latencyMs = performance.now() - startTime;
@@ -182,22 +240,26 @@ export class AmplitudeCallbackHandler {
     const toolName = this._toolNames.get(runId) ?? 'langchain-tool';
     this._toolNames.delete(runId);
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     this._ai.trackToolCall({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       toolName,
       latencyMs,
       success: true,
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       input: toolInput,
       output,
+      privacyConfig: this._privacyConfig,
     });
   }
 
-  handleToolError(error: unknown, runId: string): void {
+  handleToolError(error: unknown, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
     this._runStartTimes.delete(runId);
     const latencyMs = performance.now() - startTime;
@@ -206,39 +268,65 @@ export class AmplitudeCallbackHandler {
     const toolName = this._toolNames.get(runId) ?? 'langchain-tool';
     this._toolNames.delete(runId);
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     this._ai.trackToolCall({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       toolName,
       latencyMs,
       success: false,
       sessionId: ctx.sessionId,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       input: toolInput,
       errorMessage: error instanceof Error ? error.message : String(error),
+      privacyConfig: this._privacyConfig,
     });
   }
 
-  handleLLMError(error: unknown, runId: string): void {
+  handleChainStart(
+    _serialized: Record<string, unknown>,
+    _inputs: unknown,
+    runId: string,
+    parentRunId?: string,
+  ): void {
+    this._identities.resolve(runId, parentRunId);
+  }
+
+  handleChainEnd(_outputs: unknown, runId: string): void {
+    this._identities.end(runId);
+  }
+
+  handleChainError(_error: unknown, runId: string): void {
+    this._identities.end(runId);
+  }
+
+  handleLLMError(error: unknown, runId: string, parentRunId?: string): void {
     const startTime = this._runStartTimes.get(runId) ?? performance.now();
-    this._runStartTimes.delete(runId);
+    const modelName = this._runModelNames.get(runId) ?? 'unknown';
+    this._forgetRun(runId);
     const latencyMs = performance.now() - startTime;
 
-    const ctx = this._getContext();
+    const ctx = this._identities.resolve(runId, parentRunId);
+    this._identities.end(runId);
     this._ai.trackAiMessage({
       userId: ctx.userId,
+      deviceId: ctx.deviceId,
       content: '',
-      sessionId: ctx.sessionId ?? 'langchain-session',
-      model: 'unknown',
+      sessionId: ctx.sessionId,
+      model: modelName,
       provider: 'langchain',
       latencyMs,
       traceId: ctx.traceId,
       agentId: ctx.agentId,
+      parentAgentId: ctx.parentAgentId,
       env: ctx.env,
       isError: true,
       errorMessage: error instanceof Error ? error.message : String(error),
+      privacyConfig: this._privacyConfig,
     });
   }
 }
@@ -298,4 +386,50 @@ function _extractLangchainText(generation: unknown): string {
       return typeof item.text === 'string' ? item.text : '';
     })
     .join('');
+}
+
+function _newChatUserTexts(batch: unknown): string[] {
+  if (!Array.isArray(batch)) return [];
+  const trailing: string[] = [];
+  for (let i = batch.length - 1; i >= 0; i--) {
+    const text = _extractChatMessageUserText(batch[i]);
+    if (!text) break;
+    trailing.push(text);
+  }
+  trailing.reverse();
+  return trailing;
+}
+
+function _extractChatMessageUserText(message: unknown): string | null {
+  if (message == null || typeof message !== 'object') return null;
+  const msg = message as Record<string, unknown> & {
+    _getType?: () => string;
+    getType?: () => string;
+  };
+
+  const role =
+    (typeof msg._getType === 'function' ? msg._getType() : undefined) ??
+    (typeof msg.getType === 'function' ? msg.getType() : undefined) ??
+    msg.type ??
+    msg.role;
+  const roleStr = typeof role === 'string' ? role.toLowerCase() : '';
+  if (roleStr !== 'human' && roleStr !== 'user') return null;
+
+  if (typeof msg.content === 'string' && msg.content.length > 0) {
+    return msg.content;
+  }
+  if (Array.isArray(msg.content)) {
+    const text = msg.content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part != null && typeof part === 'object') {
+          const item = part as Record<string, unknown>;
+          return typeof item.text === 'string' ? item.text : '';
+        }
+        return '';
+      })
+      .join('');
+    return text.length > 0 ? text : null;
+  }
+  return null;
 }

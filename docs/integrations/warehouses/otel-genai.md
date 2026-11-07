@@ -1,0 +1,75 @@
+# OpenTelemetry GenAI spans stored in a table
+
+**For spans that follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) and were exported to a warehouse table.** Part of [Data warehouses + Amplitude Agent Analytics](./README.md).
+
+Amplitude's [OTLP endpoint](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) already turns GenAI spans into `[Agent]` events, so no SQL mapping is needed. [`otlp-replay.mjs`](./otlp-replay.mjs) reads an export of your span table and posts it to that endpoint. For spans you are still producing, point your Collector at the endpoint instead; replay is for spans already stored.
+
+Spans that record a feature flag evaluation, as OpenTelemetry `feature_flag.evaluation` span events or `feature_flag.key` and `feature_flag.result.variant` attributes, become `[Agent] Experiments` (the array to split any chart by) and, for one experiment, `[Agent] Experiment Key`, `[Agent] Experiment Variant`, `[Agent] Experiment Unit` (`span` unless `amplitude.experiment.unit` says otherwise) and `[Agent] Experiment Provider` (from `feature_flag.provider.name`). Keep those attributes in the export. Replaying them records the arm; it does not send an exposure event.
+
+## Export shape
+
+Export one row per span with these columns (any extra columns are ignored):
+
+| Column | Required | Notes |
+|---|---|---|
+| `trace_id`, `span_id` | Yes | Hex IDs as OpenTelemetry writes them. Other IDs are hashed into valid hex, consistently across runs |
+| `parent_span_id` | No | Empty for root spans |
+| `name` | Yes | The span name |
+| `kind` | No | `CLIENT`, `INTERNAL`, `SPAN_KIND_CLIENT`, or the number |
+| `start_time`, `end_time` | Yes | Epoch seconds, milliseconds, microseconds, or nanoseconds, or an ISO 8601 timestamp (UTC unless it has an offset) |
+| `status_code`, `status_message` | No | `OK`, `ERROR`, or `UNSET` |
+| `attributes` | Yes | The span attributes, as a JSON object (nested objects are flattened to dotted keys) or as OTLP `{key, value}` entries |
+| `resource_attributes` | No | For example `service.name`, which becomes the agent ID when `gen_ai.agent.id` is absent |
+| `session_id`, `user_id`, `agent_id` | No | Override the conversation, user, and agent for the span, if your attributes don't carry them |
+
+Older instrumentation that writes `gen_ai.prompt.N.*` and `gen_ai.completion.N.*` attributes is folded into `gen_ai.input.messages` and `gen_ai.output.messages` automatically.
+
+## Do not guess
+
+Ask the user before running:
+
+1. **Which column or attribute is the conversation ID.** An Agent Analytics session is a whole conversation. Without `gen_ai.conversation.id`, `session.id`, or a `session_id` column, each trace becomes its own session and quality scores read as noise. The script warns when this happens.
+2. **Which column or attribute is the user ID** that product analytics uses.
+3. **The agent ID**, if neither `gen_ai.agent.id` nor `service.name` names the agent. Pass it with `--agent-id`.
+4. **Whether message text may leave the warehouse.** If not, use `--metadata-only`. It drops message and prompt attributes (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.prompt.*`, `gen_ai.completion.*`, `llm.*_messages`, `llm.prompt_template.*`, `input.value`, `output.value`, `traceloop.entity.input`, `traceloop.entity.output`, `ai.prompt*`, `ai.response.*`), tool arguments and results, retrieved documents and queries (`gen_ai.retrieval.*`, `retrieval.documents`), `gen_ai.memory.*`, and error messages. Check the dry run for any other attribute your instrumentation uses for text.
+
+## Run it
+
+1. Export a few conversations as NDJSON, JSON, or CSV. For example, in BigQuery:
+
+   ```bash
+   bq query --use_legacy_sql=false --format=json --max_rows=10000 \
+     'SELECT trace_id, span_id, parent_span_id, name, kind, start_time, end_time,
+             status_code, TO_JSON_STRING(attributes) AS attributes, conversation_id AS session_id
+      FROM my_dataset.genai_spans
+      WHERE conversation_id IN ("conv_1", "conv_2")' > spans.json
+   ```
+
+   In Snowflake or Databricks, run the same `SELECT` and download the result as CSV or JSON.
+
+2. Check the conversion without sending anything:
+
+   ```bash
+   # The script ships in the npm package; run that copy rather than one from GitHub.
+   npm install --no-save --ignore-scripts @amplitude/ai
+   node node_modules/@amplitude/ai/docs/integrations/warehouses/otlp-replay.mjs spans.json --format otel --dry-run > payload.json
+   ```
+
+   Fix any warning, then look at one span in `payload.json` and confirm its session, user, and agent attributes.
+
+3. Send it (`--region eu` for the EU data center):
+
+   ```bash
+   # Reads the project API key from AMPLITUDE_API_KEY; export it from your secret store first.
+   node node_modules/@amplitude/ai/docs/integrations/warehouses/otlp-replay.mjs spans.json --format otel
+   ```
+
+   The script retries `429` and `5xx` responses, splits a batch on `413`, stops on any other error, and exits non-zero if the endpoint reports rejected spans.
+
+## Verify
+
+Follow the verify steps on the [OTLP setup page](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#verify): a real `[Agent] Session ID` rather than a trace ID, a populated `[Agent] Agent ID`, and real user IDs rather than `unknown`. Then open a session in the Agent Analytics session viewer and confirm the turns, tool calls, and message text. Run the same file again and confirm nothing duplicates.
+
+## Keep it running
+
+Schedule the export and replay, for example hourly, selecting spans that started since the last run. Event `insert_id`s come from trace and span IDs, and Amplitude's HTTP API [drops a repeated `insert_id`](https://amplitude.com/docs/apis/analytics/http-v2#event-deduplication) for the same user or device within 7 days, so windows that overlap by hours are safe. A span re-sent more than 7 days after it was first sent is a duplicate, so don't re-run old windows. Export a whole conversation's spans together where you can, so each chat span carries its full input history.

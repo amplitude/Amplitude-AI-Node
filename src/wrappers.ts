@@ -2,10 +2,10 @@
  * Convenience wrap() function for dependency injection.
  *
  * When the customer has already created a provider client, wrap()
- * returns an instrumented SDK wrapper. OpenAI/Anthropic/Azure clients are
- * reconstructed from extracted credentials; Gemini/GoogleGenAI/Bedrock/Mistral
- * clients are adopted directly so the caller's configured transport (Vertex AI
- * project, AWS region/credentials, custom server URL) is preserved.
+ * returns an instrumented SDK wrapper around that same instance, so the
+ * caller's configured transport (baseURL/gateway, custom fetch, headers,
+ * proxy, timeouts, Azure AD token provider, Vertex AI project, AWS
+ * region/credentials) is preserved. The client itself is not modified.
  *
  * Unsupported types raise AmplitudeAIWrapError.
  */
@@ -109,8 +109,7 @@ export function wrap(
     if (AzureOpenAIClass && client instanceof AzureOpenAIClass) {
       return new AmpAzureOpenAI({
         amplitude,
-        apiKey: clientObj.apiKey as string | undefined,
-        azureEndpoint: String(clientObj.baseURL ?? ''),
+        client,
         propagateContext: opts?.propagateContext as boolean | undefined,
         openaiModule,
       });
@@ -119,7 +118,7 @@ export function wrap(
     if (OpenAIClass && client instanceof OpenAIClass) {
       return new AmpOpenAI({
         amplitude,
-        apiKey: clientObj.apiKey as string | undefined,
+        client,
         baseUrl:
           clientObj.baseURL != null ? String(clientObj.baseURL) : undefined,
         propagateContext: opts?.propagateContext as boolean | undefined,
@@ -141,7 +140,7 @@ export function wrap(
     if (AnthropicClass && client instanceof AnthropicClass) {
       return new AmpAnthropic({
         amplitude,
-        apiKey: clientObj.apiKey as string | undefined,
+        client,
         propagateContext: opts?.propagateContext as boolean | undefined,
         anthropicModule,
       });

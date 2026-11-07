@@ -1,5 +1,370 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Voice agent guidance.** The coding-agent guide, the generated `AGENTS.md` routing line, and the Vapi, Retell, ElevenLabs, and Bland guides tell the customer to choose `deviceId`. `callerDeviceId` remains one optional helper.
+
+## 0.26.0
+
+### Added
+- **Voice turn properties.** `voiceTurnProperties({ direction, speechDurationMs, timeToFirstAudioMs, interrupted, interruptedBy, yielded, endOfTurnReason, transcriptConfidence })` builds `[Agent] Channel` (`voice`), `[Agent] Voice Direction`, `[Agent] Voice Speech Duration Ms`, `[Agent] Voice Time To First Audio Ms`, `[Agent] Voice Interrupted`, `[Agent] Voice Interrupted By`, `[Agent] Voice Yielded`, `[Agent] Voice End Of Turn Reason` (`completed`, `interrupted`, `silence`, `transferred`, `error`) and `[Agent] Voice Transcript Confidence` for `eventProperties` on a user message or AI response. An option left out is omitted, never sent as `false` or `0`; invalid values throw `ValidationError`.
+- **`recordingAttachment(url, { mimeType, name })`.** Builds an `audio` attachment that links a call recording, for the last turn of a call. Only the URL is sent, and only in `full` content mode; `metadata_only` sends `[Agent] Has Attachments` and the count. Amplitude never fetches the URL. Signed URLs expire, and until then they grant access to the recording.
+- **`RealtimeTurnMapper`.** Maps OpenAI Realtime API server events (GA and beta event names) to voice turns with text, speech duration, time to first audio, interruptions and end of turn reason set, ready for `trackUserMessage` / `trackAiMessage`.
+- **Voice platform guides.** Pull-job guides for Vapi, Retell AI, ElevenLabs Agents and Bland AI (`docs/integrations/<platform>.md`), each with a tested adapter, a checked-in fixture, an end reason table, the vendor success field as an `[Agent] Score`, the recording URL on the last turn, and direction from the call type. They refuse a raw phone number as `user_id` or `device_id`; `callerDeviceId()` in the new `docs/integrations/voice-forwarder.mjs` gives a salted SHA-256 `device_id` instead. Per-call platform cost is not sent as `[Agent] Cost USD`. `amplitude-ai.md` (Step 3l), `AGENTS.md` and `llms.txt` route voice agents to these guides and APIs.
+- **Event catalog: voice session rollups.** `[Agent] Session Record` and the `[Agent] Evaluator Result` session dimensions describe `[Agent] Channel`, `[Agent] Voice Direction`, `[Agent] Voice Avg Time To First Audio Ms`, `[Agent] Voice Max Time To First Audio Ms`, `[Agent] Voice Interruption Count`, `[Agent] Voice User Interruption Count`, `[Agent] Voice Yield Count`, `[Agent] Voice Final End Of Turn Reason` and `[Agent] Voice Total Speech Duration Ms`, which Amplitude's enrichment sets on voice sessions and omits on chat sessions. Additive only.
+
+### Changed
+- **Up to 32 experiments per event** (was 10). `[Agent] Experiments` carries at most 32 `key:variant` entries; `mergeExperiments` drops entries past the 32nd, and `experimentsFromAmplitude(...)` without `keys` warns past 32. A production agent that records every flag it evaluates ran under up to 25 assignments per session once non-assignment evaluations were dropped, and more than 10 on 38% of sessions, so the old cap was dropping arms, including a live 50/50 test, on a fixed set of keys. Session Record enrichment folds arms under the same cap. The MCP `validate_file` guidance, the event catalog, and the forwarder core on every integration page say 32.
+
+## 0.25.0
+
+### Added
+- **Experiments.** An `experiments` option on `ai.agent()`, `agent.child()`, `agent.session()` and single agent or session `track*` calls records A/B test or feature flag assignment as `[{ key, variant, provider?, unit? }]`. Every event carries the new `[Agent] Experiments` property (`"key:variant"` strings) and, when exactly one experiment applies, `[Agent] Experiment Key`, `Variant`, `Unit` and `Provider`, so any chart can be split by arm. Call entries override session entries, which override agent entries, by key; child agents and `runAs()` inherit them. Provider wrappers, `tool()` and OTel-mapped spans inside a session carry the session's experiments. `unit` is `agent_session` (default), `turn` or `span`; key, variant and provider are up to 256 characters, keys can't contain `:`, and at most 10 apply to an event. Invalid entries are dropped with a debug log. `context: { experiment_variant }` keeps working; the docs now point to `experiments`.
+- **Experiments from the flag tool you already use.** `experimentsFromAmplitude(variants, { keys: [...] })` turns the result of the Amplitude Experiment SDK (`fetchV2()`, `evaluateV2()`) into `experiments` entries with `provider: 'amplitude'`, skipping fallback variants; `keys` names the experiment flags (a single name may be a string), and without it every flag is recorded with a warning when more than the 10 an event carries would be. Numeric flag values become decimal labels (`3`, `0.25`), never exponent notation. `AmplitudeAIHook` from `@amplitude/ai/openfeature` is an [OpenFeature](https://openfeature.dev) hook that records every flag evaluated inside a session as an experiment, with `provider` set from the OpenFeature provider (LaunchDarkly, Statsig, GrowthBook, Flagsmith, Unleash, ...); `unit`, `flags` and the `amplitude_ai.unit` hook hint narrow what it records, and `variantOf` names the arm for object-valued flags whose provider sets no variant (Statsig experiments and dynamic configs). It does not import `@openfeature/server-sdk`, so it works with the server and web SDKs alike. `session.addExperiments(...)` and the module-level `addExperiments(...)` record an assignment learned after the session was entered; events tracked from then on carry it, through the session, through provider wrappers and `tool()` inside it, and across `runAs()` delegation, which shares one experiment list with the parent session. Neither helper sends an exposure event. `experimentFromEvaluation(...)` is the pure mapping behind the hook for any other flag SDK.
+- **Warehouse templates: optional `experiment_key` and `experiment_variant` columns.** A valid pair becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`) on every event from the row; keys and variants are trimmed, 1 to 256 characters, and keys can't contain `:`. One experiment per row.
+- **Forwarder core (every HTTP forwarder guide): experiments.** `NormalizedConversation.experiments` sends the same `[Agent] Experiment` properties as the SDK, with the same rules; invalid entries are dropped.
+- **MCP server: experiments.** `scan_project` reports `experiment_packages` (feature flag and experiment SDKs such as Amplitude Experiment, Statsig, LaunchDarkly, PostHog, GrowthBook, Optimizely and OpenFeature) and `flag_call_sites` (`{ file, line, snippet }` for each `fetchV2` / `checkGate` / `variation` / `getStringValue` ... read, secrets redacted, first 50), and recommends `experimentsFromAmplitude(..., { keys })`, `new AmplitudeAIHook({ flags })` or the literal `experiments` entry so `[Agent] Experiments` can split any chart by arm; `instrument_file` adds that TODO where a file imports or calls a flag client; `validate_file` flags the legacy `context: { experiment_variant }` form and helpers called without `keys` / `flags`; `generate_verify_test` checks that session experiments reach every event and appear in `MockAmplitudeAI.summary()`, which now reports an "Experiments fill" line; `get_integration_pattern` has an `experiments` pattern; `amplitude-ai.md` and `AGENTS.md` route flag reads to `experiments` in Phase 2, Step 3d, Step 5d and the decision tree; `examples/experiments.ts` shows the three sources.
+
+## 0.24.2
+
+### Documentation and validation
+- The event catalog and README now describe the version properties that Amplitude's enrichment sets: `[Agent] Signal Versions` on `[Agent] Session Record` (each built-in signal as `<signal_id>@<version>`), and `[Agent] Evaluator ID` with `[Agent] Evaluator Version` on `[Agent] Evaluator Result` (a custom evaluator's stable ID and its 1, 2, 3 version). `[Agent] Taxonomy Version` is described as the org-wide evaluation configuration ID, which changes on any evaluator publish. `amplitude-ai-register-catalog` registers the new descriptions. No SDK tracking changes.
+
+## 0.24.1
+
+### Fixed
+- Preserve numeric values and valid escaping in serialized JSON objects/arrays within structured content channels. Built-in redaction scans decoded string values and keys, and masks numeric values under recognized phone/card/SSN fields while preserving other numeric tokens verbatim. Distinct original keys collapsing to one redacted key fail the serialized document closed. Native object/array behavior remains unchanged; ambiguous unlabeled numbers require producer-selected content or custom redaction. Custom patterns/callbacks retain their original string boundary and run once. JSON corrupted by later custom/base64 redaction and inputs exceeding native parser limits fail closed. Malformed/oversized text and HTML retain ordinary bounded text-redaction behavior.
+
+## 0.24.0
+
+### Documentation and validation
+- Add optional `$agent_artifact` typing for inline message attachments. This improves TypeScript ergonomics without changing existing runtime capture or validating the artifact schema.
+- Clarify that producers own raw HTML artifact snapshots and their privacy. Existing content capture settings, ordinary best-effort string redaction, and size limits apply; the SDK does not parse HTML or promise rendered-content sanitization.
+- Verify artifact content across tool/span input/output and AI/user attachments, including content modes, one ordinary custom-redactor pass per string, and single-event emission. Artifact capture does not require a new preparation API or an artifact-specific minimum SDK version.
+
+### Fixed
+- The copied raw OTLP replay script rejects `--metadata-only` with a raw `resourceSpans` envelope before sending, rather than silently forwarding content the flag cannot remove. This transport-script check does not change SDK tracking.
+
+## 0.23.0
+
+### Added
+- **AWS Strands.** A public guide for native OTLP/HTTP export from Strands Agents 1.60.0, including identity, provider override, and client-side privacy.
+- **Privacy contract for non-SDK paths.** `docs/integrations/privacy.md` and `redact-pii.mjs` carry the SDK's PII patterns for HTTP, OTLP, Batch, S3, and warehouse imports. Amplitude does not scrub content after receipt.
+- **Public guide URLs track `main`.** Coding agents fetch `amplitude-ai.md` and `docs/integrations/README.md` from `main`, so a version bump no longer requires new links.
+
+### Changed
+- **`[Agent] Session End` is optional and recommended.** A native Strands export does not send one. Enrichment still runs after the server idle close.
+- **Multi-agent lineage follows delegation.** Framework callbacks inherit `[Agent] Parent Agent ID` inside `runAs()`, delegated prompts are not recorded as end-user turns, and a user message with a parent agent is marked `[Agent] Message Source = agent` unless you set the source yourself. SDK spans and `injectContext()` carry `amplitude.parent.agent.id` / `x-amplitude-parent-agent-id`.
+
+## 0.22.1
+
+### Fixed
+
+- Complete the Strands OTLP privacy guide with memory/error coverage, an executable Python exporter example, and tests of serialized outbound payloads. Metadata-only is the default; sending sanitized content requires a customer redactor.
+- Clarify ingestion sampling and Collector responsibilities, and include IDs/timestamps in the Strands fixture.
+- Regenerate release-pinned discovery links for the release containing the Strands and privacy guides.
+
+## 0.22.0
+
+### Added
+- **Review mode.** `reviewMode: true` records each post-redaction event and prints a sanitized pre-transport upload preview without sending it. Read the previews with `getReviewTraffic()`. Zero-code instrumentation honors `AMPLITUDE_AI_REVIEW=true`. Prompt and message content is left intact, and the envelope API key is `[REDACTED]`. `AMPLITUDE_AI_DEBUG` does not enable review mode.
+
+## 0.21.0
+
+Hardening release. Upgrading is recommended for all users.
+
+### Added
+- `ai.flush({ timeoutMs })` (and `agent.flush({ timeoutMs })`) stop waiting
+  after `timeoutMs` and resolve without rejecting. `ai.flush()` without
+  options is unchanged.
+
+### Changed
+- **`wrap()` instruments your OpenAI, Azure OpenAI or Anthropic client in
+  place** instead of building a new one, so its baseURL, custom `fetch`,
+  headers, proxy, timeouts and Azure settings are kept. Construct
+  `AmpOpenAI` / `AmpAnthropic` directly for a fresh client.
+- **Request options reach the provider.** The second argument of a wrapped
+  method can carry `signal`, `timeout`, `headers`, `maxRetries` and
+  `idempotencyKey` alongside the Amplitude options; an optional third argument
+  is passed to the SDK unchanged.
+- **Tracking never throws into your provider call.** A failed event is skipped
+  with one content-free warning; provider errors pass through unchanged.
+- **Each `AmplitudeAI` uses its own analytics client and its own
+  `propagateContext` setting.** Propagated context goes in request headers
+  (`traceparent`, `x-amplitude-session-id`, `x-amplitude-agent-id`) and never
+  includes user or device IDs. IDs that are not valid header values
+  (non-ASCII, line breaks, over 256 characters) are left out instead of
+  failing the request. `setDefaultPropagateContext` is deprecated.
+- **`pushContext(ctx, fn)`** keeps the context only while `fn` runs.
+  `pushContext(ctx)` without a callback still sets the context but is
+  deprecated and warns once: on HTTP servers the context can carry over to
+  later requests on the same keep-alive connection.
+- **`session.run()` caps its automatic flush at 3 s** (`flushTimeoutMs` on
+  `AIConfig` or the session).
+- **Framework integrations resolve identity per run.** Without an identity they
+  use anonymous per-run IDs instead of shared constants.
+- **`@tool` follows the active content mode.** With no privacy config it sends
+  metadata only and warns once; pass `privacyConfig` to change that. A failing
+  custom redaction function drops the content.
+- **Redaction:** attachments and labels are redacted; debug logs no longer
+  include message content. In `full` mode, a failing tool's error message is
+  redacted before it is logged. Delivery-failure and short-ID warnings no
+  longer include user or device IDs.
+- **OpenTelemetry:** only GenAI and Amplitude spans are mapped, and SDK-emitted
+  spans are skipped.
+- **Inbound headers:** `traceparent` must be valid W3C; `x-trace-id` is limited
+  to 64 characters of `[A-Za-z0-9._:-]`. `extractContext()` is for trusted
+  internal traffic only. New middleware option `deviceIdResolver`. Middleware
+  examples resolve the user from your auth layer instead of a request header.
+- **`amplitude-ai-instrument` instruments only the launched process.** Set
+  `AMPLITUDE_AI_INSTRUMENT_CHILDREN=true` for the previous behavior.
+  `node_modules/.bin/<launcher>` (tsx, nodemon, npm, ...) is treated like the
+  launcher itself.
+- **MCP server:** `scan_project` is limited to client roots or
+  `AMPLITUDE_AI_MCP_ROOTS` (roots that are the filesystem root or contain the
+  home directory are ignored) and reads each file through a single descriptor;
+  scans and tool arguments have size limits; code snippets mask key-like
+  values, including `sk_live_`/`sk_test_`-style keys, `*Key`/`*_KEY`
+  assignments, quoted 32-character hex strings and PEM private-key blocks.
+- **Offline eval uploads** require https (http only for localhost), don't follow
+  redirects, and time out after 30 s (`timeoutMs`).
+- **Streamed tool calls** with an index outside 0–127 are ignored.
+- **Packaging:** optional dependencies are no longer bundled into
+  `dist/node_modules`; the MCP server uses the installed
+  `@modelcontextprotocol/sdk` (now `^1.31.0`) and `zod`. Peer ranges have upper
+  bounds.
+- **Docs and tooling:** all `npx` commands use the scoped package
+  (`npx -y -p @amplitude/ai amplitude-ai …`); integration scripts run from the
+  installed package; doc URLs point at the release tag; the bundled Claude
+  command no longer pre-approves shell or file-write tools; examples read API
+  keys from the environment.
+- **Release process:** publishing verifies the tagged commit is on `main` and
+  matches `package.json`; CI adds workflow, package-contents and docs checks,
+  plus a weekly dependency audit.
+
+### Fixed
+- With `patch()`, OpenAI and Anthropic calls return the SDK's own types:
+  `create()` returns an `APIPromise` (so `.withResponse()` and `.asResponse()`
+  work), and `stream: true` resolves to the SDK `Stream` (so `.tee()`,
+  `.toReadableStream()` and `.controller` work).
+- Patched provider calls made inside a session are recorded by the
+  `AmplitudeAI` that owns the session, including when a different instance
+  called `patch()`. Calls outside a session are unchanged.
+- A span seen by both `enableOtel()` and `AmplitudeAgentExporter` on the same
+  `AmplitudeAI` (or exported twice) is recorded once.
+- `amplitude-ai-instrument` forwards `SIGTERM`, `SIGHUP` and `SIGQUIT` to the
+  launched app and exits with the app's exit code or signal.
+- `amplitude-ai-doctor` reports a malformed `package.json` as a failed check
+  instead of crashing.
+
+## 0.20.1
+
+### Fixed (AA-152502)
+- **The README described the wrong quality data model.** It said every
+  server-side result is an `[Agent] Score` event, listed rubrics that don't
+  exist, and called `[Agent] Topic Classification` live. Built-in signals land
+  as properties on `[Agent] Session Record`, custom evaluators emit
+  `[Agent] Evaluator Result`, Amplitude never emits Scores, and Topic
+  Classification no longer fires. `AGENTS.md` and `llms.txt` no longer list
+  deprecated events.
+- **The provider matrix said Gemini, Azure OpenAI, and Bedrock have no cache
+  token stats.** All three report them; only Mistral doesn't.
+- **`amplitude-ai.md` showed `trackToolCall` with `toolInput` / `toolOutput`.**
+  The options are `input` / `output`; the old names fail type-checking in
+  TypeScript and are dropped in JavaScript. Serverless auto-flush detects
+  Cloudflare Pages Functions (`CF_PAGES`), not Cloudflare Workers.
+- **`@google/genai` is declared as an optional peer dependency**, like
+  `@google/generative-ai`. The `GoogleGenAI` wrapper already required it.
+- The npm page's homepage and README help section link the Agent Analytics
+  docs, and the README version table shows the current version.
+
+### Changed (AA-152502)
+- **Tag pushes create a GitHub Release** from the version's CHANGELOG section,
+  so the docs site's SDK release watcher sees each release. The
+  README-to-docs sync workflow, which targeted the archived docs repo and
+  failed on every run, is removed.
+
+## 0.20.0
+
+### Added (AA-152361)
+- **`[Agent] Git SHA`, `[Agent] Git Ref`, `[Agent] Git Repo`, and
+  `[Agent] Provider Request ID` are now in the bundled event catalog.** The SDK
+  already emitted all four, but they were absent from
+  `data/agent_event_catalog.json`, so `amplitude-ai-register-catalog` never wrote
+  them into a customer's tracking plan — they arrived with no description, no
+  declared type, and outside the governed schema.
+- **`pnpm run check:catalog`**, wired into CI. Every `EVENT_*`/`PROP_*` constant
+  must exist in the bundled catalog or the build fails. The validator existed but
+  ran nowhere, which is how the four properties above went missing for months.
+
+### Fixed (AA-152361)
+- **`[Agent] Enrichment Cost USD` is no longer registered.** It was retired
+  server-side (it measured Amplitude-controlled cost, not customer spend) and is
+  no longer emitted, so registering it left a permanently empty field in the
+  customer's tracking plan. Its customer-attributable replacement,
+  `[Agent] Evaluator Enrichment Cost USD`, is registered on
+  `[Agent] Evaluator Result`.
+- **The catalog validator no longer reports success when it checked nothing.** Its
+  temporal-worker target resolved outside any checkout once this package was split
+  out of the `javascript` monorepo, so it printed `SKIP:` and exited 0. That target
+  is now opt-in via `AMPLITUDE_JAVASCRIPT_REPO`, and a configured target that
+  cannot be read is a hard failure.
+- **`@pydantic/genai-prices` is bounded to `^0.1.3`** (was `>=0.1.3`). The old
+  range would install a future major with a changed `calcPrice` signature, and the
+  cost path catches the throw and returns `null` — silently dropping
+  `[Agent] Cost USD` rather than failing loudly. Pricing data within `0.1.x` is
+  unchanged.
+
+### Fixed (AA-152024)
+- **Gemini calls record `[Agent] Provider Request ID`.** The `GoogleGenAI` and
+  `Gemini` wrappers and `patch()` (non-streaming and streaming) dropped the
+  response's `responseId`, so Gemini AI Responses could not be joined back to
+  the provider request. Same fix as `amplitude-ai`.
+
+## 0.19.0
+
+### Added (AA-152415)
+- **`PROP_INGESTION_PATH` and `PROP_SOURCE`** (`[Agent] Ingestion Path`,
+  `[Agent] Source`). The log-forwarding guides and warehouse SQL now stamp
+  content mode, path, and source, and `include_content = FALSE` writes
+  `metadata_only` so a regenerated forwarder is not scored as mode unknown.
+
+### Fixed (AA-152024)
+- **Fireworks routers other than tier routers are priced at the selected
+  model.** Every Fireworks call was priced on the requested model, so FireRouter
+  and account routers had no rate and lost `[Agent] Cost USD`, and plain model
+  calls ignored the response model. Tier routers (`...-fast`) still price at
+  their tier. A selected model outside Fireworks (bring-your-own-key) is priced
+  by model-name inference. Same rule as the Python SDK.
+- **Fireworks rates match the Python SDK.** Added GLM 5.3, GLM 5.3 Flash, and
+  DeepSeek V4.1 Flash. Kimi K3, Kimi K3 Fast, and DeepSeek V4 Flash 0731 are now
+  priced from genai-prices by endpoint instead of hard-coded copies.
+
+## 0.18.0
+
+### Added (AA-152308)
+- **`[Agent] Content Mode` now ships on every tracked event**, carrying `full`,
+  `metadata_only`, or `customer_enriched`. It rides the metadata channel, so it
+  survives the very modes whose content it describes. Without it a session that
+  arrives with no message text is ambiguous: a caller who deliberately chose
+  `metadata_only` and one whose instrumentation dropped the text look identical,
+  and Amplitude's enrichment scored both as an agent that answered nothing.
+- **`MockAmplitudeAI.summary()` gained a message-content gate.** An empty message
+  string is dropped rather than sent, so an agent wired to an unpopulated
+  variable passed all nine existing gates while delivering nothing to read. The
+  gate covers user messages -- an AI response legitimately carries no text on a
+  tool-only turn -- and is skipped under `metadata_only` / `customer_enriched`,
+  where stripped content is the point of the mode.
+
+## 0.17.0
+
+### Security (AA-152019)
+- **`amplitude-ai-register-catalog` no longer accepts or embeds credentials.**
+  The generated script resolves `AMPLITUDE_API_KEY` / `AMPLITUDE_SECRET_KEY` from
+  the environment at execution time and feeds the Authorization header to each
+  curl via stdin (`-K -`), so credentials never appear in the script, in stdout,
+  or in any process argument list. `--api-key` / `--secret-key` flags are now
+  ignored with a warning. **Breaking for scripted usage:** pipe invocations must
+  set the env vars on the bash side of the pipe:
+  `npx amplitude-ai-register-catalog | AMPLITUDE_API_KEY=KEY AMPLITUDE_SECRET_KEY=SECRET bash`.
+- Git metadata capture uses `execFileSync` (no shell) instead of `execSync`.
+
+### Added (AA-151730)
+- **Gateway partnership parity:** OpenRouter / LiteLLM / Requesty SDK-through recipes,
+  `ingestion_path` / `gateway` context convention, and gateway smoke tests proving
+  canonical model cost fill vs product-label cost omission.
+- **LangChain DoD:** `handleChatModelStart` tracks `[Agent] User Message` for chat
+  models; tool callbacks pass `privacyConfig`. Handler stays duck-typed (no hard
+  `@langchain/core` dependency).
+- **OTEL exporter parity:** `privacyConfig`, `allowedScopes`, and `blockedScopes` on
+  `AmplitudeAgentExporter` / `AmplitudeGenAIExporter`; README constructor fixed to
+  `{ amplitudeAI: ai }`.
+
+### Fixed (AA-151534)
+- Unsupported or failed automatic price lookups now omit `[Agent] Cost USD`
+  instead of recording an authoritative `$0`. Explicitly supplied zero costs
+  and zero-token calls remain unchanged.
+
+## 0.15.0
+
+### Added (AA-151394)
+- **`trackRunCost()`:** Run-end API emitting delta `[Agent] Cost USD` on
+  `[Agent] AI Response` with trace-scoped balancing. Default empty content for
+  cost-only events.
+- **`AIConfig.strictCost`:** Raises `CostCalculationError` when tokens are present
+  but cost calculates to zero (dev/CI).
+- **Streaming tool-use fix:** `finalize()` uses placeholder content when tokens > 0
+  but message body is empty.
+- **`MockAmplitudeAI.summary()`:** Provider, Cost USD, and run-cost gates; fails
+  when tool calls exist without AI Response cost.
+
+## 0.14.0
+
+### Added (AA-151359)
+- **`pushContext()` public API for cross-SDK parity:** New `pushContext()` method on
+  the AI client allows callers to append context entries that are automatically
+  included on subsequent events within the session. Aligns the Node SDK surface with
+  the Python SDK's equivalent API.
+
+### Docs (AA-151367)
+- **Trace ID grouping, UI component spans, and HTTP API usage:** New instrumentation
+  guide sections documenting how `[Agent] Trace ID` controls turn grouping in the
+  session viewer, how to emit `[Agent] Span` events for rich UI components
+  (accordions, suggestion panels, forms), how to handle empty AI responses, and a
+  complete JSON reference for sending `[Agent]` events via the HTTP V2 API without
+  the SDK.
+
+## 0.13.0
+
+### Added (AA-151308)
+- **OTEL span-first instrumentation:** `observe()` decorator and provider wrappers now
+  emit OpenTelemetry spans alongside Amplitude events. Stack trace capture,
+  `doctor --fill-rates`, provider OTEL spans, and MCP OTEL detection included.
+  Session tags, git metadata, and SDK v2 compatibility layer added.
+
+### Fixed (AA-151308)
+- **Duplicate event deduplication, privacy, provider spans, and streaming fixes:**
+  Resolved duplicate event emission, privacy mode handling, provider span accuracy,
+  and streaming cost tracking edge cases.
+- **TS2352 type error in decorators.ts:** Fixed TypeScript type assertion error.
+
+## 0.12.0
+
+### Docs (AA-151340)
+- **Fan-out LLM canonical pattern (Step 3g-b):** New instrumentation guide section
+  and MCP pattern (`fan-out-llm`) documenting the correct way to instrument parallel
+  child-agent workflows. `scan_project` now detects ≥2 LLM call sites in the same
+  function and recommends the fan-out pattern. Cross-references Python SDK parity where
+  `run_as` / `arun_as` now suppress auto user-message tracking (requires `amplitude-ai
+  >= 1.9.0`).
+
+### Added (AA-151269)
+- **Per-session idle timeout stamped on the first event:** `trackUserMessage` now
+  accepts `idleTimeoutMinutes`, and `Session` stamps its value on the first event
+  (typically the user message) in addition to `[Agent] Session End`. This closes the
+  window where the enrichment pipeline did not yet know a session's idle override and
+  could apply the org default before the explicit-end event arrived.
+
+### Changed (AA-151269)
+- **`idleTimeoutMinutes: -1` is now a 90-day backstop, not "never auto-close":** `-1`
+  means "rely on an explicit Session End," but the session still auto-closes after a
+  90-day inactivity backstop, so a session that is never explicitly ended can no longer
+  leak open forever. Positive values are honored up to 90 days (values above are
+  clamped). `agent.session()` still throws a `RangeError` for negative values other
+  than `-1`.
+
+## 0.11.1
+
+### Docs (AA-150651)
+- **Dual-event guidance for agentic business actions:** Step 3e of `amplitude-ai.md`
+  (and the README `tool()` section) now documents emitting both an `[Agent] Tool Call`
+  (operational) and the standard product event via the base SDK with a `journey_type`
+  discriminator (business attribution), so agent-driven and click-driven journeys are
+  comparable in the same funnel without joining. Reframes the Safety Rule from an absolute
+  ban on the base SDK's `track()` to scoped routing: agent telemetry via `track*`, business
+  product events via the base SDK. Docs-only; no code changes.
+
 ## 0.11.0
 
 ### Added (AA-151040)

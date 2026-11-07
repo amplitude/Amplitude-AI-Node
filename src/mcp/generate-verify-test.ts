@@ -1,7 +1,8 @@
 import type { ScanResult } from './scan-project.js';
 
+/** Body of a single-quoted JS string literal; escapes quotes, backslashes and control characters. */
 function escapeStr(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return JSON.stringify(String(s)).slice(1, -1).replace(/\\"/g, '"').replace(/'/g, "\\'");
 }
 
 export function generateVerifyTest(scanResult: ScanResult): string {
@@ -28,6 +29,31 @@ export function generateVerifyTest(scanResult: ScanResult): string {
       '    expect(events.length).toBeGreaterThanOrEqual(2);',
       `    mock.assertEventTracked('[Agent] User Message', { '[Agent] Agent ID': '${eid}' });`,
       "    mock.assertSessionClosed('verify-session');",
+      '  });',
+      '',
+    );
+  }
+
+  const firstAgent = scanResult.agents[0];
+  const readsFlags =
+    (scanResult.experiment_packages ?? []).length > 0 || (scanResult.flag_call_sites ?? []).length > 0;
+  if (readsFlags && firstAgent) {
+    const eid = escapeStr(firstAgent.inferred_id);
+    lines.push(
+      "  it('session experiments reach every event', () => {",
+      '    const mock = new MockAmplitudeAI();',
+      `    const agent = mock.agent('${eid}');`,
+      '    // Replace with the key and variant your flag client returns.',
+      "    const experiments = [{ key: 'verify-experiment', variant: 'treatment' }];",
+      "    const session = agent.session({ userId: 'verify-user', sessionId: 'verify-experiments', experiments });",
+      '    session.runSync((s) => {',
+      "      s.trackUserMessage('test message');",
+      '    });',
+      '    for (const event of mock.getEvents()) {',
+      "      expect(event.event_properties?.['[Agent] Experiments']).toEqual(['verify-experiment:treatment']);",
+      "      expect(event.event_properties?.['[Agent] Experiment Variant']).toBe('treatment');",
+      '    }',
+      "    expect(mock.summary()).toContain('[Agent] Experiments');",
       '  });',
       '',
     );

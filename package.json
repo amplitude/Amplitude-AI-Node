@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.11.0",
+  "version": "0.26.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -17,7 +17,7 @@
     "type": "git",
     "url": "https://github.com/amplitude/Amplitude-AI-Node.git"
   },
-  "homepage": "https://github.com/amplitude/Amplitude-AI-Node#readme",
+  "homepage": "https://amplitude.com/docs/sdks/agent-analytics/sdk",
   "bugs": {
     "url": "https://github.com/amplitude/Amplitude-AI-Node/issues"
   },
@@ -37,17 +37,22 @@
     "./context": "./dist/context.js",
     "./core/constants": "./dist/core/constants.js",
     "./core/enrichments": "./dist/core/enrichments.js",
+    "./core/experiments": "./dist/core/experiments.js",
     "./core/privacy": "./dist/core/privacy.js",
     "./core/tracking": "./dist/core/tracking.js",
+    "./core/voice": "./dist/core/voice.js",
     "./decorators": "./dist/decorators.js",
     "./exceptions": "./dist/exceptions.js",
     "./integrations/anthropic-managed": "./dist/integrations/anthropic-managed.js",
     "./integrations/anthropic-tools": "./dist/integrations/anthropic-tools.js",
+    "./integrations/braintrust-experiment": "./dist/integrations/braintrust-experiment.js",
     "./integrations/claude-agent-sdk": "./dist/integrations/claude-agent-sdk.js",
     "./integrations/crewai": "./dist/integrations/crewai.js",
+    "./integrations/identity": "./dist/integrations/identity.js",
     "./integrations/langchain": "./dist/integrations/langchain.js",
     "./integrations/llamaindex": "./dist/integrations/llamaindex.js",
     "./integrations/openai-agents": "./dist/integrations/openai-agents.js",
+    "./integrations/openai-realtime": "./dist/integrations/openai-realtime.js",
     "./integrations/opentelemetry": "./dist/integrations/opentelemetry.js",
     "./internals": "./dist/internals.js",
     "./mcp": "./dist/mcp/index.js",
@@ -59,6 +64,13 @@
     "./mcp/server": "./dist/mcp/server.js",
     "./mcp/validate-file": "./dist/mcp/validate-file.js",
     "./middleware": "./dist/middleware.js",
+    "./offline-eval": "./dist/offline-eval.js",
+    "./openfeature": "./dist/openfeature.js",
+    "./otel": "./dist/otel/index.js",
+    "./otel/conventions": "./dist/otel/conventions.js",
+    "./otel/mapper": "./dist/otel/mapper.js",
+    "./otel/processor": "./dist/otel/processor.js",
+    "./otel/setup": "./dist/otel/setup.js",
     "./patching": "./dist/patching.js",
     "./propagation": "./dist/propagation.js",
     "./providers/anthropic": "./dist/providers/anthropic.js",
@@ -66,6 +78,7 @@
     "./providers/base": "./dist/providers/base.js",
     "./providers/bedrock": "./dist/providers/bedrock.js",
     "./providers/gemini": "./dist/providers/gemini.js",
+    "./providers/google-genai": "./dist/providers/google-genai.js",
     "./providers/mistral": "./dist/providers/mistral.js",
     "./providers/openai": "./dist/providers/openai.js",
     "./register": "./dist/register.js",
@@ -76,9 +89,12 @@
     "./types": "./dist/types.js",
     "./utils/costs": "./dist/utils/costs.js",
     "./utils/debug": "./dist/utils/debug.js",
+    "./utils/git_metadata": "./dist/utils/git_metadata.js",
     "./utils/logger": "./dist/utils/logger.js",
     "./utils/model-tiers": "./dist/utils/model-tiers.js",
+    "./utils/openai-provider": "./dist/utils/openai-provider.js",
     "./utils/provider-detect": "./dist/utils/provider-detect.js",
+    "./utils/provider-request-id": "./dist/utils/provider-request-id.js",
     "./utils/providers": "./dist/utils/providers.js",
     "./utils/resolve-module": "./dist/utils/resolve-module.js",
     "./utils/streaming": "./dist/utils/streaming.js",
@@ -102,8 +118,9 @@
   "files": [
     "amplitude-ai.md",
     "AGENTS.md",
+    "docs/integrations",
     "dist",
-    "bin",
+    "bin/amplitude-ai*.mjs",
     "data",
     "llms.txt",
     "llms-full.txt",
@@ -113,8 +130,11 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "check:catalog": "node bin/validate-catalog-constants.mjs",
     "check:generated": "node scripts/generate-agent-docs.mjs --check",
     "clean": "rimraf dist",
+    "docs:warehouse": "node scripts/render-warehouse-sql.mjs",
+    "check:warehouse": "node scripts/render-warehouse-sql.mjs --check",
     "generate:agent-docs": "node scripts/generate-agent-docs.mjs",
     "lint": "eslint --cache --ext .js,.jsx,.ts,.tsx --quiet . && biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched",
     "lint:fix": "eslint --fix --ext .js,.jsx,.ts,.tsx . --cache && biome lint ./src --log-level=error --diagnostic-level=error --no-errors-on-unmatched --write",
@@ -126,12 +146,13 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@pydantic/genai-prices": ">=0.0.1"
+    "@pydantic/genai-prices": "^0.1.3"
   },
   "devDependencies": {
     "@amplitude/analytics-node": "1.3.5",
     "@biomejs/biome": "1.9.4",
-    "@modelcontextprotocol/sdk": "1.27.1",
+    "@duckdb/node-api": "1.5.5-r.5",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@typescript-eslint/eslint-plugin": "8.29.1",
     "@typescript-eslint/parser": "8.29.1",
     "@vitest/coverage-v8": "4.0.14",
@@ -143,14 +164,17 @@
     "vitest": "4.0.14"
   },
   "peerDependencies": {
-    "@amplitude/analytics-node": ">=1.3.0",
+    "@amplitude/analytics-node": ">=1.3.0 <2.0.0",
     "@anthropic-ai/sdk": ">=0.29.0 <1.0.0",
     "@aws-sdk/client-bedrock-runtime": ">=3.0.0 <4.0.0",
     "@google/generative-ai": ">=0.21.0 <1.0.0",
+    "@google/genai": ">=1.0.0 <2.0.0",
     "@mistralai/mistralai": ">=1.3.6 <2.0.0",
-    "js-tiktoken": ">=1.0.0",
+    "@opentelemetry/api": ">=1.0.0 <2.0.0",
+    "@opentelemetry/sdk-trace-base": ">=1.0.0 <3.0.0",
+    "js-tiktoken": ">=1.0.0 <2.0.0",
     "openai": ">=4.0.0 <7.0.0",
-    "tiktoken": ">=1.0.0"
+    "tiktoken": ">=1.0.0 <2.0.0"
   },
   "peerDependenciesMeta": {
     "@amplitude/analytics-node": {
@@ -165,7 +189,16 @@
     "@google/generative-ai": {
       "optional": true
     },
+    "@google/genai": {
+      "optional": true
+    },
     "@mistralai/mistralai": {
+      "optional": true
+    },
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace-base": {
       "optional": true
     },
     "js-tiktoken": {
@@ -179,7 +212,7 @@
     }
   },
   "optionalDependencies": {
-    "@modelcontextprotocol/sdk": "1.27.1",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "acorn": "^8.16.0",
     "acorn-typescript": "^1.4.13",
     "zod": "3.25.76"
@@ -190,7 +223,7 @@
       "esbuild"
     ],
     "overrides": {
-      "fast-xml-parser": ">=5.5.6"
+      "fast-xml-parser": ">=5.5.6 <6.0.0"
     }
   },
   "packageManager": "pnpm@10.30.3+sha512.c961d1e0a2d8e354ecaa5166b822516668b7f44cb5bd95122d590dd81922f606f5473b6d23ec4a5be05e7fcd18e8488d47d978bbe981872f1145d06e9a740017"

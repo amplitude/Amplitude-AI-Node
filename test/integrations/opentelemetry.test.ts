@@ -142,6 +142,7 @@ describe('AmplitudeAgentExporter', () => {
           'gen_ai.operation.name': 'embedding',
           'gen_ai.request.model': 'text-embedding-3-small',
           'gen_ai.usage.input_tokens': 123,
+          'gen_ai.usage.cost': 0.42,
           'gen_ai.embedding.vector_size': 1536,
           'amplitude.user_id': 'u1',
           'amplitude.session_id': 's1',
@@ -151,6 +152,10 @@ describe('AmplitudeAgentExporter', () => {
       exporter.export([embSpan as never], cb);
       expect(ai.trackEmbedding).toHaveBeenCalledOnce();
       expect(ai.trackAiMessage).not.toHaveBeenCalled();
+      expect(ai.trackEmbedding.mock.calls[0]?.[0]).toMatchObject({
+        inputTokens: 123,
+        totalCostUsd: 0.42,
+      });
     });
 
     it('uses defaultUserId when amplitude.user_id is absent', (): void => {
@@ -371,6 +376,41 @@ describe('AmplitudeAgentExporter expanded', () => {
     const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
     expect(call.totalCostUsd).toBe(0.05);
   });
+
+  it.each([
+    ['blank string', ''],
+    ['whitespace string', '   '],
+    ['boolean', false],
+    ['negative number', -0.1],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['negative infinity', Number.NEGATIVE_INFINITY],
+  ])(
+    'falls back from invalid authoritative cost: %s',
+    (_label, invalidCost): void => {
+      const ai = createMockAmplitudeAI();
+      const exporter = new AmplitudeAgentExporter({
+        amplitudeAI: ai as never,
+      });
+      const cb = vi.fn();
+
+      const span = makeGenAISpan({
+        attributes: {
+          ...makeGenAISpan().attributes,
+          'gen_ai.response.model': 'gpt-4o',
+          'gen_ai.usage.cost': invalidCost,
+        },
+      });
+      exporter.export([span as never], cb);
+
+      const call = ai.trackAiMessage.mock.calls[0]![0] as Record<
+        string,
+        unknown
+      >;
+      expect(call.totalCostUsd).toEqual(expect.any(Number));
+      expect(Number.isFinite(call.totalCostUsd)).toBe(true);
+      expect(call.totalCostUsd).toBeGreaterThan(0);
+    },
+  );
 
   it('normalizes finish reason arrays using first value', (): void => {
     const ai = createMockAmplitudeAI();
@@ -799,6 +839,23 @@ describe('AmplitudeGenAIExporter expanded', () => {
     expect(call.cacheCreationTokens).toBe(15);
   });
 
+  it('maps reasoning token attributes to trackAiMessage', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({ amplitudeAI: ai as never });
+    const cb = vi.fn();
+
+    const span = makeGenAISpan({
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.usage.reasoning.output_tokens': 12,
+      },
+    });
+    exporter.export([span as never], cb);
+
+    const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.reasoningTokens).toBe(12);
+  });
+
   it('prefers gen_ai.provider.name over gen_ai.system', (): void => {
     const ai = createMockAmplitudeAI();
     const exporter = new AmplitudeAgentExporter({ amplitudeAI: ai as never });
@@ -815,5 +872,128 @@ describe('AmplitudeGenAIExporter expanded', () => {
 
     const call = ai.trackAiMessage.mock.calls[0]![0] as Record<string, unknown>;
     expect(call.provider).toBe('azure-openai');
+  });
+
+  it('passes privacyConfig through to track* calls', (): void => {
+    const ai = createMockAmplitudeAI();
+    const privacyConfig = {
+      privacyMode: true,
+      contentMode: 'metadata_only',
+    };
+    const exporter = new AmplitudeAgentExporter({
+      amplitudeAI: ai as never,
+      privacyConfig: privacyConfig as never,
+    });
+    const cb = vi.fn();
+
+    const inputMessages = JSON.stringify([
+      { role: 'user', content: 'hello privacy' },
+    ]);
+    exporter.export(
+      [
+        makeGenAISpan({
+          attributes: {
+            ...makeGenAISpan().attributes,
+            'gen_ai.input.messages': inputMessages,
+          },
+        }) as never,
+      ],
+      cb,
+    );
+
+    expect(
+      (ai.trackUserMessage.mock.calls[0]?.[0] as Record<string, unknown>)
+        ?.privacyConfig,
+    ).toEqual(privacyConfig);
+    expect(
+      (ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>)
+        ?.privacyConfig,
+    ).toEqual(privacyConfig);
+
+    exporter.export(
+      [
+        makeGenAISpan({
+          attributes: {
+            'gen_ai.system': 'openai',
+            'gen_ai.operation.name': 'tool',
+            'gen_ai.tool.name': 'search',
+            'amplitude.user_id': 'u1',
+          },
+        }) as never,
+      ],
+      cb,
+    );
+    expect(
+      (ai.trackToolCall.mock.calls[0]?.[0] as Record<string, unknown>)
+        ?.privacyConfig,
+    ).toEqual(privacyConfig);
+  });
+
+  it('filters by allowedScopes / blockedScopes instrumentation names', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({
+      amplitudeAI: ai as never,
+      allowedScopes: ['openllmetry'],
+      blockedScopes: ['sqlalchemy'],
+    });
+    const cb = vi.fn();
+
+    const allowed = makeGenAISpan({
+      instrumentationScope: { name: 'openllmetry' },
+    });
+    const blocked = makeGenAISpan({
+      instrumentationScope: { name: 'sqlalchemy' },
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.response.text': 'blocked',
+      },
+    });
+    const otherScope = makeGenAISpan({
+      instrumentationScope: { name: 'fastapi' },
+      attributes: {
+        ...makeGenAISpan().attributes,
+        'gen_ai.response.text': 'other',
+      },
+    });
+
+    exporter.export(
+      [allowed as never, blocked as never, otherScope as never],
+      cb,
+    );
+
+    expect(ai.trackAiMessage).toHaveBeenCalledOnce();
+    expect(
+      (ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>)?.content,
+    ).toBe('Hello world');
+  });
+
+  it('blockedScopes alone drops matching scopes', (): void => {
+    const ai = createMockAmplitudeAI();
+    const exporter = new AmplitudeAgentExporter({
+      amplitudeAI: ai as never,
+      blockedScopes: new Set(['noisy-lib']),
+    });
+    const cb = vi.fn();
+
+    exporter.export(
+      [
+        makeGenAISpan({
+          instrumentationLibrary: { name: 'noisy-lib' },
+        }) as never,
+        makeGenAISpan({
+          instrumentationScope: { name: 'ok-lib' },
+          attributes: {
+            ...makeGenAISpan().attributes,
+            'gen_ai.response.text': 'kept',
+          },
+        }) as never,
+      ],
+      cb,
+    );
+
+    expect(ai.trackAiMessage).toHaveBeenCalledOnce();
+    expect(
+      (ai.trackAiMessage.mock.calls[0]?.[0] as Record<string, unknown>)?.content,
+    ).toBe('kept');
   });
 });

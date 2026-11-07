@@ -131,6 +131,7 @@ export class GoogleGenAI extends BaseAIProvider {
           'maxOutputTokens',
         ),
         isStreaming: false,
+        providerRequestId: extracted.responseId,
       });
 
       return response;
@@ -206,10 +207,12 @@ export class GoogleGenAI extends BaseAIProvider {
     ctx: ReturnType<typeof applySessionContext>,
   ): AsyncGenerator<unknown> {
     const accumulator = new StreamingAccumulator();
+    let responseId: string | undefined;
 
     try {
       for await (const chunk of stream) {
         const extracted = extractGoogleGenAIResponse(chunk);
+        responseId ??= extracted.responseId;
         if (extracted.text) accumulator.addContent(extracted.text);
         if (Array.isArray(extracted.functionCalls)) {
           for (const fc of extracted.functionCalls) accumulator.addToolCall(fc);
@@ -272,6 +275,7 @@ export class GoogleGenAI extends BaseAIProvider {
         isStreaming: true,
         isError: state.isError,
         errorMessage: state.errorMessage,
+        providerRequestId: responseId,
       });
     }
   }
@@ -291,6 +295,7 @@ interface GoogleGenAIPart {
 
 interface GoogleGenAIChunk {
   text?: string;
+  responseId?: string;
   usageMetadata?: GoogleGenAIUsageMetadata;
   candidates?: Array<{
     finishReason?: string;
@@ -307,6 +312,7 @@ export function extractGoogleGenAIResponse(response: unknown): {
   cacheReadTokens?: number;
   finishReason?: string;
   functionCalls?: Array<Record<string, unknown>>;
+  responseId?: string;
 } {
   const resp = (response ?? {}) as GoogleGenAIChunk;
 
@@ -345,6 +351,10 @@ export function extractGoogleGenAIResponse(response: unknown): {
     cacheReadTokens: usage?.cachedContentTokenCount,
     finishReason,
     functionCalls,
+    responseId:
+      typeof resp.responseId === 'string' && resp.responseId.trim()
+        ? resp.responseId.trim()
+        : undefined,
   };
 }
 

@@ -24,3 +24,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Local agent plans
+.cursor/plans/

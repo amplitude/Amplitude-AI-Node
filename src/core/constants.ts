@@ -15,7 +15,15 @@ export const EVENT_SCORE = '[Agent] Score';
 export const PROP_SESSION_ID = '[Agent] Session ID';
 export const PROP_TRACE_ID = '[Agent] Trace ID';
 export const PROP_TURN_ID = '[Agent] Turn ID';
+// Experiment assignment, from the `experiments` option. The array is sent
+// whenever an experiment applies; the scalars only when exactly one does.
+export const PROP_EXPERIMENTS = '[Agent] Experiments';
+export const PROP_EXPERIMENT_KEY = '[Agent] Experiment Key';
+export const PROP_EXPERIMENT_VARIANT = '[Agent] Experiment Variant';
+export const PROP_EXPERIMENT_UNIT = '[Agent] Experiment Unit';
+export const PROP_EXPERIMENT_PROVIDER = '[Agent] Experiment Provider';
 export const PROP_MESSAGE_ID = '[Agent] Message ID';
+export const PROP_PROVIDER_REQUEST_ID = '[Agent] Provider Request ID';
 export const PROP_MODEL_NAME = '[Agent] Model Name';
 export const PROP_PROVIDER = '[Agent] Provider';
 export const PROP_LATENCY_MS = '[Agent] Latency Ms';
@@ -35,6 +43,7 @@ export const PROP_TOOL_CALLS = '[Agent] Tool Calls';
 export const PROP_TOOL_NAME = '[Agent] Tool Name';
 export const PROP_TOOL_SUCCESS = '[Agent] Tool Success';
 export const PROP_TOOL_TYPE = '[Agent] Tool Type';
+export const PROP_TOOL_OWNER = '[Agent] Tool Owner';
 export const PROP_INVOCATION_ID = '[Agent] Invocation ID';
 export const PROP_PARENT_MESSAGE_ID = '[Agent] Parent Message ID';
 export const PROP_AGENT_ID = '[Agent] Agent ID';
@@ -43,6 +52,13 @@ export const PROP_TOOL_INPUT = '[Agent] Tool Input';
 export const PROP_TOOL_OUTPUT = '[Agent] Tool Output';
 export const PROP_SDK_VERSION = '[Agent] SDK Version';
 export const PROP_RUNTIME = '[Agent] Runtime';
+// The privacy posture the caller chose, as a metadata channel so it ships in every
+// mode. Without it a contentless session is ambiguous downstream: enrichment cannot
+// tell a deliberate metadata_only session from one whose instrumentation dropped the
+// text, so it scores both as though the agent had answered nothing.
+export const PROP_CONTENT_MODE = '[Agent] Content Mode';
+export const PROP_INGESTION_PATH = '[Agent] Ingestion Path';
+export const PROP_SOURCE = '[Agent] Source';
 export const PROP_ENV = '[Agent] Env';
 export const PROP_LOCALE = '[Agent] Locale';
 export const PROP_SPAN_KIND = '[Agent] Span Kind';
@@ -105,6 +121,16 @@ export const PROP_TOOL_DEFINITIONS = '[Agent] Tool Definitions';
 export const PROP_TOOL_DEFINITIONS_COUNT = '[Agent] Tool Definitions Count';
 export const PROP_TOOL_DEFINITIONS_HASH = '[Agent] Tool Definitions Hash';
 
+// Stack trace (v0.12.0) — opt-in error debugging
+export const PROP_STACK_TRACE = '[Agent] Stack Trace';
+export const PROP_ERROR_SOURCE = '[Agent] Error Source';
+
+// OTEL / git metadata
+export const PROP_TAGS = '[Agent] Tags';
+export const PROP_GIT_SHA = '[Agent] Git SHA';
+export const PROP_GIT_REF = '[Agent] Git Ref';
+export const PROP_GIT_REPO = '[Agent] Git Repo';
+
 // Session replay linking (v0.7.0)
 export const PROP_SESSION_REPLAY_ID = '[Amplitude] Session Replay ID';
 
@@ -116,6 +142,27 @@ export const PROP_TASK_FAILURE_REASON = '[Agent] Task Failure Reason';
 export const PROP_AGENT_CHAIN = '[Agent] Agent Chain';
 export const PROP_ROOT_AGENT_NAME = '[Agent] Root Agent Name';
 export const PROP_REQUEST_COMPLEXITY = '[Agent] Request Complexity';
+
+// Voice turn properties (AA-152825). Absent means unknown, never false.
+export const PROP_CHANNEL = '[Agent] Channel';
+export const PROP_VOICE_DIRECTION = '[Agent] Voice Direction';
+export const PROP_VOICE_SPEECH_DURATION_MS = '[Agent] Voice Speech Duration Ms';
+export const PROP_VOICE_TIME_TO_FIRST_AUDIO_MS = '[Agent] Voice Time To First Audio Ms';
+export const PROP_VOICE_INTERRUPTED = '[Agent] Voice Interrupted';
+export const PROP_VOICE_INTERRUPTED_BY = '[Agent] Voice Interrupted By';
+export const PROP_VOICE_YIELDED = '[Agent] Voice Yielded';
+export const PROP_VOICE_END_OF_TURN_REASON = '[Agent] Voice End Of Turn Reason';
+export const PROP_VOICE_TRANSCRIPT_CONFIDENCE = '[Agent] Voice Transcript Confidence';
+export const VOICE_CHANNELS = ['chat', 'voice'] as const;
+export const VOICE_DIRECTIONS = ['inbound', 'outbound', 'in_app'] as const;
+export const VOICE_INTERRUPTED_BY = ['user', 'agent'] as const;
+export const VOICE_END_OF_TURN_REASONS = [
+  'completed',
+  'interrupted',
+  'silence',
+  'transferred',
+  'error',
+] as const;
 
 const _require = createRequire(import.meta.url);
 let _sdkVersion = '0.1.0';

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -12,8 +12,14 @@ import {
 } from './contract.js';
 import { getIntegrationPatterns } from './patterns.js';
 import { generateVerifyTest } from './generate-verify-test.js';
-import { instrumentFile } from './instrument-file.js';
-import { type ScanResult, scanProject } from './scan-project.js';
+import { InstrumentFileInputError, instrumentFile } from './instrument-file.js';
+import {
+  type ScanResult,
+  defaultScanRoots,
+  isBroadScanRoot,
+  resolveScanRoot,
+  scanProject,
+} from './scan-project.js';
 import { analyzeFileInstrumentation } from './validate-file.js';
 
 type EventSchema = {
@@ -132,6 +138,7 @@ const buildInstrumentationGuidance = (
     '',
     'Next:',
     `- ${nextForTier}`,
+    '- if the app reads an A/B test or feature flag that changes agent behavior, pass the variant as `experiments` on `ai.agent()` or `agent.session()`: `experimentsFromAmplitude(variants, { keys: [...] })` for Amplitude Experiment, `new AmplitudeAIHook({ flags: [...] })` from `@amplitude/ai/openfeature` for an OpenFeature provider, or `[{ key, variant, provider }]` built from the flag read. Every event then carries `[Agent] Experiments`, which splits any chart by arm.',
     isManagedAgent
       ? '- refine your poll-and-track loop with deduplication and latency measurement for production reliability.'
       : '- treat `patch({ amplitudeAI: ai })` as migration quickstart, not steady-state production.',
@@ -168,6 +175,40 @@ const headingPriority = (heading: string): number => {
   return 1;
 };
 
+/**
+ * Directories `scan_project` may read: the client's MCP roots plus
+ * AMPLITUDE_AI_MCP_ROOTS, falling back to the server's working directory.
+ */
+const resolveAllowedScanRoots = async (server: McpServer): Promise<string[]> => {
+  const roots = (process.env.AMPLITUDE_AI_MCP_ROOTS ?? '')
+    .split(delimiter)
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const clientRoots: string[] = [];
+  if (server.server.getClientCapabilities()?.roots) {
+    try {
+      const res = await server.server.listRoots(undefined, { timeout: 5000 });
+      for (const root of res.roots) {
+        if (root.uri.startsWith('file:')) clientRoots.push(fileURLToPath(root.uri));
+      }
+    } catch {
+      // Client advertised roots but didn't answer; fall back below.
+    }
+  }
+  roots.push(...clientRoots);
+  if (clientRoots.length === 0) roots.push(...defaultScanRoots());
+  return roots.filter((root) => !isBroadScanRoot(root));
+};
+
+// Upper bounds for free-form tool arguments (source inputs keep their own
+// limits in the analyzers).
+const MAX_SHORT_ARG_CHARS = 256;
+const MAX_PATH_ARG_CHARS = 4096;
+const MAX_QUERY_CHARS = 1024;
+const MAX_DESCRIPTION_CHARS = 2000;
+const MAX_SCAN_RESULT_CHARS = 5_000_000;
+const MAX_PROVIDERS = 32;
+
 const createServer = (): McpServer => {
   const server = new McpServer({
     name: MCP_SERVER_NAME,
@@ -181,7 +222,7 @@ const createServer = (): McpServer => {
       description:
         'Return Amplitude AI event schema and event-property definitions.',
       inputSchema: {
-        event_type: z.string().optional(),
+        event_type: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
@@ -219,7 +260,7 @@ const createServer = (): McpServer => {
       description:
         'Return canonical instrumentation patterns for @amplitude/ai.',
       inputSchema: {
-        id: z.string().optional(),
+        id: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
@@ -276,8 +317,8 @@ const createServer = (): McpServer => {
       description:
         'Suggest practical next instrumentation steps from minimal hints.',
       inputSchema: {
-        framework: z.string().optional(),
-        provider: z.string().optional(),
+        framework: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
+        provider: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
         content_tier: z
           .enum(['full', 'metadata_only', 'customer_enriched'])
           .optional()
@@ -340,7 +381,10 @@ const createServer = (): McpServer => {
       description:
         'Search README.md, llms-full.txt, and amplitude-ai.md for a keyword or phrase. Returns matching sections with surrounding context.',
       inputSchema: {
-        query: z.string().describe('Keyword or phrase to search for'),
+        query: z
+          .string()
+          .max(MAX_QUERY_CHARS)
+          .describe('Keyword or phrase to search for'),
         max_results: z
           .number()
           .optional()
@@ -438,13 +482,29 @@ const createServer = (): McpServer => {
       inputSchema: {
         root_path: z
           .string()
-          .describe('Absolute path to the project root directory'),
+          .describe('Absolute path to the project root directory (must be inside the workspace roots)'),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
     async (args: any) => {
-      const rootPath =
+      const requested =
         typeof args?.root_path === 'string' ? args.root_path : '';
+      const rootPath = resolveScanRoot(requested, await resolveAllowedScanRoots(server));
+      if (!rootPath) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                error:
+                  'root_path must be an existing directory inside the MCP client roots or the server working directory. ' +
+                  'Set AMPLITUDE_AI_MCP_ROOTS to allow other directories.',
+              }),
+            },
+          ],
+        };
+      }
       const result = scanProject(rootPath);
       return {
         content: [
@@ -466,6 +526,7 @@ const createServer = (): McpServer => {
       inputSchema: {
         scan_result: z
           .string()
+          .max(MAX_SCAN_RESULT_CHARS)
           .describe('JSON string of the scan_project result'),
       },
     },
@@ -489,36 +550,51 @@ const createServer = (): McpServer => {
         'Apply instrumentation transforms to a source file. Returns the instrumented source code.',
       inputSchema: {
         source: z.string().describe('Source code of the file'),
-        file_path: z.string().describe('Path to the file (for context)'),
+        file_path: z
+          .string()
+          .max(MAX_PATH_ARG_CHARS)
+          .describe('Path to the file (for context)'),
         tier: z.enum(['quick_start', 'standard', 'advanced']),
         bootstrap_import_path: z
           .string()
+          .max(MAX_PATH_ARG_CHARS)
           .describe('Import path for the amplitude bootstrap module'),
-        agent_id: z.string().describe('Agent ID to use'),
+        agent_id: z.string().max(MAX_SHORT_ARG_CHARS).describe('Agent ID to use'),
         description: z
           .string()
+          .max(MAX_DESCRIPTION_CHARS)
           .optional()
           .describe('Agent description'),
         providers: z
-          .array(z.string())
+          .array(z.string().max(MAX_SHORT_ARG_CHARS))
+          .max(MAX_PROVIDERS)
           .describe('Provider names used in this file'),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
     async (args: any) => {
-      const result = instrumentFile({
-        source: typeof args?.source === 'string' ? args.source : '',
-        filePath: typeof args?.file_path === 'string' ? args.file_path : '',
-        tier: args?.tier ?? 'standard',
-        bootstrapImportPath:
-          typeof args?.bootstrap_import_path === 'string'
-            ? args.bootstrap_import_path
-            : '@/lib/amplitude',
-        agentId: typeof args?.agent_id === 'string' ? args.agent_id : 'agent',
-        description:
-          typeof args?.description === 'string' ? args.description : null,
-        providers: Array.isArray(args?.providers) ? args.providers : [],
-      });
+      let result: string;
+      try {
+        result = instrumentFile({
+          source: typeof args?.source === 'string' ? args.source : '',
+          filePath: typeof args?.file_path === 'string' ? args.file_path : '',
+          tier: args?.tier ?? 'standard',
+          bootstrapImportPath:
+            typeof args?.bootstrap_import_path === 'string'
+              ? args.bootstrap_import_path
+              : '@/lib/amplitude',
+          agentId: typeof args?.agent_id === 'string' ? args.agent_id : 'agent',
+          description:
+            typeof args?.description === 'string' ? args.description : null,
+          providers: Array.isArray(args?.providers) ? args.providers : [],
+        });
+      } catch (err) {
+        if (!(err instanceof InstrumentFileInputError)) throw err;
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err.message }) }],
+        };
+      }
       return {
         content: [{ type: 'text' as const, text: result }],
       };
@@ -590,8 +666,8 @@ const createServer = (): McpServer => {
       description:
         'Full guided instrumentation of a JS/TS AI app with @amplitude/ai. Includes the complete 4-phase workflow: Detect environment, Discover agents, Instrument code, Verify correctness.',
       argsSchema: {
-        framework: z.string().optional(),
-        provider: z.string().optional(),
+        framework: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
+        provider: z.string().max(MAX_SHORT_ARG_CHARS).optional(),
       },
     },
     // biome-ignore lint/suspicious/noExplicitAny: SDK callback type is intentionally broad.
@@ -606,7 +682,7 @@ const createServer = (): McpServer => {
             role: 'user',
             content: {
               type: 'text',
-              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nBefore editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put structured segmentation dimensions in context (maps to the registered [Agent] Context property, always queryable in charts). Avoid eventProperties for custom dimensions on [Agent] events — unregistered properties may be silently dropped by schema enforcement. Do not pass JSON.stringify as the only content.\n\nIMPORTANT: all event tracking MUST go through the AI SDK's track* methods (trackUserMessage, trackAiMessage, trackToolCall, trackSpan, etc.) — never call amplitude.track() from the base @amplitude/analytics-node SDK directly. The base SDK does not attach [Agent] event types or session metadata, so raw track() events will not appear in Agent Analytics dashboards. Use trackSpan() for any custom event not covered by the other track* methods.\n\nThen use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.`,
+              text: `Instrument this ${framework} app using the ${provider} provider with @amplitude/ai.\n\nBefore editing code: read the MCP resource amplitude-ai://instrument-guide (full amplitude-ai.md) for the Detect → Discover → Instrument → Verify workflow. Pay special attention to trackUserMessage: use a short natural-language content line (or a canonical headless summary); put structured segmentation dimensions in context (maps to the registered [Agent] Context property, always queryable in charts). Avoid eventProperties for custom dimensions on [Agent] events — unregistered properties may be silently dropped by schema enforcement. Do not pass JSON.stringify as the only content.\n\nIMPORTANT: all event tracking MUST go through the AI SDK's track* methods (trackUserMessage, trackAiMessage, trackToolCall, trackSpan, etc.) — never call amplitude.track() from the base @amplitude/analytics-node SDK directly. The base SDK does not attach [Agent] event types or session metadata, so raw track() events will not appear in Agent Analytics dashboards. Use trackSpan() for any custom event not covered by the other track* methods.\n\nIf the app has multiple parallel LLM calls per user action (fan-out), follow Step 3g-b: use runAs(child, fn) for each parallel call — this suppresses auto user-message tracking in delegation and keeps a single trace.\n\nThen use scan_project, validate_file, and instrument_file as needed. For the complete guide text, fetch amplitude-ai://instrument-guide rather than relying on this prompt alone.`,
             },
           },
         ],

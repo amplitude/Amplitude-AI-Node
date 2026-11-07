@@ -1,5 +1,5 @@
 import { BoundAgent, type AgentOptions } from './bound-agent.js';
-import { AIConfig } from './config.js';
+import { AIConfig, normalizeFlushTimeoutMs } from './config.js';
 import type { MessageLabel, SessionEnrichments } from './core/enrichments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import {
@@ -12,11 +12,28 @@ import {
   trackToolCall,
   trackUserMessage,
 } from './core/tracking.js';
-import { ConfigurationError } from './exceptions.js';
+import { getActiveContext } from './context.js';
+import {
+  EVENT_AI_RESPONSE,
+  PROP_CACHE_CREATION_TOKENS,
+  PROP_CACHE_READ_TOKENS,
+  PROP_COST_USD,
+  PROP_EXPERIMENTS,
+  PROP_INPUT_TOKENS,
+  PROP_OUTPUT_TOKENS,
+  PROP_SESSION_ID,
+  PROP_TRACE_ID,
+  SDK_VERSION,
+} from './core/constants.js';
+import { withExperiments } from './core/experiments.js';
+import { ConfigurationError, CostCalculationError } from './exceptions.js';
+import type { AmplitudeEventSpanProcessor } from './otel/processor.js';
+import type { OtelSpanFilter, SpanEventMapper } from './otel/mapper.js';
 import { patchedProviders } from './patching.js';
-import { setDefaultPropagateContext } from './propagation.js';
+import { ReviewBuffer, resolveReviewUrl, type ReviewRequest } from './review.js';
 import { isServerless } from './serverless.js';
 import { TenantHandle } from './tenant.js';
+import { registerTrackingClient } from './tracking-registry.js';
 import type {
   AmplitudeClientLike,
   AmplitudeEvent,
@@ -26,6 +43,19 @@ import { calculateCost } from './utils/costs.js';
 import { formatDebugLine, formatDryRunLine } from './utils/debug.js';
 import { type Logger, getLogger } from './utils/logger.js';
 import { isBundlerEnvironment, tryRequire } from './utils/resolve-module.js';
+import { createRequire } from 'node:module';
+
+import { setupOtel } from './otel/setup.js';
+
+const _require = createRequire(import.meta.url);
+
+interface OtelSpanLike {
+  isRecording(): boolean;
+  setAttribute(key: string, value: string): void;
+}
+interface OtelApi {
+  trace: { getActiveSpan(): OtelSpanLike | undefined };
+}
 
 const _MAX_SESSION_TURN_COUNTERS = 10_000;
 const _MIN_ID_LENGTH = 5;
@@ -35,15 +65,33 @@ function _warnShortId(event: AmplitudeEvent, logger: Logger): void {
   for (const field of ['user_id', 'device_id'] as const) {
     const val = (event as Record<string, unknown>)[field];
     if (typeof val === 'string' && val.length > 0 && val.length < _MIN_ID_LENGTH) {
-      const key = `${field}:${val}`;
+      // Keyed by field and length, never the identifier, so the set stays
+      // bounded and identifiers are not written to logs.
+      const key = `${field}:${val.length}`;
       if (!_shortIdWarned.has(key)) {
         _shortIdWarned.add(key);
         logger.warn(
-          `AmplitudeAI: ${field}="${val}" is shorter than ${_MIN_ID_LENGTH} characters. Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
+          `AmplitudeAI: a ${field} of length ${val.length} is shorter than ${_MIN_ID_LENGTH} characters. Amplitude's server will reject this event with HTTP 400 ("Invalid id length"). Use a longer identifier.`,
         );
       }
     }
   }
+}
+
+/**
+ * Give events tracked inside a session, but not through it (provider
+ * wrappers, integrations, `tool()`), the session's experiments.
+ */
+function _stampSessionExperiments(event: AmplitudeEvent): void {
+  const ctx = getActiveContext();
+  if (ctx?.experiments == null || ctx.experiments.length === 0) return;
+  if (typeof event.event_type !== 'string' || !event.event_type.startsWith('[Agent]')) {
+    return;
+  }
+  const props = event.event_properties;
+  if (props == null || PROP_EXPERIMENTS in props) return;
+  if (props[PROP_SESSION_ID] !== ctx.sessionId) return;
+  event.event_properties = withExperiments(props, ctx.experiments) ?? props;
 }
 
 /** @internal Exposed for testing only. */
@@ -81,6 +129,57 @@ class TrackingProxy implements AmplitudeClientLike {
   }
 }
 
+/** Options for {@link AmplitudeAI.flush}. */
+export interface FlushOptions {
+  /**
+   * Stop waiting after this many milliseconds. Values above 300000 are
+   * clamped; non-positive or non-numeric values mean "no timeout".
+   */
+  timeoutMs?: number;
+}
+
+function _flushAwaitable(result: unknown): Promise<unknown> | null {
+  if (result == null) return null;
+  const promise = (result as { promise?: unknown }).promise;
+  if (promise != null && typeof (promise as Promise<unknown>).then === 'function') {
+    return promise as Promise<unknown>;
+  }
+  if (typeof (result as Promise<unknown>).then === 'function') {
+    return result as Promise<unknown>;
+  }
+  return null;
+}
+
+async function _settleWithin(result: unknown, timeoutMs: number): Promise<void> {
+  const awaitable = _flushAwaitable(result);
+  if (awaitable == null) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+    (timer as { unref?: () => void }).unref?.();
+  });
+  try {
+    const outcome = await Promise.race([
+      Promise.resolve(awaitable).then(
+        () => 'done' as const,
+        (e: unknown) => {
+          getLogger().warn(`Flush failed (${e instanceof Error ? e.name : typeof e}).`);
+          return 'done' as const;
+        },
+      ),
+      timedOut,
+    ]);
+    if (outcome === 'timeout') {
+      Promise.resolve(awaitable).catch(() => {});
+      getLogger().warn(
+        `flush() did not complete within ${timeoutMs}ms; continuing without waiting. Pending events may be delivered later or lost if the process exits.`,
+      );
+    }
+  } finally {
+    if (timer != null) clearTimeout(timer);
+  }
+}
+
 // Module-level counter for the unflushed-events exit warning.
 // Avoids holding strong references to AmplitudeAI instances (which would
 // prevent GC if the consumer forgets to call shutdown()).
@@ -90,6 +189,45 @@ let _exitHookRegistered = false;
 /** @internal Exposed for testing only. */
 export function _getGlobalUnflushedCount(): number {
   return _globalUnflushedCount;
+}
+
+// AA-151931 V3-C: single-slot registry of the AmplitudeAI that most
+// recently called `enableOtel()`. Used by module-level entry points
+// (bare `@observe` decorators without an explicit `amplitude=`
+// argument) to confirm opt-in before routing content through OTEL.
+let _otelOwner: { otelEnabled?: boolean } | null = null;
+
+/** @internal Registered by `AmplitudeAI.enableOtel()`. */
+export function _setOtelOwner(owner: { otelEnabled?: boolean } | null): void {
+  _otelOwner = owner;
+}
+
+/** @internal Consulted by `decorators.ts` as an opt-in fallback. */
+export function _getOtelOwner(): { otelEnabled?: boolean } | null {
+  return _otelOwner;
+}
+
+/**
+ * Normalize analytics-node's `init()` return (`{ promise }`, a thenable, or
+ * nothing) into a promise that never rejects, so a failed init surfaces as a
+ * warning instead of an unhandled rejection in the host process.
+ */
+function _settleInit(result: unknown): Promise<void> {
+  const awaitable =
+    result != null && typeof (result as { promise?: unknown }).promise === 'object'
+      ? (result as { promise: Promise<unknown> }).promise
+      : result != null && typeof (result as Promise<unknown>).then === 'function'
+        ? (result as Promise<unknown>)
+        : null;
+  if (awaitable == null) return Promise.resolve();
+  return Promise.resolve(awaitable).then(
+    () => undefined,
+    (e: unknown) => {
+      getLogger().warn(
+        `AmplitudeAI: Amplitude client initialization failed (${e instanceof Error ? e.name : typeof e}). Events from this instance may not be delivered.`,
+      );
+    },
+  );
 }
 
 function _registerExitHook(): void {
@@ -130,8 +268,19 @@ export class AmplitudeAI {
   protected _config: AIConfig;
   protected _privacyConfig: PrivacyConfig;
   protected _sessionTurnCounters: Map<string, number> = new Map();
+  protected _traceEmittedCostUsd: Map<string, number> = new Map();
+  protected _traceEmittedTokens: Map<string, [number, number, number, number]> = new Map();
   /** @internal Tracks events since last flush() — used by the exit warning. */
   _trackCountSinceFlush = 0;
+  private _reviewBuffer: ReviewBuffer | null = null;
+  /** @internal Settles when an SDK-owned client (apiKey path) finishes init. */
+  _initPromise: Promise<void> = Promise.resolve();
+
+  // OTEL span-first fields
+  private _otelEnabled = false;
+  private _otelTracerProvider: unknown = null;
+  private _otelMapper: SpanEventMapper | null = null;
+  private _otelProcessor: AmplitudeEventSpanProcessor | null = null;
 
   constructor(options: {
     amplitude?: AmplitudeClientLike;
@@ -143,10 +292,12 @@ export class AmplitudeAI {
       rawAmplitude = options.amplitude;
       this._ownsClient = false;
     } else if (options.apiKey != null) {
-      const amplitudeNode = tryRequire('@amplitude/analytics-node') as
-        | (AmplitudeClientLike & { init?: (apiKey: string) => unknown })
-        | null;
-      if (amplitudeNode == null || typeof amplitudeNode.init !== 'function') {
+      const amplitudeNode = tryRequire('@amplitude/analytics-node') as {
+        createInstance?: () => AmplitudeClientLike & {
+          init: (apiKey: string) => unknown;
+        };
+      } | null;
+      if (amplitudeNode == null || typeof amplitudeNode.createInstance !== 'function') {
         if (isBundlerEnvironment) {
           throw new ConfigurationError(
             'Could not resolve @amplitude/analytics-node (likely a bundler environment such as Turbopack or Webpack). ' +
@@ -155,11 +306,17 @@ export class AmplitudeAI {
           );
         }
         throw new ConfigurationError(
-          '@amplitude/analytics-node is required. Install it as a dependency: npm install @amplitude/analytics-node',
+          '@amplitude/analytics-node >= 1.3.0 is required. Install it as a dependency: npm install @amplitude/analytics-node',
         );
       }
-      amplitudeNode.init(options.apiKey);
-      rawAmplitude = amplitudeNode;
+      // Each AmplitudeAI owns a private analytics-node client. Calling
+      // `init()` on the module's default instance would re-key one
+      // process-wide client shared by every AmplitudeAI (and by the host
+      // app's own analytics-node usage). The core client queues track()
+      // and flush() until init resolves, so the instance is usable now.
+      const instance = amplitudeNode.createInstance();
+      this._initPromise = _settleInit(instance.init(options.apiKey));
+      rawAmplitude = instance;
       this._ownsClient = true;
     } else {
       throw new ConfigurationError(
@@ -170,10 +327,18 @@ export class AmplitudeAI {
     // Wrap in a mutable proxy so we never mutate the caller's object
     // (which may be a frozen ES module namespace).
     this._amplitude = new TrackingProxy(rawAmplitude);
+    registerTrackingClient(this, this._amplitude);
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();
-    setDefaultPropagateContext(this._config.propagateContext);
+    if (this._config.reviewMode) {
+      this._reviewBuffer = new ReviewBuffer(
+        '@amplitude/ai',
+        this._config.contentMode,
+        () => resolveReviewUrl(this._amplitude.configuration),
+        SDK_VERSION,
+      );
+    }
 
     // Always install the track hook — it handles the default delivery
     // callback, short-ID warnings, debug/dry-run output, and the
@@ -189,8 +354,12 @@ export class AmplitudeAI {
   private _installTrackCounter(): void {
     const originalTrack = this._amplitude.track.bind(this._amplitude);
     this._amplitude.track = (event: AmplitudeEvent) => {
-      this._trackCountSinceFlush++;
-      _globalUnflushedCount++;
+      // Reviewed events are intentionally not uploaded, so they must not
+      // trip the unflushed-event exit warning.
+      if (!this._config.reviewMode) {
+        this._trackCountSinceFlush++;
+        _globalUnflushedCount++;
+      }
       return originalTrack(event);
     };
   }
@@ -199,6 +368,8 @@ export class AmplitudeAI {
     const originalTrack = this._amplitude.track.bind(this._amplitude);
     const debug = this._config.debug;
     const dryRun = this._config.dryRun;
+    const reviewMode = this._config.reviewMode;
+    const reviewBuffer = this._reviewBuffer;
     const onEvent = this._config.onEventCallback;
     const logger = getLogger();
     const clientWithConfig = this._amplitude as AmplitudeClientLike & {
@@ -241,10 +412,8 @@ export class AmplitudeAI {
         if (statusCode >= 400) {
           const eventType =
             (event as Record<string, unknown> | null)?.event_type ?? 'unknown';
-          const userId =
-            (event as Record<string, unknown> | null)?.user_id ?? '';
           logger.warn(
-            `AmplitudeAI: event delivery failed — HTTP ${statusCode} for event=${String(eventType)} user_id=${String(userId)}: ${message ?? ''}`,
+            `AmplitudeAI: event delivery failed — HTTP ${statusCode} for event=${String(eventType)}: ${message ?? ''}`,
           );
         }
       };
@@ -254,12 +423,25 @@ export class AmplitudeAI {
       // Short-ID warning — Amplitude server rejects user_id/device_id
       // shorter than 5 characters with HTTP 400.
       _warnShortId(event, logger);
+      _stampSessionExperiments(event);
+      this._recordEmittedCostFromEvent(event);
 
       if (debug) {
         console.warn(formatDebugLine(event));
       }
       if (dryRun) {
-        console.warn(formatDryRunLine(event));
+        console.warn(formatDryRunLine(event, this._config.contentMode));
+      }
+      if (reviewMode && reviewBuffer != null) {
+        reviewBuffer.record(event);
+        if (onEvent != null) {
+          try {
+            onEvent(event, -1, 'review-mode');
+          } catch (e) {
+            logger.debug(`AI SDK onEventCallback raised in review mode: ${e}`);
+          }
+        }
+        return;
       }
       if (!dryRun) {
         originalTrack(event);
@@ -303,6 +485,82 @@ export class AmplitudeAI {
     return next;
   }
 
+  private _traceCostKey(sessionId: string, traceId: string | null | undefined): string {
+    return `${sessionId}\0${traceId ?? ''}`;
+  }
+
+  _recordEmittedCostFromEvent(event: AmplitudeEvent): void {
+    if (event.event_type !== EVENT_AI_RESPONSE) return;
+    const props = event.event_properties ?? {};
+    const key = this._traceCostKey(String(props[PROP_SESSION_ID] ?? ''), props[PROP_TRACE_ID] as string | null);
+    const inputTokens = Number(props[PROP_INPUT_TOKENS] ?? 0);
+    const outputTokens = Number(props[PROP_OUTPUT_TOKENS] ?? 0);
+    const cacheReadTokens = Number(props[PROP_CACHE_READ_TOKENS] ?? 0);
+    const cacheCreationTokens = Number(props[PROP_CACHE_CREATION_TOKENS] ?? 0);
+    if (!this._traceEmittedTokens.has(key) && this._traceEmittedTokens.size >= _MAX_SESSION_TURN_COUNTERS) {
+      const lruKey = this._traceEmittedTokens.keys().next().value;
+      if (lruKey != null) this._traceEmittedTokens.delete(lruKey);
+    }
+    const [prevIn, prevOut, prevCacheRead, prevCacheCreation] = this._traceEmittedTokens.get(key) ?? [0, 0, 0, 0];
+    this._traceEmittedTokens.delete(key);
+    this._traceEmittedTokens.set(key, [
+      prevIn + inputTokens,
+      prevOut + outputTokens,
+      prevCacheRead + cacheReadTokens,
+      prevCacheCreation + cacheCreationTokens,
+    ]);
+
+    const cost = props[PROP_COST_USD];
+    if (cost == null || Number(cost) <= 0) return;
+    if (!this._traceEmittedCostUsd.has(key) && this._traceEmittedCostUsd.size >= _MAX_SESSION_TURN_COUNTERS) {
+      const lruKey = this._traceEmittedCostUsd.keys().next().value;
+      if (lruKey != null) this._traceEmittedCostUsd.delete(lruKey);
+    }
+    const prev = this._traceEmittedCostUsd.get(key) ?? 0;
+    this._traceEmittedCostUsd.delete(key);
+    this._traceEmittedCostUsd.set(key, Math.round((prev + Number(cost)) * 1e6) / 1e6);
+  }
+
+  _getTraceEmittedCostUsd(sessionId: string, traceId: string | null | undefined): number {
+    return this._traceEmittedCostUsd.get(this._traceCostKey(sessionId, traceId)) ?? 0;
+  }
+
+  _getTraceEmittedTokens(sessionId: string, traceId: string | null | undefined): [number, number, number, number] {
+    return this._traceEmittedTokens.get(this._traceCostKey(sessionId, traceId)) ?? [0, 0, 0, 0];
+  }
+
+  _autoCalculateCost(opts: {
+    model: string;
+    provider: string;
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number | null;
+    cacheReadTokens?: number | null;
+    cacheCreationTokens?: number | null;
+  }): number | null {
+    try {
+      const cost = calculateCost({
+        modelName: opts.model,
+        inputTokens: opts.inputTokens,
+        outputTokens: opts.outputTokens,
+        reasoningTokens: opts.reasoningTokens ?? 0,
+        cacheReadInputTokens: opts.cacheReadTokens ?? 0,
+        cacheCreationInputTokens: opts.cacheCreationTokens ?? 0,
+        defaultProvider: opts.provider || undefined,
+      });
+      const totalTokens = opts.inputTokens + opts.outputTokens;
+      if (this._config.strictCost && totalTokens > 0 && cost == null) {
+        throw new CostCalculationError(
+          `Cost could not be calculated for model=${opts.model} (provider=${opts.provider}, tokens=${totalTokens}). Pass totalCostUsd explicitly or check model alias.`,
+        );
+      }
+      return cost;
+    } catch (e) {
+      if (e instanceof CostCalculationError) throw e;
+      return null;
+    }
+  }
+
   // ---------------------------------------------------------------
   // Message Tracking
   // ---------------------------------------------------------------
@@ -328,9 +586,11 @@ export class AmplitudeAI {
     editedMessageId?: string | null;
     attachments?: Attachment[] | null;
     labels?: MessageLabel[] | null;
+    idleTimeoutMinutes?: number | null;
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
+    privacyConfig?: PrivacyConfig | null;
   }): string {
     const effectiveTurnId = opts.turnId ?? this._nextTurnId(opts.sessionId);
     return trackUserMessage({
@@ -342,7 +602,7 @@ export class AmplitudeAI {
       traceId: opts.traceId,
       turnId: effectiveTurnId,
       messageId: opts.messageId,
-      messageSource: opts.messageSource ?? 'user',
+      messageSource: opts.messageSource ?? (opts.parentAgentId ? 'agent' : 'user'),
       agentId: opts.agentId,
       parentAgentId: opts.parentAgentId,
       customerOrgId: opts.customerOrgId,
@@ -355,9 +615,10 @@ export class AmplitudeAI {
       editedMessageId: opts.editedMessageId,
       attachments: opts.attachments,
       labels: opts.labels,
+      idleTimeoutMinutes: opts.idleTimeoutMinutes,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
-      privacyConfig: this._privacyConfig,
+      privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,
     });
   }
@@ -366,6 +627,7 @@ export class AmplitudeAI {
     userId?: string;
     deviceId?: string | null;
     content: string;
+    providerRequestId?: string | null;
     sessionId: string;
     model: string;
     provider: string;
@@ -419,19 +681,15 @@ export class AmplitudeAI {
       opts.inputTokens != null &&
       opts.outputTokens != null
     ) {
-      try {
-        effectiveCost = calculateCost({
-          modelName: opts.model,
-          inputTokens: opts.inputTokens,
-          outputTokens: opts.outputTokens,
-          reasoningTokens: opts.reasoningTokens ?? 0,
-          cacheReadInputTokens: opts.cacheReadTokens ?? 0,
-          cacheCreationInputTokens: opts.cacheCreationTokens ?? 0,
-          defaultProvider: opts.provider || undefined,
-        });
-      } catch {
-        // cost calculation is best-effort
-      }
+      effectiveCost = this._autoCalculateCost({
+        model: opts.model,
+        provider: opts.provider,
+        inputTokens: opts.inputTokens,
+        outputTokens: opts.outputTokens,
+        reasoningTokens: opts.reasoningTokens,
+        cacheReadTokens: opts.cacheReadTokens,
+        cacheCreationTokens: opts.cacheCreationTokens,
+      });
     }
 
     return trackAiMessage({
@@ -441,6 +699,7 @@ export class AmplitudeAI {
       modelName: opts.model,
       provider: opts.provider,
       responseContent: opts.content,
+      providerRequestId: opts.providerRequestId,
       latencyMs: opts.latencyMs,
       sessionId: opts.sessionId,
       traceId: opts.traceId,
@@ -486,6 +745,76 @@ export class AmplitudeAI {
     });
   }
 
+  trackRunCost(opts: {
+    totalCostUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+    model: string;
+    provider: string;
+    latencyMs?: number | null;
+    content?: string;
+    finishReason?: string | null;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    userId?: string;
+    deviceId?: string | null;
+    sessionId?: string;
+    traceId?: string | null;
+    turnId?: number | null;
+    agentId?: string | null;
+    parentAgentId?: string | null;
+    customerOrgId?: string | null;
+    agentVersion?: string | null;
+    description?: string | null;
+    context?: Record<string, unknown> | null;
+    env?: string | null;
+    eventProperties?: Record<string, unknown> | null;
+    groups?: Record<string, unknown> | null;
+    browserSessionId?: string | number | null;
+  }): string {
+    const ctx = getActiveContext();
+    const sessionId = opts.sessionId ?? ctx?.sessionId ?? '';
+    const traceId = opts.traceId !== undefined ? opts.traceId : (ctx?.traceId ?? null);
+    const emitted = this._getTraceEmittedCostUsd(sessionId, traceId);
+    const delta = Math.round((opts.totalCostUsd - emitted) * 1e6) / 1e6;
+    if (delta <= 1e-6) return '';
+    const [emittedIn, emittedOut, emittedCacheRead, emittedCacheCreation] = this._getTraceEmittedTokens(
+      sessionId,
+      traceId,
+    );
+    const deltaInput = Math.max(0, opts.inputTokens - emittedIn);
+    const deltaOutput = Math.max(0, opts.outputTokens - emittedOut);
+    const deltaCacheRead = Math.max(0, (opts.cacheReadTokens ?? 0) - emittedCacheRead);
+    const deltaCacheCreation = Math.max(0, (opts.cacheCreationTokens ?? 0) - emittedCacheCreation);
+    return this.trackAiMessage({
+      userId: opts.userId,
+      deviceId: opts.deviceId,
+      content: opts.content ?? '',
+      sessionId,
+      model: opts.model,
+      provider: opts.provider,
+      latencyMs: opts.latencyMs ?? 0,
+      inputTokens: deltaInput,
+      outputTokens: deltaOutput,
+      cacheReadTokens: deltaCacheRead,
+      cacheCreationTokens: deltaCacheCreation,
+      totalCostUsd: delta,
+      finishReason: opts.finishReason ?? 'tool_use',
+      traceId,
+      turnId: opts.turnId,
+      agentId: opts.agentId,
+      parentAgentId: opts.parentAgentId,
+      customerOrgId: opts.customerOrgId,
+      agentVersion: opts.agentVersion,
+      description: opts.description,
+      context: opts.context,
+      env: opts.env,
+      eventProperties: opts.eventProperties,
+      groups: opts.groups,
+      browserSessionId: opts.browserSessionId,
+    });
+  }
+
   // ---------------------------------------------------------------
   // Operation Tracking
   // ---------------------------------------------------------------
@@ -495,6 +824,7 @@ export class AmplitudeAI {
     deviceId?: string | null;
     toolName: string;
     toolType?: string | null;
+    toolOwner?: string | null;
     latencyMs: number;
     success: boolean;
     sessionId?: string | null;
@@ -516,18 +846,22 @@ export class AmplitudeAI {
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
+    privacyConfig?: PrivacyConfig | null;
   }): string {
+    const sessionId = opts.sessionId ?? getActiveContext()?.sessionId;
+    const effectiveTurnId = opts.turnId ?? (sessionId ? this._nextTurnId(sessionId) : undefined);
     return trackToolCall({
       amplitude: this._amplitude,
       userId: opts.userId,
       deviceId: opts.deviceId,
       toolName: opts.toolName,
       toolType: opts.toolType,
+      toolOwner: opts.toolOwner,
       success: opts.success,
       latencyMs: opts.latencyMs,
       sessionId: opts.sessionId,
       traceId: opts.traceId,
-      turnId: opts.turnId ?? undefined,
+      turnId: effectiveTurnId,
       invocationId: opts.invocationId,
       toolInput: opts.input,
       toolOutput: opts.output,
@@ -543,7 +877,7 @@ export class AmplitudeAI {
       errorType: opts.errorType,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
-      privacyConfig: this._privacyConfig,
+      privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,
     });
   }
@@ -570,6 +904,7 @@ export class AmplitudeAI {
     eventProperties?: Record<string, unknown> | null;
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
+    privacyConfig?: PrivacyConfig | null;
   }): string {
     // Auto-calculate cost from input tokens when not supplied, mirroring
     // trackAiMessage. Embeddings have no output tokens, so outputTokens is 0.
@@ -609,7 +944,7 @@ export class AmplitudeAI {
       env: opts.env,
       eventProperties: opts.eventProperties,
       groups: opts.groups,
-      privacyConfig: this._privacyConfig,
+      privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,
     });
   }
@@ -831,6 +1166,103 @@ export class AmplitudeAI {
   }
 
   // ---------------------------------------------------------------
+  // OTEL span-first instrumentation
+  // ---------------------------------------------------------------
+
+  enableOtel(options?: {
+    defaultUserId?: string;
+    defaultDeviceId?: string;
+    otelEndpoint?: string;
+    /**
+     * `'genai'` (default): only spans with `gen_ai.*` / `amplitude.*`
+     * attributes become events. `'all'`: map every span in the process.
+     */
+    otelSpanFilter?: OtelSpanFilter;
+  }): this {
+    if (this._otelEnabled) {
+      getLogger().debug('enableOtel() called more than once — skipping');
+      return this;
+    }
+
+    const { provider, mapper, processor } = setupOtel({
+      amplitude: this._amplitude,
+      defaultUserId: options?.defaultUserId,
+      defaultDeviceId: options?.defaultDeviceId,
+      otelEndpoint: options?.otelEndpoint,
+      privacyConfig: this._privacyConfig,
+      otelSpanFilter: options?.otelSpanFilter,
+    });
+
+    this._otelTracerProvider = provider;
+    this._otelMapper = mapper;
+    this._otelProcessor = processor;
+    this._otelEnabled = true;
+    // AA-151931 V3-C: register this AmplitudeAI as the OTEL owner so
+    // bare `@observe` decorators (no `amplitude=` argument in scope)
+    // can confirm opt-in without hijacking an unrelated global provider.
+    _setOtelOwner(this);
+    getLogger().info('OTEL span-first instrumentation enabled');
+    return this;
+  }
+
+  get otelEnabled(): boolean {
+    return this._otelEnabled;
+  }
+
+  usingAttributes<T>(attrs: Record<string, string>, fn: () => T): T {
+    if (this._otelEnabled) {
+      try {
+        const api = _require('@opentelemetry/api') as OtelApi;
+        const span = api.trace.getActiveSpan();
+        if (span && span.isRecording()) {
+          for (const [key, value] of Object.entries(attrs)) {
+            span.setAttribute(key, value);
+          }
+        }
+      } catch {
+        getLogger().debug('opentelemetry not available for usingAttributes');
+      }
+    }
+    return fn();
+  }
+
+  updateCurrentSpan(attrs: Record<string, string>): void {
+    if (!this._otelEnabled) {
+      getLogger().debug('updateCurrentSpan called but OTEL is not enabled');
+      return;
+    }
+    try {
+      const api = _require('@opentelemetry/api') as OtelApi;
+      const span = api.trace.getActiveSpan();
+      if (span && span.isRecording()) {
+        for (const [key, value] of Object.entries(attrs)) {
+          span.setAttribute(key, value);
+        }
+      }
+    } catch {
+      getLogger().debug('opentelemetry not available for updateCurrentSpan');
+    }
+  }
+
+  updateCurrentTrace(attrs: Record<string, string>): void {
+    if (!this._otelEnabled) {
+      getLogger().debug('updateCurrentTrace called but OTEL is not enabled');
+      return;
+    }
+    try {
+      const api = _require('@opentelemetry/api') as OtelApi;
+      const span = api.trace.getActiveSpan();
+      if (span && span.isRecording()) {
+        for (const [key, value] of Object.entries(attrs)) {
+          span.setAttribute(`amplitude.trace.${key}`, value);
+        }
+      }
+    } catch {
+      getLogger().debug('opentelemetry not available for updateCurrentTrace');
+    }
+  }
+
+  // ---------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------
 
@@ -865,19 +1297,51 @@ export class AmplitudeAI {
       content_mode: this._config.contentMode,
       debug: this._config.debug,
       dry_run: this._config.dryRun,
+      review_mode: this._config.reviewMode,
       redact_pii: this._config.redactPii,
+      otel_enabled: this._otelEnabled,
       providers_available: availableProviders,
       patched_providers: patchedProviders(),
     };
   }
 
-  flush(): unknown {
+  /**
+   * Flush queued events.
+   *
+   * Without options, returns the underlying client's flush result unchanged.
+   * With `timeoutMs`, returns a promise that resolves when the flush settles
+   * or when the timeout elapses (whichever comes first). It never rejects.
+   */
+  /** Closed review batches plus a snapshot of the still-open batch. */
+  getReviewTraffic(): ReviewRequest[] {
+    return this._reviewBuffer?.getTraffic() ?? [];
+  }
+
+  /** Drop captured review batches without printing them. */
+  clearReviewTraffic(): void {
+    this._reviewBuffer?.clear();
+  }
+
+  flush(options?: FlushOptions): unknown {
+    this._reviewBuffer?.close();
     _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
-    return this._amplitude.flush();
+    const timeoutMs = normalizeFlushTimeoutMs(options?.timeoutMs);
+    if (timeoutMs == null) {
+      return this._amplitude.flush();
+    }
+    let result: unknown;
+    try {
+      result = this._amplitude.flush();
+    } catch (e) {
+      getLogger().warn(`Flush failed (${e instanceof Error ? e.name : typeof e}).`);
+      return Promise.resolve();
+    }
+    return _settleWithin(result, timeoutMs);
   }
 
   shutdown(): void {
+    this._reviewBuffer?.close();
     _globalUnflushedCount = Math.max(0, _globalUnflushedCount - this._trackCountSinceFlush);
     this._trackCountSinceFlush = 0;
     if (this._ownsClient) {

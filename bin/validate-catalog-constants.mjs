@@ -5,11 +5,19 @@
  * match the canonical agent_event_catalog.json.
  *
  * Usage:
- *   node packages/amplitude-ai/bin/validate-catalog-constants.mjs
+ *   node bin/validate-catalog-constants.mjs
  *
  * Checks:
- *   - packages/amplitude-ai/src/core/constants.ts
- *   - server/packages/temporal-worker/src/workflows/llm-analytics/constants.ts
+ *   - src/core/constants.ts (always)
+ *   - <javascript>/server/packages/temporal-worker/src/workflows/llm-analytics/constants.ts
+ *     (only when AMPLITUDE_JAVASCRIPT_REPO points at a `javascript` checkout)
+ *
+ * This package used to live inside the `javascript` monorepo, where the
+ * temporal-worker constants were reachable at a fixed relative path. It is now a
+ * standalone repo and that file lives in a *sibling* repo, so there is no path we
+ * can derive from here. Rather than resolve to nothing and silently pass, the
+ * cross-repo target is opt-in: set AMPLITUDE_JAVASCRIPT_REPO to check it, and a
+ * target that is configured but unreadable is a hard failure, not a skip.
  *
  * Exit code 0 = all constants covered; exit code 1 = drift detected.
  */
@@ -20,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(__dirname, '..');
-const REPO_ROOT = resolve(PACKAGE_ROOT, '..', '..');
+const JAVASCRIPT_REPO = process.env.AMPLITUDE_JAVASCRIPT_REPO;
 
 const CATALOG_PATH = join(PACKAGE_ROOT, 'data', 'agent_event_catalog.json');
 
@@ -30,8 +38,11 @@ const FILES_TO_CHECK = [
     label: 'amplitude-ai/constants.ts',
     allowExtra: new Set(),
   },
-  {
-    path: join(REPO_ROOT, 'server', 'packages', 'temporal-worker', 'src', 'workflows', 'llm-analytics', 'constants.ts'),
+];
+
+if (JAVASCRIPT_REPO) {
+  FILES_TO_CHECK.push({
+    path: join(JAVASCRIPT_REPO, 'server', 'packages', 'temporal-worker', 'src', 'workflows', 'llm-analytics', 'constants.ts'),
     label: 'temporal-worker/constants.ts',
     allowExtra: new Set([
       '[Agent] Tool Input Hash',
@@ -47,8 +58,8 @@ const FILES_TO_CHECK = [
       'user id',
       '$llm message',
     ]),
-  },
-];
+  });
+}
 
 function loadCatalog() {
   const raw = readFileSync(CATALOG_PATH, 'utf-8');
@@ -87,11 +98,13 @@ function main() {
   let allOk = true;
 
   for (const { path: filePath, label, allowExtra } of FILES_TO_CHECK) {
-    let source;
+    // Every target in this list is one we were asked to check, so an unreadable
+    // one is a misconfiguration — not a reason to report success.
     try {
-      source = readFileSync(filePath, 'utf-8');
+      readFileSync(filePath, 'utf-8');
     } catch {
-      console.warn(`SKIP: ${label} not found at ${filePath}`);
+      console.error(`ERROR: ${label} is configured but could not be read at ${filePath}`);
+      allOk = false;
       continue;
     }
 

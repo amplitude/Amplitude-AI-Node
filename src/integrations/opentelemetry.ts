@@ -6,12 +6,32 @@
  * Amplitude [Agent] events.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from '../client.js';
+import type { PrivacyConfig } from '../core/privacy.js';
+import {
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_USAGE_COST,
+} from '../otel/conventions.js';
+import { claimSpan } from '../otel/span-claims.js';
 import { calculateCost } from '../utils/costs.js';
 
 export interface ExporterOptions {
   amplitudeAI: AmplitudeAI;
+  /**
+   * User ID for spans without an `amplitude.user_id` attribute. When unset,
+   * such spans are sent with an anonymous device ID and session ID derived
+   * from the span's trace ID (one per trace), never a shared constant.
+   */
   defaultUserId?: string;
+  privacyConfig?: PrivacyConfig | null;
+  /**
+   * If set, only process spans whose instrumentation scope name is in this set.
+   * By default any span with `gen_ai.*` attributes is processed.
+   */
+  allowedScopes?: ReadonlySet<string> | string[] | null;
+  /** Instrumentation scope names to ignore (e.g. `['fastapi', 'sqlalchemy']`). */
+  blockedScopes?: ReadonlySet<string> | string[] | null;
 }
 
 interface OTELSpan {
@@ -23,15 +43,36 @@ interface OTELSpan {
   status?: { code?: number; message?: string };
   parentSpanId?: string;
   spanContext?: () => { traceId: string; spanId: string };
+  instrumentationScope?: { name?: string };
+  instrumentationLibrary?: { name?: string };
 }
 
 export class AmplitudeAgentExporter {
   private _ai: AmplitudeAI;
-  private _defaultUserId: string;
+  private _defaultUserId: string | null;
+  private _privacyConfig: PrivacyConfig | null;
+  private _allowedScopes: Set<string> | null;
+  private _blockedScopes: Set<string>;
 
   constructor(options: ExporterOptions) {
     this._ai = options.amplitudeAI;
-    this._defaultUserId = options.defaultUserId ?? 'otel-user';
+    this._defaultUserId = options.defaultUserId ?? null;
+    this._privacyConfig = options.privacyConfig ?? null;
+    this._allowedScopes =
+      options.allowedScopes == null
+        ? null
+        : new Set(
+            options.allowedScopes instanceof Set
+              ? options.allowedScopes
+              : options.allowedScopes,
+          );
+    this._blockedScopes = new Set(
+      options.blockedScopes == null
+        ? []
+        : options.blockedScopes instanceof Set
+          ? options.blockedScopes
+          : options.blockedScopes,
+    );
   }
 
   export(
@@ -40,6 +81,7 @@ export class AmplitudeAgentExporter {
   ): void {
     for (const span of spans) {
       try {
+        if (!this._shouldProcess(span)) continue;
         this._processSpan(span);
       } catch {
         // Skip individual span failures
@@ -57,6 +99,25 @@ export class AmplitudeAgentExporter {
     return Promise.resolve();
   }
 
+  private _shouldProcess(span: OTELSpan): boolean {
+    const scopeName =
+      span.instrumentationScope?.name ??
+      span.instrumentationLibrary?.name ??
+      '';
+
+    if (scopeName && this._blockedScopes.has(scopeName)) {
+      return false;
+    }
+    if (this._allowedScopes != null) {
+      if (!scopeName || !this._allowedScopes.has(scopeName)) {
+        return false;
+      }
+    }
+
+    const attrs = span.attributes ?? {};
+    return Object.keys(attrs).some((k) => k.startsWith('gen_ai.'));
+  }
+
   private _processSpan(span: OTELSpan): void {
     const attrs = span.attributes ?? {};
     const providerName =
@@ -70,13 +131,23 @@ export class AmplitudeAgentExporter {
     const latencyMs = (endNanos - startNanos) / 1_000_000;
     const isError = span.status?.code === 2;
     const spanCtx = span.spanContext?.();
+    if (!claimSpan(this._ai.amplitude, spanCtx?.traceId, spanCtx?.spanId)) {
+      return;
+    }
     const operation =
       (attrs['gen_ai.operation.name'] as string | undefined) ??
       (attrs['gen_ai.operation'] as string | undefined);
+    // Spans are exported in batches outside any request context, so identity
+    // comes from span attributes. Without them, fall back to an anonymous
+    // identity scoped to the span's trace rather than a constant shared ID.
+    const runKey = spanCtx?.traceId || randomUUID();
     const userId =
-      _normalizeOtelString(attrs['amplitude.user_id']) ?? this._defaultUserId;
+      _normalizeOtelString(attrs['amplitude.user_id']) ?? this._defaultUserId ?? undefined;
+    const deviceId =
+      _normalizeOtelString(attrs['amplitude.device_id']) ??
+      (userId == null ? `otel-${runKey}` : undefined);
     const sessionId =
-      _normalizeOtelString(attrs['amplitude.session_id']) ?? 'otel-session';
+      _normalizeOtelString(attrs['amplitude.session_id']) ?? `otel-${runKey}`;
 
     // Prefer response.model (actual versioned model) over request.model
     const modelName = String(
@@ -84,6 +155,7 @@ export class AmplitudeAgentExporter {
         attrs['gen_ai.request.model'] ??
         'unknown',
     );
+    const authoritativeCostUsd = _toOtelCost(attrs[GENAI_USAGE_COST]);
 
     if (
       operation === 'tool' ||
@@ -92,6 +164,7 @@ export class AmplitudeAgentExporter {
     ) {
       this._ai.trackToolCall({
         userId,
+        deviceId,
         toolName: String(attrs['gen_ai.tool.name'] ?? span.name ?? 'tool'),
         latencyMs,
         success: !isError,
@@ -103,6 +176,7 @@ export class AmplitudeAgentExporter {
           undefined,
         output: attrs['gen_ai.response.text'] ?? undefined,
         errorMessage: isError ? span.status?.message : undefined,
+        privacyConfig: this._privacyConfig,
       });
       return;
     }
@@ -110,6 +184,7 @@ export class AmplitudeAgentExporter {
     if (operation === 'embedding' || operation === 'embeddings') {
       this._ai.trackEmbedding({
         userId,
+        deviceId,
         model: modelName,
         provider: providerName,
         latencyMs,
@@ -122,6 +197,8 @@ export class AmplitudeAgentExporter {
             | number
             | undefined) ??
           (attrs['gen_ai.embeddings.dimension.count'] as number | undefined),
+        totalCostUsd: authoritativeCostUsd,
+        privacyConfig: this._privacyConfig,
       });
       return;
     }
@@ -144,9 +221,11 @@ export class AmplitudeAgentExporter {
         ) {
           this._ai.trackUserMessage({
             userId,
+            deviceId,
             content: m.content,
             sessionId,
             traceId: spanCtx?.traceId,
+            privacyConfig: this._privacyConfig,
           });
         }
       }
@@ -164,8 +243,11 @@ export class AmplitudeAgentExporter {
     const cacheCreationTokens = _toOtelNumber(
       attrs['gen_ai.usage.cache_creation.input_tokens'],
     );
+    const reasoningTokens = _toOtelNumber(
+      attrs[GENAI_REASONING_OUTPUT_TOKENS],
+    );
 
-    let costUsd = _toOtelNumber(attrs['gen_ai.usage.cost']);
+    let costUsd = authoritativeCostUsd;
     if (
       costUsd == null &&
       modelName !== 'unknown' &&
@@ -177,6 +259,7 @@ export class AmplitudeAgentExporter {
           modelName,
           inputTokens,
           outputTokens,
+          reasoningTokens: reasoningTokens ?? 0,
           cacheReadInputTokens: cacheReadTokens ?? 0,
           cacheCreationInputTokens: cacheCreationTokens ?? 0,
           defaultProvider:
@@ -184,7 +267,7 @@ export class AmplitudeAgentExporter {
               ? providerName
               : undefined,
         });
-        if (computed > 0) costUsd = computed;
+        if (computed != null) costUsd = computed;
       } catch {
         // cost calculation is best-effort
       }
@@ -192,6 +275,7 @@ export class AmplitudeAgentExporter {
 
     this._ai.trackAiMessage({
       userId,
+      deviceId,
       content: String(attrs['gen_ai.response.text'] ?? ''),
       sessionId,
       model: modelName,
@@ -201,6 +285,7 @@ export class AmplitudeAgentExporter {
       inputTokens,
       outputTokens,
       totalTokens,
+      reasoningTokens,
       cacheReadTokens,
       cacheCreationTokens,
       totalCostUsd: costUsd,
@@ -212,6 +297,7 @@ export class AmplitudeAgentExporter {
       temperature: _toOtelNumber(attrs['gen_ai.request.temperature']),
       maxOutputTokens: _toOtelNumber(attrs['gen_ai.request.max_tokens']),
       topP: _toOtelNumber(attrs['gen_ai.request.top_p']),
+      privacyConfig: this._privacyConfig,
     });
   }
 }
@@ -235,6 +321,13 @@ function _toOtelNumber(value: unknown): number | undefined {
     return Number.isNaN(parsed) ? undefined : parsed;
   }
   return undefined;
+}
+
+function _toOtelCost(value: unknown): number | undefined {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function _tryParseJsonArray(value: string): unknown[] {

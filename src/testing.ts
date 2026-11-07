@@ -1,9 +1,23 @@
 import { AmplitudeAI } from './client.js';
 import type { AIConfig } from './config.js';
 import {
+  EVENT_AI_RESPONSE,
   EVENT_SESSION_END,
+  EVENT_TOOL_CALL,
+  EVENT_USER_MESSAGE,
   PROP_AGENT_ID,
+  PROP_CONTENT_MODE,
+  PROP_COST_USD,
+  PROP_EXPERIMENTS,
+  PROP_INPUT_TOKENS,
+  PROP_LATENCY_MS,
+  PROP_MODEL_NAME,
+  PROP_OUTPUT_TOKENS,
+  PROP_PROVIDER,
   PROP_SESSION_ID,
+  PROP_TOOL_NAME,
+  PROP_TRACE_ID,
+  PROP_TURN_ID,
 } from './core/constants.js';
 
 interface MockEvent {
@@ -214,5 +228,228 @@ export class MockAmplitudeAI extends AmplitudeAI {
     }
 
     return candidates[0] as Record<string, unknown>;
+  }
+
+  /**
+   * Fill-rate report for local verification.
+   *
+   * Checks 10 gates across tracked events and returns a human-readable
+   * summary with impact/fix hints for missing fields. Useful for verifying
+   * instrumentation completeness during development.
+   */
+  summary(): string {
+    const lines: string[] = [];
+    const total = this.events.length;
+    lines.push('=== AmplitudeAI Instrumentation Summary ===');
+    lines.push(`Total events: ${total}`);
+    if (total === 0) {
+      lines.push('No events tracked. Call track* methods or run your agent.');
+      return lines.join('\n');
+    }
+
+    const byType = new Map<string, number>();
+    for (const e of this.events) {
+      const t = e.event_type ?? 'unknown';
+      byType.set(t, (byType.get(t) ?? 0) + 1);
+    }
+    lines.push('');
+    lines.push('Event breakdown:');
+    for (const [type, count] of byType) {
+      lines.push(`  ${type}: ${count}`);
+    }
+
+    // Experiments fill. Not a gate: most agents run under no experiment.
+    // Shown whenever any event carries one, so a partial fill (an assignment
+    // learned after the session started, or a runAs child that missed it) is
+    // visible.
+    const experimentsFilled = this.events.filter(
+      (e) => e.event_properties?.[PROP_EXPERIMENTS] != null,
+    ).length;
+    if (experimentsFilled > 0) {
+      lines.push('');
+      lines.push('Experiments fill:');
+      lines.push(`  ${PROP_EXPERIMENTS}: ${experimentsFilled}/${total} events`);
+      if (experimentsFilled < total) {
+        lines.push(
+          '    note: pass experiments on ai.agent() or agent.session(), or call addExperiments() before the first event, so every event carries the arm',
+        );
+      }
+    }
+
+    // Gate checks
+    const gates: Array<{ name: string; pass: boolean; impact: string; fix: string }> = [];
+
+    // 1. Session ID
+    const hasSessionId = this.events.some((e) => e.event_properties?.[PROP_SESSION_ID]);
+    gates.push({
+      name: 'Session ID',
+      pass: hasSessionId,
+      impact: 'Events cannot be grouped into sessions',
+      fix: 'Pass sessionId to track* methods or use agent.session()',
+    });
+
+    // 2. Trace ID
+    const hasTraceId = this.events.some((e) => e.event_properties?.[PROP_TRACE_ID]);
+    gates.push({
+      name: 'Trace ID',
+      pass: hasTraceId,
+      impact: 'Events within a session cannot be grouped into traces',
+      fix: 'Pass traceId or use session.run() which auto-generates one',
+    });
+
+    // 3. Turn ID
+    const hasTurnId = this.events.some((e) => e.event_properties?.[PROP_TURN_ID] != null);
+    gates.push({
+      name: 'Turn ID',
+      pass: hasTurnId,
+      impact: 'Turn ordering cannot be reconstructed',
+      fix: 'Turn IDs are auto-incremented when using session context',
+    });
+
+    // 4. Agent ID
+    const hasAgentId = this.events.some((e) => e.event_properties?.[PROP_AGENT_ID]);
+    gates.push({
+      name: 'Agent ID',
+      pass: hasAgentId,
+      impact: 'Events cannot be attributed to a specific agent',
+      fix: 'Pass agentId to ai.agent() or track* calls',
+    });
+
+    // 5. Model name (for AI responses)
+    const aiResponses = this.events.filter((e) => e.event_type === EVENT_AI_RESPONSE);
+    const toolCalls = this.events.filter((e) => e.event_type === EVENT_TOOL_CALL);
+    const hasModel =
+      aiResponses.length > 0 &&
+      aiResponses.every((e) => {
+        const v = e.event_properties?.[PROP_MODEL_NAME];
+        return v != null && v !== '';
+      });
+    gates.push({
+      name: 'Model Name',
+      pass: aiResponses.length === 0 || hasModel,
+      impact: 'Cannot segment by model or calculate costs',
+      fix: 'Pass model to trackAiMessage()',
+    });
+
+    // 6. Provider (AI responses)
+    const hasProvider =
+      aiResponses.length > 0 &&
+      aiResponses.every((e) => {
+        const v = e.event_properties?.[PROP_PROVIDER];
+        return v != null && v !== '';
+      });
+    gates.push({
+      name: 'Provider',
+      pass: aiResponses.length === 0 || hasProvider,
+      impact: 'Provider breakdown not available',
+      fix: 'Pass provider to trackAiMessage() or use a provider wrapper',
+    });
+
+    // 7. Token usage
+    const hasTokens =
+      aiResponses.length > 0 &&
+      aiResponses.every(
+        (e) =>
+          (e.event_properties?.[PROP_INPUT_TOKENS] as number) > 0 ||
+          (e.event_properties?.[PROP_OUTPUT_TOKENS] as number) > 0,
+      );
+    gates.push({
+      name: 'Token Usage',
+      pass: aiResponses.length === 0 || hasTokens,
+      impact: 'Cannot calculate costs or monitor usage',
+      fix: 'Pass inputTokens/outputTokens to trackAiMessage()',
+    });
+
+    // 8. Cost USD (AI responses)
+    const hasCost =
+      aiResponses.length > 0 &&
+      aiResponses.every((e) => e.event_properties?.[PROP_COST_USD] != null);
+    gates.push({
+      name: 'Cost USD',
+      pass: aiResponses.length === 0 || hasCost,
+      impact: 'Monitor cost coverage will be incomplete',
+      fix: 'Use canonical model name, set totalCostUsd, or call trackRunCost() at run end',
+    });
+
+    // 9. Tool calls without AI Response cost
+    gates.push({
+      name: 'Run cost (tool-only)',
+      pass: !(toolCalls.length > 0 && aiResponses.length === 0),
+      impact: 'Batch/artifact runs show $0 spend on Monitor',
+      fix: 'Call trackRunCost() at run end with totalCostUsd',
+    });
+
+    // 10. Message content. An empty string is dropped rather than sent
+    // (sanitizeContent returns early on zero-length text), so passing '' produces
+    // an event that looks structurally perfect and carries nothing to read. Every
+    // other gate here passes in that state, which is how an agent can be shipped
+    // emitting no content at all.
+    //
+    // Only meaningful in 'full' mode: metadata_only and customer_enriched strip
+    // content deliberately, and flagging them would train people to ignore this.
+    // User messages only. An AI Response legitimately carries no text -- a tool-only
+    // turn, or the synthetic response trackRunCost() emits to record batch spend --
+    // but a user message exists because a human said something, so an empty one is
+    // always a defect.
+    const contentBearing = this.events.filter((e) => e.event_type === EVENT_USER_MESSAGE);
+    const contentExpected = contentBearing.filter((e) => {
+      const mode = e.event_properties?.[PROP_CONTENT_MODE];
+      return mode === undefined || mode === 'full';
+    });
+    const hasContent = contentExpected.every((e) => {
+      const msg = e.event_properties?.$llm_message;
+      return msg != null && msg !== '';
+    });
+    gates.push({
+      name: 'Message Content',
+      pass: contentExpected.length === 0 || hasContent,
+      impact: 'Thread view shows no messages, and content-based signals are not scored',
+      fix: "Pass the actual message text to trackUserMessage()/trackAiMessage() — an empty string is silently dropped",
+    });
+
+    // 10. Tool names
+    const hasToolName = toolCalls.some((e) => e.event_properties?.[PROP_TOOL_NAME]);
+    gates.push({
+      name: 'Tool Names',
+      pass: toolCalls.length === 0 || hasToolName,
+      impact: 'Cannot identify which tools are called',
+      fix: 'Pass toolName to trackToolCall()',
+    });
+
+    // 11. Latency
+    const hasLatency = this.events.some(
+      (e) =>
+        (e.event_type === EVENT_AI_RESPONSE || e.event_type === EVENT_TOOL_CALL) &&
+        e.event_properties?.[PROP_LATENCY_MS] != null,
+    );
+    gates.push({
+      name: 'Latency',
+      pass: (aiResponses.length === 0 && toolCalls.length === 0) || hasLatency,
+      impact: 'Cannot monitor response times',
+      fix: 'Pass latencyMs to trackAiMessage()/trackToolCall()',
+    });
+
+    lines.push('');
+    lines.push('Gate checks:');
+    const passed = gates.filter((g) => g.pass).length;
+    lines.push(`  ${passed}/${gates.length} passed`);
+    lines.push('');
+
+    for (const gate of gates) {
+      const status = gate.pass ? '✓' : '✗';
+      lines.push(`  ${status} ${gate.name}`);
+      if (!gate.pass) {
+        lines.push(`    Impact: ${gate.impact}`);
+        lines.push(`    Fix: ${gate.fix}`);
+      }
+    }
+
+    // Content mode warning
+    if (this._config.contentMode === 'metadata_only') {
+      lines.push('');
+      lines.push('⚠ Content mode is "metadata_only" — message content will not be stored.');
+    }
+
+    return lines.join('\n');
   }
 }

@@ -164,14 +164,65 @@ function hasKeywordArg(args: EstreeNode[], keyword: string): boolean {
   return false;
 }
 
+const MAX_CONTEXT_LINE_CHARS = 400;
+
+// code_context is returned to the coding agent's LLM; strip credentials first.
+const SECRET_TOKEN_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+  /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*/g,
+  /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{0,8192}?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+];
+const SECRET_ASSIGNMENT_RE =
+  /((?:api[_-]?key|secret|token|password|passwd|credential|auth|\w{0,32}key)[\w-]{0,32}['"]?\s*[:=]\s*)(['"`])[^'"`\n]{6,512}?\2/gi;
+// A quoted 32-character hex string has the shape of an Amplitude API key.
+const HEX_KEY_LITERAL_RE = /(['"`])[0-9a-fA-F]{32}\1/g;
+const PEM_BEGIN_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const PEM_END_RE = /-----END [A-Z ]*PRIVATE KEY-----/;
+const MAX_PEM_LOOKBACK_LINES = 200;
+
+export function redactSecrets(text: string): string {
+  let out = text.replace(SECRET_ASSIGNMENT_RE, (_m, head: string, q: string) => `${head}${q}[REDACTED]${q}`);
+  for (const re of SECRET_TOKEN_PATTERNS) out = out.replace(re, '[REDACTED]');
+  out = out.replace(HEX_KEY_LITERAL_RE, (_m, q: string) => `${q}[REDACTED]${q}`);
+  return out;
+}
+
+/** Index of each line that sits inside a PEM private-key block. */
+function pemBodyLines(sourceLines: string[], start: number, end: number): Set<number> {
+  const inside = new Set<number>();
+  let open = false;
+  for (let i = Math.max(0, start - MAX_PEM_LOOKBACK_LINES); i <= end; i++) {
+    const line = sourceLines[i] ?? '';
+    if (PEM_BEGIN_RE.test(line) && !PEM_END_RE.test(line)) {
+      open = true;
+    } else if (open && PEM_END_RE.test(line)) {
+      open = false;
+    } else if (open && i >= start) {
+      inside.add(i);
+    }
+  }
+  return inside;
+}
+
 function extractCodeContext(sourceLines: string[], lineNum: number, radius = 4): string {
   const idx = lineNum - 1;
   const start = Math.max(0, idx - radius);
   const end = Math.min(sourceLines.length - 1, idx + radius);
+  const pemLines = pemBodyLines(sourceLines, start, end);
   return sourceLines.slice(start, end + 1).map((l, i) => {
     const ln = start + i + 1;
     const marker = ln === lineNum ? '>>>' : '   ';
-    return `${marker} ${ln}: ${l}`;
+    if (pemLines.has(start + i)) return `${marker} ${ln}: [REDACTED]`;
+    // Redact before truncating so a credential straddling the cut is still caught.
+    const redacted = redactSecrets(l.slice(0, MAX_CONTEXT_LINE_CHARS * 4));
+    const line = redacted.length > MAX_CONTEXT_LINE_CHARS ? `${redacted.slice(0, MAX_CONTEXT_LINE_CHARS)}…` : redacted;
+    return `${marker} ${ln}: ${line}`;
   }).join('\n');
 }
 
@@ -573,6 +624,10 @@ function analyzeWithAST(source: string, sourceLines: string[]): FileAnalysis | n
 
 // ---- Regex fallback (used when acorn is not available) ----
 
+const MAX_SCAN_SPAN = 10_000;
+const MAX_FUNCTION_LOOKBACK_LINES = 500;
+const RECEIVER_WINDOW_CHARS = 256;
+
 const regexLlmPatterns = [
   { pattern: /\.chat\.completions\.create\s*\(/g, receiverRe: /(\w+)(?:\.\w+)*\.chat\.completions\.create\s*\(/, provider: 'openai', api: 'chat.completions.create' },
   { pattern: /\.chat\.completions\.parse\s*\(/g, receiverRe: /(\w+)(?:\.\w+)*\.chat\.completions\.parse\s*\(/, provider: 'openai', api: 'chat.completions.parse' },
@@ -598,15 +653,16 @@ function findWrappedConstructorsRegex(source: string): Set<string> {
     const varName = m[1] ?? '';
     if (!varName) continue;
     let depth = 1;
-    let i = (m.index ?? 0) + m[0].length;
-    let argBlock = '';
-    while (i < source.length && depth > 0) {
+    const argStart = (m.index ?? 0) + m[0].length;
+    const limit = Math.min(source.length, argStart + MAX_SCAN_SPAN);
+    let i = argStart;
+    while (i < limit && depth > 0) {
       const ch = source[i];
       if (ch === '(') depth++;
       else if (ch === ')') depth--;
-      if (depth > 0) argBlock += ch;
       i++;
     }
+    const argBlock = source.slice(argStart, depth > 0 ? i : i - 1);
     if (/\bamplitude\s*:/.test(argBlock)) {
       result.add(varName);
     }
@@ -615,8 +671,9 @@ function findWrappedConstructorsRegex(source: string): Set<string> {
 }
 
 function findContainingFunctionRegex(lines: string[], lineIndex: number): string | null {
-  for (let i = lineIndex; i >= 0; i--) {
-    const line = lines[i] ?? '';
+  const stop = Math.max(0, lineIndex - MAX_FUNCTION_LOOKBACK_LINES);
+  for (let i = lineIndex; i >= stop; i--) {
+    const line = (lines[i] ?? '').slice(0, MAX_SCAN_SPAN);
     const fnDeclMatch = line.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/);
     if (fnDeclMatch) {
       const name = fnDeclMatch[1] ?? '';
@@ -634,13 +691,13 @@ function findContainingFunctionRegex(lines: string[], lineIndex: number): string
 function findToolDefinitionsRegex(source: string): string[] {
   const tools: string[] = [];
   // OpenAI function-calling: { type: 'function', function: { name: '...' } }
-  const funcDefRe = /function:\s*\{[^}]*name:\s*['"](\w+)['"]/g;
+  const funcDefRe = /function:\s*\{[^}]{0,500}?name:\s*['"](\w+)['"]/g;
   for (const m of source.matchAll(funcDefRe)) {
     const name = m[1] ?? '';
     if (name && !tools.includes(name)) tools.push(name);
   }
   // Anthropic-style: { name: '...', input_schema: { ... } }
-  const anthropicRe = /name:\s*['"](\w+)['"][^}]*input_schema\s*:/g;
+  const anthropicRe = /name:\s*['"](\w+)['"][^}]{0,500}?input_schema\s*:/g;
   for (const m of source.matchAll(anthropicRe)) {
     const name = m[1] ?? '';
     if (name && !tools.includes(name)) tools.push(name);
@@ -650,7 +707,7 @@ function findToolDefinitionsRegex(source: string): string[] {
 
 function findFunctionDefinitionsRegex(source: string): string[] {
   const fns: string[] = [];
-  const re = /(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>/g;
+  const re = /(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]{0,500}\)|[^=])\s*=>/g;
   for (const m of source.matchAll(re)) {
     const name = m[1] ?? m[2] ?? '';
     if (name && !fns.includes(name)) fns.push(name);
@@ -687,14 +744,18 @@ function analyzeWithRegex(source: string): FileAnalysis {
     const line = lines[i] ?? '';
     for (const { pattern, receiverRe, provider, api } of regexLlmPatterns) {
       pattern.lastIndex = 0;
-      if (pattern.test(line)) {
+      const hit = pattern.exec(line);
+      if (hit) {
         let effectiveProvider = provider;
         let effectiveApi = api;
         if (provider === 'anthropic' && assistantsApiRe.test(line)) {
           effectiveProvider = 'openai-assistants';
           effectiveApi = 'beta.threads.messages.create';
         }
-        const rm = receiverRe ? line.match(receiverRe) : null;
+        // Only look just before the call so long dotted lines can't backtrack quadratically.
+        const windowStart = Math.max(0, hit.index - RECEIVER_WINDOW_CHARS);
+        const window = line.slice(windowStart, hit.index + hit[0].length);
+        const rm = receiverRe ? window.match(receiverRe) : null;
         const receiver = rm?.[1] ?? '';
         const instrumented = hasPatch || wrappedClients.has(receiver);
         callSites.push({
@@ -756,9 +817,84 @@ function analyzeWithRegex(source: string): FileAnalysis {
 
 // ---- Public API ----
 
-export function analyzeFileInstrumentation(source: string): FileAnalysis {
+/** Inputs above this are analyzed only up to the limit. */
+export const MAX_ANALYZE_SOURCE_CHARS = 1_000_000;
+
+export function analyzeFileInstrumentation(fullSource: string): FileAnalysis {
+  const source =
+    fullSource.length > MAX_ANALYZE_SOURCE_CHARS ? fullSource.slice(0, MAX_ANALYZE_SOURCE_CHARS) : fullSource;
   const sourceLines = source.split('\n');
-  const astResult = analyzeWithAST(source, sourceLines);
-  if (astResult) return astResult;
-  return analyzeWithRegex(source);
+  const analysis = analyzeWithAST(source, sourceLines) ?? analyzeWithRegex(source);
+  analysis.suggestions.push(...experimentSuggestions(source));
+  return analysis;
+}
+
+const LEGACY_EXPERIMENT_CONTEXT_RE = /["']?experiment_variant["']?\s*:/;
+const EXPERIMENTS_FROM_AMPLITUDE_RE = /\bexperimentsFromAmplitude\s*\(/g;
+const OPENFEATURE_HOOK_RE = /\bAmplitudeAIHook\s*\(/g;
+
+const PAREN_RE = /[()]/g;
+
+/**
+ * True when some call matched by `callRe` has no `option:` at its own level.
+ * Nested calls such as `await experiment.fetchV2(user)` in the argument list
+ * do not hide an option that follows them, and an option inside a nested call
+ * does not count.
+ *
+ * One pass over the parentheses: every `(` opens a frame, text between
+ * parentheses lands in the innermost frame only, and a frame opened by a
+ * matched call is checked when it closes (or at end of input when
+ * unbalanced). Linear in the source, whatever the nesting depth.
+ */
+function callsMissingOption(source: string, callRe: RegExp, option: string): boolean {
+  const targets = new Set<number>();
+  callRe.lastIndex = 0;
+  for (let match = callRe.exec(source); match != null; match = callRe.exec(source)) {
+    targets.add(match.index + match[0].length - 1);
+  }
+  if (targets.size === 0) return false;
+  const optionRe = new RegExp(`(?:^|[,{(\\s])${option}\\s*:`);
+  // One buffer per open frame; null for calls we are not checking.
+  const frames: Array<string[] | null> = [];
+  let last = 0;
+  PAREN_RE.lastIndex = 0;
+  for (let paren = PAREN_RE.exec(source); paren != null; paren = PAREN_RE.exec(source)) {
+    const top = frames[frames.length - 1];
+    if (top != null) top.push(source.slice(last, paren.index));
+    last = paren.index + 1;
+    if (paren[0] === '(') {
+      frames.push(targets.has(paren.index) ? [] : null);
+    } else if (frames.length > 0) {
+      const closed = frames.pop();
+      if (closed != null && !optionRe.test(closed.join(''))) return true;
+    }
+  }
+  const top = frames[frames.length - 1];
+  if (top != null) top.push(source.slice(last));
+  return frames.some((frame) => frame != null && !optionRe.test(frame.join('')));
+}
+
+/**
+ * Experiment-recording advice for `validate_file`: the legacy
+ * `context: { experiment_variant }` form, and helpers called without naming
+ * the experiment flags.
+ */
+export function experimentSuggestions(source: string): string[] {
+  const out: string[] = [];
+  if (LEGACY_EXPERIMENT_CONTEXT_RE.test(source)) {
+    out.push(
+      '`experiment_variant` in `context` is the legacy form. Pass the assignment as `experiments: [{ key, variant, provider }]` instead so every event carries `[Agent] Experiments` and the value is recorded once.',
+    );
+  }
+  if (callsMissingOption(source, EXPERIMENTS_FROM_AMPLITUDE_RE, 'keys')) {
+    out.push(
+      '`experimentsFromAmplitude(...)` without `keys` records every flag in the result, configuration flags included, and an event carries at most 32. Pass `{ keys: [...] }` naming the experiment flags.',
+    );
+  }
+  if (callsMissingOption(source, OPENFEATURE_HOOK_RE, 'flags')) {
+    out.push(
+      '`new AmplitudeAIHook()` without `flags` records every flag evaluated inside a session. Pass `{ flags: [...] }` naming the experiment flags.',
+    );
+  }
+  return out;
 }

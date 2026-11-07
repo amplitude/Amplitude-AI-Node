@@ -26,6 +26,19 @@ const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const catalog = JSON.parse(
   readFileSync(join(root, 'data', 'agent_event_catalog.json'), 'utf8'),
 );
+const integrations = JSON.parse(
+  readFileSync(join(root, 'docs', 'integrations', 'manifest.json'), 'utf8'),
+);
+const platforms = integrations.platforms;
+const runtimes = integrations.runtimes ?? [];
+const hostedPlatforms = platforms.filter((p) => p.category === 'hosted_agent_platform');
+const tracingTools = platforms.filter((p) => p.category === 'tracing_tool');
+const warehouses = integrations.warehouses;
+const frameworks = integrations.frameworks ?? [];
+const platformGuideLabel = (p) =>
+  p.category === 'tracing_tool'
+    ? `${p.name} trace forwarding over the HTTP API (no SDK)`
+    : `${p.name} conversation ingestion over the HTTP API (no SDK)`;
 
 const toolNames = [
   'get_event_schema',
@@ -42,10 +55,29 @@ const toolNames = [
 const resources = ['amplitude-ai://event-schema', 'amplitude-ai://integration-patterns', 'amplitude-ai://instrument-guide'];
 const events = Array.isArray(catalog?.events)
   ? catalog.events
+      .filter((event) => event?.deprecated !== true)
       .map((event) => event?.event_type)
       .filter((name) => typeof name === 'string')
       .sort((a, b) => a.localeCompare(b))
   : [];
+
+const mcpArgs = JSON.stringify(['-y', '-p', packageJson.name, 'amplitude-ai', 'mcp']).replaceAll(',', ', ');
+const mcpServerJson = `"amplitude-ai": { "command": "npx", "args": ${mcpArgs} }`;
+const mcpJsonGeneric = `{ ${mcpServerJson} }`;
+const mcpJsonCursor = `{ "mcpServers": { ${mcpServerJson} } }`;
+const claudeAddCommand = `claude mcp add --scope project amplitude-ai -- npx -y -p ${packageJson.name} amplitude-ai mcp`;
+const codexToml = `[mcp_servers.amplitude-ai]\ncommand = "npx"\nargs = ${mcpArgs}`;
+
+// Public guide URLs track main. Search already indexes that ref, and a version tag
+// would need a docs edit on every release. The published package still matches the
+// guide that was on main when the tag was cut.
+const releaseRawPrefix = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/';
+const rawRefPattern = /https:\/\/raw\.githubusercontent\.com\/amplitude\/Amplitude-AI-Node\/[^/\s"'`]+\//g;
+const pinnedRawUrlFiles = [
+  join('docs', 'integrations', 'manifest.json'),
+  join('docs', 'integrations', 'README.md'),
+  join('docs', 'integrations', 'analytics-metadata.schema.json'),
+];
 
 const generatedHeader = '<!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->';
 
@@ -64,42 +96,38 @@ pnpm add ${packageJson.name}
 The SDK ships an MCP server for AI coding agents. It provides project scanning,
 file validation, instrumentation, test generation, and the complete API reference.
 
+Install \`${packageJson.name}\` in the project first, and configure the server per
+project (not in a global config) so it runs the version installed in that project.
+Always name the scoped package in \`npx\` (\`npx -y -p ${packageJson.name} amplitude-ai ...\`):
+\`amplitude-ai\` is only a bin name, and \`npx\` without \`-p\` looks it up as a separate package.
+
 ### Cursor
 
 Add to \`.cursor/mcp.json\` in your project root:
 \`\`\`json
-{
-  "mcpServers": {
-    "amplitude-ai": {
-      "command": "npx",
-      "args": ["amplitude-ai", "mcp"]
-    }
-  }
-}
+${mcpJsonCursor}
 \`\`\`
 Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
 
 ### Claude Code
 
 \`\`\`bash
-claude mcp add amplitude-ai -- npx amplitude-ai mcp
+${claudeAddCommand}
 \`\`\`
-Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
+This writes \`.mcp.json\` in the project root. Then point the agent at the instrumentation guide: \`node_modules/@amplitude/ai/amplitude-ai.md\`
 
 ### OpenAI Codex CLI
 
-Add to \`~/.codex/config.toml\`:
+Add to \`.codex/config.toml\` in your project root (Codex reads project config for trusted projects):
 \`\`\`toml
-[mcp_servers.amplitude-ai]
-command = "npx"
-args = ["amplitude-ai", "mcp"]
+${codexToml}
 \`\`\`
 Codex auto-reads this \`AGENTS.md\` file for context.
 
 ### Generic (any MCP-compatible agent)
 
 \`\`\`json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+${mcpJsonGeneric}
 \`\`\`
 
 ## Decision Tree
@@ -110,7 +138,20 @@ Codex auto-reads this \`AGENTS.md\` file for context.
 - Need tool telemetry: use \`tool()\`.
 - Need span/observability: use \`observe()\`.
 - Cannot modify call sites at all: use \`patch()\` for aggregate-only monitoring (no per-user analytics).
+- Already emit OTEL GenAI spans: use \`AmplitudeAgentExporter({ amplitudeAI: ai })\` (or \`enableOtel()\`) to map them to [Agent] events.
+- LangChain / LangGraph: use \`AmplitudeCallbackHandler\` (duck-typed; implements \`handleChatModelStart\` for User Message).
+- App reads an A/B test or feature flag that changes agent behavior: pass the assignment as \`experiments\` — \`experimentsFromAmplitude(variants, { keys: [...] })\` for Amplitude Experiment, \`new AmplitudeAIHook({ flags: [...] })\` from \`@amplitude/ai/openfeature\` for any OpenFeature provider, or the literal entry — so \`[Agent] Experiments\` splits any chart by arm (see Experiments in \`amplitude-ai.md\`).
 - Need agent-assistant guidance: run MCP prompt \`instrument_app\`.
+- Want local verification: use \`MockAmplitudeAI().summary()\` for fill-rate report.
+- HTML artifact snapshots are producer-owned content: existing capture modes and ordinary best-effort string redaction apply. Choose approved source content and preflight size before tracking; the SDK does not parse or sanitize rendered HTML.
+- Agent runs on a hosted platform (${hostedPlatforms.map((p) => p.name).join(', ')}): no SDK; forward conversations over HTTP by following \`docs/integrations/<platform>.md\`.
+- Voice agent you run yourself: add \`voiceTurnProperties({ direction, ... })\` as \`eventProperties\` on each turn, use \`RealtimeTurnMapper\` for the OpenAI Realtime API, and put \`recordingAttachment(url)\` on the last turn (a link only; Amplitude never fetches it). Never put a raw phone number in \`userId\` or \`deviceId\`; \`deviceId\` is the customer's choice, a hash is allowed, and no algorithm is required. See Step 3l in \`amplitude-ai.md\`.
+${runtimes.map((r) => `- Agent built on the ${r.name}: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following \`docs/integrations/${r.id}.md\`.`).join('\n')}
+- Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
+- Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
+- Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
+- Agent runs on AWS Strands (Python): export native OTLP by following \`docs/integrations/strands.md\`. Scrub content before export with \`docs/integrations/privacy.md\`. When the app already runs this SDK, \`AmplitudeAgentExporter\` / \`enableOtel()\` can map spans in process.
+${frameworks.filter((f) => f.id !== 'strands').map((f) => `- Agent runs on ${f.name}: export native OTLP by following \`docs/integrations/${f.id}.md\`. Scrub content before export with \`docs/integrations/privacy.md\`. When the app already runs this SDK, \`AmplitudeAgentExporter\` / \`enableOtel()\` can map spans in process.`).join('\n')}
 
 ## MCP Surface
 
@@ -142,7 +183,8 @@ Prompt:
 - \`session.run()\` relies on \`AsyncLocalStorage\`; not available in Edge Runtime. **Cloudflare Workers:** do NOT import \`AmplitudeAI\`, \`AIConfig\`, or any runtime export from \`@amplitude/ai\` in Worker bundles — they pull in \`node:async_hooks\` / \`node:module\` which break Workers Builds. Use the SDK-free \`FetchAmplitudeClient\` pattern with direct \`[Agent]\` event construction (see "Edge Runtime / Cloudflare Workers" in amplitude-ai.md). Only \`import type { ... } from '@amplitude/ai/types'\` is safe.
 - **User message text:** \`trackUserMessage(content, opts?)\` — put human-readable intent in \`content\`; large JSON / RAG / pipeline state in \`opts.context\` (preferred — maps to the registered \`[Agent] Context\` property, always queryable in charts), not as the only \`content\`, or session labels and segmentation show raw JSON. Avoid \`opts.eventProperties\` for custom dimensions on \`[Agent]\` events — unregistered properties may be silently dropped by schema enforcement.
 - **Turns vs spans:** \`[Agent] User Message\` + \`[Agent] AI Response\` drive turn-level analytics; \`observe()\` / \`trackSpan()\` complement them — do not use spans alone for conversation metrics.
-- **Gateways / custom \`baseURL\`:** use \`trackAiMessage\` with \`usage\` fields, the **real** routed model id, and \`totalCostUsd\` when genai-prices cannot resolve the model string (install \`@pydantic/genai-prices\` for automatic cost when supported).
+- **Gateways / custom \`baseURL\`:** use \`trackAiMessage\` with \`usage\` fields, the **real** routed model id, and \`totalCostUsd\` when genai-prices cannot resolve the model string (install \`@pydantic/genai-prices\` for automatic cost when supported). Tag gateway traffic with \`context: { ingestion_path: 'gateway', gateway: 'openrouter'|'litellm'|'requesty' }\`.
+- **LangChain callbacks:** \`AmplitudeCallbackHandler\` is duck-typed (no hard \`@langchain/core\` dep). Prefer \`handleChatModelStart\` coverage for chat models.
 
 ## CLI
 
@@ -164,12 +206,25 @@ Prompt:
 - \`examples/wrap-openai.ts\`
 - \`examples/multi-agent.ts\`
 - \`examples/framework-integration.ts\`
+- \`examples/experiments.ts\`
 - \`examples/real-openai.ts\` (requires OPENAI_API_KEY)
 
 ## Instrumentation Guide
 
-- \`amplitude-ai.md\` — **Start here.** Complete 4-phase instrumentation workflow + API reference. Paste into any coding agent.
+Fetch the public guide for the job. These URLs track \`main\`.
+
+- Node app: fetch \`${releaseRawPrefix}amplitude-ai.md\` and follow it, then install \`${packageJson.name}\` as that guide says.
+- Python app: \`python3 -m pip install amplitude-ai\`, then run \`amplitude-ai --print-guide\`.
+- Hosted platform, ${runtimes.map((r) => `${r.name}, `).join('')}tracing tool, warehouse, gateway, or AWS Strands: start at \`${releaseRawPrefix}docs/integrations/README.md\` and follow the linked page, including privacy.
+- \`amplitude-ai.md\` — **Start here** once the package is installed. Complete 4-phase instrumentation workflow + API reference. The installed copy is \`node_modules/@amplitude/ai/amplitude-ai.md\`.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
+${runtimes.map((r) => `- \`docs/integrations/${r.id}.md\` — ${r.name} live sessions over the HTTP API, from a hook (no SDK)`).join('\n')}
+${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
+- \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
+- \`docs/integrations/routers.md\` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
+- \`docs/integrations/strands.md\` — AWS Strands (Python) native OTLP export
+${frameworks.filter((f) => f.id !== 'strands').map((f) => `- \`docs/integrations/${f.id}.md\` — ${f.name} native OTLP export`).join('\n')}
+- \`docs/integrations/privacy.md\` — Client-side scrubbing for HTTP, OTLP, Batch, S3, and warehouse paths that do not run the SDK
 
 ## Event Schema (names)
 
@@ -181,6 +236,11 @@ const llmsTxt = `${generatedHeader}
 package=${packageJson.name}
 version=${packageJson.version}
 
+[routing]
+instrument-node=${releaseRawPrefix}amplitude-ai.md
+instrument-python=python3 -m pip install amplitude-ai && amplitude-ai --print-guide
+other-sources=${releaseRawPrefix}docs/integrations/README.md
+
 [mcp.tools]
 ${toolNames.join('\n')}
 
@@ -189,7 +249,16 @@ ${resources.join('\n')}
 
 [events]
 ${events.join('\n')}
-`;
+
+[integrations]
+${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
+warehouses=${warehouses.raw_url}
+routers=${integrations.routers.raw_url}
+${frameworks.map((f) => `${f.id}=${f.raw_url}`).join('\n')}
+privacy=${integrations.privacy.raw_url}
+${integrations.schemas.map((s) => `${s.id}-schema=${s.raw_url}`).join('\n')}
+${integrations.tools.map((t) => `${t.id}=${t.raw_url}`).join('\n')}
+`.replace(rawRefPattern, releaseRawPrefix);
 
 const mcpSchema = JSON.stringify(
   {
@@ -220,25 +289,24 @@ project analysis tools (scan_project, validate_file):
 pnpm add @amplitude/ai
 \`\`\`
 
-MCP config (one line — works with any MCP-compatible agent):
+MCP config (one line — works with any MCP-compatible agent). Configure it per
+project, and always name the scoped package in npx:
 \`\`\`json
-{ "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } }
+${mcpJsonGeneric}
 \`\`\`
 
 Agent-specific setup:
 
-Cursor: Add to .cursor/mcp.json:
-  { "mcpServers": { "amplitude-ai": { "command": "npx", "args": ["amplitude-ai", "mcp"] } } }
+Cursor: Add to .cursor/mcp.json in the project root:
+  ${mcpJsonCursor}
   Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
-Claude Code:
-  claude mcp add amplitude-ai -- npx amplitude-ai mcp
+Claude Code (writes .mcp.json in the project root):
+  ${claudeAddCommand}
   Then point the agent at: node_modules/@amplitude/ai/amplitude-ai.md
 
-Codex CLI: Add to ~/.codex/config.toml:
-  [mcp_servers.amplitude-ai]
-  command = "npx"
-  args = ["amplitude-ai", "mcp"]
+Codex CLI: Add to .codex/config.toml in the project root:
+${codexToml.split('\n').map((line) => `  ${line}`).join('\n')}
   AGENTS.md in the npm package is auto-read by Codex.
 
 Without MCP: Read amplitude-ai.md for the complete guided workflow, or this file for the API reference.
@@ -302,6 +370,7 @@ const agent = ai.agent('shopping-agent', {
   groups?: Record<string, unknown>,
   deviceId?: string,
   browserSessionId?: string,
+  experiments?: { key, variant, provider?, unit? }[], // see Experiments
 });
 \`\`\`
 
@@ -322,6 +391,7 @@ const session = agent.session({
   deviceId?: string,
   browserSessionId?: string, // links to Amplitude browser session
   autoFlush?: boolean,       // auto-flush on completion (default: auto-detect serverless)
+  experiments?: { key, variant, provider?, unit? }[], // overrides the agent's, by key
 });
 \`\`\`
 
@@ -401,6 +471,17 @@ const results = await searchProducts({ query: 'pancakes' });
 // [Agent] Tool Call event is automatically emitted with duration, success, input/output.
 \`\`\`
 
+### Experiments
+Record A/B test or feature flag assignment with \`experiments\`, not \`context\`:
+\`\`\`
+const agent = ai.agent('support-bot', { experiments: [{ key: 'router', variant: 'fast' }] });
+await agent.session({ userId: 'u1', experiments: [{ key: 'prompt', variant: 'v2', provider: 'statsig' }] }).run(async (s) => {
+  s.trackUserMessage('Hi', { experiments: [{ key: 'retry', variant: 'on', unit: 'turn' }] });
+});
+\`\`\`
+Every event carries \`[Agent] Experiments\` (an array of \`"key:variant"\` strings; split charts by it) and, when exactly one experiment applies, also \`[Agent] Experiment Key\` / \`Variant\` / \`Unit\` / \`Provider\`. Call entries override session entries, which override agent entries, by key; \`child()\` and \`runAs()\` inherit them. \`unit\` is \`agent_session\` (default), \`turn\`, or \`span\`. Key, variant, and provider are up to 256 characters, keys without \`:\`; at most 32 per event; invalid entries are dropped with a debug log.
+Take the assignment from the flag tool in use: \`experiments: experimentsFromAmplitude(variants, { keys: [...] })\` for an Amplitude Experiment \`fetchV2()\` / \`evaluateV2()\` result (\`provider: "amplitude"\`, fallback variants skipped; \`keys\` names the experiment flags, otherwise every flag is recorded and more than 32 warns); \`OpenFeature.addHooks([new AmplitudeAIHook({ flags: [...] })])\` from \`@amplitude/ai/openfeature\` for any OpenFeature provider (each listed flag evaluated inside a session is recorded with the provider's name; \`variantOf: (key, value) => ...\` names the arm for object-valued flags such as Statsig experiments); \`s.addExperiments([...])\` for an assignment learned after the session was entered. Neither sends an exposure event. Requires \`@amplitude/ai\` 0.25.0 or later.
+
 ### observe(fn, opts?) / observe(opts)(fn)
 Higher-order function that wraps a function to auto-emit [Agent] Span events.
 Creates a session boundary if none exists.
@@ -427,7 +508,7 @@ Express/Fastify/Hono middleware for automatic session tracking.
 import { createAmplitudeAIMiddleware } from '@amplitude/ai';
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
-  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+  userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 \`\`\`
 
@@ -528,7 +609,7 @@ import { AmplitudeAI, createAmplitudeAIMiddleware } from '@amplitude/ai';
 const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
-  userIdResolver: (req) => req.headers['x-user-id'] ?? null,
+  userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 \`\`\`
 
@@ -655,6 +736,10 @@ const outputs = [
   { path: join(root, 'llms.txt'), content: llmsTxt },
   { path: join(root, 'llms-full.txt'), content: llmsFullTxtWithExcerpt },
   { path: join(root, 'mcp.schema.json'), content: `${mcpSchema}\n` },
+  ...pinnedRawUrlFiles.map((file) => ({
+    path: join(root, file),
+    content: readFileSync(join(root, file), 'utf8').replace(rawRefPattern, releaseRawPrefix),
+  })),
 ];
 
 let stale = false;

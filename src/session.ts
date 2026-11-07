@@ -30,7 +30,18 @@ import {
   getActiveContext,
   SessionContext,
 } from './context.js';
+import {
+  DEFAULT_FLUSH_TIMEOUT_MS,
+  normalizeFlushTimeoutMs,
+} from './config.js';
 import type { SessionEnrichments } from './core/enrichments.js';
+import {
+  chainLevels,
+  type Experiment,
+  type ExperimentInput,
+  mergeExperiments,
+} from './core/experiments.js';
+import type { PrivacyConfig } from './core/privacy.js';
 import { PROP_SESSION_REPLAY_ID } from './core/tracking.js';
 import { isServerless } from './serverless.js';
 import { getLogger } from './utils/logger.js';
@@ -50,12 +61,34 @@ export function _resetRunSyncWarning(): void {
   _warnedRunSyncAutoFlush = false;
 }
 
+function _sameExperiment(a: Experiment, b: Experiment): boolean {
+  return a.key === b.key && a.variant === b.variant && a.unit === b.unit && a.provider === b.provider;
+}
+
 export interface SessionOptions {
   sessionId?: string | null;
+  /**
+   * Idle-timeout hint for the enrichment pipeline (minutes). Defaults to the
+   * pipeline default (~30 min); positive values are honored up to 90 days
+   * (129600, values above are clamped). `-1` means "rely on an explicit
+   * `[Agent] Session End`" — the session is enriched early on an explicit end,
+   * with a 90-day inactivity backstop so it never leaks open forever. See
+   * {@link BoundAgent.session}.
+   */
   idleTimeoutMinutes?: number | null;
   userId?: string | null;
   deviceId?: string | null;
   browserSessionId?: string | null;
+  /**
+   * User-defined tags for filtering/segmentation.
+   */
+  tags?: string[] | null;
+  /**
+   * Experiment assignment for this session, the same shape as the agent's
+   * `experiments`. Overrides the agent's entries with the same key; a
+   * `track*` call's `experiments` override these.
+   */
+  experiments?: ExperimentInput[] | null;
   /**
    * Automatically flush pending events when `run()` completes.
    *
@@ -64,6 +97,13 @@ export interface SessionOptions {
    * - `undefined` (default) — auto-detect: flush if a serverless environment is detected
    */
   autoFlush?: boolean;
+  /**
+   * Maximum time (ms) `run()` waits for the automatic flush before resolving.
+   * Defaults to the `AIConfig.flushTimeoutMs` of the owning `AmplitudeAI`
+   * (3000 ms unless configured). The flush continues in the background after
+   * the timeout.
+   */
+  flushTimeoutMs?: number;
   /**
    * Emit `[Agent] Session End` when `run()` finishes.
    *
@@ -81,13 +121,23 @@ export class Session {
   readonly userId: string | null;
   readonly deviceId: string | null;
   readonly browserSessionId: string | null;
+  readonly tags: string[] | null;
   readonly autoFlush: boolean;
+  readonly flushTimeoutMs: number | null;
   readonly trackSessionEnd: boolean;
   /** @internal Set by `runAs()` to suppress auto user-message tracking in delegation contexts. */
   _skipAutoUserTracking = false;
   private _agent: BoundAgent;
   private _enrichments: SessionEnrichments | null = null;
   private _sessionReplayId: string | null;
+  // `runAs` children share the root session's experiments: the root owns
+  // `_experiments`; children read through `_root()` and are listed in
+  // `_children` while their delegation is open. `_contexts` holds the live
+  // contexts of this session so `addExperiments()` can refresh them.
+  private _experiments: Experiment[];
+  private _parent: Session | null = null;
+  private readonly _children = new Set<Session>();
+  private readonly _contexts = new Set<SessionContext>();
 
   constructor(agent: BoundAgent, opts: SessionOptions = {}) {
     this.sessionId = opts.sessionId ?? randomUUID();
@@ -98,7 +148,10 @@ export class Session {
     this.browserSessionId =
       opts.browserSessionId ??
       (agent._defaults.browserSessionId as string | null);
+    this.tags = opts.tags ?? null;
+    this._experiments = mergeExperiments(opts.experiments);
     this.autoFlush = opts.autoFlush ?? isServerless();
+    this.flushTimeoutMs = normalizeFlushTimeoutMs(opts.flushTimeoutMs);
     this.trackSessionEnd = opts.trackSessionEnd ?? true;
     this._agent = agent;
     this._sessionReplayId =
@@ -111,8 +164,12 @@ export class Session {
     const defaults = this._agent._defaults;
     const ai = this._agent._ai;
     const sid = this.sessionId;
+    const experiments = mergeExperiments(
+      defaults.experiments as Experiment[] | undefined,
+      this._root()._experiments,
+    );
 
-    return new SessionContext({
+    const ctx = new SessionContext({
       sessionId: sid,
       traceId: this.traceId,
       userId: (this.userId ?? defaults.userId) as string | null,
@@ -124,14 +181,70 @@ export class Session {
       description: defaults.description as string | null,
       context: defaults.context as Record<string, unknown> | null,
       groups: defaults.groups as Record<string, unknown> | null,
+      tags: this.tags,
+      experiments: experiments.length > 0 ? experiments : null,
       idleTimeoutMinutes: this.idleTimeoutMinutes,
       deviceId: this.deviceId ?? (defaults.deviceId as string | null),
       browserSessionId:
         this.browserSessionId ?? (defaults.browserSessionId as string | null),
       nextTurnIdFn: () => ai._nextTurnId(sid),
       amplitude: ai.amplitude,
+      privacyConfig:
+        (ai as unknown as { _privacyConfig?: PrivacyConfig | null })
+          ._privacyConfig ?? null,
       skipAutoUserTracking: this._skipAutoUserTracking,
     });
+    ctx._session = this;
+    ctx.sessionExperiments = [...this._root()._experiments];
+    return ctx;
+  }
+
+  /**
+   * The session that owns the experiment list: this one, or the ancestor a
+   * `runAs` chain started from.
+   */
+  private _root(): Session {
+    return this._parent == null ? this : this._parent._root();
+  }
+
+  /**
+   * Record more `experiments` on this session after it was created.
+   *
+   * For assignments the code learns inside the session: a flag read on the
+   * first turn, a hook such as the OpenFeature `AmplitudeAIHook`, or an
+   * experiment chosen by the agent itself. Entries merge with session
+   * precedence (a later entry replaces an earlier one with the same key), so
+   * events tracked from this point on carry them, through this session, a
+   * provider wrapper, `tool()` or a `runAs` child. Adding from a `runAs`
+   * child records on the root session, so the parent's later events and
+   * `[Agent] Session End` carry the entries as well as the child's.
+   */
+  addExperiments(experiments: ExperimentInput[] | null | undefined): void {
+    const root = this._root();
+    const merged = mergeExperiments(root._experiments, experiments);
+    if (
+      merged.length === root._experiments.length &&
+      merged.every((entry, i) => _sameExperiment(entry, root._experiments[i] as Experiment))
+    ) {
+      return;
+    }
+    root._experiments = merged;
+    root._refreshExperiments();
+  }
+
+  /**
+   * Push the root experiment list into every live context of this session
+   * and its open `runAs` children, each merged over its own agent's defaults.
+   */
+  private _refreshExperiments(): void {
+    const experiments = this._root()._experiments;
+    const agentDefaults = this._agent._defaults.experiments as Experiment[] | undefined;
+    for (const ctx of this._contexts) {
+      const merged = mergeExperiments(agentDefaults, experiments);
+      ctx.experiments = merged.length > 0 ? merged : null;
+      ctx.sessionExperiments = [...experiments];
+    }
+    for (const child of this._children) child._refreshExperiments();
   }
 
   newTrace(): string {
@@ -159,10 +272,12 @@ export class Session {
   async run<T>(fn: (session: Session) => T | Promise<T>): Promise<T> {
     if (this.traceId == null) this.traceId = randomUUID();
     const ctx = this._buildSessionContext();
+    this._contexts.add(ctx);
     try {
       const result = await _sessionStorage.run(ctx, () => fn(this));
       return result;
     } finally {
+      this._contexts.delete(ctx);
       if (this.trackSessionEnd) this._autoEnd();
       if (this.autoFlush) {
         await this._flush();
@@ -183,11 +298,29 @@ export class Session {
     }
     if (this.traceId == null) this.traceId = randomUUID();
     const ctx = this._buildSessionContext();
+    this._contexts.add(ctx);
     try {
       return _sessionStorage.run(ctx, () => fn(this));
     } finally {
+      this._contexts.delete(ctx);
       if (this.trackSessionEnd) this._autoEnd();
     }
+  }
+
+  private _childSession(childAgent: BoundAgent): Session {
+    const childSession = new Session(childAgent, {
+      sessionId: this.sessionId,
+      userId: this.userId,
+      deviceId: this.deviceId,
+      browserSessionId: this.browserSessionId,
+      tags: this.tags,
+      trackSessionEnd: false,
+    });
+    childSession.traceId = this.traceId;
+    childSession._skipAutoUserTracking = true;
+    childSession._parent = this;
+    this._children.add(childSession);
+    return childSession;
   }
 
   /**
@@ -212,17 +345,15 @@ export class Session {
     childAgent: BoundAgent,
     fn: (session: Session) => T | Promise<T>,
   ): Promise<T> {
-    const childSession = new Session(childAgent, {
-      sessionId: this.sessionId,
-      userId: this.userId,
-      deviceId: this.deviceId,
-      browserSessionId: this.browserSessionId,
-      trackSessionEnd: false,
-    });
-    childSession.traceId = this.traceId;
-    childSession._skipAutoUserTracking = true;
+    const childSession = this._childSession(childAgent);
     const ctx = childSession._buildSessionContext();
-    return await _sessionStorage.run(ctx, () => fn(childSession));
+    childSession._contexts.add(ctx);
+    try {
+      return await _sessionStorage.run(ctx, () => fn(childSession));
+    } finally {
+      childSession._contexts.delete(ctx);
+      this._children.delete(childSession);
+    }
   }
 
   /**
@@ -232,17 +363,15 @@ export class Session {
     childAgent: BoundAgent,
     fn: (session: Session) => T,
   ): T {
-    const childSession = new Session(childAgent, {
-      sessionId: this.sessionId,
-      userId: this.userId,
-      deviceId: this.deviceId,
-      browserSessionId: this.browserSessionId,
-      trackSessionEnd: false,
-    });
-    childSession.traceId = this.traceId;
-    childSession._skipAutoUserTracking = true;
+    const childSession = this._childSession(childAgent);
     const ctx = childSession._buildSessionContext();
-    return _sessionStorage.run(ctx, () => fn(childSession));
+    childSession._contexts.add(ctx);
+    try {
+      return _sessionStorage.run(ctx, () => fn(childSession));
+    } finally {
+      childSession._contexts.delete(ctx);
+      this._children.delete(childSession);
+    }
   }
 
   private _autoEnd(): void {
@@ -258,6 +387,14 @@ export class Session {
     } catch (e) {
       getLogger().debug(`Failed to auto-end session ${this.sessionId}: ${e}`);
     }
+  }
+
+  private _effectiveFlushTimeoutMs(): number {
+    if (this.flushTimeoutMs != null) return this.flushTimeoutMs;
+    const configured = (
+      this._agent._ai as { config?: { flushTimeoutMs?: unknown } } | undefined
+    )?.config?.flushTimeoutMs;
+    return normalizeFlushTimeoutMs(configured) ?? DEFAULT_FLUSH_TIMEOUT_MS;
   }
 
   private async _flush(): Promise<void> {
@@ -277,11 +414,37 @@ export class Session {
               ? result
               : null;
         if (awaitable != null) {
-          await awaitable;
+          await this._awaitWithTimeout(awaitable as Promise<unknown>);
         }
       }
     } catch (e) {
-      getLogger().warn(`Failed to flush after session ${this.sessionId}: ${e}`);
+      getLogger().warn(
+        `Failed to flush after session.run() (${e instanceof Error ? e.name : typeof e}).`,
+      );
+    }
+  }
+
+  private async _awaitWithTimeout(awaitable: Promise<unknown>): Promise<void> {
+    const timeoutMs = this._effectiveFlushTimeoutMs();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), timeoutMs);
+      (timer as { unref?: () => void }).unref?.();
+    });
+    try {
+      const outcome = await Promise.race([
+        Promise.resolve(awaitable).then(() => 'done' as const),
+        timedOut,
+      ]);
+      if (outcome === 'timeout') {
+        // Keep a late rejection from surfacing as unhandled.
+        Promise.resolve(awaitable).catch(() => {});
+        getLogger().warn(
+          `Flush after session.run() did not complete within ${timeoutMs}ms; continuing without waiting. Pending events may be delivered later or lost if the process exits. Adjust with AIConfig.flushTimeoutMs.`,
+        );
+      }
+    } finally {
+      if (timer != null) clearTimeout(timer);
     }
   }
 
@@ -296,21 +459,35 @@ export class Session {
       merged.deviceId = this.deviceId;
     if (this.browserSessionId != null && merged.browserSessionId == null)
       merged.browserSessionId = this.browserSessionId;
-    if (this._sessionReplayId != null) {
+    if (this._sessionReplayId != null || this.tags != null) {
       const existingEp = merged.eventProperties as
         | Record<string, unknown>
         | undefined;
       const ep = existingEp != null ? { ...existingEp } : {};
-      if (!(PROP_SESSION_REPLAY_ID in ep)) {
+      if (this._sessionReplayId != null && !(PROP_SESSION_REPLAY_ID in ep)) {
         ep[PROP_SESSION_REPLAY_ID] = this._sessionReplayId;
-        merged.eventProperties = ep;
       }
+      if (this.tags != null && !('[Agent] Tags' in ep)) {
+        ep['[Agent] Tags'] = JSON.stringify(this.tags);
+      }
+      merged.eventProperties = ep;
+    }
+    const experiments = this._root()._experiments;
+    if (experiments.length > 0) {
+      merged.experiments = chainLevels(experiments, merged.experiments);
     }
     return merged as T;
   }
 
   trackUserMessage(content: string, opts: UserMessageOpts = {}): string {
-    return this._agent.trackUserMessage(content, this._inject(opts));
+    // Stamp the session's idle-timeout hint on this (usually first) event so
+    // the enrichment pipeline learns it before any idle/max-duration close
+    // could fire. An explicit opt on the call still wins.
+    const merged = this._inject(opts);
+    if (this.idleTimeoutMinutes != null && merged.idleTimeoutMinutes == null) {
+      merged.idleTimeoutMinutes = this.idleTimeoutMinutes;
+    }
+    return this._agent.trackUserMessage(content, merged);
   }
 
   trackAiMessage(
@@ -325,6 +502,24 @@ export class Session {
       model,
       provider,
       latencyMs,
+      this._inject(opts),
+    );
+  }
+
+  trackRunCost(
+    totalCostUsd: number,
+    inputTokens: number,
+    outputTokens: number,
+    model: string,
+    provider: string,
+    opts: Parameters<BoundAgent['trackRunCost']>[5] = {},
+  ): string {
+    return this._agent.trackRunCost(
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+      model,
+      provider,
       this._inject(opts),
     );
   }

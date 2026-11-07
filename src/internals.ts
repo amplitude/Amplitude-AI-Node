@@ -11,7 +11,11 @@ export {
   SimpleStreamingTracker,
   applySessionContext,
 } from './providers/base.js';
-export type { ProviderTrackOptions } from './providers/base.js';
+export type {
+  ProviderCallOptions,
+  ProviderRequestOptions,
+  ProviderTrackOptions,
+} from './providers/base.js';
 
 // Cost calculation internals
 export { stripProviderPrefix, inferProvider } from './utils/costs.js';

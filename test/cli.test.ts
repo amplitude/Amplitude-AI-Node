@@ -1,10 +1,24 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const execFileSyncMock = vi.fn();
+class FakeChild extends EventEmitter {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  kill = vi.fn();
+}
+
+let lastChild: FakeChild | null = null;
+const spawnMock = vi.fn(() => {
+  lastChild = new FakeChild();
+  return lastChild;
+});
 
 vi.mock('node:child_process', () => ({
-  execFileSync: execFileSyncMock,
+  spawn: spawnMock,
 }));
+
+const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'] as const;
+let listenersBefore = new Map<string, ((...args: unknown[]) => void)[]>();
 
 const originalArgv = [...process.argv];
 const originalEnv = { ...process.env };
@@ -17,11 +31,12 @@ async function runCli(
   configureMock?: () => void,
 ): Promise<void> {
   vi.resetModules();
-  execFileSyncMock.mockReset();
-  configureMock?.();
+  spawnMock.mockClear();
+  lastChild = null;
   process.argv = argv;
   process.env = { ...env };
   await import('../bin/amplitude-ai-instrument.mjs');
+  configureMock?.();
 }
 
 async function runCliCapturingExit(
@@ -52,9 +67,18 @@ describe('amplitude-ai-instrument CLI', (): void => {
   beforeEach((): void => {
     process.argv = [...originalArgv];
     process.env = { ...originalEnv };
+    listenersBefore = new Map(SIGNALS.map((s) => [s, process.listeners(s)]));
   });
 
   afterEach((): void => {
+    for (const signal of SIGNALS) {
+      const before = listenersBefore.get(signal) ?? [];
+      for (const listener of process.listeners(signal)) {
+        if (!before.includes(listener)) {
+          process.removeListener(signal, listener as (...args: unknown[]) => void);
+        }
+      }
+    }
     process.argv = [...originalArgv];
     process.env = { ...originalEnv };
     process.exit = originalExit;
@@ -68,8 +92,8 @@ describe('amplitude-ai-instrument CLI', (): void => {
       AMPLITUDE_AI_AUTO_PATCH: 'true',
     });
 
-    expect(execFileSyncMock).toHaveBeenCalledOnce();
-    const call = execFileSyncMock.mock.calls[0];
+    expect(spawnMock).toHaveBeenCalledOnce();
+    const call = spawnMock.mock.calls[0] as unknown[];
     const options = call?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
     expect(options?.env?.NODE_OPTIONS).toContain('--import');
     expect(options?.env?.NODE_OPTIONS).toContain('register.js');
@@ -82,7 +106,7 @@ describe('amplitude-ai-instrument CLI', (): void => {
       AMPLITUDE_AI_AUTO_PATCH: 'false',
     });
 
-    const call = execFileSyncMock.mock.calls[0];
+    const call = spawnMock.mock.calls[0] as unknown[];
     const options = call?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
     expect(options?.env?.NODE_OPTIONS ?? '').not.toContain('--import');
   });
@@ -97,7 +121,7 @@ describe('amplitude-ai-instrument CLI', (): void => {
     );
 
     expect(code).toBe(1);
-    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
     expect(stderrSpy).toHaveBeenCalledWith(
       'Usage: amplitude-ai-instrument <command> [args...]\n',
     );
@@ -112,16 +136,14 @@ describe('amplitude-ai-instrument CLI', (): void => {
         AMPLITUDE_AI_AUTO_PATCH: 'true',
       },
       () => {
-        execFileSyncMock.mockImplementationOnce(() => {
-          throw { status: 7 };
-        });
+        lastChild?.emit('exit', 7, null);
       },
     );
 
     expect(code).toBe(7);
   });
 
-  it('exits 1 when command fails without numeric status', async (): Promise<void> => {
+  it('exits 1 when the command cannot be started', async (): Promise<void> => {
     const code = await runCliCapturingExit(
       ['node', 'amplitude-ai-instrument', 'node', 'app.js'],
       {
@@ -130,9 +152,7 @@ describe('amplitude-ai-instrument CLI', (): void => {
         AMPLITUDE_AI_AUTO_PATCH: 'true',
       },
       () => {
-        execFileSyncMock.mockImplementationOnce(() => {
-          throw new Error('spawn failed');
-        });
+        lastChild?.emit('error', new Error('spawn failed'));
       },
     );
 
@@ -147,7 +167,7 @@ describe('amplitude-ai-instrument CLI', (): void => {
       NODE_OPTIONS: '--trace-warnings',
     });
 
-    const call = execFileSyncMock.mock.calls[0];
+    const call = spawnMock.mock.calls[0] as unknown[];
     const options = call?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
     expect(options?.env?.NODE_OPTIONS).toBe('--trace-warnings');
   });

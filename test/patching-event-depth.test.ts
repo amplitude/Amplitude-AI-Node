@@ -348,7 +348,7 @@ describe('patching event depth', () => {
     const tc = call.toolCalls as Array<Record<string, unknown>>;
     expect(tc).toHaveLength(1);
     expect((tc[0]?.function as Record<string, unknown>).name).toBe('get_data');
-    expect(call.totalCostUsd).toBeTypeOf('number');
+    expect(call.totalCostUsd).toBeNull();
   });
 
   it('Bedrock non-streaming: extracts tool calls from content', async (): Promise<void> => {
@@ -377,7 +377,7 @@ describe('patching event depth', () => {
     const tc = call.toolCalls as Array<Record<string, unknown>>;
     expect(tc).toHaveLength(1);
     expect((tc[0]?.function as Record<string, unknown>).name).toBe('calc');
-    expect(call.totalCostUsd).toBeTypeOf('number');
+    expect(call.totalCostUsd).toBeNull();
   });
 
   it('Bedrock streaming: accumulates tool calls from contentBlockStart/Delta', async (): Promise<void> => {
@@ -425,7 +425,7 @@ describe('patching event depth', () => {
     expect((tc[0]?.function as Record<string, unknown>).name).toBe('calc');
     expect((tc[0]?.function as Record<string, unknown>).arguments).toBe('{"expr":"2+2"}');
     expect(call.content).toBe('result');
-    expect(call.totalCostUsd).toBeTypeOf('number');
+    expect(call.totalCostUsd).toBeNull();
   });
 
   it('User message dedup: only tracks messages after last assistant reply', async (): Promise<void> => {

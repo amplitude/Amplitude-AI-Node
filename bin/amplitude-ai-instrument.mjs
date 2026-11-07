@@ -8,14 +8,25 @@
  *
  * This sets NODE_OPTIONS to preload the register module, then exec's the user command.
  * Same pattern as ddtrace, opentelemetry-instrument, etc.
+ *
+ * Only the first Node process (after npm/pnpm/yarn/npx/tsx/nodemon) is instrumented.
+ * Set AMPLITUDE_AI_INSTRUMENT_CHILDREN=true to instrument every descendant Node process.
  */
 
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const registerPath = join(__dirname, '..', 'dist', 'register.js');
+// NODE_OPTIONS is split on whitespace; a quoted file URL keeps the path intact.
+const importFlag = `--import=${JSON.stringify(pathToFileURL(registerPath).href)}`;
+
+// Must match the names in src/register.ts.
+const BOOTSTRAP_MARKER = '_AMPLITUDE_AI_BOOTSTRAP';
+const BOOTSTRAP_NODE_OPTIONS = '_AMPLITUDE_AI_BOOTSTRAP_NODE_OPTIONS';
+const instrumentChildren =
+  (process.env.AMPLITUDE_AI_INSTRUMENT_CHILDREN || '').toLowerCase() === 'true';
 
 const apiKey = process.env.AMPLITUDE_AI_API_KEY || '';
 const autoPatch = (process.env.AMPLITUDE_AI_AUTO_PATCH || '').toLowerCase() === 'true';
@@ -35,18 +46,53 @@ if (args.length === 0) {
 const existingNodeOpts = process.env.NODE_OPTIONS || '';
 if (apiKey && autoPatch) {
   process.env.NODE_OPTIONS = existingNodeOpts
-    ? `${existingNodeOpts} --import ${registerPath}`
-    : `--import ${registerPath}`;
+    ? `${existingNodeOpts} ${importFlag}`
+    : importFlag;
+  if (instrumentChildren) {
+    delete process.env[BOOTSTRAP_MARKER];
+    delete process.env[BOOTSTRAP_NODE_OPTIONS];
+  } else {
+    // register.js consumes this in the first Node process and restores
+    // NODE_OPTIONS so descendants (npm, build workers, MCP servers) are left alone.
+    process.env[BOOTSTRAP_MARKER] = '1';
+    process.env[BOOTSTRAP_NODE_OPTIONS] = existingNodeOpts;
+  }
 }
 
-try {
-  execFileSync(args[0], args.slice(1), {
-    stdio: 'inherit',
-    env: process.env,
-  });
-} catch (err) {
-  if (err && typeof err === 'object' && 'status' in err && typeof err.status === 'number') {
-    process.exit(err.status);
+const child = spawn(args[0], args.slice(1), {
+  stdio: 'inherit',
+  env: process.env,
+});
+
+// Forward termination signals so stopping the wrapper (a process manager,
+// `docker stop`, `kill <pid>`) stops the app instead of orphaning it. SIGINT
+// from a terminal already reaches the whole foreground process group, so it
+// is only forwarded when there is no terminal.
+const FORWARDED_SIGNALS =
+  process.platform === 'win32' ? ['SIGTERM', 'SIGHUP'] : ['SIGTERM', 'SIGHUP', 'SIGQUIT'];
+const forward = (signal) => {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill(signal);
   }
-  process.exit(1);
+};
+for (const signal of FORWARDED_SIGNALS) {
+  process.on(signal, forward);
 }
+process.on('SIGINT', () => {
+  if (!process.stdin.isTTY) forward('SIGINT');
+});
+
+child.on('error', (err) => {
+  process.stderr.write(`amplitude-ai-instrument: could not start ${args[0]}: ${err.message}\n`);
+  process.exit(1);
+});
+
+child.on('exit', (code, signal) => {
+  if (signal) {
+    // Exit the same way the child did, so callers see the signal.
+    for (const s of [...FORWARDED_SIGNALS, 'SIGINT']) process.removeAllListeners(s);
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exit(code ?? 1);
+});

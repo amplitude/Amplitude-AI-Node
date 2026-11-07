@@ -38,6 +38,14 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       'import { tool } from "@amplitude/ai";\nconst searchProducts = tool(async (query: string) => ({ items: [] }), {\n  name: "search_products",\n  inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },\n});',
   },
   {
+    id: 'experiments',
+    title: 'Experiment and feature flag assignment',
+    whenToUse:
+      'The agent runs under an A/B test or feature flag (prompt, model, router, or tool variant). Pass the variant the flag client already returned; never put it in context or eventProperties. Amplitude Experiment: experimentsFromAmplitude(variants, { keys: ["planner"] }). OpenFeature providers: new AmplitudeAIHook({ flags: ["planner"] }) from @amplitude/ai/openfeature. Learned later in the session: s.addExperiments([...]).',
+    snippet:
+      'import { experimentsFromAmplitude } from "@amplitude/ai";\nconst variants = await experiment.fetchV2({ user_id: "u1" }); // your existing Amplitude Experiment client\nconst session = ai.agent("assistant", { userId: "u1" }).session({\n  sessionId: "s1",\n  experiments: experimentsFromAmplitude(variants, { keys: ["planner"] }),\n  // or, from any flag client: [{ key: "planner", variant, provider: "statsig" }]\n});\n// Every event carries [Agent] Experiments; [Agent] Experiment Variant too when one experiment applies.',
+  },
+  {
     id: 'express-middleware',
     title: 'Express middleware propagation',
     whenToUse: 'Server app needs per-request context propagation.',
@@ -51,6 +59,26 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       'Parent agent delegates sub-tasks to child agents. Provider wrappers automatically pick up the child agent identity.',
     snippet:
       'const orchestrator = ai.agent("orchestrator", { userId: "u1" });\nconst researcher = orchestrator.child("researcher");\nconst session = orchestrator.session({ sessionId: "s1" });\nawait session.run(async (s) => {\n  const result = await s.runAs(researcher, async (cs) => {\n    return openai.chat.completions.create({ model: "gpt-4o", messages: [...] });\n  });\n});',
+  },
+  {
+    id: 'fan-out-llm',
+    title: 'Fan-out LLM pattern: parallel child calls, single user turn',
+    whenToUse:
+      'One user action triggers multiple parallel LLM calls (scoring, content generation, ' +
+      'matching). Each parallel call should be a child agent via runAs() sharing a single ' +
+      'trace — never emit separate user messages or traces for internal delegation.',
+    snippet:
+      'const orchestrator = ai.agent("orchestrator", { userId: uid });\n' +
+      'const scorer = orchestrator.child("focus-scorer");\n' +
+      'const matcher = orchestrator.child("catalog-matcher");\n\n' +
+      'await orchestrator.session({ sessionId }).run(async (s) => {\n' +
+      '  s.trackUserMessage("Generate plan from quiz results", { context: structuredState });\n\n' +
+      '  const [a, b] = await Promise.all([\n' +
+      '    s.runAs(scorer, () => openai.chat.completions.create({ model: "gpt-4o", messages: [...] })),\n' +
+      '    s.runAs(matcher, () => openai.chat.completions.create({ model: "gpt-4o", messages: [...] })),\n' +
+      '  ]);\n\n' +
+      '  s.trackAiMessage(assemble(a, b), { model: "gpt-4o", provider: "openai" });\n' +
+      '});',
   },
 ];
 

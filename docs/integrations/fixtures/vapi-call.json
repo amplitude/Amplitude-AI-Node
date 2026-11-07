@@ -1,0 +1,33 @@
+{
+  "id": "6b1f3c2e-4a5d-4e8f-9b7a-1c2d3e4f5a6b",
+  "orgId": "0f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+  "assistantId": "a1b2c3d4-0000-4000-8000-000000000001",
+  "type": "inboundPhoneCall",
+  "status": "ended",
+  "createdAt": "2026-10-20T16:59:59.000Z",
+  "updatedAt": "2026-10-20T17:00:20.000Z",
+  "startedAt": "2026-10-20T17:00:00.000Z",
+  "endedAt": "2026-10-20T17:00:15.000Z",
+  "endedReason": "customer-ended-call",
+  "cost": 0.0842,
+  "customer": {
+    "number": "+14155550123",
+    "externalId": "user_48213"
+  },
+  "messages": [
+    { "role": "system", "message": "You are Acme's order support agent.", "time": 1792515600000, "secondsFromStart": 0 },
+    { "role": "bot", "message": "Thanks for calling Acme. How can I help?", "time": 1792515601200, "endTime": 1792515603400, "secondsFromStart": 1.2, "duration": 2.2 },
+    { "role": "user", "message": "Where is my order? My email is someone@example.com.", "time": 1792515604100, "endTime": 1792515605900, "secondsFromStart": 4.1, "duration": 1.8, "confidence": 0.94 },
+    { "role": "bot", "message": "Your order shipped yesterday and arrives Thursday.", "time": 1792515606600, "endTime": 1792515609800, "secondsFromStart": 6.6, "duration": 3.2 },
+    { "role": "user", "message": "Great, thanks.", "time": 1792515611000, "endTime": 1792515612100, "secondsFromStart": 11, "duration": 1.1, "confidence": 0.97 },
+    { "role": "bot", "message": "Happy to help. Goodbye!", "time": 1792515612650, "endTime": 1792515614300, "secondsFromStart": 12.65, "duration": 1.65 }
+  ],
+  "artifact": {
+    "recordingUrl": "https://storage.vapi.ai/6b1f3c2e-4a5d-4e8f-9b7a-1c2d3e4f5a6b-1792515615000-mono.wav",
+    "transcript": "AI: Thanks for calling Acme. How can I help?\nUser: Where is my order? My email is someone@example.com.\nAI: Your order shipped yesterday and arrives Thursday.\nUser: Great, thanks.\nAI: Happy to help. Goodbye!"
+  },
+  "analysis": {
+    "summary": "The caller asked about an order; the agent said it arrives Thursday.",
+    "successEvaluation": "true"
+  }
+}

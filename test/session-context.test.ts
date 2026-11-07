@@ -244,6 +244,85 @@ describe('Idle timeout', () => {
     expect(props[PROP_IDLE_TIMEOUT_MINUTES]).toBe(60);
     mock.assertSessionClosed('s1');
   });
+
+  it('idle timeout is stamped on the first user message', async (): Promise<void> => {
+    // The pipeline must learn the hint before any idle/max-duration close, so
+    // it has to ride the first event, not just Session End.
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    const session = agent.session({ sessionId: 's1', idleTimeoutMinutes: 240 });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hi');
+    });
+
+    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
+    const props = userMsg.event_properties as Props;
+    expect(props[PROP_IDLE_TIMEOUT_MINUTES]).toBe(240);
+  });
+
+  it('idle timeout is omitted from user message when not set', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    const session = agent.session({ sessionId: 's1' });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hi');
+    });
+
+    const userMsg = mock.getEvents(EVENT_USER_MESSAGE)[0];
+    const props = userMsg.event_properties as Props;
+    expect(props[PROP_IDLE_TIMEOUT_MINUTES]).toBeUndefined();
+  });
+
+  it('unbounded sentinel (-1) is forwarded on user message and session end', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    const session = agent.session({ sessionId: 's1', idleTimeoutMinutes: -1 });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Long-running');
+    });
+
+    const userProps = mock.getEvents(EVENT_USER_MESSAGE)[0].event_properties as Props;
+    const endProps = mock.getEvents(EVENT_SESSION_END)[0].event_properties as Props;
+    expect(userProps[PROP_IDLE_TIMEOUT_MINUTES]).toBe(-1);
+    expect(endProps[PROP_IDLE_TIMEOUT_MINUTES]).toBe(-1);
+  });
+
+  it('far-future value (90 days) is forwarded on user message', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    const session = agent.session({ sessionId: 's1', idleTimeoutMinutes: 129600 });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Weeks-long');
+    });
+
+    const userProps = mock.getEvents(EVENT_USER_MESSAGE)[0].event_properties as Props;
+    expect(userProps[PROP_IDLE_TIMEOUT_MINUTES]).toBe(129600);
+  });
+
+  it('explicit idle timeout on the call wins over the session value', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    const session = agent.session({ sessionId: 's1', idleTimeoutMinutes: 240 });
+
+    await session.run(async (s) => {
+      s.trackUserMessage('Hi', { idleTimeoutMinutes: 60 });
+    });
+
+    const userProps = mock.getEvents(EVENT_USER_MESSAGE)[0].event_properties as Props;
+    expect(userProps[PROP_IDLE_TIMEOUT_MINUTES]).toBe(60);
+  });
+
+  it('rejects negative values other than the -1 sentinel', (): void => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('bot', { userId: 'u1' });
+    expect(() => agent.session({ sessionId: 's1', idleTimeoutMinutes: -5 })).toThrow(
+      RangeError,
+    );
+  });
 });
 
 describe('Session userId behavior', () => {

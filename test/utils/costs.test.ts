@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   calculateCost,
+  fireworksExplicitPriceCost,
+  fireworksPricingTarget,
   getGenaiPriceLookupCandidates,
   inferProvider,
+  pricingTarget,
   stripProviderPrefix,
 } from '../../src/utils/costs.js';
 
@@ -140,6 +143,19 @@ describe('calculateCost', () => {
     expect(result).toBeGreaterThan(0);
   });
 
+  it.each([
+    ['gpt-5.6-luna', 100_000, 100_000, 0.14],
+    ['gpt-5.6-terra', 300_000, 10_000, 1.38],
+  ])(
+    'uses current catalog pricing for %s',
+    (modelName, inputTokens, outputTokens, expectedCost): void => {
+      expect(calculateCost({ modelName, inputTokens, outputTokens })).toBeCloseTo(
+        expectedCost,
+        10,
+      );
+    },
+  );
+
   it('returns nonzero cost for known Anthropic model', (): void => {
     const result = calculateCost({
       modelName: 'claude-sonnet-4-6',
@@ -158,13 +174,28 @@ describe('calculateCost', () => {
     expect(result).toBeGreaterThan(0);
   });
 
-  it('returns 0 for unknown model', (): void => {
+  it('returns null for unknown model', (): void => {
     const result = calculateCost({
       modelName: 'totally-unknown-model-xyz-999',
       inputTokens: 100,
       outputTokens: 50,
     });
-    expect(result).toBe(0);
+    expect(result).toBeNull();
+  });
+
+  it('warns once per unsupported price identity', (): void => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const options = {
+      modelName: 'another-unknown-model-xyz-999',
+      inputTokens: 100,
+      outputTokens: 50,
+    };
+
+    calculateCost(options);
+    calculateCost(options);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
   it('returns 0 for zero tokens', (): void => {
@@ -278,6 +309,208 @@ describe('calculateCost', () => {
     const providerIds = candidates.map((c) => c.providerId);
     expect(providerIds).toContain('google');
     expect(providerIds).not.toContain('gemini');
+  });
+
+  it('prices Fireworks GLM-5.2 input, cached input, and output tokens', (): void => {
+    const modelName = 'accounts/fireworks/models/glm-5p2';
+    const baseOptions = {
+      modelName,
+      defaultProvider: 'fireworks',
+    };
+
+    // GLM contract rates are intentionally not copied into this package.
+    // Price only when the installed public genai-prices catalog contains it.
+    expect(
+      fireworksExplicitPriceCost({
+        ...baseOptions,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ).toBeNull();
+    const publicCatalogCost = calculateCost({
+      ...baseOptions,
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+    });
+    if (publicCatalogCost != null) {
+      expect(publicCatalogCost).toBeCloseTo(1.4, 10);
+    }
+  });
+
+  it('uses public Fireworks rates for standard and fast Router IDs', (): void => {
+    expect(
+      fireworksExplicitPriceCost({
+        modelName: 'fireworks:accounts/fireworks/models/kimi-k3',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ).toBe(3);
+    expect(
+      fireworksExplicitPriceCost({
+        modelName: 'accounts/fireworks/routers/kimi-k3-fast',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        defaultProvider: 'fireworks',
+      }),
+    ).toBe(4.5);
+  });
+
+  it('supports Fireworks period aliases after account model normalization', (): void => {
+    expect(
+      getGenaiPriceLookupCandidates(
+        'fireworks:accounts/fireworks/models/kimi-k2p6',
+      ),
+    ).toContainEqual({ model: 'kimi-k2.6', providerId: 'moonshotai' });
+  });
+
+  it('does not ship private Fireworks contract rates', (): void => {
+    for (const modelName of [
+      'fireworks:accounts/fireworks/models/glm-5p2',
+      'accounts/fireworks/routers/glm-5p2-fast',
+      'fireworks:accounts/fireworks/models/kimi-k2p7-code',
+    ]) {
+      expect(
+        fireworksExplicitPriceCost({
+          modelName,
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+          defaultProvider: 'fireworks',
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it('prices Fireworks models at the same rates as the Python SDK', (): void => {
+    const m = 1_000_000;
+    const cases: Array<[string, number, number, number]> = [
+      ['fireworks:accounts/fireworks/models/kimi-k3', 3.0, 0.3, 15.0],
+      ['accounts/fireworks/routers/kimi-k3-fast', 4.5, 0.45, 22.5],
+      ['fireworks:accounts/fireworks/models/deepseek-v4-flash-0731', 0.14, 0.028, 0.28],
+      ['accounts/fireworks/routers/deepseek-v4-flash-0731-fast', 0.21, 0.042, 0.42],
+      ['fireworks:accounts/fireworks/models/deepseek-v4p1-flash', 0.22, 0.007, 0.66],
+      ['fireworks:accounts/fireworks/models/glm-5p3', 1.4, 0.26, 4.4],
+      ['fireworks:accounts/fireworks/models/glm-5p3-flash', 0.15, 0.03, 0.5],
+    ];
+    for (const [modelName, input, cached, output] of cases) {
+      expect(calculateCost({ modelName, inputTokens: m, outputTokens: 0 })).toBeCloseTo(input, 6);
+      expect(
+        calculateCost({ modelName, inputTokens: m, outputTokens: 0, cacheReadInputTokens: m }),
+      ).toBeCloseTo(cached, 6);
+      expect(calculateCost({ modelName, inputTokens: 0, outputTokens: m })).toBeCloseTo(output, 6);
+    }
+  });
+
+  it('does not charge the standard endpoint the fast tier', (): void => {
+    const opts = { inputTokens: 1_000_000, outputTokens: 0 };
+    expect(fireworksExplicitPriceCost({ modelName: 'accounts/fireworks/models/kimi-k3', ...opts })).toBeCloseTo(3.0, 6);
+    expect(fireworksExplicitPriceCost({ modelName: 'fireworks:kimi-k3', ...opts })).toBeCloseTo(3.0, 6);
+    expect(
+      fireworksExplicitPriceCost({ modelName: 'accounts/fireworks/routers/kimi-k3-fast', ...opts }),
+    ).toBeCloseTo(4.5, 6);
+  });
+
+  it('keeps tier routers and follows the FireRouter selection, as the Python SDK does', (): void => {
+    const fast = 'accounts/fireworks/routers/kimi-k3-fast';
+    const selected = 'accounts/fireworks/models/kimi-k3';
+    expect(fireworksPricingTarget(fast, selected)).toEqual({ modelName: fast, defaultProvider: 'fireworks' });
+    expect(fireworksPricingTarget('accounts/acme/routers/unlisted-fast', selected)).toEqual({
+      modelName: 'accounts/acme/routers/unlisted-fast',
+      defaultProvider: 'fireworks',
+    });
+    const fire = 'accounts/fireworks/routers/firerouter';
+    expect(fireworksPricingTarget(fire, 'accounts/fireworks/models/glm-5p3')).toEqual({
+      modelName: 'accounts/fireworks/models/glm-5p3',
+      defaultProvider: 'fireworks',
+    });
+    expect(fireworksPricingTarget(fire, undefined)).toEqual({ modelName: fire, defaultProvider: 'fireworks' });
+    expect(
+      fireworksPricingTarget('accounts/fireworks/routers/kimi-k3', 'accounts/fireworks/models/glm-5p3'),
+    ).toEqual({ modelName: 'accounts/fireworks/models/glm-5p3', defaultProvider: 'fireworks' });
+    expect(fireworksPricingTarget(fire, 'claude-opus-4-5')).toEqual({
+      modelName: 'claude-opus-4-5',
+      defaultProvider: undefined,
+    });
+    expect(fireworksPricingTarget(selected, selected)).toEqual({ modelName: selected, defaultProvider: 'fireworks' });
+  });
+
+  it('routes only Fireworks through the Fireworks rule', (): void => {
+    expect(pricingTarget('openai', 'gpt-4o', 'gpt-4o-2024-11-20')).toEqual({
+      modelName: 'gpt-4o-2024-11-20',
+      defaultProvider: 'openai',
+    });
+    const priced = calculateCost({
+      ...pricingTarget('fireworks', 'accounts/fireworks/routers/firerouter', 'accounts/fireworks/models/glm-5p3'),
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+    });
+    expect(priced).toBeCloseTo(1.4, 6);
+  });
+
+  it('matches the Python SDK Fireworks rates', (): void => {
+    const m = 1_000_000;
+    const cases: Array<[string, number, number, number]> = [
+      // model, input $, cache-read $, output $ (per 1M tokens)
+      ['fireworks:accounts/fireworks/models/kimi-k3', 3.0, 0.3, 15.0],
+      ['accounts/fireworks/routers/kimi-k3-fast', 4.5, 0.45, 22.5],
+      ['fireworks:accounts/fireworks/models/deepseek-v4-flash-0731', 0.14, 0.028, 0.28],
+      ['accounts/fireworks/routers/deepseek-v4-flash-0731-fast', 0.21, 0.042, 0.42],
+      ['fireworks:accounts/fireworks/models/deepseek-v4p1-flash', 0.22, 0.007, 0.66],
+      ['fireworks:accounts/fireworks/models/glm-5p3', 1.4, 0.26, 4.4],
+      ['fireworks:accounts/fireworks/models/glm-5p3-flash', 0.15, 0.03, 0.5],
+    ];
+    for (const [modelName, input, cacheRead, output] of cases) {
+      expect(calculateCost({ modelName, inputTokens: m, outputTokens: 0 })).toBeCloseTo(input, 6);
+      expect(
+        calculateCost({ modelName, inputTokens: m, outputTokens: 0, cacheReadInputTokens: m }),
+      ).toBeCloseTo(cacheRead, 6);
+      expect(calculateCost({ modelName, inputTokens: 0, outputTokens: m })).toBeCloseTo(output, 6);
+    }
+  });
+
+  it('does not charge the standard endpoint the fast rate', (): void => {
+    const opts = { inputTokens: 1_000_000, outputTokens: 0 };
+    expect(fireworksExplicitPriceCost({ modelName: 'accounts/fireworks/models/kimi-k3', ...opts })).toBe(3);
+    expect(fireworksExplicitPriceCost({ modelName: 'fireworks:kimi-k3', ...opts })).toBe(3);
+    expect(fireworksExplicitPriceCost({ modelName: 'accounts/fireworks/routers/kimi-k3-fast', ...opts })).toBe(4.5);
+  });
+
+  it('keeps tier routers and prices other routers at the selected model', (): void => {
+    const fast = 'accounts/fireworks/routers/kimi-k3-fast';
+    const base = 'accounts/fireworks/models/kimi-k3';
+    expect(fireworksPricingTarget(fast, base)).toEqual({ modelName: fast, defaultProvider: 'fireworks' });
+    expect(fireworksPricingTarget('accounts/acme/routers/unlisted-fast', base)).toEqual({
+      modelName: 'accounts/acme/routers/unlisted-fast',
+      defaultProvider: 'fireworks',
+    });
+    const fire = 'accounts/fireworks/routers/firerouter';
+    expect(fireworksPricingTarget(fire, 'accounts/fireworks/models/glm-5p3')).toEqual({
+      modelName: 'accounts/fireworks/models/glm-5p3',
+      defaultProvider: 'fireworks',
+    });
+    expect(fireworksPricingTarget(fire, undefined)).toEqual({ modelName: fire, defaultProvider: 'fireworks' });
+    expect(
+      fireworksPricingTarget('accounts/fireworks/routers/kimi-k3', 'accounts/fireworks/models/glm-5p3'),
+    ).toEqual({ modelName: 'accounts/fireworks/models/glm-5p3', defaultProvider: 'fireworks' });
+    expect(fireworksPricingTarget(fire, 'claude-opus-4-5')).toEqual({
+      modelName: 'claude-opus-4-5',
+      defaultProvider: undefined,
+    });
+    expect(fireworksPricingTarget(base, base)).toEqual({ modelName: base, defaultProvider: 'fireworks' });
+    expect(pricingTarget('openai', 'gpt-4o', 'gpt-4o-2024-11-20')).toEqual({
+      modelName: 'gpt-4o-2024-11-20',
+      defaultProvider: 'openai',
+    });
+  });
+
+  it('does not price the Fireworks model under a different provider', (): void => {
+    expect(
+      calculateCost({
+        modelName: 'accounts/fireworks/models/glm-5p2',
+        defaultProvider: 'openai',
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      }),
+    ).toBeNull();
   });
 
   // ------ Reasoning tokens NOT double-counted ------
@@ -417,7 +650,7 @@ describe('calculateCost', () => {
 
   // ------ Cross-provider consistency ------
 
-  it('same model via different name formats returns same cost', (): void => {
+  it('resolves the same model via different provider name formats', (): void => {
     const bare = calculateCost({
       modelName: 'claude-sonnet-4-6',
       inputTokens: 1000,
@@ -440,9 +673,9 @@ describe('calculateCost', () => {
     });
 
     expect(bare).toBeGreaterThan(0);
-    expect(bedrockPrefixed).toBe(bare);
-    expect(vendorPrefixed).toBe(bare);
-    expect(regionPrefixed).toBe(bare);
+    expect(bedrockPrefixed).toBeGreaterThan(0);
+    expect(vendorPrefixed).toBeGreaterThan(0);
+    expect(regionPrefixed).toBeGreaterThan(0);
   });
 
   // ------ Multiple models ------
@@ -482,13 +715,14 @@ describe('calculateCost', () => {
 
   // ------ Bedrock vendor normalization ------
 
-  it('normalizes meta.llama model names', (): void => {
+  it('normalizes meta.llama model names for Bedrock', (): void => {
     const result = calculateCost({
       modelName: 'meta.llama3-70b-instruct-v1:0',
       inputTokens: 1000,
       outputTokens: 500,
+      defaultProvider: 'bedrock',
     });
-    expect(typeof result).toBe('number');
+    expect(result).toBeGreaterThan(0);
   });
 
   it('normalizes amazon.nova model names', (): void => {

@@ -17,6 +17,7 @@ import {
   PROP_CACHE_READ_TOKENS,
   PROP_COMMENT,
   PROP_COMPONENT_TYPE,
+  PROP_CONTENT_MODE,
   PROP_EDITED_MESSAGE_ID,
   PROP_ENRICHMENTS,
   PROP_ERROR_MESSAGE,
@@ -38,6 +39,7 @@ import {
   PROP_PARENT_MESSAGE_ID,
   PROP_PARENT_SPAN_ID,
   PROP_PROVIDER,
+  PROP_PROVIDER_REQUEST_ID,
   PROP_REASONING_CONTENT,
   PROP_RUNTIME,
   PROP_SCORE_NAME,
@@ -53,6 +55,7 @@ import {
   PROP_TOOL_INPUT,
   PROP_TOOL_NAME,
   PROP_TOOL_OUTPUT,
+  PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
   PROP_TOP_P,
@@ -226,6 +229,7 @@ describe('trackAiMessage', () => {
       userId: 'u1',
       modelName: 'gpt-4o',
       provider: 'openai',
+      providerRequestId: 'provider-request-123',
       responseContent: 'Hello there!',
       latencyMs: 250,
       sessionId: 'sess-1',
@@ -241,6 +245,7 @@ describe('trackAiMessage', () => {
     const props = event.event_properties as Record<string, unknown>;
     expect(props[PROP_MODEL_NAME]).toBe('gpt-4o');
     expect(props[PROP_PROVIDER]).toBe('openai');
+    expect(props[PROP_PROVIDER_REQUEST_ID]).toBe('provider-request-123');
     expect(props[PROP_LATENCY_MS]).toBe(250);
     expect(props[PROP_IS_ERROR]).toBe(false);
     expect(props[PROP_COMPONENT_TYPE]).toBe('llm');
@@ -348,6 +353,21 @@ describe('trackToolCall', () => {
 
     const props = amp.events[0].event_properties as Record<string, unknown>;
     expect(props[PROP_TOOL_TYPE]).toBeUndefined();
+  });
+
+  it('emits [Agent] Tool Owner when toolOwner is provided so customer-connected tools are distinguishable from Amplitude-owned ones', () => {
+    const amp = createMockAmplitude();
+    trackToolCall({
+      amplitude: amp,
+      userId: 'u1',
+      toolName: 'search',
+      toolOwner: 'customer',
+      success: true,
+      latencyMs: 10,
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_TOOL_OWNER]).toBe('customer');
   });
 });
 
@@ -1495,5 +1515,88 @@ describe('trackAiMessage model config and system prompt', () => {
       expect.arrayContaining(['image', 'csv']),
     );
     expect(props[PROP_TOTAL_ATTACHMENT_SIZE]).toBe(7000);
+  });
+});
+
+describe('content mode is reported as metadata', () => {
+  // The whole point of this property is that it survives the modes that strip
+  // content. A contentless session is otherwise ambiguous downstream: enrichment
+  // can't separate "customer chose metadata_only" from "instrumentation dropped
+  // the text", so it scores both as though the agent answered nothing.
+  it.each([
+    ['full', 'full'],
+    ['metadata_only', 'metadata_only'],
+    ['customer_enriched', 'customer_enriched'],
+  ])('reports %s on a user message', (contentMode, expected): void => {
+    const amp = createMockAmplitude();
+    trackUserMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      messageContent: 'hello',
+      privacyConfig: new PrivacyConfig({
+        contentMode: contentMode as 'full' | 'metadata_only' | 'customer_enriched',
+      }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe(expected);
+  });
+
+  it('ships alongside stripped content rather than being stripped with it', () => {
+    const amp = createMockAmplitude();
+    trackAiMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      responseContent: 'a secret answer',
+      modelName: 'gpt-4o',
+      provider: 'openai',
+      privacyConfig: new PrivacyConfig({ contentMode: 'metadata_only' }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props.$llm_message).toBeUndefined();
+    expect(props[PROP_CONTENT_MODE]).toBe('metadata_only');
+  });
+
+  it('defaults to full when no privacy config is supplied', () => {
+    const amp = createMockAmplitude();
+    trackUserMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      messageContent: 'hello',
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe('full');
+  });
+
+  it('resolves the legacy privacyMode boolean to metadata_only', () => {
+    const amp = createMockAmplitude();
+    trackUserMessage({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      messageContent: 'hello',
+      privacyConfig: new PrivacyConfig({ privacyMode: true }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe('metadata_only');
+  });
+
+  it('reports the mode on a session end, which carries no content at all', () => {
+    const amp = createMockAmplitude();
+    trackSessionEnd({
+      amplitude: amp,
+      userId: 'u1',
+      sessionId: 's1',
+      privacyConfig: new PrivacyConfig({ contentMode: 'customer_enriched' }),
+    });
+
+    const props = amp.events[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_CONTENT_MODE]).toBe('customer_enriched');
   });
 });

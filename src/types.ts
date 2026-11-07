@@ -119,6 +119,7 @@ export interface ChatCompletionParams {
  * Describes the subset of the OpenAI SDK's response shape that the SDK tracks.
  */
 export interface ChatCompletionResponse {
+  id?: string;
   model: string;
   choices: ChatChoice[];
   usage?: OpenAITokenUsage;
@@ -187,6 +188,7 @@ export interface OpenAIResponseUsage {
  * Structural interface for OpenAI Responses API responses.
  */
 export interface OpenAIResponse {
+  id?: string;
   model?: string;
   status?: string;
   output_text?: string;
@@ -255,6 +257,7 @@ export interface AnthropicTokenUsage {
 export interface GeminiResponse {
   response?: GeminiResponseObject;
   text?: (() => string) | string;
+  responseId?: string;
   usageMetadata?: GeminiUsageMetadata;
   candidates?: GeminiCandidate[];
 }
@@ -264,6 +267,7 @@ export interface GeminiResponse {
  */
 export interface GeminiResponseObject {
   text?: () => string;
+  responseId?: string;
   usageMetadata?: GeminiUsageMetadata;
   candidates?: GeminiCandidate[];
 }
@@ -389,10 +393,13 @@ export interface ToolCallShape {
  */
 export interface Attachment {
   type: string;
+  /** Optional artifact data, captured with ordinary content settings and string redaction. */
+  $agent_artifact?: Record<string, unknown>;
   name?: string;
   content?: string;
   url?: string;
   size_bytes?: number;
+  mime_type?: string;
 }
 
 /**
@@ -421,6 +428,7 @@ export interface TrackCallOptions {
   modelName: string;
   provider: string;
   responseContent: string;
+  providerRequestId?: string | null;
   latencyMs: number;
   sessionId?: string | null;
   traceId?: string | null;
@@ -433,6 +441,15 @@ export interface TrackCallOptions {
   context?: Record<string, unknown> | null;
   env?: string | null;
   groups?: Record<string, unknown> | null;
+  /**
+   * Caller-supplied event properties merged onto the emitted event.
+   *
+   * ESCAPE HATCH — not subject to `contentMode` / `PrivacyConfig`.
+   * These ship as-is regardless of privacy mode. Do NOT put LLM
+   * prompts, response content, or PII here — use the documented
+   * content channels (`responseContent`, `toolInput`, `messageContent`,
+   * etc.) for anything that should be gated by privacy mode.
+   */
   eventProperties?: Record<string, unknown> | null;
   browserSessionId?: string | number | null;
   inputTokens?: number | null;

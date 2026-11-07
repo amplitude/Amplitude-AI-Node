@@ -4,17 +4,45 @@
  * Provides shared tracking logic and session context integration.
  */
 
+import { createRequire } from 'node:module';
 import { getActiveContext, isTrackerManaged } from '../context.js';
 import {
+  PROP_EXPERIMENTS,
   PROP_IDLE_TIMEOUT_MINUTES,
   PROP_SESSION_REPLAY_ID,
 } from '../core/constants.js';
+import { withExperiments } from '../core/experiments.js';
 import type { PrivacyConfig } from '../core/privacy.js';
+import { sanitizeStructuredContent } from '../core/privacy.js';
 import {
   trackAiMessage,
   trackUserMessage,
   type TrackAiMessageOptions,
 } from '../core/tracking.js';
+import {
+  GENAI_CACHE_CREATION_INPUT_TOKENS,
+  GENAI_CACHE_READ_INPUT_TOKENS,
+  GENAI_ERROR_TYPE,
+  GENAI_FINISH_REASONS,
+  GENAI_INPUT_MESSAGES,
+  GENAI_INPUT_TOKENS,
+  GENAI_OPERATION_NAME,
+  GENAI_OUTPUT_MESSAGES,
+  GENAI_OUTPUT_TOKENS,
+  GENAI_PROVIDER_NAME,
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_REQUEST_MAX_TOKENS,
+  GENAI_REQUEST_MODEL,
+  GENAI_REQUEST_TEMPERATURE,
+  GENAI_REQUEST_TOP_P,
+  GENAI_RESPONSE_MODEL,
+  GENAI_RESPONSE_ID,
+  GENAI_USAGE_COST,
+  AMP_AGENT_ID,
+  AMP_PARENT_AGENT_ID,
+  AMP_SKIP_AUTO_USER_TRACKING,
+  OP_CHAT,
+} from '../otel/conventions.js';
 import { recordToolUsesFromResponse } from '../utils/tool-latency.js';
 import {
   resolveAmplitude,
@@ -23,7 +51,11 @@ import {
   type TrackCallOptions,
   type TrackFn,
 } from '../types.js';
+import { calculateCost } from '../utils/costs.js';
+import { getLogger, safeTrack } from '../utils/logger.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
+
+const _require = createRequire(import.meta.url);
 
 /**
  * Per-call context overrides for provider wrappers.
@@ -55,6 +87,92 @@ export interface ProviderTrackOptions {
    * Set to false when you already call `trackUserMessage()` explicitly.
    */
   trackInputMessages?: boolean;
+  /**
+   * Next Turn ID for an event in this completion. The first call returns the
+   * id `applySessionContext` already allocated. Later calls take the next
+   * session id, so a user message, tool call, and AI response do not share one.
+   */
+  takeTurnId?: () => number | undefined;
+}
+
+/**
+ * Provider SDK request options accepted alongside Amplitude overrides in the
+ * second argument of wrapped methods, e.g.
+ * `create(params, { userId, signal, timeout })`. They are forwarded to the
+ * underlying SDK call. Anything else can be passed as a third argument.
+ */
+export interface ProviderRequestOptions {
+  signal?: AbortSignal | null;
+  timeout?: number;
+  maxRetries?: number;
+  headers?: Record<string, string | null | undefined>;
+  query?: Record<string, unknown>;
+  idempotencyKey?: string;
+  fetchOptions?: Record<string, unknown>;
+}
+
+export type ProviderCallOptions = ProviderTrackOptions & ProviderRequestOptions;
+
+const TRACK_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'userId',
+  'deviceId',
+  'sessionId',
+  'traceId',
+  'turnId',
+  'agentId',
+  'parentAgentId',
+  'customerOrgId',
+  'agentVersion',
+  'description',
+  'context',
+  'env',
+  'groups',
+  'eventProperties',
+  'browserSessionId',
+  'trackInputMessages',
+  'takeTurnId',
+] satisfies Array<keyof ProviderTrackOptions>);
+
+/**
+ * Separate Amplitude tracking overrides from provider SDK request options.
+ * Request options from `extra` take precedence over those in `options`.
+ */
+export function splitCallOptions(
+  options?: ProviderCallOptions | null,
+  extra?: Record<string, unknown> | null,
+): {
+  overrides: ProviderTrackOptions | undefined;
+  requestOptions: Record<string, unknown> | undefined;
+} {
+  let overrides: Record<string, unknown> | undefined;
+  let requestOptions: Record<string, unknown> | undefined;
+  if (options != null && typeof options === 'object') {
+    for (const key of Object.keys(options)) {
+      const value = (options as Record<string, unknown>)[key];
+      if (TRACK_OPTION_KEYS.has(key)) {
+        overrides ??= {};
+        overrides[key] = value;
+      } else if (value !== undefined) {
+        requestOptions ??= {};
+        requestOptions[key] = value;
+      }
+    }
+  }
+  if (extra != null && typeof extra === 'object') {
+    requestOptions = { ...requestOptions, ...extra };
+  }
+  return {
+    overrides: overrides as ProviderTrackOptions | undefined,
+    requestOptions,
+  };
+}
+
+/** Arguments for the underlying SDK call: `[params]` or `[params, requestOptions]`. */
+export function sdkCallArgs(
+  params: Record<string, unknown>,
+  requestOptions: Record<string, unknown> | undefined,
+): unknown[] {
+  return requestOptions === undefined ? [params] : [params, requestOptions];
 }
 
 /**
@@ -101,10 +219,37 @@ export function applySessionContext(
     ) {
       ep[PROP_SESSION_REPLAY_ID] = `${ctx.deviceId}/${ctx.browserSessionId}`;
     }
-    if (Object.keys(ep).length > 0) {
-      result.eventProperties = ep;
+    const withSessionExperiments =
+      ctx.experiments != null &&
+      ctx.experiments.length > 0 &&
+      result.sessionId === ctx.sessionId &&
+      !(PROP_EXPERIMENTS in ep)
+        ? (withExperiments(ep, ctx.experiments) ?? ep)
+        : ep;
+    if (Object.keys(withSessionExperiments).length > 0) {
+      result.eventProperties = withSessionExperiments;
     }
   }
+
+  const explicitTurn = overrides.turnId != null;
+  const sessionAllocated = !explicitTurn && ctx != null && result.turnId != null;
+  let started = false;
+  let local = typeof result.turnId === 'number' ? result.turnId : undefined;
+  result.takeTurnId = (): number | undefined => {
+    if (!started) {
+      started = true;
+      return typeof result.turnId === 'number' ? result.turnId : undefined;
+    }
+    if (sessionAllocated && ctx != null) {
+      const nxt = ctx.nextTurnId();
+      if (nxt != null) return nxt;
+    }
+    if (typeof local === 'number') {
+      local += 1;
+      return local;
+    }
+    return undefined;
+  };
 
   return result as unknown as ProviderTrackOptions;
 }
@@ -138,7 +283,7 @@ export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
     deviceId: ctx.deviceId ?? undefined,
     sessionId: ctx.sessionId,
     traceId: ctx.traceId,
-    turnId: ctx.turnId ?? undefined,
+    turnId: ctx.takeTurnId?.() ?? ctx.turnId ?? undefined,
     agentId: ctx.agentId,
     parentAgentId: ctx.parentAgentId,
     customerOrgId: ctx.customerOrgId,
@@ -152,9 +297,127 @@ export function contextFields(ctx: ProviderTrackOptions): TrackContextFields {
   };
 }
 
+interface OtelTracerLike {
+  startSpan(name: string, options?: { attributes?: Record<string, unknown> }): OtelSpanHandle;
+}
+
+interface OtelSpanHandle {
+  setAttribute(key: string, value: string | number | boolean): void;
+  setStatus(status: { code: number; message?: string }): void;
+  end(): void;
+}
+
+/**
+ * Return an OTEL tracer only when the specific `AmplitudeAI` instance
+ * that owns this provider wrapper has called `.enableOtel()`.
+ *
+ * Previously (AA-151931 V3-A) this checked the *global* `TracerProvider`
+ * shape and returned a tracer whenever any real one was registered —
+ * which meant every app running OTEL for APM (Datadog, Honeycomb, etc.)
+ * silently rerouted our LLM content into that APM sink, bypassing
+ * `contentMode` entirely. Python's provider path (`providers/base.py:74-95`)
+ * always gated on `owner._otel_enabled`; this brings Node to parity.
+ */
+function _getOtelTracer(otelEnabled: boolean): OtelTracerLike | null {
+  if (!otelEnabled) return null;
+  try {
+    const api = _require('@opentelemetry/api') as {
+      trace: {
+        getTracerProvider(): {
+          getTracer?(name: string): OtelTracerLike;
+          _delegate?: { constructor?: { name?: string } };
+          constructor?: { name?: string };
+        };
+      };
+    };
+    const provider = api.trace.getTracerProvider();
+    const delegateName = provider._delegate?.constructor?.name;
+    const providerName = provider.constructor?.name;
+    const isReal =
+      delegateName === 'BasicTracerProvider' ||
+      delegateName === 'NodeTracerProvider' ||
+      providerName === 'BasicTracerProvider' ||
+      providerName === 'NodeTracerProvider';
+    if (isReal) {
+      const tracer = provider.getTracer?.('@amplitude/ai');
+      return tracer ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function _inheritOtelEnabled(input: AmplitudeOrAI): boolean {
+  const flag = (input as { otelEnabled?: boolean }).otelEnabled;
+  return flag === true;
+}
+
+function _inheritPrivacyConfig(input: AmplitudeOrAI): PrivacyConfig | null {
+  const config = (input as { config?: { toPrivacyConfig?: () => PrivacyConfig } })
+    .config;
+  if (config != null && typeof config.toPrivacyConfig === 'function') {
+    return config.toPrivacyConfig();
+  }
+  return null;
+}
+
+/**
+ * Resolve effective content mode (mirrors `core/tracking.ts _effectiveMode`).
+ * Kept local so the OTEL emission path can gate its message attributes the
+ * same way Amplitude-event emission does (AA-151931 V3-B).
+ */
+function _providerEffectiveMode(
+  pc: PrivacyConfig | null,
+): 'full' | 'metadata_only' | 'customer_enriched' {
+  if (pc == null) return 'full';
+  const explicit = pc.contentMode;
+  if (
+    explicit === 'full' ||
+    explicit === 'metadata_only' ||
+    explicit === 'customer_enriched'
+  ) {
+    return explicit;
+  }
+  return pc.privacyMode ? 'metadata_only' : 'full';
+}
+
+/**
+ * Serialize an input-messages array for the `gen_ai.input.messages` span
+ * attribute, applying PrivacyConfig if provided. Returns `null` when the
+ * effective mode is not `full` — caller must omit the attribute in that
+ * case rather than stamping an empty string (AA-151931 V3-B).
+ *
+ * Applies built-in PII redaction AND custom redaction (via the
+ * three-arg `sanitizeStructuredContent`) so `gen_ai.input.messages` /
+ * `gen_ai.output.messages` obey `customRedactionPatterns` and
+ * `customRedactionFn` before attributes enter the OTEL pipeline —
+ * matching the trackAiMessage / trackToolCall contract.
+ */
+function _stampLineage(
+  attrs: Record<string, unknown>,
+  ctx: ReturnType<typeof getActiveContext>,
+): void {
+  if (ctx?.agentId) attrs[AMP_AGENT_ID] = ctx.agentId;
+  if (ctx?.parentAgentId) attrs[AMP_PARENT_AGENT_ID] = ctx.parentAgentId;
+  if (ctx?.skipAutoUserTracking) attrs[AMP_SKIP_AUTO_USER_TRACKING] = true;
+}
+
+function _sanitizeGenAiMessagesForSpan(
+  messages: unknown,
+  pc: PrivacyConfig | null,
+): string | null {
+  const mode = _providerEffectiveMode(pc);
+  if (mode !== 'full') return null;
+  if (pc == null) return JSON.stringify(messages);
+  const sanitized = sanitizeStructuredContent(messages, pc.redactPii, pc);
+  return JSON.stringify(sanitized);
+}
+
 export abstract class BaseAIProvider {
   protected _amplitude: AmplitudeLike;
   protected _privacyConfig: PrivacyConfig | null;
+  protected _otelEnabled: boolean;
   readonly _providerName: string;
 
   constructor(options: {
@@ -163,11 +426,33 @@ export abstract class BaseAIProvider {
     providerName: string;
   }) {
     this._amplitude = resolveAmplitude(options.amplitude);
-    this._privacyConfig = options.privacyConfig ?? null;
+    // When passed an AmplitudeAI instance, inherit its privacyConfig so
+    // wrapper-emitted events honor the user's contentMode / redactPii /
+    // customRedaction* settings. Without this, wrappers silently default to
+    // `new PrivacyConfig()` (contentMode=full, no custom redaction), leaking
+    // content that the AmplitudeAI instance was configured to strip.
+    this._privacyConfig =
+      options.privacyConfig ?? _inheritPrivacyConfig(options.amplitude);
+    // OTEL routing is opt-in per AmplitudeAI instance. Inherit the flag
+    // from the AmplitudeAI passed in (AA-151931 V3-A). Raw Amplitude
+    // clients or plain transports have no otelEnabled property, so this
+    // stays false.
+    this._otelEnabled = _inheritOtelEnabled(options.amplitude);
     this._providerName = options.providerName;
   }
 
+  /**
+   * Emit the AI response event. Never throws: a failure in validation, cost
+   * enforcement or serialization skips the event with a content-free warning
+   * so the host's provider call is unaffected.
+   */
   protected _track(opts: Omit<TrackAiMessageOptions, 'amplitude'>): string {
+    return safeTrack(() => this._trackUnguarded(opts)) ?? '';
+  }
+
+  private _trackUnguarded(
+    opts: Omit<TrackAiMessageOptions, 'amplitude'>,
+  ): string {
     if (isTrackerManaged()) return '';
 
     const merged = applySessionContext({
@@ -187,6 +472,96 @@ export abstract class BaseAIProvider {
       eventProperties: opts.eventProperties,
       browserSessionId: opts.browserSessionId,
     });
+
+    // When OTEL is active on this AmplitudeAI instance, emit a completed
+    // span with gen_ai.* attributes so the SpanEventMapper handles event
+    // creation. This enables provider wrapper events to show up in OTEL
+    // traces alongside observe() spans. AA-151931 V3-A: gate on explicit
+    // opt-in so we don't route content into an unrelated global provider.
+    const tracer = _getOtelTracer(this._otelEnabled);
+    if (tracer != null) {
+      try {
+        const spanAttrs: Record<string, unknown> = {
+          [GENAI_OPERATION_NAME]: OP_CHAT,
+          [GENAI_REQUEST_MODEL]: opts.modelName,
+          [GENAI_RESPONSE_MODEL]: opts.modelName,
+          [GENAI_PROVIDER_NAME]: opts.provider,
+        };
+        if (opts.providerRequestId) {
+          spanAttrs[GENAI_RESPONSE_ID] = opts.providerRequestId;
+        }
+        if (opts.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = opts.inputTokens;
+        if (opts.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = opts.outputTokens;
+        if (opts.reasoningTokens != null) {
+          spanAttrs[GENAI_REASONING_OUTPUT_TOKENS] = opts.reasoningTokens;
+        }
+        if (opts.cacheReadInputTokens != null) {
+          spanAttrs[GENAI_CACHE_READ_INPUT_TOKENS] = opts.cacheReadInputTokens;
+        }
+        if (opts.cacheCreationInputTokens != null) {
+          spanAttrs[GENAI_CACHE_CREATION_INPUT_TOKENS] = opts.cacheCreationInputTokens;
+        }
+        if (opts.totalCostUsd != null) {
+          spanAttrs[GENAI_USAGE_COST] = opts.totalCostUsd;
+        }
+        if (opts.temperature != null) spanAttrs[GENAI_REQUEST_TEMPERATURE] = opts.temperature;
+        if (opts.maxOutputTokens != null) spanAttrs[GENAI_REQUEST_MAX_TOKENS] = opts.maxOutputTokens;
+        if (opts.topP != null) spanAttrs[GENAI_REQUEST_TOP_P] = opts.topP;
+        // AA-151931 V3-B: gen_ai.input.messages / gen_ai.output.messages
+        // are content channels — respect contentMode and apply custom
+        // redaction so metadata_only really means no content, even on
+        // OTEL spans.
+        const inputMsgs = (opts as Record<string, unknown>).inputMessages;
+        if (inputMsgs != null) {
+          const serialized = _sanitizeGenAiMessagesForSpan(inputMsgs, this._privacyConfig);
+          if (serialized != null) spanAttrs[GENAI_INPUT_MESSAGES] = serialized;
+        }
+        if (opts.responseContent != null) {
+          const serialized = _sanitizeGenAiMessagesForSpan(
+            [{ role: 'assistant', content: opts.responseContent }],
+            this._privacyConfig,
+          );
+          if (serialized != null) spanAttrs[GENAI_OUTPUT_MESSAGES] = serialized;
+        }
+        if (opts.finishReason != null) {
+          spanAttrs[GENAI_FINISH_REASONS] = [opts.finishReason];
+        }
+        if (opts.latencyMs != null) {
+          spanAttrs['amplitude.latency_ms'] = opts.latencyMs;
+        }
+        // AA-151931 V3-D: `error.type` is a short classifier per the
+        // GenAI semantic conventions. Previously we fell back to
+        // `errorMessage` here, which shipped the raw error string under
+        // the classifier attribute (violating the convention and bypassing
+        // any content gate). The message flows through the span status
+        // instead; consumers that need it can read it from there.
+        if (opts.isError && opts.errorType != null) {
+          spanAttrs[GENAI_ERROR_TYPE] = opts.errorType;
+        }
+        _stampLineage(spanAttrs, getActiveContext());
+
+        const span = tracer.startSpan(`${opts.provider}.${OP_CHAT}`, { attributes: spanAttrs });
+        if (opts.isError) {
+          // AA-151931 V3-G: the mapper reads `span.status.message` into
+          // PROP_ERROR_MESSAGE, so the raw error string is content and
+          // must obey the same gate as gen_ai.*.messages. Non-full modes
+          // still emit an ERROR status so consumers see the failure;
+          // only the message body is stripped.
+          const errMode = _providerEffectiveMode(this._privacyConfig);
+          if (errMode === 'full') {
+            span.setStatus({ code: 2, message: opts.errorMessage ?? 'error' });
+          } else {
+            span.setStatus({ code: 2 });
+          }
+        }
+        span.end();
+      } catch (e) {
+        getLogger().debug(`Failed to create OTEL span for provider wrapper: ${e}`);
+      }
+      // OTEL span created — the SpanEventMapper handles event emission.
+      // Return early so we don't also emit a direct trackAiMessage().
+      return '';
+    }
 
     return trackAiMessage({
       ...opts,
@@ -228,15 +603,23 @@ export abstract class BaseAIProvider {
   _privacyConfigRef(): PrivacyConfig | null {
     return this._privacyConfig;
   }
+
+  /** @internal Accessor for SimpleStreamingTracker (AA-151931 V3-A). */
+  _otelEnabledRef(): boolean {
+    return this._otelEnabled;
+  }
 }
 
 export class SimpleStreamingTracker {
   private _trackFn: TrackFn;
   private _amplitude: AmplitudeLike;
   private _privacyConfig: PrivacyConfig | null;
+  private _otelEnabled: boolean;
   readonly accumulator: StreamingAccumulator;
   private _modelName = 'unknown';
   private _providerName: string;
+  private _providerRequestId: string | null = null;
+  private _bodyProviderRequestIdSet = false;
   private _inputMessages: Array<Record<string, unknown>> = [];
   private _autoUserTracked = false;
   private _skipAutoUserTracking = false;
@@ -245,6 +628,7 @@ export class SimpleStreamingTracker {
     this._trackFn = provider.trackFn();
     this._amplitude = provider._amplitudeClient();
     this._privacyConfig = provider._privacyConfigRef();
+    this._otelEnabled = provider._otelEnabledRef();
     this._providerName = provider._providerName;
     this.accumulator = new StreamingAccumulator();
   }
@@ -274,6 +658,23 @@ export class SimpleStreamingTracker {
     this.accumulator.model = model;
   }
 
+  setProviderRequestId(
+    providerRequestId: string,
+    bodyPreferred = false,
+  ): void {
+    if (!providerRequestId) return;
+    if (bodyPreferred) {
+      if (!this._bodyProviderRequestIdSet) {
+        this._providerRequestId = providerRequestId;
+        this._bodyProviderRequestIdSet = true;
+      }
+      return;
+    }
+    if (!this._providerRequestId) {
+      this._providerRequestId = providerRequestId;
+    }
+  }
+
   addContent(chunk: string): void {
     this.accumulator.addContent(chunk);
   }
@@ -295,36 +696,82 @@ export class SimpleStreamingTracker {
 
     const state = this.accumulator.getState();
     const ctx = applySessionContext(overrides);
+    let costUsd: number | null = null;
+    if (state.inputTokens != null && state.outputTokens != null) {
+      try {
+        costUsd = calculateCost({
+          modelName: this._modelName,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          reasoningTokens: state.reasoningTokens ?? 0,
+          cacheReadInputTokens: state.cacheReadTokens ?? 0,
+          cacheCreationInputTokens: state.cacheCreationTokens ?? 0,
+          defaultProvider: this._providerName,
+        });
+      } catch {
+        // cost calculation is best-effort
+      }
+    }
 
-    const eventId = this._trackFn({
-      ...contextFields(ctx),
-      modelName: this._modelName,
-      provider: this._providerName,
-      responseContent: state.content,
-      latencyMs: this.accumulator.elapsedMs,
-      inputTokens: state.inputTokens,
-      outputTokens: state.outputTokens,
-      totalTokens: state.totalTokens,
-      reasoningTokens: state.reasoningTokens,
-      cacheReadInputTokens: state.cacheReadTokens,
-      cacheCreationInputTokens: state.cacheCreationTokens,
-      finishReason: state.finishReason,
-      toolCalls: state.toolCalls.length > 0 ? state.toolCalls : null,
-      providerTtfbMs: state.ttfbMs,
-      isStreaming: true,
-    });
+    // When OTEL is active on this AmplitudeAI instance, emit a span
+    // instead of calling _trackFn directly (AA-151931 V3-A).
+    const tracer = _getOtelTracer(this._otelEnabled);
+    if (tracer != null) {
+      try {
+        const spanAttrs: Record<string, unknown> = {
+          [GENAI_OPERATION_NAME]: OP_CHAT,
+          [GENAI_REQUEST_MODEL]: this._modelName,
+          [GENAI_RESPONSE_MODEL]: this._modelName,
+          [GENAI_PROVIDER_NAME]: this._providerName,
+        };
+        if (this._providerRequestId) {
+          spanAttrs[GENAI_RESPONSE_ID] = this._providerRequestId;
+        }
+        if (state.inputTokens != null) spanAttrs[GENAI_INPUT_TOKENS] = state.inputTokens;
+        if (state.outputTokens != null) spanAttrs[GENAI_OUTPUT_TOKENS] = state.outputTokens;
+        if (state.reasoningTokens != null) {
+          spanAttrs[GENAI_REASONING_OUTPUT_TOKENS] = state.reasoningTokens;
+        }
+        if (state.cacheReadTokens != null) {
+          spanAttrs[GENAI_CACHE_READ_INPUT_TOKENS] = state.cacheReadTokens;
+        }
+        if (state.cacheCreationTokens != null) {
+          spanAttrs[GENAI_CACHE_CREATION_INPUT_TOKENS] = state.cacheCreationTokens;
+        }
+        if (costUsd != null) spanAttrs[GENAI_USAGE_COST] = costUsd;
+        if (state.finishReason != null) spanAttrs[GENAI_FINISH_REASONS] = [state.finishReason];
+        // AA-151931 V3-B: gate gen_ai.*.messages on contentMode, same as
+        // the non-streaming path.
+        if (this._inputMessages.length > 0) {
+          const serialized = _sanitizeGenAiMessagesForSpan(this._inputMessages, this._privacyConfig);
+          if (serialized != null) spanAttrs[GENAI_INPUT_MESSAGES] = serialized;
+        }
+        if (state.content) {
+          const serialized = _sanitizeGenAiMessagesForSpan(
+            [{ role: 'assistant', content: state.content }],
+            this._privacyConfig,
+          );
+          if (serialized != null) spanAttrs[GENAI_OUTPUT_MESSAGES] = serialized;
+        }
+        if (this.accumulator.elapsedMs > 0) {
+          spanAttrs['amplitude.latency_ms'] = this.accumulator.elapsedMs;
+        }
+        _stampLineage(spanAttrs, getActiveContext());
 
-    // Record streamed tool_use timestamps so the next completion reports
-    // real tool-call latencyMs instead of 0.
-    recordToolUsesFromResponse(state.toolCalls, {
-      sessionId: ctx.sessionId,
-      agentId: ctx.agentId,
-    });
+        const span = tracer.startSpan(`${this._providerName}.${OP_CHAT}`, { attributes: spanAttrs });
+        span.end();
+      } catch (e) {
+        getLogger().debug(`Failed to create OTEL span for streaming: ${e}`);
+      }
+      recordToolUsesFromResponse(state.toolCalls, {
+        sessionId: ctx.sessionId,
+        agentId: ctx.agentId,
+      });
+      return '';
+    }
 
-    // Emit trackUserMessage() for any new user-role messages in the input
-    // conversation. Mirrors provider wrappers' `_trackInputMessages()` so
-    // custom streaming integrations get zero-instrumentation parity.
-    // Idempotent across repeat finalize() calls via _autoUserTracked.
+    // Users take Turn IDs before the AI response. Emitting them afterwards
+    // would stamp a higher id on the earlier message.
     const activeCtx = getActiveContext();
     if (
       !this._skipAutoUserTracking &&
@@ -337,6 +784,38 @@ export class SimpleStreamingTracker {
       this._autoUserTracked = true;
       this._emitAutoUserMessages(ctx);
     }
+
+    const eventId = this._trackFn({
+      ...contextFields(ctx),
+      modelName: this._modelName,
+      provider: this._providerName,
+      providerRequestId: this._providerRequestId,
+      responseContent:
+        (state.content?.trim()
+          ? state.content
+          : (state.inputTokens ?? 0) > 0 || (state.outputTokens ?? 0) > 0
+            ? '[Agent run: tool_use response]'
+            : (state.content ?? '')),
+      latencyMs: this.accumulator.elapsedMs,
+      inputTokens: state.inputTokens,
+      outputTokens: state.outputTokens,
+      totalTokens: state.totalTokens,
+      reasoningTokens: state.reasoningTokens,
+      cacheReadInputTokens: state.cacheReadTokens,
+      cacheCreationInputTokens: state.cacheCreationTokens,
+      totalCostUsd: costUsd,
+      finishReason: state.finishReason,
+      toolCalls: state.toolCalls.length > 0 ? state.toolCalls : null,
+      providerTtfbMs: state.ttfbMs,
+      isStreaming: true,
+    });
+
+    // Record streamed tool_use timestamps so the next completion reports
+    // real tool-call latencyMs instead of 0.
+    recordToolUsesFromResponse(state.toolCalls, {
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+    });
 
     return eventId;
   }
@@ -397,7 +876,7 @@ export class SimpleStreamingTracker {
         messageContent: content,
         sessionId: ctx.sessionId,
         traceId: ctx.traceId,
-        turnId: ctx.turnId ?? undefined,
+        turnId: ctx.takeTurnId?.() ?? ctx.turnId ?? undefined,
         messageSource: ctx.parentAgentId ? 'agent' : 'user',
         agentId: ctx.agentId,
         parentAgentId: ctx.parentAgentId,

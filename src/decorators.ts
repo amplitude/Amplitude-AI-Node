@@ -7,15 +7,27 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import {
   _sessionStorage,
   getActiveContext,
   SessionContext,
 } from './context.js';
-import type { PrivacyConfig } from './core/privacy.js';
+import { _getOtelOwner } from './client.js';
+import { PrivacyConfig, redactPiiPatterns } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
+import {
+  AMP_AGENT_ID,
+  AMP_INPUT_STATE,
+  AMP_OUTPUT_STATE,
+  AMP_PARENT_AGENT_ID,
+  AMP_SKIP_AUTO_USER_TRACKING,
+  AMP_SPAN_KIND,
+} from './otel/conventions.js';
 import type { AmplitudeLike } from './types.js';
 import { getLogger } from './utils/logger.js';
+
+const _require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // ToolCallTracker — global config singleton (parity with Python)
@@ -104,9 +116,46 @@ export class ToolCallTracker {
 // Context resolution (merges runtime overrides > explicit opts > session ctx > global)
 // ---------------------------------------------------------------------------
 
+// Used when no privacy config is reachable (no decorator option, no owning
+// session, no ToolCallTracker config): content is dropped rather than sent.
+const _FAIL_CLOSED_PRIVACY_CONFIG = new PrivacyConfig({
+  privacyMode: true,
+  contentMode: 'metadata_only',
+});
+
+/**
+ * Privacy config resolution for decorators: decorator option → owning
+ * session's `AmplitudeAI` config → `ToolCallTracker` → `metadata_only`.
+ */
+function _isFullMode(pc: PrivacyConfig): boolean {
+  return pc.contentMode === 'full' || (pc.contentMode == null && !pc.privacyMode);
+}
+
+function _redactForLog(message: string, pc: PrivacyConfig, fallback: string): string {
+  try {
+    const redacted = pc.redactPii ? redactPiiPatterns(message) : message;
+    return pc.applyCustomRedaction(redacted);
+  } catch {
+    return fallback;
+  }
+}
+
+function _resolvePrivacyConfig(
+  explicit: PrivacyConfig | null | undefined,
+  ctx: SessionContext | null,
+): PrivacyConfig {
+  return (
+    explicit ??
+    ctx?.privacyConfig ??
+    ToolCallTracker._privacyConfig ??
+    _FAIL_CLOSED_PRIVACY_CONFIG
+  );
+}
+
 interface ToolOptions {
   name?: string;
   toolType?: string | null;
+  toolOwner?: string | null;
   amplitude?: AmplitudeLike | null;
   userId?: string | null;
   sessionId?: string | null;
@@ -139,7 +188,7 @@ interface ResolvedContext {
   customerOrgId: string | null;
   agentVersion: string | null;
   context: Record<string, unknown> | null;
-  privacyConfig: PrivacyConfig | null;
+  privacyConfig: PrivacyConfig;
   eventProperties: Record<string, unknown> | null;
   userProperties: Record<string, unknown> | null;
   groups: Record<string, unknown> | null;
@@ -198,10 +247,7 @@ function _resolveContextFields(opts: ToolOptions): ResolvedContext {
       ToolCallTracker._context,
       ctx?.context,
     ) as Record<string, unknown> | null,
-    privacyConfig: resolve(
-      opts.privacyConfig,
-      ToolCallTracker._privacyConfig,
-    ) as PrivacyConfig | null,
+    privacyConfig: _resolvePrivacyConfig(opts.privacyConfig, ctx),
     eventProperties: resolve(
       opts.eventProperties,
       ToolCallTracker._eventProperties,
@@ -298,6 +344,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     const startTime = performance.now();
     let success = true;
     let errorMsg: string | null = null;
+    let errorStack: string | null = null;
     let result: unknown = undefined;
 
     try {
@@ -314,6 +361,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
     } catch (e) {
       success = false;
       errorMsg = e instanceof Error ? e.message : String(e);
+      errorStack = e instanceof Error ? (e.stack ?? null) : null;
       if (opts.onError != null) {
         try {
           opts.onError(e instanceof Error ? e : new Error(String(e)), toolName);
@@ -321,7 +369,12 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           // swallow callback errors
         }
       }
-      getLogger().error(`Tool '${toolName}' failed: ${errorMsg}`);
+      const errorType = e instanceof Error ? e.name : typeof e;
+      getLogger().error(
+        _isFullMode(r.privacyConfig)
+          ? `Tool '${toolName}' failed: ${_redactForLog(errorMsg, r.privacyConfig, errorType)}`
+          : `Tool '${toolName}' failed (${errorType})`,
+      );
       throw e;
     } finally {
       const latencyMs = performance.now() - startTime;
@@ -336,12 +389,15 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
         ...extraProps,
       };
 
+      const captureStack = r.privacyConfig.captureStackTrace === true;
+
       try {
         trackToolCall({
           amplitude: r.amplitude,
           userId: r.userId,
           toolName,
           toolType: opts.toolType,
+          toolOwner: opts.toolOwner,
           success,
           latencyMs,
           sessionId: r.sessionId,
@@ -350,6 +406,7 @@ function _wrapTool<T extends AnyFn>(fn: T, opts: ToolOptions): ToolWrapped<T> {
           toolInput,
           toolOutput: success ? result : undefined,
           errorMessage: errorMsg,
+          stackTrace: captureStack && errorStack ? errorStack : undefined,
           env: r.env,
           agentId: r.agentId,
           parentAgentId: r.parentAgentId,
@@ -404,8 +461,11 @@ async function _runWithTimeout(
 // observe() HOF — wraps a function to auto-track as [Agent] Span
 // ---------------------------------------------------------------------------
 
+export type ObserveSpanType = 'span' | 'tool' | 'agent' | 'llm';
+
 interface ObserveOptions {
   name?: string;
+  type?: ObserveSpanType;
   amplitude?: AmplitudeLike | null;
   userId?: string | null;
   agentId?: string | null;
@@ -459,7 +519,7 @@ interface ResolvedObserveParams {
   userId: string;
   agentId: string | null;
   env: string | null;
-  privacyConfig: PrivacyConfig | null;
+  privacyConfig: PrivacyConfig;
   context: SessionContext | null;
 }
 
@@ -470,28 +530,102 @@ function _resolveObserveParams(opts: ObserveOptions): ResolvedObserveParams {
     userId: opts.userId ?? ctx?.userId ?? ToolCallTracker._userId ?? '',
     agentId: opts.agentId ?? ctx?.agentId ?? ToolCallTracker._agentId ?? null,
     env: opts.env ?? ctx?.env ?? ToolCallTracker._env ?? null,
-    privacyConfig: opts.privacyConfig ?? ToolCallTracker._privacyConfig ?? null,
+    privacyConfig: _resolvePrivacyConfig(opts.privacyConfig, ctx),
     context: ctx,
   };
 }
 
 function _serializeState(
   value: unknown,
-  pc: PrivacyConfig | null,
+  pc: PrivacyConfig,
 ): Record<string, unknown> | null {
-  if (value == null) return null;
-  if (pc != null) {
-    const mode = pc.contentMode;
-    if (mode === 'metadata_only' || (mode == null && pc.privacyMode))
-      return null;
-  }
+  if (value == null || !_isFullMode(pc)) return null;
   if (typeof value === 'object' && !Array.isArray(value))
     return value as Record<string, unknown>;
   return { value: String(value) };
 }
 
+// ---------------------------------------------------------------------------
+// OTEL tracer detection — used by observe() to emit real OTEL spans when
+// the SDK's OTEL pipeline is active (so AmplitudeEventSpanProcessor handles
+// event emission instead of direct trackSpan calls).
+// ---------------------------------------------------------------------------
+
+interface OtelTracerLike {
+  startActiveSpan<T>(
+    name: string,
+    fn: (span: OtelSpanHandle) => T | Promise<T>,
+  ): T | Promise<T>;
+}
+
+interface OtelSpanHandle {
+  setAttribute(key: string, value: string | number | boolean): void;
+  setStatus(status: { code: number; message?: string }): void;
+  end(): void;
+}
+
+function _getOtelTracer(caller?: unknown): OtelTracerLike | null {
+  // AA-151931 V3-C: gate on the specific caller's OTEL opt-in, falling
+  // back to the module-level registry only when the caller's amplitude
+  // is a raw transport without an `otelEnabled` signal.
+  //
+  // Round-2 review (Avery): the earlier version consulted only the
+  // module registry, so once ANY AmplitudeAI in the process called
+  // `enableOtel()`, every `observe()` — including work associated with
+  // a different client that never opted in — silently rerouted through
+  // OTEL. That crossed the consent boundary between coexisting clients.
+  //
+  // Resolution order:
+  //   1. If the caller passed an AmplitudeAI-shaped object with an
+  //      explicit `otelEnabled` flag, honor THAT client's choice.
+  //      `true` → use OTEL; `false` → do not, even if the module
+  //      registry is populated.
+  //   2. Otherwise (raw transport, null, undefined) fall back to the
+  //      module registry so bare `observe(fn)` calls with no explicit
+  //      amplitude continue to work as documented.
+  const callerOtelEnabled = (caller as { otelEnabled?: boolean } | null)
+    ?.otelEnabled;
+  if (callerOtelEnabled === true) {
+    // fall through to tracer resolution
+  } else if (callerOtelEnabled === false) {
+    return null;
+  } else {
+    const owner = _getOtelOwner();
+    if (owner?.otelEnabled !== true) return null;
+  }
+  try {
+    const api = _require('@opentelemetry/api') as {
+      trace: {
+        getTracerProvider(): {
+          getTracer?(name: string): OtelTracerLike;
+          _delegate?: { constructor?: { name?: string } };
+          constructor?: { name?: string };
+        };
+      };
+    };
+    const provider = api.trace.getTracerProvider();
+    // When a real provider (BasicTracerProvider/NodeTracerProvider) is
+    // registered, the global proxy's _delegate points to it.
+    const delegateName = provider._delegate?.constructor?.name;
+    const providerName = provider.constructor?.name;
+    const isReal =
+      delegateName === 'BasicTracerProvider' ||
+      delegateName === 'NodeTracerProvider' ||
+      providerName === 'BasicTracerProvider' ||
+      providerName === 'NodeTracerProvider';
+    if (isReal) {
+      const tracer = provider.getTracer?.('@amplitude/ai');
+      return tracer ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
   const spanName = opts.name || fn.name || 'anonymous';
+  const spanKind = opts.type ?? 'span';
 
   const wrapper = async function (
     this: unknown,
@@ -503,11 +637,79 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
     const sessionId = ctx?.sessionId ?? randomUUID();
 
     const runFn = async (): Promise<unknown> => {
+      // AA-151931 V3-E: gate span state attributes on effective content
+      // mode. `_serializeState` already drops the payload when the mode
+      // is `metadata_only`, but `AMP_INPUT_STATE` was previously stamped
+      // unconditionally when `_serializeState` returned non-null — which
+      // meant the `full` fallback path always shipped it, and
+      // `customer_enriched` mode leaked it too.
+      const pc = params.privacyConfig;
+      const gateOpen = _isFullMode(pc);
       const inputState = _serializeState(
         args.length === 1 ? args[0] : args.length > 0 ? { args } : null,
-        params.privacyConfig,
+        pc,
       );
 
+      // Try to use OTEL tracer if available — the span processor will
+      // handle event emission via the mapper. Pass this call's amplitude
+      // so the opt-in check is scoped to the specific client, not to
+      // the process-wide module registry (AA-151931 V3-C review).
+      const tracer = _getOtelTracer(params.amplitude);
+      if (tracer != null) {
+        return tracer.startActiveSpan(spanName, async (span: OtelSpanHandle) => {
+          span.setAttribute(AMP_SPAN_KIND, spanKind);
+          if (ctx?.agentId) span.setAttribute(AMP_AGENT_ID, ctx.agentId);
+          if (ctx?.parentAgentId) span.setAttribute(AMP_PARENT_AGENT_ID, ctx.parentAgentId);
+          if (ctx?.skipAutoUserTracking) span.setAttribute(AMP_SKIP_AUTO_USER_TRACKING, true);
+          if (inputState != null && gateOpen) {
+            span.setAttribute(AMP_INPUT_STATE, JSON.stringify(inputState));
+          }
+
+          let result: unknown = undefined;
+          try {
+            result = await fn.apply(this, args);
+            if (gateOpen) {
+              const outputState = _serializeState(result, pc);
+              if (outputState != null) {
+                span.setAttribute(AMP_OUTPUT_STATE, JSON.stringify(outputState));
+              }
+            }
+            return result;
+          } catch (exc) {
+            // AA-151931 V3-G: the mapper reads `span.status.message` into
+            // PROP_ERROR_MESSAGE, which is a content channel. Non-full
+            // modes still emit an ERROR status so the failure signal
+            // survives; only the raw message body is stripped.
+            if (gateOpen) {
+              const msg = exc instanceof Error ? exc.message : String(exc);
+              span.setStatus({ code: 2, message: msg });
+            } else {
+              span.setStatus({ code: 2 });
+            }
+            throw exc;
+          } finally {
+            span.end();
+            if (ownsSession && params.amplitude != null) {
+              try {
+                trackSessionEnd({
+                  amplitude: params.amplitude,
+                  userId: params.userId,
+                  sessionId,
+                  env: params.env,
+                  agentId: params.agentId || spanName,
+                  privacyConfig: params.privacyConfig,
+                });
+              } catch (e) {
+                getLogger().error(
+                  `Failed to end @observe session '${spanName}': ${e}`,
+                );
+              }
+            }
+          }
+        });
+      }
+
+      // Fallback: directly call trackSpan (no OTEL pipeline active).
       const start = performance.now();
       let isError = false;
       let errorMessage: string | null = null;
@@ -575,6 +777,7 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
         agentId: params.agentId || spanName,
         env: params.env,
         amplitude: params.amplitude,
+        privacyConfig: params.privacyConfig,
       });
       return _sessionStorage.run(newCtx, runFn);
     }

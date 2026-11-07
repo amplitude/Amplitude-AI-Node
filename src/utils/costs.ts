@@ -10,9 +10,67 @@ import {
   inferProviderFromModel,
   tryInferProviderFromModel,
 } from './providers.js';
+import { getLogger } from './logger.js';
 import { calcPrice, updatePrices } from '@pydantic/genai-prices';
 
 let _livePricesEnabled = false;
+const warnedCostLookupFailures = new Set<string>();
+const MAX_COST_LOOKUP_WARNINGS = 100;
+const FIREWORKS_MODEL_ID_PREFIXES = [
+  'accounts/fireworks/models/',
+  'accounts/fireworks/routers/',
+] as const;
+
+/** Fireworks models genai-prices prices by endpoint (`routers` for `-fast`, else `models`). */
+const FIREWORKS_CATALOG_MODEL_IDS = new Set([
+  'kimi-k3',
+  'kimi-k3-fast',
+  'deepseek-v4-flash-0731',
+]);
+
+/** Fireworks-published USD rates per million tokens not yet in genai-prices. */
+const FIREWORKS_PUBLIC_RATES_PER_MTOK: Record<
+  string,
+  { input: number; output: number; cacheRead: number; cacheWrite: number }
+> = {
+  'deepseek-v4-flash-0731-fast': {
+    input: 0.21,
+    cacheRead: 0.042,
+    cacheWrite: 0.21,
+    output: 0.42,
+  },
+  'deepseek-v4p1-flash': {
+    input: 0.22,
+    cacheRead: 0.007,
+    cacheWrite: 0.22,
+    output: 0.66,
+  },
+  'glm-5p3': { input: 1.4, cacheRead: 0.26, cacheWrite: 1.4, output: 4.4 },
+  'glm-5p3-flash': {
+    input: 0.15,
+    cacheRead: 0.03,
+    cacheWrite: 0.15,
+    output: 0.5,
+  },
+};
+
+function warnCostLookupFailure(
+  modelName: string,
+  provider: string | undefined,
+  reason: string,
+): void {
+  const key = `${modelName}\x1f${provider ?? ''}\x1f${reason}`;
+  if (
+    warnedCostLookupFailures.has(key) ||
+    warnedCostLookupFailures.size >= MAX_COST_LOOKUP_WARNINGS
+  ) {
+    return;
+  }
+  warnedCostLookupFailures.add(key);
+  getLogger().warn(
+    `Unable to calculate cost for model=${modelName} provider=${provider ?? 'unknown'} (${reason}); [Agent] Cost USD will be omitted.`,
+  );
+}
 
 /**
  * Opt in to background price updates from the genai-prices GitHub repo.
@@ -80,6 +138,136 @@ function normalizeProviderForGenaiPrices(
   return provider;
 }
 
+function stripFireworksModelIdPrefix(modelName: string): string {
+  for (const prefix of FIREWORKS_MODEL_ID_PREFIXES) {
+    if (modelName.startsWith(prefix)) return modelName.slice(prefix.length);
+  }
+  return modelName;
+}
+
+function getFireworksPeriodAliasCandidates(
+  modelName: string,
+): Array<{ model: string; providerId?: string }> {
+  const modelId = stripFireworksModelIdPrefix(modelName);
+  const dottedModelId = modelId.replace(/(?<=\d)p(?=\d)/g, '.');
+  if (dottedModelId === modelId) return [];
+  return dottedModelId.startsWith('kimi-')
+    ? [
+        { model: dottedModelId, providerId: 'moonshotai' },
+        { model: dottedModelId },
+      ]
+    : [{ model: dottedModelId }];
+}
+
+function isPricedFireworksId(bare: string): boolean {
+  return (
+    bare in FIREWORKS_PUBLIC_RATES_PER_MTOK ||
+    FIREWORKS_CATALOG_MODEL_IDS.has(bare)
+  );
+}
+
+function isFireworksModelId(modelName: string): boolean {
+  return (
+    /^(accounts\/|fireworks:|firerouter)/.test(modelName) ||
+    isPricedFireworksId(
+      stripFireworksModelIdPrefix(stripProviderPrefix(modelName)),
+    )
+  );
+}
+
+/**
+ * Model and default provider to price a Fireworks call with.
+ *
+ * Tier routers (`.../routers/<model>-fast`) bill at their tier, so they keep the
+ * requested router id even though the response reports the base model. Other
+ * routers, FireRouter included, are not separately priced: each request bills at
+ * the model it selected. A selected model outside Fireworks (a BYOK Claude turn)
+ * is priced by model-name inference, or omitted when nothing matches.
+ */
+export function fireworksPricingTarget(
+  requested: string,
+  selected: string | undefined,
+): { modelName: string; defaultProvider: string | undefined } {
+  if (requested.includes('/routers/') && requested.endsWith('-fast')) {
+    return { modelName: requested, defaultProvider: 'fireworks' };
+  }
+  const modelName = selected || requested;
+  return {
+    modelName,
+    defaultProvider: isFireworksModelId(modelName) ? 'fireworks' : undefined,
+  };
+}
+
+/** Pricing inputs for a provider call; Fireworks follows `fireworksPricingTarget`. */
+export function pricingTarget(
+  providerName: string,
+  requested: unknown,
+  selected: string,
+): { modelName: string; defaultProvider: string | undefined } {
+  return providerName === 'fireworks'
+    ? fireworksPricingTarget(String(requested ?? selected), selected)
+    : { modelName: selected, defaultProvider: providerName };
+}
+
+export function fireworksExplicitPriceCost(options: {
+  modelName: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  defaultProvider?: string;
+}): number | null {
+  const bare = stripFireworksModelIdPrefix(
+    stripProviderPrefix(options.modelName),
+  );
+  const provider = normalizeProviderForGenaiPrices(
+    options.modelName.includes(':')
+      ? options.modelName.split(':', 1)[0]
+      : options.defaultProvider,
+  );
+  if (provider && provider !== 'fireworks') return null;
+
+  const cacheRead = Math.max(0, safeInt(options.cacheReadInputTokens));
+  const cacheWrite = Math.max(0, safeInt(options.cacheCreationInputTokens));
+  const rates = FIREWORKS_PUBLIC_RATES_PER_MTOK[bare];
+  if (!rates) {
+    if (!FIREWORKS_CATALOG_MODEL_IDS.has(bare)) return null;
+    const endpoint = bare.endsWith('-fast') ? 'routers' : 'models';
+    try {
+      const price = calcPrice(
+        {
+          input_tokens: Math.max(0, safeInt(options.inputTokens)),
+          output_tokens: Math.max(0, safeInt(options.outputTokens)),
+          cache_read_tokens: cacheRead,
+          cache_write_tokens: cacheWrite,
+        },
+        `accounts/fireworks/${endpoint}/${bare}`,
+        { providerId: 'fireworks' },
+      );
+      if (price?.total_price == null) return null;
+      return Math.round(price.total_price * 1_000_000) / 1_000_000;
+    } catch {
+      return null;
+    }
+  }
+
+  const uncached = Math.max(
+    0,
+    safeInt(options.inputTokens) - cacheRead - cacheWrite,
+  );
+  const inputCost =
+    (uncached * rates.input +
+      cacheRead * rates.cacheRead +
+      cacheWrite * rates.cacheWrite) /
+    1_000_000;
+  const outputCost =
+    (Math.max(0, safeInt(options.outputTokens)) * rates.output) / 1_000_000;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
+}
+
+/** Backward-compatible name matching the Python public helper. */
+export const fireworksFastTierCost = fireworksExplicitPriceCost;
+
 /**
  * Generate candidate (modelRef, providerId) pairs for price lookup.
  *
@@ -97,7 +285,12 @@ export function getGenaiPriceLookupCandidates(
   defaultProvider?: string,
 ): Array<{ model: string; providerId?: string }> {
   const stripped = stripProviderPrefix(modelName);
-  const inferred = defaultProvider ?? tryInferProviderFromModel(stripped);
+  const prefix = modelName.includes(':')
+    ? modelName.slice(0, modelName.indexOf(':'))
+    : '';
+  const explicitProvider = prefix && !prefix.includes('.') ? prefix : undefined;
+  const inferred =
+    explicitProvider ?? defaultProvider ?? tryInferProviderFromModel(stripped);
 
   const isBedrock =
     inferred === 'bedrock' ||
@@ -110,6 +303,9 @@ export function getGenaiPriceLookupCandidates(
   const candidates: Array<{ model: string; providerId?: string }> = [
     { model: stripped, providerId },
   ];
+  if (providerId === 'fireworks') {
+    candidates.push(...getFireworksPeriodAliasCandidates(stripped));
+  }
   // For Bedrock, also try without provider for globally-matched models (e.g. Claude)
   if (isBedrock) {
     candidates.push({ model: stripped, providerId: undefined });
@@ -187,7 +383,7 @@ export function calculateCost(options: {
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
   defaultProvider?: string;
-}): number {
+}): number | null {
   const {
     modelName,
     inputTokens,
@@ -197,14 +393,32 @@ export function calculateCost(options: {
     defaultProvider,
   } = options;
 
-  try {
-    const usage = {
-      input_tokens: safeInt(inputTokens),
-      output_tokens: safeInt(outputTokens),
-      cache_read_tokens: safeInt(cacheReadInputTokens),
-      cache_write_tokens: safeInt(cacheCreationInputTokens),
-    };
+  const usage = {
+    input_tokens: safeInt(inputTokens),
+    output_tokens: safeInt(outputTokens),
+    cache_read_tokens: safeInt(cacheReadInputTokens),
+    cache_write_tokens: safeInt(cacheCreationInputTokens),
+  };
+  if (
+    usage.input_tokens <= 0 &&
+    usage.output_tokens <= 0 &&
+    usage.cache_read_tokens <= 0 &&
+    usage.cache_write_tokens <= 0
+  ) {
+    return 0;
+  }
 
+  const explicitFireworksCost = fireworksExplicitPriceCost({
+    modelName,
+    inputTokens,
+    outputTokens,
+    cacheReadInputTokens,
+    cacheCreationInputTokens,
+    defaultProvider,
+  });
+  if (explicitFireworksCost != null) return explicitFireworksCost;
+
+  try {
     const candidates = getGenaiPriceLookupCandidates(
       modelName,
       defaultProvider,
@@ -217,13 +431,18 @@ export function calculateCost(options: {
         model,
         Object.keys(opts).length > 0 ? opts : undefined,
       );
-      if (result?.total_price != null && result.total_price > 0) {
+      if (result?.total_price != null) {
         return result.total_price;
       }
     }
+    warnCostLookupFailure(
+      modelName,
+      defaultProvider,
+      'unsupported model or provider',
+    );
   } catch {
-    // Fall through to 0
+    warnCostLookupFailure(modelName, defaultProvider, 'price lookup failed');
   }
 
-  return 0;
+  return null;
 }

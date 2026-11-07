@@ -30,7 +30,7 @@
  * ```
  */
 
-import { getLogger } from '../utils/logger.js';
+import { getLogger, safeTrack } from '../utils/logger.js';
 
 const logger = getLogger('claude-agent-sdk');
 
@@ -61,6 +61,13 @@ export interface ClaudeAgentSDKTrackerOptions {
   defaultProvider?: string;
   defaultModel?: string;
 }
+
+/**
+ * PostToolUse does not fire for denied, interrupted or failed tools, so
+ * PreToolUse timers are dropped after this long or beyond this many.
+ */
+const TOOL_TIMER_TTL_MS = 10 * 60_000;
+const MAX_TOOL_TIMERS = 1000;
 
 export class ClaudeAgentSDKTracker {
   private _defaultProvider: string;
@@ -122,10 +129,25 @@ export class ClaudeAgentSDKTracker {
     }
   }
 
+  private _startToolTimer(toolUseId: string): void {
+    const now = performance.now();
+    for (const [id, startedAt] of this._toolTimers) {
+      if (
+        now - startedAt <= TOOL_TIMER_TTL_MS &&
+        this._toolTimers.size < MAX_TOOL_TIMERS
+      ) {
+        break;
+      }
+      this._toolTimers.delete(id);
+    }
+    this._toolTimers.delete(toolUseId);
+    this._toolTimers.set(toolUseId, now);
+  }
+
   private _makePreToolHook(): HookFn {
     return async (_inputData, toolUseId, _context) => {
       if (toolUseId) {
-        this._toolTimers.set(toolUseId, performance.now());
+        this._startToolTimer(toolUseId);
       }
       return {};
     };
@@ -144,12 +166,14 @@ export class ClaudeAgentSDKTracker {
         this._toolTimers.delete(toolUseId);
       }
 
-      const opts: Record<string, unknown> = {};
-      if (toolInput != null) opts.input = toolInput;
-      if (toolResponse != null) opts.output = String(toolResponse);
-      if (isError && toolResponse) opts.errorMessage = String(toolResponse);
+      safeTrack(() => {
+        const opts: Record<string, unknown> = {};
+        if (toolInput != null) opts.input = toolInput;
+        if (toolResponse != null) opts.output = String(toolResponse);
+        if (isError && toolResponse) opts.errorMessage = String(toolResponse);
 
-      session.trackToolCall(toolName, latencyMs, !isError, opts);
+        session.trackToolCall(toolName, latencyMs, !isError, opts);
+      });
 
       return {};
     };

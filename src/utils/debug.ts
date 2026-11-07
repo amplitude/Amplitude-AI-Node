@@ -8,21 +8,36 @@ import {
   EVENT_TOOL_CALL,
   EVENT_USER_MESSAGE,
   PROP_AGENT_ID,
+  PROP_ATTACHMENTS,
+  PROP_COMMENT,
+  PROP_CONTENT_MODE,
+  PROP_CONTEXT,
   PROP_COST_USD,
   PROP_EMBEDDING_DIMENSIONS,
   PROP_ENRICHMENTS,
+  PROP_ERROR_MESSAGE,
+  PROP_INPUT_STATE,
   PROP_INPUT_TOKENS,
   PROP_IS_ERROR,
   PROP_LATENCY_MS,
+  PROP_MESSAGE_LABELS,
   PROP_MODEL_NAME,
+  PROP_OUTPUT_STATE,
   PROP_OUTPUT_TOKENS,
   PROP_PROVIDER,
+  PROP_REASONING_CONTENT,
   PROP_SCORE_NAME,
   PROP_SCORE_VALUE,
   PROP_SESSION_ID,
   PROP_SPAN_NAME,
+  PROP_STACK_TRACE,
+  PROP_SYSTEM_PROMPT,
   PROP_TARGET_ID,
+  PROP_TOOL_CALLS,
+  PROP_TOOL_DEFINITIONS,
+  PROP_TOOL_INPUT,
   PROP_TOOL_NAME,
+  PROP_TOOL_OUTPUT,
   PROP_TOOL_SUCCESS,
 } from '../core/constants.js';
 
@@ -110,10 +125,50 @@ export function formatDebugLine(event: unknown): string {
   return line;
 }
 
-export function formatDryRunLine(event: unknown): string {
+const CONTENT_PROPERTIES: ReadonlySet<string> = new Set([
+  '$llm_message',
+  PROP_ATTACHMENTS,
+  PROP_COMMENT,
+  PROP_CONTEXT,
+  PROP_ENRICHMENTS,
+  PROP_ERROR_MESSAGE,
+  PROP_INPUT_STATE,
+  PROP_MESSAGE_LABELS,
+  PROP_OUTPUT_STATE,
+  PROP_REASONING_CONTENT,
+  PROP_STACK_TRACE,
+  PROP_SYSTEM_PROMPT,
+  PROP_TOOL_CALLS,
+  PROP_TOOL_DEFINITIONS,
+  PROP_TOOL_INPUT,
+  PROP_TOOL_OUTPUT,
+]);
+
+/**
+ * Format an event for `dryRun` output. The whole event is printed only when
+ * both the configured content mode and the event's own content mode are
+ * `full`; otherwise content-bearing properties are replaced with
+ * `"[omitted]"` and user properties are dropped.
+ */
+export function formatDryRunLine(
+  event: unknown,
+  contentMode: string | null = null,
+): string {
+  if (event == null || typeof event !== 'object') return String(event);
+  const e = event as EventLike & Record<string, unknown>;
+  const props = e.event_properties ?? {};
+  const eventMode = props[PROP_CONTENT_MODE];
+  const full =
+    contentMode === 'full' && (eventMode == null || eventMode === 'full');
   try {
-    return JSON.stringify(event);
+    if (full) return JSON.stringify(event);
+    const summaryProps: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(props)) {
+      summaryProps[key] = CONTENT_PROPERTIES.has(key) ? '[omitted]' : value;
+    }
+    const { user_properties: _omit, ...rest } = e;
+    return JSON.stringify({ ...rest, event_properties: summaryProps });
   } catch {
-    return String(event);
+    return `{"event_type":${JSON.stringify(String(e.event_type ?? 'unknown'))}}`;
   }
 }

@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { trace } from '@opentelemetry/api';
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
 import { _sessionStorage, SessionContext } from '../../src/context.js';
 import {
   PROP_IDLE_TIMEOUT_MINUTES,
@@ -9,6 +15,14 @@ import {
   applySessionContext,
   BaseAIProvider,
 } from '../../src/providers/base.js';
+import {
+  GENAI_CACHE_CREATION_INPUT_TOKENS,
+  GENAI_CACHE_READ_INPUT_TOKENS,
+  GENAI_INPUT_TOKENS,
+  GENAI_OUTPUT_TOKENS,
+  GENAI_REASONING_OUTPUT_TOKENS,
+  GENAI_USAGE_COST,
+} from '../../src/otel/conventions.js';
 
 vi.mock('../../src/core/tracking.js', () => ({
   trackAiMessage: vi.fn(() => 'msg-123'),
@@ -26,8 +40,20 @@ function createMockAmplitude(): {
 }
 
 class TestProvider extends BaseAIProvider {
-  constructor(amplitude: { track: (event: Record<string, unknown>) => void }) {
-    super({ amplitude, providerName: 'test' });
+  constructor(
+    amplitude: { track: (event: Record<string, unknown>) => void },
+    providerName = 'test',
+  ) {
+    super({ amplitude, providerName });
+  }
+
+  /**
+   * AA-151931 V3-A: OTEL emission is gated on `_otelEnabled`. The test
+   * fake used here isn't an `AmplitudeAI` instance, so we flip the flag
+   * directly for the OTEL-parity tests.
+   */
+  _forceOtelEnabledForTest(): void {
+    (this as unknown as { _otelEnabled: boolean })._otelEnabled = true;
   }
 }
 
@@ -40,7 +66,9 @@ describe('applySessionContext', () => {
 
   it('returns empty overrides when no session and no overrides', (): void => {
     const result = applySessionContext({});
-    expect(result).toEqual({});
+    const { takeTurnId, ...rest } = result;
+    expect(rest).toEqual({});
+    expect(takeTurnId?.()).toBeUndefined();
   });
 
   it('merges with explicit overrides taking precedence over session context', (): void => {
@@ -149,6 +177,37 @@ describe('SimpleStreamingTracker', () => {
     expect(typeof call[0].latencyMs).toBe('number');
     expect(call[0].latencyMs).toBeGreaterThanOrEqual(0);
   });
+
+  it('lets the first body ID replace a header ID and remain stable', (): void => {
+    const provider = new TestProvider(createMockAmplitude(), 'fireworks');
+    const tracker = provider.createStreamingTracker();
+    tracker.setProviderRequestId('header-id');
+    tracker.setProviderRequestId('first-body-id', true);
+    tracker.setProviderRequestId('later-body-id', true);
+
+    tracker.finalize({ userId: 'u1' });
+
+    const calls = (trackAiMessage as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.at(-1)?.[0].providerRequestId).toBe('first-body-id');
+  });
+
+  it('calculates cost from complete streaming usage', (): void => {
+    const provider = new TestProvider(createMockAmplitude(), 'openai');
+    const tracker = provider.createStreamingTracker();
+    tracker.setModel('gpt-4o');
+    tracker.setUsage({
+      inputTokens: 1_000,
+      outputTokens: 200,
+      cacheReadTokens: 400,
+    });
+
+    tracker.finalize({ userId: 'u1' });
+
+    const calls = (trackAiMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const call = calls.at(-1);
+    if (!call) throw new Error('Expected mock to be called');
+    expect(call[0].totalCostUsd).toBeGreaterThan(0);
+  });
 });
 
 describe('BaseAIProvider._track', () => {
@@ -168,5 +227,187 @@ describe('BaseAIProvider._track', () => {
     expect(call[0].userId).toBe('u1');
     expect(call[0].modelName).toBe('gpt-4');
     expect(call[0].provider).toBe('test');
+  });
+});
+
+describe('BaseAIProvider OTEL usage parity', () => {
+  afterEach(() => {
+    trace.disable();
+  });
+
+  function installSpanExporter(): InMemorySpanExporter {
+    trace.disable();
+    const exporter = new InMemorySpanExporter();
+    const tracerProvider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    trace.setGlobalTracerProvider(tracerProvider);
+    return exporter;
+  }
+
+  it('emits complete usage and authoritative cost for non-streaming calls', () => {
+    const exporter = installSpanExporter();
+    const provider = new TestProvider(createMockAmplitude(), 'openai');
+    provider._forceOtelEnabledForTest();
+
+    provider.trackFn()({
+      modelName: 'gpt-4o',
+      provider: 'openai',
+      responseContent: 'done',
+      latencyMs: 10,
+      inputTokens: 1_000,
+      outputTokens: 200,
+      reasoningTokens: 75,
+      cacheReadInputTokens: 400,
+      cacheCreationInputTokens: 50,
+      totalCostUsd: 0.123456,
+    });
+
+    const attributes = exporter.getFinishedSpans()[0]?.attributes;
+    expect(attributes).toMatchObject({
+      [GENAI_INPUT_TOKENS]: 1_000,
+      [GENAI_OUTPUT_TOKENS]: 200,
+      [GENAI_REASONING_OUTPUT_TOKENS]: 75,
+      [GENAI_CACHE_READ_INPUT_TOKENS]: 400,
+      [GENAI_CACHE_CREATION_INPUT_TOKENS]: 50,
+      [GENAI_USAGE_COST]: 0.123456,
+    });
+  });
+
+  it('emits complete usage for generic streaming calls', () => {
+    const exporter = installSpanExporter();
+    const provider = new TestProvider(createMockAmplitude(), 'openai');
+    provider._forceOtelEnabledForTest();
+    const tracker = provider.createStreamingTracker();
+    tracker.setModel('gpt-4o');
+    tracker.setUsage({
+      inputTokens: 1_000,
+      outputTokens: 200,
+      reasoningTokens: 75,
+      cacheReadTokens: 400,
+      cacheCreationTokens: 50,
+    });
+
+    tracker.finalize({ userId: 'user-1' });
+
+    const attributes = exporter.getFinishedSpans()[0]?.attributes;
+    expect(attributes).toMatchObject({
+      [GENAI_INPUT_TOKENS]: 1_000,
+      [GENAI_OUTPUT_TOKENS]: 200,
+      [GENAI_REASONING_OUTPUT_TOKENS]: 75,
+      [GENAI_CACHE_READ_INPUT_TOKENS]: 400,
+      [GENAI_CACHE_CREATION_INPUT_TOKENS]: 50,
+      [GENAI_USAGE_COST]: expect.any(Number),
+    });
+    expect(attributes?.[GENAI_USAGE_COST]).toBeGreaterThan(0);
+  });
+});
+
+describe('BaseAIProvider inherits privacyConfig from AmplitudeAI (AA-151915)', () => {
+  it('inherits contentMode=metadata_only from AmplitudeAI when passed as `amplitude`', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig, ContentMode } = await import('../../src/config.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ contentMode: ContentMode.METADATA_ONLY }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getContentMode(): string | null {
+        return this._privacyConfig?.contentMode ?? null;
+      }
+    }
+
+    const provider = new ProbeProvider(ai);
+    expect(provider.getContentMode()).toBe('metadata_only');
+  });
+
+  it('inherits customRedactionPatterns from AmplitudeAI', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig } = await import('../../src/config.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ customRedactionPatterns: ['sk-[A-Za-z0-9]+'] }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getCustomPatternCount(): number {
+        return this._privacyConfig?.customPatterns.length ?? 0;
+      }
+    }
+
+    const provider = new ProbeProvider(ai);
+    expect(provider.getCustomPatternCount()).toBe(1);
+  });
+
+  it('does not inherit when a plain Amplitude client (no .config) is passed', () => {
+    const plain = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown) {
+        super({ amplitude: input as never, providerName: 'probe' });
+      }
+      getPrivacyConfig(): unknown {
+        return this._privacyConfig;
+      }
+    }
+
+    const provider = new ProbeProvider(plain);
+    expect(provider.getPrivacyConfig()).toBeNull();
+  });
+
+  it('explicit privacyConfig option overrides inheritance', async (): Promise<void> => {
+    const { AmplitudeAI } = await import('../../src/client.js');
+    const { AIConfig, ContentMode } = await import('../../src/config.js');
+    const { PrivacyConfig } = await import('../../src/core/privacy.js');
+
+    const mockTransport = {
+      configuration: {},
+      track: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+    };
+    const ai = new AmplitudeAI({
+      amplitude: mockTransport,
+      config: new AIConfig({ contentMode: ContentMode.METADATA_ONLY }),
+    });
+
+    class ProbeProvider extends BaseAIProvider {
+      constructor(input: unknown, pc: PrivacyConfig) {
+        super({
+          amplitude: input as never,
+          privacyConfig: pc,
+          providerName: 'probe',
+        });
+      }
+      getContentMode(): string | null {
+        return this._privacyConfig?.contentMode ?? null;
+      }
+    }
+
+    const explicit = new PrivacyConfig({ contentMode: 'full' });
+    const provider = new ProbeProvider(ai, explicit);
+    expect(provider.getContentMode()).toBe('full');
   });
 });

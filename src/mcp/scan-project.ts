@@ -1,11 +1,21 @@
 import {
-  readFileSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
   readdirSync,
+  readSync,
+  realpathSync,
   statSync,
 } from 'node:fs';
-import { join, relative, basename, dirname } from 'node:path';
-import { analyzeFileInstrumentation } from './validate-file.js';
+import { homedir } from 'node:os';
+import { join, relative, basename, dirname, isAbsolute, parse, resolve, sep } from 'node:path';
+import { EXPERIMENT_DEPS, type FlagCallSite, flagCallSites } from './experiment-deps.js';
+import { analyzeFileInstrumentation, redactSecrets } from './validate-file.js';
+
+const MAX_FLAG_READS = 50; // flag_call_sites entries reported per scan
 
 export interface ScanResult {
   project_name: string | null;
@@ -44,6 +54,7 @@ export interface ScanResult {
   uninstrumented_call_sites: number;
   is_multi_agent: boolean;
   multi_agent_signals: string[];
+  has_fan_out: boolean;
   has_streaming: boolean;
   has_vercel_ai_sdk: boolean;
   has_edge_runtime: boolean;
@@ -51,6 +62,12 @@ export interface ScanResult {
   has_langgraph: boolean;
   message_queue_deps: string[];
   has_frontend_deps: boolean;
+  has_otel_deps: boolean;
+  otel_packages: string[];
+  /** Feature flag or experimentation SDKs in the dependencies. */
+  experiment_packages: string[];
+  /** Where the code reads a flag or experiment assignment (first 50). */
+  flag_call_sites: FlagCallSite[];
   recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
@@ -65,6 +82,9 @@ const SKIP_DIRS = new Set([
   'test',
 ]);
 const MAX_DEPTH = 5;
+export const MAX_SCAN_FILES = 5000;
+export const MAX_SCAN_FILE_BYTES = 1_000_000;
+const SKIP_FILE_RE = /\.d\.ts$|\.min\.[cm]?js$/;
 
 const FRAMEWORK_DEPS: Array<[string, string]> = [
   ['next', 'nextjs'],
@@ -112,6 +132,18 @@ const FRONTEND_DEPS = [
   '@angular/core',
 ];
 
+const OTEL_DEPS = [
+  '@opentelemetry/api',
+  '@opentelemetry/sdk-trace-base',
+  '@opentelemetry/sdk-trace-node',
+  '@opentelemetry/exporter-trace-otlp-grpc',
+  '@opentelemetry/exporter-trace-otlp-http',
+  '@opentelemetry/exporter-trace-otlp-proto',
+  '@opentelemetry/instrumentation',
+  '@opentelemetry/auto-instrumentations-node',
+  '@traceloop/node-server-sdk',
+];
+
 // Tightened to LLM-specific contexts: stream:true near model/messages, or Vercel AI SDK fns
 const STREAMING_RE = /streamText\s*\(|useChat\s*\(|stream\s*:\s*true/;
 
@@ -129,12 +161,103 @@ const MULTI_AGENT_CODE_RE = /\.child\s*\(|\.runAs\s*\(|\.runAsSync\s*\(/;
 const ROUTE_HANDLER_RE =
   /export\s+async\s+function\s+(?:POST|GET|PUT|DELETE)\b|app\.\s*(?:get|post|put|delete)\s*\(|router\./;
 
+export function isPathInside(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function realpathOrNull(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve `rootPath` for scanning. Returns the real path when it lies inside
+ * one of `allowedRoots` (each resolved with realpath), otherwise null.
+ */
+export function resolveScanRoot(rootPath: string, allowedRoots: string[]): string | null {
+  if (!rootPath) return null;
+  const real = realpathOrNull(resolve(rootPath));
+  if (!real) return null;
+  for (const allowed of allowedRoots) {
+    const realAllowed = realpathOrNull(resolve(allowed));
+    if (realAllowed && isPathInside(real, realAllowed)) return real;
+  }
+  return null;
+}
+
+/**
+ * Read a regular file through one descriptor so the type and size checks
+ * apply to the bytes actually read. Returns null for non-files, files over
+ * `maxBytes`, and symlinks at the final path component.
+ */
+export function readRegularFileCapped(path: string, maxBytes: number): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > maxBytes) return null;
+    const buf = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < buf.length) {
+      const n = readSync(fd, buf, offset, buf.length - offset, offset);
+      if (n === 0) break;
+      offset += n;
+    }
+    return buf.subarray(0, offset).toString('utf8');
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * True for roots too broad to scan: the filesystem root and any directory
+ * that contains the user's home directory (e.g. `/Users`, `/home`).
+ */
+export function isBroadScanRoot(root: string): boolean {
+  const real = realpathOrNull(resolve(root));
+  if (!real) return false;
+  if (real === parse(real).root) return true;
+  const home = realpathOrNull(homedir());
+  return home != null && home !== real && isPathInside(home, real);
+}
+
+/**
+ * Roots a scan may target when the MCP client does not provide any: the
+ * server's working directory, unless that is the filesystem root or home.
+ */
+export function defaultScanRoots(cwd: string = process.cwd()): string[] {
+  const real = realpathOrNull(cwd);
+  if (!real) return [];
+  const home = realpathOrNull(homedir());
+  if (real === parse(real).root || real === home) return [];
+  return [real];
+}
+
+/**
+ * Walks `dir` without following directory symlinks. File symlinks are only
+ * included when their target stays inside `realRoot`.
+ */
 function collectSourceFiles(
   dir: string,
-  rootPath: string,
+  realRoot: string,
   depth: number,
+  visited: Set<string>,
+  budget: { files: number },
 ): string[] {
-  if (depth > MAX_DEPTH) return [];
+  if (depth > MAX_DEPTH || budget.files >= MAX_SCAN_FILES) return [];
+  const realDir = realpathOrNull(dir);
+  if (!realDir || visited.has(realDir) || !isPathInside(realDir, realRoot)) return [];
+  visited.add(realDir);
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -143,22 +266,36 @@ function collectSourceFiles(
   }
 
   const files: string[] = [];
+  const take = (path: string, size: number): void => {
+    if (size > MAX_SCAN_FILE_BYTES || budget.files >= MAX_SCAN_FILES) return;
+    budget.files++;
+    files.push(path);
+  };
   for (const entry of entries) {
-    if (SKIP_DIRS.has(entry)) continue;
+    if (budget.files >= MAX_SCAN_FILES) break;
+    if (SKIP_DIRS.has(entry) || SKIP_FILE_RE.test(entry)) continue;
     const fullPath = join(dir, entry);
-    let stat;
+    let stat: ReturnType<typeof lstatSync> | undefined;
     try {
-      stat = statSync(fullPath);
+      stat = lstatSync(fullPath);
     } catch {
       continue;
     }
-    if (stat.isDirectory()) {
-      files.push(...collectSourceFiles(fullPath, rootPath, depth + 1));
-    } else if (stat.isFile()) {
-      const ext = entry.slice(entry.lastIndexOf('.'));
-      if (SOURCE_EXTENSIONS.has(ext)) {
-        files.push(fullPath);
+    const ext = entry.slice(entry.lastIndexOf('.'));
+    if (stat.isSymbolicLink()) {
+      if (!SOURCE_EXTENSIONS.has(ext)) continue;
+      const target = realpathOrNull(fullPath);
+      if (!target || !isPathInside(target, realRoot)) continue;
+      try {
+        const targetStat = statSync(target);
+        if (targetStat.isFile()) take(target, targetStat.size);
+      } catch {
+        // dangling or unreadable
       }
+    } else if (stat.isDirectory()) {
+      files.push(...collectSourceFiles(fullPath, realRoot, depth + 1, visited, budget));
+    } else if (stat.isFile() && SOURCE_EXTENSIONS.has(ext)) {
+      take(fullPath, stat.size);
     }
   }
   return files;
@@ -166,11 +303,13 @@ function collectSourceFiles(
 
 function inferAgentId(filePath: string): string {
   const base = basename(filePath).replace(/\.[^.]+$/, '');
+  let id = base;
   if (base === 'route' || base === 'index') {
-    const parentDir = basename(dirname(filePath));
-    return parentDir || base;
+    id = basename(dirname(filePath)) || base;
   }
-  return base;
+  // Ids flow into instrument_file's generated code; keep them to a safe charset.
+  const safe = id.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 128);
+  return safe || 'agent';
 }
 
 function inferDescription(
@@ -194,11 +333,13 @@ function readPackageJson(
   allDeps: Set<string>;
 } {
   const pkgPath = join(rootPath, 'package.json');
-  if (!existsSync(pkgPath)) {
+  const realPkg = realpathOrNull(pkgPath);
+  if (!realPkg || !isPathInside(realPkg, rootPath)) {
     return { name: null, allDeps: new Set() };
   }
   try {
-    const raw = readFileSync(pkgPath, 'utf8');
+    const raw = readRegularFileCapped(realPkg, MAX_SCAN_FILE_BYTES);
+    if (raw == null) return { name: null, allDeps: new Set() };
     const pkg = JSON.parse(raw) as Record<string, unknown>;
     const name = typeof pkg.name === 'string' ? pkg.name : null;
     const deps = (pkg.dependencies ?? {}) as Record<string, string>;
@@ -210,7 +351,8 @@ function readPackageJson(
   }
 }
 
-export function scanProject(rootPath: string): ScanResult {
+export function scanProject(requestedRoot: string): ScanResult {
+  const rootPath = realpathOrNull(resolve(requestedRoot)) ?? resolve(requestedRoot);
   const { name: projectName, allDeps } = readPackageJson(rootPath);
 
   // Detect framework
@@ -247,7 +389,7 @@ export function scanProject(rootPath: string): ScanResult {
   const hasAmplitudeAiDep = allDeps.has('@amplitude/ai');
 
   // Walk source files and analyze
-  const sourceFiles = collectSourceFiles(rootPath, rootPath, 0);
+  const sourceFiles = [...new Set(collectSourceFiles(rootPath, rootPath, 0, new Set(), { files: 0 }))];
 
   let totalCallSites = 0;
   let instrumentedCallSites = 0;
@@ -274,13 +416,19 @@ export function scanProject(rootPath: string): ScanResult {
   const agents: ScanResult['agents'] = [];
   const filesWithCallSites = new Set<string>();
   const providerImportsPerFile = new Map<string, Set<string>>();
+  const flagReads: FlagCallSite[] = [];
 
   for (const filePath of sourceFiles) {
-    let content: string;
-    try {
-      content = readFileSync(filePath, 'utf8');
-    } catch {
-      continue;
+    const content = readRegularFileCapped(filePath, MAX_SCAN_FILE_BYTES);
+    if (content == null) continue;
+
+    if (flagReads.length < MAX_FLAG_READS) {
+      flagReads.push(
+        ...flagCallSites(content, relative(rootPath, filePath), redactSecrets).slice(
+          0,
+          MAX_FLAG_READS - flagReads.length,
+        ),
+      );
     }
 
     const analysis = analyzeFileInstrumentation(content);
@@ -430,6 +578,10 @@ export function scanProject(rootPath: string): ScanResult {
   // Frontend deps (browser-server linking signal)
   const hasFrontendDeps = FRONTEND_DEPS.some((dep) => allDeps.has(dep));
 
+  // OTEL deps
+  const otelPackages = OTEL_DEPS.filter((dep) => allDeps.has(dep));
+  const hasOtelDeps = otelPackages.length > 0;
+
   // Vercel AI SDK detection (dep-level)
   const hasVercelAiSdk = VERCEL_AI_SDK_DEPS.some((dep) => allDeps.has(dep)) || hasVercelAiSdkUsage;
 
@@ -446,6 +598,25 @@ export function scanProject(rootPath: string): ScanResult {
     recommendations.push(
       'Streaming detected: keep sessions open until stream is fully consumed. ' +
       'Use session.run() with an awaited stream, not a fire-and-forget pattern.',
+    );
+  }
+  const experimentPackages = EXPERIMENT_DEPS.filter((dep) => allDeps.has(dep));
+  if (experimentPackages.length > 0 || flagReads.length > 0) {
+    const detected =
+      experimentPackages.length > 0
+        ? `Feature flag or experiment SDKs detected (${experimentPackages.join(', ')})`
+        : 'Feature flag reads detected';
+    let where = '';
+    if (flagReads.length > 0) {
+      const shown = flagReads
+        .slice(0, 5)
+        .map((site) => `${site.file}:${site.line}`)
+        .join(', ');
+      const more = flagReads.length > 5 ? ` and ${flagReads.length - 5} more` : '';
+      where = ` Flag reads at ${shown}${more}; the variants that change agent behavior belong in experiments.`;
+    }
+    recommendations.push(
+      `${detected}: where the app reads a variant that changes agent behavior, pass it as \`experiments: [{ key, variant, provider }]\` on ai.agent(), agent.session() or one track call (or experimentsFromAmplitude(..., { keys: [...] }) / new AmplitudeAIHook({ flags: [...] }) for the experiment flags only), so [Agent] Experiments can split any chart by arm. See "Experiments" in amplitude-ai.md.${where}`,
     );
   }
   if (messageQueueDeps.length > 0) {
@@ -490,11 +661,47 @@ export function scanProject(rootPath: string): ScanResult {
     );
   }
 
+  if (hasOtelDeps) {
+      recommendations.push(
+        `OpenTelemetry dependencies detected (${otelPackages.join(', ')}). Consider calling \`ai.enableOtel()\` after initializing AmplitudeAI to route all instrumentation through OTEL spans. The AmplitudeEventSpanProcessor maps GenAI semantic convention spans into [Agent] events automatically. Use \`observe({ type: "agent" })\` on orchestration functions to capture delegation latency and errors as real OTEL spans.`,
+      );
+  }
+
   if (globalHasAmplitudeImport && globalHasWrappers && globalHasSessionContext) {
     recommendations.push(
       'Project already has @amplitude/ai instrumentation with wrappers and session context. ' +
       'No re-instrumentation needed. Consider upgrading contentMode tiers, adding scoring, ' +
       'or expanding multi-agent coverage if applicable.',
+    );
+  }
+
+  // Fan-out LLM detection: ≥2 LLM call sites within the same function
+  // suggests a parallel/fan-out pattern that needs runAs delegation.
+  let hasFanOut = false;
+  for (const agent of agents) {
+    const fnCounts = new Map<string, number>();
+    for (const cs of agent.call_site_details) {
+      const fn = cs.containing_function;
+      if (fn) {
+        fnCounts.set(fn, (fnCounts.get(fn) ?? 0) + 1);
+      }
+    }
+    const fanOutFns = [...fnCounts.entries()]
+      .filter(([, count]) => count >= 2)
+      .map(([fn]) => fn);
+    if (fanOutFns.length > 0) {
+      hasFanOut = true;
+      multiAgentSignals.push(
+        `File ${agent.file}: fan-out pattern detected — multiple LLM call sites in function(s): ${fanOutFns.join(', ')}. Use runAs() to delegate each parallel call to a child agent.`,
+      );
+    }
+  }
+
+  if (hasFanOut) {
+    recommendations.push(
+      'Fan-out LLM pattern detected: one function dispatches multiple LLM calls in parallel. ' +
+      'Use session.runAs(child, fn) for each sub-call so they share the parent traceId without ' +
+      'emitting duplicate user messages. See Step 3g-b in the instrumentation guide (amplitude-ai.md).',
     );
   }
 
@@ -518,6 +725,7 @@ export function scanProject(rootPath: string): ScanResult {
     uninstrumented_call_sites: uninstrumentedCallSites,
     is_multi_agent: isMultiAgent,
     multi_agent_signals: multiAgentSignals,
+    has_fan_out: hasFanOut,
     has_streaming: hasStreaming,
     has_vercel_ai_sdk: hasVercelAiSdk,
     has_edge_runtime: hasEdgeRuntime,
@@ -525,6 +733,10 @@ export function scanProject(rootPath: string): ScanResult {
     has_langgraph: hasLanggraph,
     message_queue_deps: messageQueueDeps,
     has_frontend_deps: hasFrontendDeps,
+    has_otel_deps: hasOtelDeps,
+    otel_packages: otelPackages,
+    experiment_packages: experimentPackages,
+    flag_call_sites: flagReads,
     recommendations,
     recommended_tier: recommendedTier,
   };

@@ -8,6 +8,11 @@ import { calculateCost } from '../utils/costs.js';
 import { tryRequire } from '../utils/resolve-module.js';
 import { StreamingAccumulator } from '../utils/streaming.js';
 import { applySessionContext, BaseAIProvider, contextFields } from './base.js';
+import {
+  safeErrorMessage,
+  safeTrack,
+  warnTrackingFailure,
+} from '../utils/logger.js';
 
 const _resolved = tryRequire('@mistralai/mistralai');
 export const MISTRAL_AVAILABLE = _resolved != null;
@@ -105,50 +110,51 @@ export class WrappedChat {
           ctx,
         );
       }
-      const latencyMs = performance.now() - startTime;
+      safeTrack(() => {
+        const latencyMs = performance.now() - startTime;
 
-      const resp = response as MistralChatResponse;
-      const choice = resp.choices?.[0];
-      const usage = resp.usage;
-      const modelName = String(resp.model ?? params.model ?? 'unknown');
-      const toolCalls = (
-        choice?.message as { tool_calls?: Array<Record<string, unknown>> }
-      )?.tool_calls;
+        const resp = response as MistralChatResponse;
+        const choice = resp.choices?.[0];
+        const usage = resp.usage;
+        const modelName = String(resp.model ?? params.model ?? 'unknown');
+        const toolCalls = (
+          choice?.message as { tool_calls?: Array<Record<string, unknown>> }
+        )?.tool_calls;
 
-      let costUsd: number | null = null;
-      if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName,
-            inputTokens: usage.prompt_tokens,
-            outputTokens: usage.completion_tokens,
-            defaultProvider: 'mistral',
-          });
-        } catch {
-          // cost calculation is best-effort
+        let costUsd: number | null = null;
+        if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName,
+              inputTokens: usage.prompt_tokens,
+              outputTokens: usage.completion_tokens,
+              defaultProvider: 'mistral',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._trackFn({
-        ...contextFields(ctx),
-        modelName,
-        provider: 'mistral',
-        responseContent: extractMistralContent(choice?.message?.content),
-        latencyMs,
-        inputTokens: usage?.prompt_tokens,
-        outputTokens: usage?.completion_tokens,
-        totalTokens: usage?.total_tokens,
-        totalCostUsd: costUsd,
-        finishReason: choice?.finish_reason,
-        toolCalls: toolCalls ?? undefined,
-        toolDefinitions: extractMistralToolDefinitions(params),
-        systemPrompt: extractMistralSystemPrompt(params),
-        temperature: params.temperature as number | undefined,
-        topP: params.top_p as number | undefined,
-        maxOutputTokens: params.max_tokens as number | undefined,
-        isStreaming: false,
+        this._trackFn({
+          ...contextFields(ctx),
+          modelName,
+          provider: 'mistral',
+          responseContent: extractMistralContent(choice?.message?.content),
+          latencyMs,
+          inputTokens: usage?.prompt_tokens,
+          outputTokens: usage?.completion_tokens,
+          totalTokens: usage?.total_tokens,
+          totalCostUsd: costUsd,
+          finishReason: choice?.finish_reason,
+          toolCalls: toolCalls ?? undefined,
+          toolDefinitions: extractMistralToolDefinitions(params),
+          systemPrompt: extractMistralSystemPrompt(params),
+          temperature: params.temperature as number | undefined,
+          topP: params.top_p as number | undefined,
+          maxOutputTokens: params.max_tokens as number | undefined,
+          isStreaming: false,
+        });
       });
-
       return response;
     } catch (error) {
       const latencyMs = performance.now() - startTime;
@@ -160,7 +166,7 @@ export class WrappedChat {
         responseContent: '',
         latencyMs,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
       });
 
       throw error;
@@ -193,7 +199,7 @@ export class WrappedChat {
         responseContent: '',
         latencyMs: performance.now() - startTime,
         isError: true,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: safeErrorMessage(error),
         isStreaming: true,
       });
       throw error;
@@ -210,104 +216,111 @@ export class WrappedChat {
 
     try {
       for await (const chunk of stream) {
-        const c = chunk as Record<string, unknown>;
-        const choices = c.choices as Array<Record<string, unknown>> | undefined;
-        const delta = choices?.[0]?.delta as
-          | Record<string, unknown>
-          | undefined;
-        const message = choices?.[0]?.message as
-          | Record<string, unknown>
-          | undefined;
+        try {
+          const c = chunk as Record<string, unknown>;
+          const choices = c.choices as Array<Record<string, unknown>> | undefined;
+          const delta = choices?.[0]?.delta as
+            | Record<string, unknown>
+            | undefined;
+          const message = choices?.[0]?.message as
+            | Record<string, unknown>
+            | undefined;
 
-        const content =
-          (delta?.content as string | undefined) ??
-          (message?.content as string | undefined);
-        if (typeof content === 'string' && content.length > 0) {
-          accumulator.addContent(content);
-        }
+          const content =
+            (delta?.content as string | undefined) ??
+            (message?.content as string | undefined);
+          if (typeof content === 'string' && content.length > 0) {
+            accumulator.addContent(content);
+          }
 
-        const toolCalls =
-          (delta?.tool_calls as Array<Record<string, unknown>> | undefined) ??
-          (message?.tool_calls as Array<Record<string, unknown>> | undefined);
-        if (Array.isArray(toolCalls)) {
-          for (const call of toolCalls) {
-            const idx = call.index as number | undefined;
-            const id = call.id as string | undefined;
-            const fn = call.function as Record<string, unknown> | undefined;
-            if (idx != null && id && fn?.name != null) {
-              accumulator.setToolCallAt(idx, {
-                type: 'function',
-                id,
-                function: {
-                  name: fn.name,
-                  arguments: ((fn.arguments as string) ?? ''),
-                },
-              });
-            } else if (idx != null && fn?.arguments) {
-              accumulator.appendToolCallArgs(idx, fn.arguments as string);
-            } else {
-              accumulator.addToolCall(call);
+          const toolCalls =
+            (delta?.tool_calls as Array<Record<string, unknown>> | undefined) ??
+            (message?.tool_calls as Array<Record<string, unknown>> | undefined);
+          if (Array.isArray(toolCalls)) {
+            for (const call of toolCalls) {
+              const idx = call.index as number | undefined;
+              const id = call.id as string | undefined;
+              const fn = call.function as Record<string, unknown> | undefined;
+              if (idx != null && id && fn?.name != null) {
+                accumulator.setToolCallAt(idx, {
+                  type: 'function',
+                  id,
+                  function: {
+                    name: fn.name,
+                    arguments: ((fn.arguments as string) ?? ''),
+                  },
+                });
+              } else if (idx != null && fn?.arguments) {
+                accumulator.appendToolCallArgs(idx, fn.arguments as string);
+              } else {
+                accumulator.addToolCall(call);
+              }
             }
           }
+
+          const finishReason = choices?.[0]?.finish_reason;
+          if (finishReason != null)
+            accumulator.finishReason = String(finishReason);
+
+          const usage = c.usage as Record<string, unknown> | undefined;
+          accumulator.setUsage({
+            inputTokens: usage?.prompt_tokens as number | undefined,
+            outputTokens: usage?.completion_tokens as number | undefined,
+            totalTokens: usage?.total_tokens as number | undefined,
+          });
+        } catch (trackingError) {
+          warnTrackingFailure(trackingError);
         }
-
-        const finishReason = choices?.[0]?.finish_reason;
-        if (finishReason != null)
-          accumulator.finishReason = String(finishReason);
-
-        const usage = c.usage as Record<string, unknown> | undefined;
-        accumulator.setUsage({
-          inputTokens: usage?.prompt_tokens as number | undefined,
-          outputTokens: usage?.completion_tokens as number | undefined,
-          totalTokens: usage?.total_tokens as number | undefined,
-        });
-
         yield chunk;
       }
     } catch (error) {
       accumulator.setError(
-        error instanceof Error ? error.message : String(error),
+        safeErrorMessage(error),
       );
       throw error;
     } finally {
-      const state = accumulator.getState();
-      const modelName = String(accumulator.model ?? params.model ?? 'unknown');
-      let costUsd: number | null = null;
-      if (state.inputTokens != null && state.outputTokens != null) {
-        try {
-          costUsd = calculateCost({
-            modelName,
-            inputTokens: state.inputTokens,
-            outputTokens: state.outputTokens,
-            defaultProvider: 'mistral',
-          });
-        } catch {
-          // cost calculation is best-effort
+      try {
+        const state = accumulator.getState();
+        const modelName = String(accumulator.model ?? params.model ?? 'unknown');
+        let costUsd: number | null = null;
+        if (state.inputTokens != null && state.outputTokens != null) {
+          try {
+            costUsd = calculateCost({
+              modelName,
+              inputTokens: state.inputTokens,
+              outputTokens: state.outputTokens,
+              defaultProvider: 'mistral',
+            });
+          } catch {
+            // cost calculation is best-effort
+          }
         }
-      }
 
-      this._trackFn({
-        ...contextFields(sessionCtx),
-        modelName,
-        provider: 'mistral',
-        responseContent: state.content,
-        latencyMs: accumulator.elapsedMs,
-        inputTokens: state.inputTokens,
-        outputTokens: state.outputTokens,
-        totalTokens: state.totalTokens,
-        totalCostUsd: costUsd,
-        finishReason: state.finishReason,
-        toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
-        toolDefinitions: extractMistralToolDefinitions(params),
-        systemPrompt: extractMistralSystemPrompt(params),
-        temperature: params.temperature as number | undefined,
-        topP: params.top_p as number | undefined,
-        maxOutputTokens: params.max_tokens as number | undefined,
-        providerTtfbMs: state.ttfbMs,
-        isStreaming: true,
-        isError: state.isError,
-        errorMessage: state.errorMessage,
-      });
+        this._trackFn({
+          ...contextFields(sessionCtx),
+          modelName,
+          provider: 'mistral',
+          responseContent: state.content,
+          latencyMs: accumulator.elapsedMs,
+          inputTokens: state.inputTokens,
+          outputTokens: state.outputTokens,
+          totalTokens: state.totalTokens,
+          totalCostUsd: costUsd,
+          finishReason: state.finishReason,
+          toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
+          toolDefinitions: extractMistralToolDefinitions(params),
+          systemPrompt: extractMistralSystemPrompt(params),
+          temperature: params.temperature as number | undefined,
+          topP: params.top_p as number | undefined,
+          maxOutputTokens: params.max_tokens as number | undefined,
+          providerTtfbMs: state.ttfbMs,
+          isStreaming: true,
+          isError: state.isError,
+          errorMessage: state.errorMessage,
+        });
+      } catch (trackingError) {
+        warnTrackingFailure(trackingError);
+      }
     }
   }
 }

@@ -9,8 +9,10 @@ import {
   PROP_LATENCY_MS,
   PROP_SESSION_ID,
   PROP_TOOL_NAME,
+  PROP_TOOL_OWNER,
   PROP_TOOL_SUCCESS,
   PROP_TOOL_TYPE,
+  PrivacyConfig,
   runWithContextAsync,
   SessionContext,
   tool,
@@ -85,6 +87,25 @@ describe('tool() HOF', () => {
     expect(props[PROP_TOOL_TYPE]).toBe('mcp');
   });
 
+  it('forwards toolOwner to the [Agent] Tool Call event so customer-connected tools are distinguishable from Amplitude-owned ones', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const search = tool(async (q: string): Promise<string> => `r:${q}`, {
+      name: 'search',
+      amplitude: mock.amplitude,
+      userId: 'u1',
+      sessionId: 's1',
+      toolOwner: 'customer',
+    });
+
+    await search('hello');
+
+    const toolEvents = mock.getEvents(EVENT_TOOL_CALL);
+    expect(toolEvents.length).toBe(1);
+    const props = toolEvents[0].event_properties as Record<string, unknown>;
+    expect(props[PROP_TOOL_NAME]).toBe('search');
+    expect(props[PROP_TOOL_OWNER]).toBe('customer');
+  });
+
   it('wraps sync functions', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
     ToolCallTracker.setAmplitude(mock.amplitude, 'u1', { sessionId: 's1' });
@@ -150,7 +171,10 @@ describe('tool() HOF', () => {
 
   it('tracks errors on failure', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
-    ToolCallTracker.setAmplitude(mock.amplitude, 'u1', { sessionId: 's1' });
+    ToolCallTracker.setAmplitude(mock.amplitude, 'u1', {
+      sessionId: 's1',
+      privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+    });
 
     const failingTool = tool(
       (): never => {
@@ -391,7 +415,9 @@ describe('observe() expanded', () => {
 
   it('observe tracks error on failure (isError=true, errorMessage set)', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();
-    ToolCallTracker.setAmplitude(mock.amplitude, 'u1');
+    ToolCallTracker.setAmplitude(mock.amplitude, 'u1', {
+      privacyConfig: new PrivacyConfig({ contentMode: 'full' }),
+    });
 
     const failingObserved = observe(
       async (): Promise<never> => {

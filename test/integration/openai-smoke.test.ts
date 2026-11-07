@@ -100,22 +100,44 @@ describeWithOpenAI('Integration: OpenAI SDK against mock HTTP server', () => {
     },
   };
 
-  function handleRequest(req: IncomingMessage, res: ServerResponse): void {
-    if (req.url?.includes('/responses')) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(MOCK_RESPONSES_API_RESPONSE));
-      return;
-    }
+  function sendJson(res: ServerResponse, payload: unknown): void {
+    const body = JSON.stringify(payload);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      Connection: 'close',
+    });
+    res.end(body);
+  }
 
-    let body = '';
+  function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+    const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => {
-      body += chunk.toString();
+      chunks.push(chunk);
+    });
+    req.on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(500, { Connection: 'close' });
+        res.end();
+      }
     });
     req.on('end', () => {
       try {
-        lastRequestBody = JSON.parse(body) as Record<string, unknown>;
+        const raw = Buffer.concat(chunks).toString('utf8');
+        lastRequestBody = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
       } catch {
         lastRequestBody = null;
+      }
+
+      if (req.url?.includes('/responses')) {
+        sendJson(res, MOCK_RESPONSES_API_RESPONSE);
+        return;
+      }
+
+      if (!req.url?.includes('/chat/completions')) {
+        res.writeHead(404, { Connection: 'close' });
+        res.end();
+        return;
       }
 
       const messages = (lastRequestBody?.messages ?? []) as Array<{
@@ -126,10 +148,7 @@ describeWithOpenAI('Integration: OpenAI SDK against mock HTTP server', () => {
         ?.toLowerCase()
         .includes('weather');
 
-      const responseBody = useToolResponse ? MOCK_TOOL_RESPONSE : MOCK_RESPONSE;
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(responseBody));
+      sendJson(res, useToolResponse ? MOCK_TOOL_RESPONSE : MOCK_RESPONSE);
     });
   }
 
