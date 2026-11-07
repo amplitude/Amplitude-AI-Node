@@ -48,6 +48,13 @@ describe('coding-agents templates', () => {
 });
 
 describe('coding-agents init', () => {
+  it('writes the shared codex-hooks.json verbatim into a repo without one', () => {
+    init({ harnesses: ['codex'], apiKey: SECRET });
+    const written = readFileSync(join(repo, '.codex/hooks.json'), 'utf8');
+    expect(written).toBe(template('codex-hooks.json'));
+    expect(written).toContain(`"command": "${CODEX_STOP_COMMAND}"`);
+  });
+
   it('writes the hook and workflow verbatim and wires git and package.json', () => {
     writeFileSync(join(repo, 'package.json'), '{\n    "name": "app",\n    "scripts": {\n        "build": "tsc"\n    }\n}\n');
     const result = init({ apiKey: SECRET });

@@ -91,8 +91,9 @@ Variables set in the environment win over `.amplitude-ai/local.env` (found by wa
 | `token_count.last_token_usage` | tokens on the turn's last AI Response |
 | `task_complete.error`, `turn_aborted` | errors. A user interrupt or a replaced turn is not an error |
 | subagent `session_meta` (`parent_thread_id` or `source.subagent.thread_spawn`) | `[Agent] Agent ID` `codex/<role>` (or `codex/<path>`) with `[Agent] Parent Agent ID`; records copied from the parent before `subagent_history_start_ordinal` are skipped |
+| `inter_agent_communication` addressed to this thread (`recipient` or `other_recipients`) | `[Agent] User Message` with `[Agent] Message Source` `agent`: the parent's instruction to a subagent, or a subagent's report to the root. Messages the thread sent itself and messages for other agents are skipped |
 
-`[Agent] Turn ID` is an ordered integer stored with the byte cursor, so it keeps counting across hook runs. Insert IDs come from the thread, turn and item, so a replayed hook never double-counts. Compressed (`.zst`) rollouts are skipped with a log line.
+`[Agent] Turn ID` is an ordered integer stored with the byte cursor, so it keeps counting across hook runs. The insert ID (also the message or invocation ID) is `uuid5(6f1c2b8e-4c1a-5e4b-9a57-0d2a4b3c9e11, "<thread>:<turn>:<user|ai|tool>:<key>")`, where the key is the record's ordinal (or `b<byte offset>`) or the tool call ID: the same IDs the Python forwarder sends, so a replayed hook, or the Node and Python hooks on one rollout, never double-count. One hook at a time forwards a transcript (a lock file next to the cursor; a second hook waits up to 10 s, then skips), and the hook waits for the rollout to stop growing (stable for 300 ms, at most 2 s) before reading it. Compressed (`.zst`) rollouts are skipped with a log line.
 
 ### Verify
 

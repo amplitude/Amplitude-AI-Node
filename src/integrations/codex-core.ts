@@ -5,8 +5,35 @@
  * same Codex turn produces the same `[Agent]` events either way.
  */
 
+import { createHash } from 'node:crypto';
+
 export const CODEX_AGENT_ID = 'codex';
 export const CODEX_PROVIDER = 'openai';
+
+/** Namespace of the Python forwarder's `_INSERT_ID_NAMESPACE`; both SDKs must derive the same IDs. */
+export const CODEX_INSERT_ID_NAMESPACE = '6f1c2b8e-4c1a-5e4b-9a57-0d2a4b3c9e11';
+
+/** RFC 4122 version-5 UUID (SHA-1), the same as Python's `uuid.uuid5(namespace, name)`. */
+export function uuid5(namespace: string, name: string): string {
+  const hash = createHash('sha1')
+    .update(Buffer.from(namespace.replace(/-/g, ''), 'hex'))
+    .update(name, 'utf8')
+    .digest();
+  hash[6] = (hash[6]! & 0x0f) | 0x50;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * Insert ID (also the message or invocation ID) of a Codex rollout event:
+ * `uuid5(namespace, "<thread>:<turn>:<kind>:<key>")`, where kind is `user`,
+ * `ai` or `tool` and key is the line's ordinal, else `b<byte offset>`, or the
+ * tool call ID.
+ */
+export function codexInsertId(threadId: string, turnId: string | null, kind: 'user' | 'ai' | 'tool', key: string): string {
+  return uuid5(CODEX_INSERT_ID_NAMESPACE, `${threadId}:${turnId ?? ''}:${kind}:${key}`);
+}
 
 /** Codex `Usage` / `TokenUsage`: cached and cache-write tokens are subsets of input. */
 export type CodexUsage = {

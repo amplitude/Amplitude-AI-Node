@@ -5,6 +5,7 @@
  * Pure and incremental: {@link mapCodexRollout} takes new lines plus the state
  * returned by the previous call, so `amplitude-ai hook codex` can read each
  * transcript from a byte cursor and replays produce the same insert IDs.
+ * Insert IDs are {@link codexInsertId}, byte-for-byte the Python forwarder's.
  *
  * Line shape (codex-rs `RolloutLine`): `{ timestamp, ordinal?, type, payload }`
  * with `type` one of `session_meta`, `turn_context`, `response_item`,
@@ -16,6 +17,7 @@ import {
   type CodexUsage,
   addCodexUsage,
   codexExitCode,
+  codexInsertId,
   codexUsageOpts,
 } from './codex-core.js';
 import { commitShaProperties } from './commit-sha.js';
@@ -32,7 +34,10 @@ export type CodexRolloutMeta = {
 };
 
 type PendingCall = { name: string; input: string; time: number; invocationId: string };
-type PendingReply = { text: string; time: number; messageId: string; reasoning: string | null; latencyMs: number };
+type PendingReply = { text: string; time: number; key: string; reasoning: string | null; latencyMs: number };
+
+/** A rollout line and its byte offset in the (uncompressed) transcript. */
+export type CodexRolloutLine = { text: string; offset: number };
 
 export type CodexRolloutState = {
   meta: CodexRolloutMeta | null;
@@ -40,13 +45,14 @@ export type CodexRolloutState = {
   model: string | null;
   turnStartedAt: number | null;
   lastEventAt: number | null;
-  messageCount: number;
   pendingReply: PendingReply | null;
   reasoning: string | null;
   turnUsage: CodexUsage | null;
   summedUsage: CodexUsage | null;
   lastTotal: CodexUsage | null;
   pendingCalls: Record<string, PendingCall>;
+  /** Byte offset of the next string line, for callers that pass lines without offsets. */
+  byteOffset: number;
 };
 
 export type CodexTrackCall =
@@ -85,13 +91,13 @@ export function initialCodexRolloutState(): CodexRolloutState {
     model: null,
     turnStartedAt: null,
     lastEventAt: null,
-    messageCount: 0,
     pendingReply: null,
     reasoning: null,
     turnUsage: null,
     summedUsage: null,
     lastTotal: null,
     pendingCalls: {},
+    byteOffset: 0,
   };
 }
 
@@ -223,11 +229,11 @@ export function codexAgentIds(
  * last AI Response with the usage seen so far, as at a Stop hook.
  */
 export function mapCodexRollout(
-  lines: string[],
+  lines: Array<string | CodexRolloutLine>,
   previous: CodexRolloutState = initialCodexRolloutState(),
   options: { flush?: boolean; agentId?: string } = {},
 ): CodexRolloutResult {
-  const state: CodexRolloutState = structuredClone(previous);
+  const state: CodexRolloutState = { ...structuredClone(previous), byteOffset: previous.byteOffset ?? 0 };
   const calls: CodexTrackCall[] = [];
   const skipped: CodexRolloutCounts = {};
   const skip = (reason: string) => {
@@ -245,29 +251,32 @@ export function mapCodexRollout(
     if (Object.keys(props).length > 0) opts.eventProperties = props;
     return opts;
   };
-  const insertId = (key: string) => `codex:${state.meta?.threadId}:${state.turnId}:${key}`;
+  const insertId = (kind: 'user' | 'ai' | 'tool', key: string) =>
+    codexInsertId(state.meta?.threadId ?? '', state.turnId, kind, key);
   const sinceLast = (time: number) => {
     const from = state.lastEventAt ?? state.turnStartedAt;
     state.lastEventAt = time;
     return from != null ? Math.max(0, time - from) : 0;
   };
 
-  const flushReply = (withUsage: boolean) => {
+  const flushReply = (withUsage: boolean, errorMessage?: string) => {
     const reply = state.pendingReply;
     const usage = withUsage ? (state.turnUsage ?? state.summedUsage) : null;
     state.pendingReply = null;
     const opts = base();
-    if (!opts || (!reply && !usage)) return;
+    if (!opts || (!reply && !usage && !errorMessage)) return;
     if (withUsage) {
       state.turnUsage = null;
       state.summedUsage = null;
     }
-    const messageId = reply?.messageId ?? `usage-${state.messageCount++}`;
-    Object.assign(opts, codexUsageOpts(usage), { messageId: insertId(messageId) });
+    const key = reply?.key ?? `${state.turnId ?? 'turn'}:${errorMessage ? 'error' : 'usage'}`;
+    const id = insertId('ai', key);
+    Object.assign(opts, codexUsageOpts(usage), { messageId: id });
+    if (errorMessage) Object.assign(opts, { isError: true, errorMessage });
     if (reply?.reasoning) opts.reasoningContent = reply.reasoning;
     calls.push({
       kind: 'ai',
-      insertId: insertId(messageId),
+      insertId: id,
       time: reply?.time ?? state.lastEventAt ?? state.turnStartedAt ?? 0,
       content: reply?.text ?? '',
       model: state.model ?? 'unknown',
@@ -276,20 +285,11 @@ export function mapCodexRollout(
     });
   };
 
+  /** The turn's error lands on its last AI Response, or on an empty one, as in the Python forwarder. */
   const trackError = (time: number, message: string) => {
-    flushReply(true);
-    const opts = base();
-    if (!opts) return skip('error_outside_turn');
-    const id = insertId('error');
-    calls.push({
-      kind: 'ai',
-      insertId: id,
-      time,
-      content: '',
-      model: state.model ?? 'unknown',
-      latencyMs: 0,
-      opts: { ...opts, messageId: id, isError: true, errorMessage: message },
-    });
+    if (!base()) return skip('error_outside_turn');
+    state.lastEventAt ??= time;
+    flushReply(true, message);
   };
 
   const startTurn = (turnId: string, time: number) => {
@@ -298,13 +298,15 @@ export function mapCodexRollout(
     state.turnId = turnId;
     state.turnStartedAt = time;
     state.lastEventAt = time;
-    state.messageCount = 0;
     state.reasoning = null;
     state.turnUsage = null;
     state.summedUsage = null;
   };
 
-  for (const raw of lines) {
+  for (const entry of lines) {
+    const raw = typeof entry === 'string' ? entry : entry.text;
+    const offset = typeof entry === 'string' ? state.byteOffset : entry.offset;
+    state.byteOffset = offset + Buffer.byteLength(raw, 'utf8') + 1;
     if (!raw.trim()) continue;
     let line: Record<string, unknown>;
     try {
@@ -316,6 +318,7 @@ export function mapCodexRollout(
     const payload = (line.payload ?? {}) as Record<string, unknown>;
     const parsedTime = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) : Number.NaN;
     const time = Number.isFinite(parsedTime) ? parsedTime : (state.lastEventAt ?? 0);
+    const lineKey = typeof line.ordinal === 'number' ? String(line.ordinal) : `b${offset}`;
 
     if (line.type === 'session_meta') {
       const meta = parseCodexSessionMeta(payload);
@@ -404,13 +407,12 @@ export function mapCodexRollout(
               }
               if (!text) break;
               flushReply(false);
-              const key = typeof payload.id === 'string' ? payload.id : `user-${state.messageCount++}`;
               state.lastEventAt = time;
-              calls.push({ kind: 'user', insertId: insertId(key), time, content: text, opts: { ...opts, messageId: insertId(key) } });
+              const id = insertId('user', lineKey);
+              calls.push({ kind: 'user', insertId: id, time, content: text, opts: { ...opts, messageId: id } });
             } else if (payload.role === 'assistant') {
               flushReply(false);
-              const key = typeof payload.id === 'string' ? payload.id : `assistant-${state.messageCount++}`;
-              state.pendingReply = { text, time, messageId: key, reasoning: state.reasoning, latencyMs: sinceLast(time) };
+              state.pendingReply = { text, time, key: lineKey, reasoning: state.reasoning, latencyMs: sinceLast(time) };
               state.reasoning = null;
             } else {
               skip(`message_role_${String(payload.role)}`);
@@ -453,7 +455,7 @@ export function mapCodexRollout(
             const exitCode = codexExitCode(output);
             const explicit = (payload.output as { success?: unknown } | null)?.success;
             const success = explicit === false ? false : exitCode == null || exitCode === 0;
-            const toolOpts: Record<string, unknown> = { ...opts, invocationId: insertId(callId), input: call.input, output };
+            const toolOpts: Record<string, unknown> = { ...opts, invocationId: insertId('tool', callId), input: call.input, output };
             if (!success) toolOpts.errorMessage = exitCode != null ? `exit code ${exitCode}` : 'tool call failed';
             if (success) {
               const commit = commitShaProperties(call.name, call.input, output);
@@ -464,7 +466,7 @@ export function mapCodexRollout(
             state.lastEventAt = time;
             calls.push({
               kind: 'tool',
-              insertId: insertId(callId),
+              insertId: insertId('tool', callId),
               time,
               toolName: call.name,
               latencyMs: Math.max(0, time - call.time),
@@ -475,17 +477,17 @@ export function mapCodexRollout(
           }
           case 'web_search_call': {
             const action = (payload.action ?? {}) as Record<string, unknown>;
-            const key = typeof payload.id === 'string' ? payload.id : `web-${state.messageCount++}`;
+            const key = typeof payload.id === 'string' && payload.id ? payload.id : lineKey;
             calls.push({
               kind: 'tool',
-              insertId: insertId(key),
+              insertId: insertId('tool', key),
               time,
               toolName: 'web_search',
               latencyMs: 0,
               success: payload.status !== 'failed',
               opts: {
                 ...opts,
-                invocationId: insertId(key),
+                invocationId: insertId('tool', key),
                 input: typeof action.query === 'string' ? action.query : JSON.stringify(action),
               },
             });
@@ -494,6 +496,36 @@ export function mapCodexRollout(
           default:
             skip(`response_item_${String(payload.type)}`);
         }
+        break;
+      }
+      case 'inter_agent_communication': {
+        const opts = base();
+        if (!opts) {
+          skip('outside_turn');
+          break;
+        }
+        // Delivered to this thread: Codex writes it to the recipient's rollout and to the author's.
+        const own = state.meta.agentPath ?? (state.meta.isSubagent ? null : '/root');
+        const others = Array.isArray(payload.other_recipients) ? payload.other_recipients : [];
+        if (own != null && payload.recipient !== own && !others.includes(own)) {
+          skip('inter_agent_not_addressed');
+          break;
+        }
+        if (payload.author === own) {
+          skip('inter_agent_own_message');
+          break;
+        }
+        if (typeof payload.content !== 'string' || !payload.content) break;
+        flushReply(false);
+        state.lastEventAt = time;
+        const id = insertId('user', lineKey);
+        calls.push({
+          kind: 'user',
+          insertId: id,
+          time,
+          content: payload.content,
+          opts: { ...opts, messageId: id, messageSource: 'agent' },
+        });
         break;
       }
       default:

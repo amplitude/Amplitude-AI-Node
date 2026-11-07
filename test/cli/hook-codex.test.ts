@@ -63,11 +63,11 @@ describe('mapCodexRollout', () => {
     const { calls, skipped } = mapCodexRollout(lines(ROOT));
     expect(calls.map((c) => c.kind)).toEqual(['user', 'tool', 'tool', 'tool', 'ai']);
     const [user, test, commit, pr, ai] = calls;
-    expect(user).toMatchObject({ content: 'Fix the failing test and commit', insertId: `codex:${THREAD}:turn-1:user-0` });
+    expect(user).toMatchObject({ content: 'Fix the failing test and commit', insertId: 'a231b923-48ca-58f7-85a9-3c9d9cacf3bb' });
     expect(user!.opts).toMatchObject({ sessionId: THREAD, traceId: 'turn-1', agentId: 'codex' });
     expect(test).toMatchObject({ toolName: 'exec_command', success: false, latencyMs: 5000 });
     expect(test!.opts.errorMessage).toBe('exit code 1');
-    expect(commit).toMatchObject({ toolName: 'shell', success: true, insertId: `codex:${THREAD}:turn-1:call_commit` });
+    expect(commit).toMatchObject({ toolName: 'shell', success: true, insertId: '25494fe7-4ee9-57e2-9a31-29f3078c15cf' });
     expect(commit!.opts.eventProperties).toEqual({ commit_sha: '1a2b3c4' });
     expect(pr).toMatchObject({ toolName: 'mcp__github__create_pull_request', success: true });
     expect(pr!.opts.eventProperties).toEqual({ commit_sha: '3'.repeat(40) });

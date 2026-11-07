@@ -35,11 +35,10 @@ export const CODEX_HOOKS_PATH = '.codex/hooks.json';
 export const HOOKS_PATH_COMMAND = `git config core.hooksPath ${HOOKS_PATH}`;
 export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
 /**
- * `npx @amplitude/ai` cannot pick an executable: the package ships several
- * bins and none is named `ai`, so the written Stop hook names the bin with `-p`.
+ * The Stop hook command in `codex-hooks.json`. `npx @amplitude/ai` cannot pick
+ * an executable (the package ships several bins), so it names the bin with `-p`.
  */
 export const CODEX_STOP_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook codex';
-const TEMPLATE_CODEX_STOP_COMMAND = 'npx --yes @amplitude/ai hook codex';
 
 const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_TOOL_DETAILS'];
 const GOOSE_TRACES_PATH = '/otlp/v1/traces';
@@ -392,16 +391,14 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
   }
 
   if (harnesses.includes('codex')) {
-    const template = JSON.parse(
-      readCodingAgentsTemplate('codex-hooks.json', templatesDir).replace(
-        TEMPLATE_CODEX_STOP_COMMAND,
-        CODEX_STOP_COMMAND,
-      ),
-    ) as JsonObject;
+    const templateText = readCodingAgentsTemplate('codex-hooks.json', templatesDir);
+    const template = JSON.parse(templateText) as JsonObject;
     const hooksFile = readJsonFile(join(cwd, CODEX_HOOKS_PATH));
     if (!hooksFile.ok) {
       writer.skip(CODEX_HOOKS_PATH, `invalid JSON: ${hooksFile.error}`);
       warnings.push(`${CODEX_HOOKS_PATH} is not valid JSON; fix it and re-run.`);
+    } else if (hooksFile.value === null) {
+      writer.write(CODEX_HOOKS_PATH, templateText, 'Stop hook forwards the rollout transcript (no secrets)');
     } else {
       const merged: JsonObject = hooksFile.value ?? {};
       const existingStop = hookCommands(isObject(merged.hooks) ? merged.hooks.Stop : undefined);

@@ -17,19 +17,36 @@
  * environment are read from the gitignored `.amplitude-ai/local.env` that
  * `coding-agents init` writes at the repo root.
  *
+ * One forwarder at a time per transcript: a lock file next to the cursor is
+ * held from reading the cursor to saving it. Before reading, the hook waits
+ * for the rollout to stop growing, because Codex writes it asynchronously.
+ * Both match the Python forwarder.
+ *
  * Never blocks Codex: every failure is reported on stderr and the process
  * exits 0. The API key is never printed.
  */
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { AmplitudeAI } from '../client.js';
 import { AIConfig, type ContentMode } from '../config.js';
 import type { AmplitudeEvent } from '../types.js';
 import {
+  type CodexRolloutLine,
   type CodexRolloutState,
   type CodexTrackCall,
   initialCodexRolloutState,
@@ -38,6 +55,7 @@ import {
 import { CODEX_PROVIDER } from '../integrations/codex-core.js';
 
 export const CODEX_HOOK_VERSION = 'codex-hook/1.0';
+const CURSOR_VERSION = 2;
 const MAX_READ_BYTES = 32 * 1024 * 1024;
 const HTTP_TIMEOUT_MS = 10_000;
 const BATCH_SIZE = 500;
@@ -55,7 +73,7 @@ export type CodexHookInput = {
 export const LOCAL_ENV_PATH = '.amplitude-ai/local.env';
 
 type Cursor = {
-  version: 1;
+  version: typeof CURSOR_VERSION;
   transcriptPath: string;
   offset: number;
   turnCounter: number;
@@ -72,7 +90,18 @@ export type CodexHookOptions = {
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
   gitEmail?: (cwd: string | undefined) => string | null;
+  /** Quiescence wait before reading a rollout; the defaults are the Python forwarder's. */
+  quiescence?: Partial<QuiescenceOptions>;
+  /** How long to wait for another forwarder's lock on the same transcript. */
+  lockTimeoutMs?: number;
 };
+
+export type QuiescenceOptions = { pollMs: number; stableMs: number; maxMs: number };
+export const DEFAULT_QUIESCENCE: QuiescenceOptions = { pollMs: 100, stableMs: 300, maxMs: 2000 };
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_POLL_MS = 50;
+/** A lock older than this is left by a forwarder that died; the hook takes it over. */
+const LOCK_STALE_MS = 60_000;
 
 export type CodexHookResult = {
   sent: number;
@@ -154,11 +183,17 @@ export function cursorFileFor(dir: string, transcriptPath: string): string {
 }
 
 function loadCursor(file: string, transcriptPath: string): Cursor {
-  const fresh: Cursor = { version: 1, transcriptPath, offset: 0, turnCounter: 0, state: initialCodexRolloutState() };
+  const fresh: Cursor = {
+    version: CURSOR_VERSION,
+    transcriptPath,
+    offset: 0,
+    turnCounter: 0,
+    state: initialCodexRolloutState(),
+  };
   if (!existsSync(file)) return fresh;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as Cursor;
-    if (parsed?.version !== 1 || parsed.transcriptPath !== transcriptPath || typeof parsed.offset !== 'number') return fresh;
+    if (parsed?.version !== CURSOR_VERSION || parsed.transcriptPath !== transcriptPath || typeof parsed.offset !== 'number') return fresh;
     return parsed;
   } catch {
     return fresh;
@@ -172,8 +207,72 @@ function saveCursor(file: string, cursor: Cursor): void {
   renameSync(tmp, file);
 }
 
-/** New complete lines after `offset`, and the offset just past the last newline. */
-export function readNewLines(path: string, offset: number): { lines: string[]; offset: number; reset: boolean } {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Waits until the file size has not changed for `stableMs`, at most `maxMs`. */
+export async function waitForQuiescence(path: string, options: QuiescenceOptions = DEFAULT_QUIESCENCE): Promise<void> {
+  const sizeOf = () => {
+    try {
+      return statSync(path).size;
+    } catch {
+      return null;
+    }
+  };
+  const deadline = Date.now() + options.maxMs;
+  let last = sizeOf();
+  if (last == null) return;
+  let stableSince = Date.now();
+  while (Date.now() < deadline) {
+    await sleep(options.pollMs);
+    const size = sizeOf();
+    if (size == null) return;
+    if (size !== last) {
+      last = size;
+      stableSince = Date.now();
+    } else if (Date.now() - stableSince >= options.stableMs) {
+      return;
+    }
+  }
+}
+
+/**
+ * Takes an exclusive lock file, retrying until `timeoutMs`. Returns a release
+ * function, or null when another forwarder still holds the lock.
+ */
+export async function acquireLock(lockPath: string, timeoutMs = LOCK_TIMEOUT_MS): Promise<(() => void) | null> {
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      closeSync(openSync(lockPath, 'wx', 0o600));
+      return () => {
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // already gone
+        }
+      };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+    try {
+      if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+        unlinkSync(lockPath);
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    if (Date.now() >= deadline) return null;
+    await sleep(LOCK_POLL_MS);
+  }
+}
+
+/** New complete lines after `offset` with their byte offsets, and the offset just past the last newline. */
+export function readNewLines(
+  path: string,
+  offset: number,
+): { lines: string[]; records: CodexRolloutLine[]; offset: number; reset: boolean } {
   const size = statSync(path).size;
   let start = offset;
   let reset = false;
@@ -182,7 +281,7 @@ export function readNewLines(path: string, offset: number): { lines: string[]; o
     reset = true;
   }
   const length = Math.min(size - start, MAX_READ_BYTES);
-  if (length <= 0) return { lines: [], offset: start, reset };
+  if (length <= 0) return { lines: [], records: [], offset: start, reset };
   const buffer = Buffer.alloc(length);
   const fd = openSync(path, 'r');
   try {
@@ -191,9 +290,16 @@ export function readNewLines(path: string, offset: number): { lines: string[]; o
     closeSync(fd);
   }
   const lastNewline = buffer.lastIndexOf(0x0a);
-  if (lastNewline < 0) return { lines: [], offset: start, reset };
-  const text = buffer.subarray(0, lastNewline + 1).toString('utf8');
-  return { lines: text.split('\n').filter((l) => l.length > 0), offset: start + lastNewline + 1, reset };
+  if (lastNewline < 0) return { lines: [], records: [], offset: start, reset };
+  const records: CodexRolloutLine[] = [];
+  let position = 0;
+  while (position <= lastNewline) {
+    const end = buffer.indexOf(0x0a, position);
+    const text = buffer.subarray(position, end).toString('utf8').replace(/\r$/, '');
+    if (text.trim()) records.push({ text, offset: start + position });
+    position = end + 1;
+  }
+  return { lines: records.map((r) => r.text), records, offset: start + lastNewline + 1, reset };
 }
 
 function contentModeFrom(value: string | undefined, stderr: (t: string) => void): ContentMode {
@@ -329,26 +435,43 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
         continue;
       }
       const cursorFile = cursorFileFor(dir, path);
-      let cursor = loadCursor(cursorFile, path);
-      const read = readNewLines(path, cursor.offset);
-      if (read.reset) cursor = { ...cursor, offset: 0, turnCounter: 0, state: initialCodexRolloutState() };
-      const mapped = mapCodexRollout(read.lines, cursor.state, { agentId });
-      for (const [k, v] of Object.entries(mapped.skipped)) result.skipped[k] = (result.skipped[k] ?? 0) + v;
-      const { events, turnCounter } = buildCodexEvents(mapped.calls, {
-        userId,
-        contentMode,
-        turnStart: cursor.turnCounter,
-      });
-      if (dryRun) {
-        for (const event of events) stdout(`${JSON.stringify(event)}\n`);
-      } else {
-        for (let i = 0; i < events.length; i += BATCH_SIZE) {
-          await postBatch(options.fetchImpl ?? fetch, endpointFor(region), apiKey, events.slice(i, i + BATCH_SIZE));
-        }
-        saveCursor(cursorFile, { version: 1, transcriptPath: path, offset: read.offset, turnCounter, state: mapped.state });
+      const release = dryRun ? () => undefined : await acquireLock(`${cursorFile}.lock`, options.lockTimeoutMs);
+      if (!release) {
+        result.skipped.transcript_locked = (result.skipped.transcript_locked ?? 0) + 1;
+        stderr('amplitude-ai hook codex: another forwarder holds the lock for this transcript; skipping\n');
+        continue;
       }
-      result.sent += events.length;
-      result.transcripts += 1;
+      try {
+        let cursor = loadCursor(cursorFile, path);
+        await waitForQuiescence(path, { ...DEFAULT_QUIESCENCE, ...options.quiescence });
+        const read = readNewLines(path, cursor.offset);
+        if (read.reset) cursor = { ...cursor, offset: 0, turnCounter: 0, state: initialCodexRolloutState() };
+        const mapped = mapCodexRollout(read.records, cursor.state, { agentId });
+        for (const [k, v] of Object.entries(mapped.skipped)) result.skipped[k] = (result.skipped[k] ?? 0) + v;
+        const { events, turnCounter } = buildCodexEvents(mapped.calls, {
+          userId,
+          contentMode,
+          turnStart: cursor.turnCounter,
+        });
+        if (dryRun) {
+          for (const event of events) stdout(`${JSON.stringify(event)}\n`);
+        } else {
+          for (let i = 0; i < events.length; i += BATCH_SIZE) {
+            await postBatch(options.fetchImpl ?? fetch, endpointFor(region), apiKey, events.slice(i, i + BATCH_SIZE));
+          }
+          saveCursor(cursorFile, {
+            version: CURSOR_VERSION,
+            transcriptPath: path,
+            offset: read.offset,
+            turnCounter,
+            state: mapped.state,
+          });
+        }
+        result.sent += events.length;
+        result.transcripts += 1;
+      } finally {
+        release();
+      }
     }
   } catch (err) {
     result.reason = 'error';
