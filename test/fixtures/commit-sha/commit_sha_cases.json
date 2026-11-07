@@ -1,0 +1,95 @@
+{
+  "description": "Golden cases for the shared commit_sha parser. Implementations: Python amplitude_ai/integrations/commit_sha.py, Node src/integrations/commit-sha.ts, Java receiver CommitShaParser. Input is a tool call (name, input string, output string); expected is the commit SHA or null.",
+  "rules": [
+    "git commit output: first match of ^\\[<branch>( \\(root-commit\\))? <7-40 hex>\\] on any line; requires the tool input to contain 'git commit' (or 'git' and 'commit' as separate argv items) OR the output to start with that bracket line",
+    "JSON output: top-level sha (40 hex), else commit.sha (40 hex), else head.sha (40 hex); only when the tool name or input mentions commit, pull, pr, push_files, create_or_update_file",
+    "Never parse git log, git show, git rev-parse or arbitrary hex strings",
+    "Return lowercase"
+  ],
+  "cases": [
+    {
+      "name": "git commit basic",
+      "tool_name": "Bash",
+      "input": "git commit -m \"Fix parser\"",
+      "output": "[main 1a2b3c4] Fix parser\n 1 file changed, 2 insertions(+)",
+      "expected": "1a2b3c4"
+    },
+    {
+      "name": "git commit branch with slash",
+      "tool_name": "shell",
+      "input": "git add -A && git commit -m 'wip'",
+      "output": "[vinaygoel/AA-1-feature 9f8e7d6c5b4a] wip\n 3 files changed",
+      "expected": "9f8e7d6c5b4a"
+    },
+    {
+      "name": "root commit",
+      "tool_name": "Bash",
+      "input": "git commit -m init",
+      "output": "[main (root-commit) abcdef0] init\n 1 file changed",
+      "expected": "abcdef0"
+    },
+    {
+      "name": "codex argv form",
+      "tool_name": "shell",
+      "input": "{\"command\":[\"git\",\"commit\",\"-m\",\"Add tests\"]}",
+      "output": "[feature/x 0123456789ab] Add tests\n 2 files changed",
+      "expected": "0123456789ab"
+    },
+    {
+      "name": "git commit failed",
+      "tool_name": "Bash",
+      "input": "git commit -m \"nothing\"",
+      "output": "On branch main\nnothing to commit, working tree clean",
+      "expected": null
+    },
+    {
+      "name": "git log is ignored",
+      "tool_name": "Bash",
+      "input": "git log --oneline -3",
+      "output": "1a2b3c4 Fix parser\n5d6e7f8 Earlier",
+      "expected": null
+    },
+    {
+      "name": "rev-parse is ignored",
+      "tool_name": "Bash",
+      "input": "git rev-parse HEAD",
+      "output": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+      "expected": null
+    },
+    {
+      "name": "github mcp create commit",
+      "tool_name": "mcp__github__push_files",
+      "input": "{\"owner\":\"acme\",\"repo\":\"app\",\"branch\":\"fix\",\"message\":\"Fix\"}",
+      "output": "{\"sha\":\"AABBCCDDEEFF00112233445566778899AABBCCDD\",\"url\":\"https://api.github.com/repos/acme/app/git/commits/aabbccddeeff00112233445566778899aabbccdd\"}",
+      "expected": "aabbccddeeff00112233445566778899aabbccdd"
+    },
+    {
+      "name": "github create_or_update_file nested commit",
+      "tool_name": "create_or_update_file",
+      "input": "{\"path\":\"README.md\"}",
+      "output": "{\"content\":{\"sha\":\"1111111111111111111111111111111111111111\"},\"commit\":{\"sha\":\"2222222222222222222222222222222222222222\"}}",
+      "expected": "2222222222222222222222222222222222222222"
+    },
+    {
+      "name": "github create pull request head sha",
+      "tool_name": "mcp__github__create_pull_request",
+      "input": "{\"title\":\"Fix\",\"head\":\"fix\",\"base\":\"main\"}",
+      "output": "{\"number\":42,\"head\":{\"ref\":\"fix\",\"sha\":\"3333333333333333333333333333333333333333\"}}",
+      "expected": "3333333333333333333333333333333333333333"
+    },
+    {
+      "name": "unrelated json with sha is ignored",
+      "tool_name": "read_file",
+      "input": "{\"path\":\"package-lock.json\"}",
+      "output": "{\"sha\":\"4444444444444444444444444444444444444444\"}",
+      "expected": null
+    },
+    {
+      "name": "empty output",
+      "tool_name": "Bash",
+      "input": "git commit -m x",
+      "output": "",
+      "expected": null
+    }
+  ]
+}

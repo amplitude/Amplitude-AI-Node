@@ -31,6 +31,7 @@
  */
 
 import { getLogger, safeTrack } from '../utils/logger.js';
+import { commitShaProperties } from './commit-sha.js';
 
 const logger = getLogger('claude-agent-sdk');
 
@@ -171,6 +172,10 @@ export class ClaudeAgentSDKTracker {
         if (toolInput != null) opts.input = toolInput;
         if (toolResponse != null) opts.output = String(toolResponse);
         if (isError && toolResponse) opts.errorMessage = String(toolResponse);
+        if (!isError) {
+          const commit = commitShaProperties(toolName, toolInput, toolResponse);
+          if (commit.commit_sha) opts.eventProperties = commit;
+        }
 
         session.trackToolCall(toolName, latencyMs, !isError, opts);
       });

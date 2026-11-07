@@ -79,6 +79,22 @@ describe('ClaudeAgentSDKTracker', () => {
       nowSpy.mockRestore();
     });
 
+    it('sets commit_sha on a successful git commit', async (): Promise<void> => {
+      const session = createMockSession();
+      const postHook = tracker.hooks(session).PostToolUse![0]!.hooks[0]!;
+      await postHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'git commit -m "Fix"' },
+          tool_response: '[main 1a2b3c4] Fix\n 1 file changed',
+        },
+        'tu_commit',
+        {},
+      );
+      const opts = session.trackToolCall.mock.calls[0]![3] as Record<string, unknown>;
+      expect(opts.eventProperties).toEqual({ commit_sha: '1a2b3c4' });
+    });
+
     it('tracks failed tool call with error message', async (): Promise<void> => {
       const session = createMockSession();
       const hooks = tracker.hooks(session);
