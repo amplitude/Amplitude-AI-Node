@@ -82,7 +82,7 @@ As with tracing tools, the import brings in what the table already records, incl
 
 ## Tools
 
-- [check-agent-events.mjs](./check-agent-events.mjs): checks a file of `[Agent]` events (CSV, JSON, or NDJSON) against the rules every guide shares, before you send or import it. No dependencies: `node check-agent-events.mjs events.json`.
+- [check-agent-events.mjs](./check-agent-events.mjs): checks a file of `[Agent]` events (CSV, JSON, or NDJSON) against the rules every guide shares, before you send or import it. No dependencies: `node check-agent-events.mjs events.json`. Errors exit 1; warnings cover what is legal but usually wrong, including an `[Agent] Experiments` entry that records flag state (`on`, `off`, `skipped`, a key with no arm) rather than an assignment, and a key whose arm is the same on every session in the file (a rollout, not a split).
 - [warehouses/otlp-replay.mjs](./warehouses/otlp-replay.mjs): converts exported spans to OTLP and sends them to Amplitude. No dependencies.
 - [redact-pii.mjs](./redact-pii.mjs): applies the SDK's PII patterns to one string. No dependencies. Pass it as `redact` on an HTTP forwarder, or call it from a Collector processor. See [privacy.md](./privacy.md).
 - [voice-forwarder.mjs](./voice-forwarder.mjs): the voice additions the voice platform guides share: voice turn properties, the recording link on the last turn, the phone-number identity check, and an optional salted hash of the caller's number as a device ID. No dependencies.

@@ -89,6 +89,7 @@ Read the actual sample payload. Fill in `normalizeSierraConversation` (below) so
 | `messages[].toolCalls` | Tool or action calls made before that assistant reply, with the vendor's call ID |
 | `messages[].spans` | UI components shown with that reply (name, what was rendered, what the user did) and steps the user never saw, such as routing. Never emit an assistant message with neither text nor spans |
 | `scores` | Post-conversation ratings such as CSAT, if present |
+| `experiments` | The experiment arm the conversation ran under, if the export records one: `experimentsFromSierraTags(tags)` for `experiment:<name>:<arm>` tags, otherwise `[{ key, variant, provider: 'sierra' }]` from the confirmed field. Gates, `skipped` and `off` are not arms. See Experiments under Reference |
 | `endedAt` | When the conversation ended, in epoch milliseconds. Leave it undefined if the conversation may still be open |
 
 **PAUSE.** Show the user the mapping and the normalized output for the sample payload.
@@ -104,7 +105,7 @@ Then locate or create the forwarder:
 
 ### Phase 4: Verify
 
-1. Run the dry-run on the sample payload and show the user the exact events. Optionally save the events as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub).
+1. Run the dry-run on the sample payload and show the user the exact events. Optionally save the events as JSON and run Amplitude's checker: `npm install --no-save --ignore-scripts @amplitude/ai && node node_modules/@amplitude/ai/docs/integrations/check-agent-events.mjs events.json` (the checker ships in the npm package; don't download it from GitHub). If the conversation carries `[Agent] Experiments`, the checker warns on an entry that records flag state rather than an arm, and, across several conversations, on a key with the same arm everywhere.
 2. Send one real conversation. A `200` response only confirms receipt; it is returned before Agent Analytics processes the events, so it cannot tell you whether they grouped correctly.
 3. Ask the user to check in Amplitude (Live Events, then the Agent Analytics session viewer):
    - all events share one session
@@ -156,9 +157,32 @@ Each of these is something a real integration got wrong. The forwarder core impl
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID`, `[Agent] Agent ID`, `[Agent] Runtime`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `sierra`, `[Agent] Content Mode` (`full` or `metadata_only`), and `[Agent] Context` when you have dimensions.
 
-**Experiments.** If the conversation ran under an A/B test or feature flag variant and it is recorded in a conversation field in your Sierra export (ask the user which one), or your app's flag client assigned it when the conversation started, set `experiments: [{ key, variant, provider }]` on the normalized conversation. Every event then carries `[Agent] Experiments`, an array of `key:variant` strings that splits any chart by arm, and, for exactly one experiment, `[Agent] Experiment Key`, `Variant`, `Unit` (`agent_session` unless you set `unit`) and `Provider`. Key, variant and provider are trimmed and 1 to 256 characters; keys can't contain `:`; at most 32 are sent; invalid entries are dropped. Don't put the variant in `[Agent] Context`. If nothing records it, leave `experiments` unset. Neither the forwarder nor the SDK sends an exposure event; the flag tool keeps doing that.
+Optional, on every event when the conversation ran under an A/B test: `[Agent] Experiments` and, for exactly one experiment, `[Agent] Experiment Key`, `[Agent] Experiment Variant`, `[Agent] Experiment Unit` and `[Agent] Experiment Provider`. See Experiments below.
 
 Do not send `[Agent] Session Record` or `[Agent] Evaluator Result`; Amplitude generates them after the session closes.
+
+### Experiments
+
+An `experiments` entry is an assignment the flag tool made for that conversation, never flag state. Sierra does not assign arms itself: the assignment is recorded in a conversation field of your Sierra export (ask the user which one; a conversation tag of the form `experiment:<name>:<arm>` is the common shape), or your app's flag client assigned it when the conversation started. Set `experiments: [{ key, variant, provider }]` on the normalized conversation; `experimentsFromSierraTags` in the adapter skeleton maps the tag form. Every event then carries `[Agent] Experiments`, an array of `key:variant` strings that splits any chart by arm, and, for exactly one experiment, `[Agent] Experiment Key`, `Variant`, `Unit` (`agent_session` unless you set `unit`) and `Provider`. Don't put the variant in `[Agent] Context`. If nothing records it, leave `experiments` unset. Neither the forwarder nor the SDK sends an exposure event; the flag tool keeps doing that.
+
+| Sierra value | `experiments` entry | `[Agent] Experiments` token |
+|---|---|---|
+| `experiment:greeting:warm` | `{ key: 'greeting', variant: 'warm', provider: 'sierra' }` | `greeting:warm` |
+| `experiment:planner:v2:fast` (the arm may contain `:`; the key may not) | `{ key: 'planner', variant: 'v2:fast', provider: 'sierra' }` | `planner:v2:fast` |
+| `experiment:greeting` or `gate:new_tools` (a gate: no arm) | not mapped | none |
+| `experiment:greeting:skipped`, `:off`, `:on`, `:true`, `:false`, `:eligible:<anything>` (flag state, not an assignment) | not mapped | none |
+| A tag that does not start with `experiment:` | not mapped | none |
+| Two tags for one key | the later tag wins; the core keeps one entry per key | one token per key |
+| More than 32 keys | the core sends the first 32 valid entries and drops the rest before they leave your infrastructure, with no marker on the event. Map only the experiments that change agent behavior | at most 32 |
+
+Key, variant and provider are trimmed and 1 to 256 characters; invalid entries are dropped. Two Session Record properties describe the result; nothing in the forwarder sets them:
+
+| Session Record property | Value for a Sierra forwarder |
+|---|---|
+| `[Agent] Experiment Source` | `http`: enrichment derives it from `[Agent] Ingestion Path` = `http_forwarder`. If a variant was put in `[Agent] Context` instead (a legacy form), the arms enrichment normalizes out of the context read `context` |
+| `[Agent] Experiment Overflow` | The number of arms enrichment dropped past the cap of 32 on the Session Record. Set only when arms were dropped; because the core already caps each event at 32 and a conversation carries one list, it normally stays unset for forwarder sessions |
+
+One arm on every session is a rollout, not a split: there is nothing to compare. `check-agent-events.mjs` warns on an entry that records flag state and on a key whose arm is identical across every session in the file.
 
 ### Example: one complete session
 
@@ -723,6 +747,7 @@ import {
   send,
   toAgentEvents,
   type AgentEvent,
+  type ForwarderExperiment,
   type NormalizedConversation,
 } from './amplitude-agent-forwarder';
 
@@ -734,12 +759,39 @@ function todo(what: string): never {
   throw new NotMapped(`Map ${what} from your Sierra payload before running this forwarder`);
 }
 
+// Arm values that record flag state, not an assignment. `eligible:*` is matched by prefix.
+const NOT_AN_ARM = ['on', 'off', 'true', 'false', 'skipped'];
+
+/**
+ * `experiments` entries from Sierra tags of the form `experiment:<name>:<arm>`.
+ * The arm may contain `:`; the name may not. Gates (`experiment:<name>` with no
+ * arm, `gate:*`), `skipped`, `off`, `on`, `true`, `false` and `eligible:*` are
+ * flag state, not assignments, and are not mapped. See "Experiments".
+ */
+export function experimentsFromSierraTags(tags: readonly string[]): ForwarderExperiment[] {
+  const entries: ForwarderExperiment[] = [];
+  for (const tag of tags) {
+    if (!tag.startsWith('experiment:')) continue;
+    const rest = tag.slice('experiment:'.length);
+    const colon = rest.indexOf(':');
+    if (colon === -1) continue;
+    const key = rest.slice(0, colon).trim();
+    const variant = rest.slice(colon + 1).trim();
+    const state = variant.toLowerCase();
+    if (!key || !variant) continue;
+    if (NOT_AN_ARM.includes(state) || state === 'eligible' || state.startsWith('eligible:')) continue;
+    entries.push({ key, variant, provider: 'sierra' });
+  }
+  return entries;
+}
+
 export function normalizeSierraConversation(payload: SierraPayload): NormalizedConversation {
   return {
     conversationId: todo('the stable conversation ID'),
     agentId: todo('the confirmed agent ID'),
     userId: todo('the end-user ID your product analytics already uses'),
     context: { platform: 'sierra' }, // add one key per dimension to filter on
+    experiments: undefined, // experimentsFromSierraTags(tags) if the export carries experiment:<name>:<arm> tags
     messages: todo(
       'messages: id, role, text, timestamp (epoch ms), toolCalls, and spans (UI components shown with a reply, and steps the user never saw, such as routing)',
     ),
@@ -883,6 +935,8 @@ Historical `time` values are kept as sent, with no age limit. Forward each conve
 | Filters missing a dimension | Sent as `[Agent] Tags` or as a flat property instead of a key in `[Agent] Context` |
 | Session never enriched, or late messages missing from signals | Events arrived after the session closed |
 | `400` about ID length | User or device ID shorter than 5 characters; pass `minIdLength` |
+| An experiment is missing from `[Agent] Experiments` | The tag was a gate (`experiment:<name>` with no arm), or its arm was `skipped`, `off`, `on`, `true`, `false` or `eligible:*`: flag state, not an assignment. Or the key contained `:`, or the list had more than 32 entries |
+| Every session shows the same arm | A rollout, not a split. The mapping copies one fixed value instead of the arm the flag tool assigned per conversation |
 
 ### More
 

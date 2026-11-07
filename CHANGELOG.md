@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- **Sierra experiments mapping.** `docs/integrations/sierra.md` gains an Experiments section with the mapping table from a Sierra `experiment:<name>:<arm>` tag to an `experiments` entry `{ key, variant, provider: 'sierra' }`, what is not mapped (gates, `skipped`, `off`, `on`, `true`, `false`, `eligible:*`: flag state, not an assignment), the cap of 32, and the Session Record properties `[Agent] Experiment Source` (`http` for a forwarder) and `[Agent] Experiment Overflow`, which the event catalog now describes. The adapter skeleton gains `experimentsFromSierraTags`. `check-agent-events.mjs` warns on an `[Agent] Experiments` entry that records flag state and on a key whose arm is the same on every session in the file (a rollout, not a split). No SDK tracking changes.
 - **Voice agent guidance.** The coding-agent guide, the generated `AGENTS.md` routing line, and the Vapi, Retell, ElevenLabs, and Bland guides tell the customer to choose `deviceId`. `callerDeviceId` remains one optional helper.
 
 ## 0.26.0
