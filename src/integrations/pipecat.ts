@@ -147,7 +147,7 @@ export class PipecatVoiceTracker {
       const text = textOf(frame);
       if (text) this._transcriptTurn().text.push(text);
     } else if (name === 'BotStartedSpeakingFrame') {
-      this._flushUser();
+      this._flushUser(false, true);
       this._botSpeaking = true;
       this._botStarted = now;
       if (this._userStopped !== undefined) {
@@ -214,14 +214,27 @@ export class PipecatVoiceTracker {
     return turn;
   }
 
-  /** Track caller turns in order; with `finishedOnly`, stop at the first one still waiting on speech or text. */
-  private _flushUser(finishedOnly = false): void {
+  /**
+   * Track caller turns in order.
+   *
+   * With `finishedOnly`, stop at the first one still waiting on speech or text. With
+   * `keepUntranscribed`, keep turns with no text queued so a late transcript still finds them.
+   * At the end of the call, a turn that never got a transcript is dropped: voice activity
+   * detection also fires on noise.
+   */
+  private _flushUser(finishedOnly = false, keepUntranscribed = false): void {
+    const kept: UserTurn[] = [];
     for (let turn = this._userTurns[0]; turn; turn = this._userTurns[0]) {
-      if (finishedOnly && (turn.ended === undefined || turn.text.length === 0)) return;
+      if (finishedOnly && (turn.ended === undefined || turn.text.length === 0)) break;
       this._userTurns.shift();
+      if (keepUntranscribed && turn.text.length === 0) {
+        kept.push(turn);
+        continue;
+      }
       if (turn === this._bargeInTurn) this._closeBargeIn(this._clock());
       if (turn.text.length > 0) this._trackUser(turn);
     }
+    this._userTurns.unshift(...kept);
   }
 
   /** Set the barge-in overlap: from the barge-in until the caller or the bot stopped, whichever was first. */

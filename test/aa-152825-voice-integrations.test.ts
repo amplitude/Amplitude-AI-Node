@@ -362,6 +362,24 @@ describe('PipecatVoiceTracker', () => {
     expect(reply[PROP_VOICE_PRE_REPLY_SILENCE_MS]).toBe(0);
   });
 
+  it('keeps the utterance timing of a transcript that arrives after the reply starts', () => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('UserStartedSpeakingFrame')],
+      [1.0, frame('UserStoppedSpeakingFrame')],
+      [1.5, frame('BotStartedSpeakingFrame')],
+      [1.7, frame('TranscriptionFrame', { text: "What's my balance?" })],
+      [3.0, frame('BotStoppedSpeakingFrame')],
+      [3.5, frame('EndFrame')],
+    ]);
+    const users = props(mock, EVENT_USER_MESSAGE);
+    expect(users).toHaveLength(1);
+    expect(users[0]?.[PROP_VOICE_TURN_START_OFFSET_MS]).toBe(0);
+    expect(users[0]?.[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(1000);
+  });
+
   it('keeps a late transcript on its own utterance', () => {
     const mock = new MockAmplitudeAI();
     const clock = new Clock();
