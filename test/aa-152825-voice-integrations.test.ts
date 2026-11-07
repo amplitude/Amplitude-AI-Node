@@ -322,7 +322,7 @@ function pipecatSamCall(): MockAmplitudeAI {
     [10.6, metrics],
     [10.6, frame('BotStartedSpeakingFrame')],
     [10.7, frame('TTSTextFrame', { text: 'I found your order, it—' })],
-    [10.9, frame('EndFrame')],
+    [10.9, frame('CancelFrame')],
   ]);
   return mock;
 }
@@ -357,9 +357,27 @@ describe('PipecatVoiceTracker', () => {
     });
     expect(reply[PROP_VOICE_TURN_START_OFFSET_MS]).toBe(10600);
     expect(reply[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(10900);
-    expect(reply[PROP_VOICE_END_OF_TURN_REASON]).toBe('completed');
+    expect(reply[PROP_VOICE_END_OF_TURN_REASON]).toBe('interrupted');
+    expect(reply[PROP_VOICE_INTERRUPTED]).toBe(true);
+    expect(reply).not.toHaveProperty(PROP_VOICE_INTERRUPTED_BY);
+    expect(reply).not.toHaveProperty(PROP_VOICE_YIELDED);
     expect(reply[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS]).toBe(4400);
     expect(reply[PROP_VOICE_PRE_REPLY_SILENCE_MS]).toBe(0);
+  });
+
+  it('keeps a reply completed when the pipeline ends gracefully mid-reply', () => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('BotStartedSpeakingFrame')],
+      [0.1, frame('TTSTextFrame', { text: 'Hi, this is Sam' })],
+      [1.0, frame('EndFrame')],
+    ]);
+    const replies = props(mock, EVENT_AI_RESPONSE);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]?.[PROP_VOICE_END_OF_TURN_REASON]).toBe('completed');
+    expect(replies[0]).not.toHaveProperty(PROP_VOICE_INTERRUPTED);
   });
 
   it('keeps the utterance timing of a transcript that arrives after the reply starts', () => {

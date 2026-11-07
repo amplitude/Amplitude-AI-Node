@@ -14,7 +14,7 @@
  * | `TTSTextFrame`               | The words the bot spoke                                              |
  * | `BotStoppedSpeakingFrame`    | Closes the agent turn; after a barge-in, ends the overlap on the caller's turn (or the caller's stop, if earlier) |
  * | `MetricsFrame`               | STT, LLM, and TTS time to first byte (`TTFBMetricsData`)             |
- * | `EndFrame` / `CancelFrame`   | Tracks any turn still pending                                        |
+ * | `EndFrame` / `CancelFrame`   | Tracks any turn still pending; a reply still playing at `CancelFrame` (hang-up) ends interrupted |
  *
  * Frames are matched by class name (or a `type` / `name` string such as
  * `"TranscriptionFrame#3"` on plain objects), so this module does not import
@@ -170,13 +170,18 @@ export class PipecatVoiceTracker {
     } else if (name === 'MetricsFrame') {
       this._readMetrics(frame);
     } else if (name === 'EndFrame' || name === 'CancelFrame') {
-      this.flush();
+      this.flush({ cancelled: name === 'CancelFrame' });
     }
   }
 
-  /** Track any turn still pending, for a call that ends mid-exchange. */
-  flush(): void {
-    if (this._botSpeaking) this._finishAssistant(this._clock());
+  /**
+   * Track any turn still pending, for a call that ends mid-exchange.
+   *
+   * With `cancelled` (a hang-up), a reply still playing ends interrupted. A graceful
+   * `EndFrame` can arrive before the bot's last audio finishes, so it doesn't.
+   */
+  flush(options: { cancelled?: boolean } = {}): void {
+    if (this._botSpeaking) this._finishAssistant(this._clock(), options.cancelled === true);
     this._flushUser();
   }
 
@@ -270,16 +275,17 @@ export class PipecatVoiceTracker {
     this._agent.trackUserMessage(turn.text.join(' '), { eventProperties });
   }
 
-  private _finishAssistant(now: number): void {
-    const interrupted = this._interrupted;
+  private _finishAssistant(now: number, cutOff = false): void {
+    const bargedIn = this._interrupted;
+    const interrupted = bargedIn || cutOff;
     const started = this._botStarted;
     const eventProperties = voiceTurnProperties({
       direction: this._direction,
       speechDurationMs: started !== undefined ? (now - started) * 1000 : undefined,
       timeToFirstAudioMs: this._ttfaMs,
       interrupted: interrupted ? true : undefined,
-      interruptedBy: interrupted ? 'user' : undefined,
-      yielded: interrupted ? true : undefined,
+      interruptedBy: bargedIn ? 'user' : undefined,
+      yielded: bargedIn ? true : undefined,
       endOfTurnReason: interrupted ? 'interrupted' : 'completed',
       sttMs: this._stages.stt,
       llmTtftMs: this._stages.llm,
