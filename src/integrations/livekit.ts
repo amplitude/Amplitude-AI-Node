@@ -95,7 +95,7 @@ export class LiveKitVoiceTracker {
   private readonly _direction: VoiceTurnOptions['direction'];
   private _callStart: number | undefined;
   private readonly _finished = new Map<string, { started: number; stopped: number }>();
-  private _pendingSttMs: number | undefined;
+  private _pendingStt: { ms: number; userStopped: number | undefined } | undefined;
 
   constructor(agent: VoiceTurnSink, options: LiveKitVoiceTrackerOptions = {}) {
     this._agent = agent;
@@ -144,9 +144,9 @@ export class LiveKitVoiceTracker {
     Object.assign(timing, this._againstOtherSide(role, started, stopped));
 
     if (role === 'user') {
-      this._trackUser(item, text, metrics, timing);
+      this._trackUser(item, text, metrics, timing, stopped);
     } else {
-      this._trackAssistant(item, text, metrics, timing);
+      this._trackAssistant(item, text, metrics, timing, started);
     }
   }
 
@@ -183,9 +183,15 @@ export class LiveKitVoiceTracker {
     return {};
   }
 
-  private _trackUser(item: object, text: string, metrics: unknown, timing: Timing): void {
+  private _trackUser(
+    item: object,
+    text: string,
+    metrics: unknown,
+    timing: Timing,
+    stopped: number | undefined,
+  ): void {
     const sttMs = ms(seconds(metrics, 'transcriptionDelay', 'transcription_delay'));
-    if (sttMs !== undefined) this._pendingSttMs = sttMs;
+    if (sttMs !== undefined) this._pendingStt = { ms: sttMs, userStopped: stopped };
     const confidence = field(item, 'transcriptConfidence', 'transcript_confidence');
     const eventProperties = voiceTurnProperties({
       direction: this._direction,
@@ -199,10 +205,24 @@ export class LiveKitVoiceTracker {
     this._agent.trackUserMessage(text, { eventProperties });
   }
 
-  private _trackAssistant(item: object, text: string, metrics: unknown, timing: Timing): void {
+  private _trackAssistant(
+    item: object,
+    text: string,
+    metrics: unknown,
+    timing: Timing,
+    started: number | undefined,
+  ): void {
     const interrupted = (item as { interrupted?: unknown }).interrupted === true;
-    const sttMs = this._pendingSttMs;
-    this._pendingSttMs = undefined;
+    let sttMs: number | undefined;
+    // A reply that started before the caller finished didn't wait on that transcription; a later reply did.
+    const pending = this._pendingStt;
+    if (
+      pending !== undefined &&
+      (started === undefined || pending.userStopped === undefined || started >= pending.userStopped)
+    ) {
+      sttMs = pending.ms;
+      this._pendingStt = undefined;
+    }
     const eventProperties = voiceTurnProperties({
       direction: this._direction,
       timeToFirstAudioMs: ms(seconds(metrics, 'e2eLatency', 'e2e_latency')),

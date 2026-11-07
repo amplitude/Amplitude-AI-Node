@@ -12,7 +12,7 @@
  * | `TranscriptionFrame`         | The caller's words                                                   |
  * | `BotStartedSpeakingFrame`    | Time to first audio and pre-reply silence, from the end of the caller's speech |
  * | `TTSTextFrame`               | The words the bot spoke                                              |
- * | `BotStoppedSpeakingFrame`    | Closes the agent turn; after a barge-in, the overlap on the caller's turn |
+ * | `BotStoppedSpeakingFrame`    | Closes the agent turn; after a barge-in, ends the overlap on the caller's turn (or the caller's stop, if earlier) |
  * | `MetricsFrame`               | STT, LLM, and TTS time to first byte (`TTFBMetricsData`)             |
  * | `EndFrame` / `CancelFrame`   | Tracks any turn still pending                                        |
  *
@@ -164,10 +164,8 @@ export class PipecatVoiceTracker {
     } else if (name === 'BotStoppedSpeakingFrame') {
       if (this._botSpeaking) {
         this._finishAssistant(now);
-      } else if (this._bargeInAt !== undefined && this._bargeInTurn !== undefined) {
-        this._bargeInTurn.overlapMs = Math.max(0, (now - this._bargeInAt) * 1000);
-        this._bargeInAt = undefined;
-        this._bargeInTurn = undefined;
+      } else {
+        this._closeBargeIn(now);
       }
     } else if (name === 'MetricsFrame') {
       this._readMetrics(frame);
@@ -221,12 +219,20 @@ export class PipecatVoiceTracker {
     for (let turn = this._userTurns[0]; turn; turn = this._userTurns[0]) {
       if (finishedOnly && (turn.ended === undefined || turn.text.length === 0)) return;
       this._userTurns.shift();
-      if (turn === this._bargeInTurn) {
-        this._bargeInTurn = undefined;
-        this._bargeInAt = undefined;
-      }
+      if (turn === this._bargeInTurn) this._closeBargeIn(this._clock());
       if (turn.text.length > 0) this._trackUser(turn);
     }
+  }
+
+  /** Set the barge-in overlap: from the barge-in until the caller or the bot stopped, whichever was first. */
+  private _closeBargeIn(botStillSpeakingAt: number): void {
+    const turn = this._bargeInTurn;
+    const started = this._bargeInAt;
+    this._bargeInTurn = undefined;
+    this._bargeInAt = undefined;
+    if (turn === undefined || started === undefined) return;
+    const end = turn.ended === undefined ? botStillSpeakingAt : Math.min(turn.ended, botStillSpeakingAt);
+    turn.overlapMs = Math.max(0, (end - started) * 1000);
   }
 
   private _trackUser(turn: UserTurn): void {

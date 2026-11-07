@@ -194,6 +194,22 @@ describe('LiveKit attach', () => {
     expect(ai).not.toHaveProperty(PROP_VOICE_PRE_REPLY_SILENCE_MS);
   });
 
+  it('gives the STT delay to the reply that started after the caller', () => {
+    const mock = new MockAmplitudeAI();
+    const session = new FakeLiveKitSession();
+    attach(session, mock.agent('sam', { userId: 'customer-1042' }));
+    session.add({
+      role: 'user',
+      textContent: "Where's my order?",
+      metrics: { startedSpeakingAt: 3.0, stoppedSpeakingAt: 6.2, transcriptionDelay: 0.31 },
+    });
+    session.add({ role: 'assistant', textContent: 'Hi, this is Sam', metrics: { startedSpeakingAt: 0, stoppedSpeakingAt: 7.0 } });
+    session.add({ role: 'assistant', textContent: 'Let me check', metrics: { startedSpeakingAt: 7.5, stoppedSpeakingAt: 9.0 } });
+    const [, greeting, reply] = props(mock) as [Props, Props, Props];
+    expect(greeting).not.toHaveProperty(PROP_VOICE_STT_MS);
+    expect(reply[PROP_VOICE_STT_MS]).toBe(310);
+  });
+
   it('keeps the previous turn for overlap when an item has no stop', () => {
     const mock = new MockAmplitudeAI();
     const session = new FakeLiveKitSession();
@@ -414,6 +430,45 @@ describe('PipecatVoiceTracker', () => {
     expect(ai[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(2500);
     expect(barge[PROP_VOICE_OVERLAP_MS]).toBe(400);
     expect(barge[PROP_VOICE_TURN_START_OFFSET_MS]).toBe(2500);
+  });
+
+  it.each([
+    // The caller speaks again before the bot's stop frame arrives, which tracks the barge-in first.
+    [
+      'the caller speaks again before the bot stops',
+      [
+        [2.8, 'UserStoppedSpeakingFrame'],
+        [2.9, 'TranscriptionFrame'],
+        [3.5, 'UserStartedSpeakingFrame'],
+        [3.8, 'BotStoppedSpeakingFrame'],
+      ],
+    ],
+    // The caller stops before the bot does: the overlap ends at the caller's stop.
+    [
+      'the caller stops before the bot',
+      [
+        [2.8, 'UserStoppedSpeakingFrame'],
+        [3.2, 'BotStoppedSpeakingFrame'],
+        [3.3, 'TranscriptionFrame'],
+      ],
+    ],
+  ] as Array<[string, Array<[number, string]>]>)('ends the barge-in overlap at the first stop when %s', (_, script) => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('UserStartedSpeakingFrame')],
+      [1.0, frame('UserStoppedSpeakingFrame')],
+      [1.1, frame('TranscriptionFrame', { text: "What's my balance?" })],
+      [1.8, frame('BotStartedSpeakingFrame')],
+      [2.5, frame('UserStartedSpeakingFrame')],
+      ...script.map(
+        ([at, name]): [number, object] => [at, name === 'TranscriptionFrame' ? frame(name, { text: 'Wait' }) : frame(name)],
+      ),
+      [4.0, frame('EndFrame')],
+    ]);
+    const barge = props(mock, EVENT_USER_MESSAGE).find((p) => p[PROP_VOICE_TURN_START_OFFSET_MS] === 2500);
+    expect(barge?.[PROP_VOICE_OVERLAP_MS]).toBe(300);
   });
 
   it('counts a frame relayed on a later hop once, through the observer, for plain-object frames', () => {
