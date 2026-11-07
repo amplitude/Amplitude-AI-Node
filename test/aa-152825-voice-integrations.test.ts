@@ -181,6 +181,30 @@ describe('LiveKit attach', () => {
     expect(user).not.toHaveProperty(PROP_VOICE_DIRECTION);
   });
 
+  it('counts only the shared speech of a talk-over that finishes first', () => {
+    const mock = new MockAmplitudeAI();
+    const session = new FakeLiveKitSession();
+    attach(session, mock.agent('sam', { userId: 'customer-1042' }));
+    session.add({ role: 'user', textContent: 'Hi', metrics: { startedSpeakingAt: 0, stoppedSpeakingAt: 1 } });
+    session.add({ role: 'user', textContent: 'Mm-hm', metrics: { startedSpeakingAt: 5, stoppedSpeakingAt: 7 } });
+    session.add({ role: 'assistant', textContent: 'Your order', metrics: { startedSpeakingAt: 2, stoppedSpeakingAt: 10 } });
+    const [, backchannel, ai] = props(mock) as [Props, Props, Props];
+    expect(backchannel).not.toHaveProperty(PROP_VOICE_OVERLAP_MS);
+    expect(ai[PROP_VOICE_OVERLAP_MS]).toBe(2000);
+    expect(ai).not.toHaveProperty(PROP_VOICE_PRE_REPLY_SILENCE_MS);
+  });
+
+  it('keeps the previous turn for overlap when an item has no stop', () => {
+    const mock = new MockAmplitudeAI();
+    const session = new FakeLiveKitSession();
+    attach(session, mock.agent('sam', { userId: 'customer-1042' }));
+    session.add({ role: 'assistant', textContent: 'Let me check', metrics: { startedSpeakingAt: 0, stoppedSpeakingAt: 4 } });
+    session.add({ role: 'assistant', textContent: 'One moment', metrics: { startedSpeakingAt: 4.5 } });
+    session.add({ role: 'user', textContent: 'Wait', metrics: { startedSpeakingAt: 3, stoppedSpeakingAt: 3.5 } });
+    const user = props(mock)[2] as Props;
+    expect(user[PROP_VOICE_OVERLAP_MS]).toBe(500);
+  });
+
   it('tracks a turn that started before the first item seen', () => {
     const mock = new MockAmplitudeAI();
     const session = new FakeLiveKitSession();

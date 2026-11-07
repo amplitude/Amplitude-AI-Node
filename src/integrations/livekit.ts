@@ -94,7 +94,7 @@ export class LiveKitVoiceTracker {
   private readonly _provider: string;
   private readonly _direction: VoiceTurnOptions['direction'];
   private _callStart: number | undefined;
-  private _last: { role: string; stopped: number | undefined } | undefined;
+  private readonly _finished = new Map<string, { started: number; stopped: number }>();
   private _pendingSttMs: number | undefined;
 
   constructor(agent: VoiceTurnSink, options: LiveKitVoiceTrackerOptions = {}) {
@@ -141,24 +141,46 @@ export class LiveKitVoiceTracker {
         timing.turnEndOffsetMs = Math.max(0, (stopped - this._callStart) * 1000);
       }
     }
-    const previousStopped =
-      this._last !== undefined && this._last.role !== role
-        ? this._last.stopped
-        : undefined;
-    if (previousStopped !== undefined && started !== undefined) {
-      if (started < previousStopped) {
-        timing.overlapMs = (previousStopped - started) * 1000;
-      } else if (role === 'assistant') {
-        timing.preReplySilenceMs = (started - previousStopped) * 1000;
-      }
-    }
-    this._last = { role, stopped };
+    Object.assign(timing, this._againstOtherSide(role, started, stopped));
 
     if (role === 'user') {
       this._trackUser(item, text, metrics, timing);
     } else {
       this._trackAssistant(item, text, metrics, timing);
     }
+  }
+
+  /**
+   * Overlap with, or silence after, the other side's latest finished turn.
+   * Items arrive when they finish, so arrival order is not speaking order:
+   * overlap is the intersection of the two speech intervals.
+   */
+  private _againstOtherSide(
+    role: string,
+    started: number | undefined,
+    stopped: number | undefined,
+  ): Timing {
+    const other = this._finished.get(role === 'user' ? 'assistant' : 'user');
+    const own = this._finished.get(role);
+    if (
+      started !== undefined &&
+      stopped !== undefined &&
+      (own === undefined || stopped >= own.stopped)
+    ) {
+      this._finished.set(role, { started, stopped });
+    }
+    if (other === undefined || started === undefined) return {};
+    const end = stopped ?? other.stopped;
+    const overlap = Math.min(end, other.stopped) - Math.max(started, other.started);
+    if (overlap > 0) return { overlapMs: overlap * 1000 };
+    if (
+      role === 'assistant' &&
+      other.stopped <= started &&
+      (own === undefined || other.stopped > own.stopped)
+    ) {
+      return { preReplySilenceMs: (started - other.stopped) * 1000 };
+    }
+    return {};
   }
 
   private _trackUser(item: object, text: string, metrics: unknown, timing: Timing): void {
