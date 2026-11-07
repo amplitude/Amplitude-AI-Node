@@ -112,6 +112,7 @@ export class PipecatVoiceTracker {
   private _bargeInTurn: UserTurn | undefined;
   private _botSpeaking = false;
   private _botStarted: number | undefined;
+  private _talkedOver: UserTurn | undefined;
   private _botText: string[] = [];
   private _ttfaMs: number | undefined;
   private _preReplyMs: number | undefined;
@@ -170,6 +171,7 @@ export class PipecatVoiceTracker {
       this._flushUser(false, true);
       this._botSpeaking = true;
       this._botStarted = now;
+      this._talkedOver = this._userTurns.find((turn) => turn.ended === undefined && turn.started !== undefined);
       if (this._userStopped !== undefined) {
         this._ttfaMs = Math.max(0, (now - this._userStopped) * 1000);
         this._userStopped = undefined;
@@ -300,6 +302,13 @@ export class PipecatVoiceTracker {
     const bargedIn = this._interrupted;
     const interrupted = bargedIn || cutOff;
     const started = this._botStarted;
+    // A reply that starts while the caller is still speaking overlaps until either side stops.
+    let overlapMs: number | undefined;
+    const caller = this._talkedOver;
+    if (caller !== undefined && started !== undefined) {
+      const end = caller.ended === undefined ? now : Math.min(caller.ended, now);
+      if (end > started) overlapMs = (end - started) * 1000;
+    }
     const eventProperties = voiceTurnProperties({
       direction: this._direction,
       speechDurationMs: started !== undefined ? (now - started) * 1000 : undefined,
@@ -314,12 +323,14 @@ export class PipecatVoiceTracker {
       turnStartOffsetMs: this._offset(started),
       turnEndOffsetMs: started !== undefined ? this._offset(now) : undefined,
       preReplySilenceMs: this._preReplyMs,
+      overlapMs,
     });
     this._agent.trackAiMessage(this._botText.join(' '), this._model, this._provider, 0, {
       eventProperties,
     });
     this._botSpeaking = false;
     this._botStarted = undefined;
+    this._talkedOver = undefined;
     this._botText = [];
     this._ttfaMs = undefined;
     this._preReplyMs = undefined;

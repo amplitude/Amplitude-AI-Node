@@ -421,6 +421,46 @@ describe('PipecatVoiceTracker', () => {
     expect(second[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS]).toBe(500);
   });
 
+  it.each([
+    [1.4, 3.0, 400],
+    [2.5, 2.0, 1000],
+  ])(
+    'records the overlap of a reply that talks over the caller (caller stops %s, bot stops %s)',
+    (callerStops, botStops, overlap) => {
+      const mock = new MockAmplitudeAI();
+      const clock = new Clock();
+      const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+      const script: Array<[number, object]> = [
+        [0.0, frame('UserStartedSpeakingFrame')],
+        [0.8, frame('TranscriptionFrame', { text: "What's my balance?" })],
+        [1.0, frame('BotStartedSpeakingFrame')],
+        [callerStops, frame('UserStoppedSpeakingFrame')],
+        [botStops, frame('BotStoppedSpeakingFrame')],
+        [4.0, frame('EndFrame')],
+      ];
+      drive(tracker, clock, script.sort((a, b) => a[0] - b[0]));
+      const replies = props(mock, EVENT_AI_RESPONSE);
+      expect(replies).toHaveLength(1);
+      expect(replies[0]?.[PROP_VOICE_OVERLAP_MS]).toBe(overlap);
+      expect(replies[0]?.[PROP_VOICE_END_OF_TURN_REASON]).toBe('completed');
+    },
+  );
+
+  it('records no overlap on a reply after the caller stops', () => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('UserStartedSpeakingFrame')],
+      [0.8, frame('TranscriptionFrame', { text: "What's my balance?" })],
+      [1.0, frame('UserStoppedSpeakingFrame')],
+      [1.5, frame('BotStartedSpeakingFrame')],
+      [3.0, frame('BotStoppedSpeakingFrame')],
+    ]);
+    const [reply] = props(mock, EVENT_AI_RESPONSE) as [Props];
+    expect(reply).not.toHaveProperty(PROP_VOICE_OVERLAP_MS);
+  });
+
   it('keeps a late transcript on its own utterance', () => {
     const mock = new MockAmplitudeAI();
     const clock = new Clock();
