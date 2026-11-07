@@ -385,7 +385,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       ensureGitignored(writer, cwd, CLAUDE_LOCAL_SETTINGS_PATH);
       if (!options.apiKey && typeof localEnv.OTEL_EXPORTER_OTLP_HEADERS !== 'string') {
         instructions.push(
-          `Claude Code: put the key in ${CLAUDE_LOCAL_SETTINGS_PATH} (re-run with --api-key-stdin) or export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <AMPLITUDE_API_KEY>"`,
+          `Claude Code: put the key in ${CLAUDE_LOCAL_SETTINGS_PATH} (re-run with --api-key-stdin) or export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <AMPLITUDE_AI_API_KEY>"`,
         );
       }
     }
@@ -436,8 +436,9 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
   if (harnesses.includes('goose')) {
     const lines = [
       `export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://${amplitudeHost(region)}${GOOSE_TRACES_PATH}`,
-      'export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <AMPLITUDE_API_KEY>"',
+      'export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>"',
       `export OTEL_RESOURCE_ATTRIBUTES="enduser.id=${userId ? encodeResourceValue(userId) : '<your email>'}"`,
+      'export OTEL_SERVICE_NAME=goose',
     ];
     if (privacy === 'full') lines.push('export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
     instructions.push(`goose: add to the shell profile that starts goose:\n  ${lines.join('\n  ')}`);

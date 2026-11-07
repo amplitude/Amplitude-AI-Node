@@ -160,7 +160,8 @@ describe('coding-agents init', () => {
     const result = init({ harnesses: ['goose'], apiKey: SECRET });
     const goose = result.instructions.find((l) => l.startsWith('goose'))!;
     expect(goose).toContain('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.amplitude.com/otlp/v1/traces');
-    expect(goose).toContain('Authorization=Bearer <AMPLITUDE_API_KEY>');
+    expect(goose).toContain('Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>');
+    expect(goose).toContain('OTEL_SERVICE_NAME=goose');
     expect(goose).toContain('OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
     expect(JSON.stringify(result)).not.toContain(SECRET);
     expect(existsSync(join(repo, '.claude'))).toBe(false);

@@ -243,6 +243,28 @@ describe('docs/integrations contract', () => {
     }
   });
 
+  it('points every coding_agents harness, recipe and template at a file that ships', () => {
+    const manifest = JSON.parse(readPage('manifest.json')) as {
+      coding_agents: {
+        harnesses: { id: string; url: string; raw_url: string; pinned_version: string; last_verified: string }[];
+        recipes: { url: string; raw_url: string }[];
+        templates: { raw_url: string }[];
+      };
+    };
+    const { harnesses, recipes, templates } = manifest.coding_agents;
+    expect(harnesses.map((h) => h.id)).toEqual(['claude-code', 'codex', 'goose', 'buzz']);
+    for (const harness of harnesses) {
+      expect(harness.url.endsWith(`/docs/integrations/${harness.id}.md`)).toBe(true);
+      expect(harness.pinned_version).not.toBe('');
+      expect(readPage(`${harness.id}.md`)).toContain('Last verified: pending live capture');
+    }
+    const repoRaw = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/';
+    for (const url of [...harnesses.map((h) => h.raw_url), ...recipes.map((r) => r.raw_url), ...templates.map((t) => t.raw_url)]) {
+      expect(url.startsWith(repoRaw)).toBe(true);
+      expect(() => readFileSync(resolve(__dirname, '..', url.slice(repoRaw.length)))).not.toThrow();
+    }
+  });
+
   it('shows router analytics metadata that the schema accepts, and rejects missing identity or unknown keys', () => {
     const schema = JSON.parse(readPage('analytics-metadata.schema.json')) as MetadataSchema;
     const example = JSON.parse(
