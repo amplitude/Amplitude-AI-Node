@@ -137,7 +137,8 @@
       { "id": "openai-messages", "ingestion_path": "warehouse_import" },
       { "id": "otel-genai", "ingestion_path": "otlp_replay" },
       { "id": "openinference", "ingestion_path": "otlp_replay" },
-      { "id": "mlflow-tracing", "ingestion_path": "otlp_replay" }
+      { "id": "mlflow-tracing", "ingestion_path": "otlp_replay" },
+      { "id": "adk-bigquery-agent-analytics", "ingestion_path": "warehouse_import" }
     ],
     "last_verified": "2026-10-06"
   },

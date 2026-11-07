@@ -11,6 +11,8 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ADK_BIGQUERY, renderAdkSample } from './warehouse-sql/adk-bigquery.mjs';
+import { DIALECTS } from './warehouse-sql/dialects.mjs';
 import { MESSAGE_FORMATS } from './warehouse-sql/formats.mjs';
 import { renderMessageQuery } from './warehouse-sql/query.mjs';
 import { CANONICAL_COLUMNS, renderDatabricksPipeline } from './warehouse-sql/tail.mjs';
@@ -40,6 +42,10 @@ export function renderBlocks() {
       `CREATE OR REPLACE VIEW ${DATABRICKS_VIEW} AS\n${renderMessageQuery(format, 'databricks')};`,
     );
   }
+  blocks[`${ADK_BIGQUERY.id}:bigquery`] = fence(
+    'sql',
+    renderMessageQuery(ADK_BIGQUERY, 'bigquery', { source: renderAdkSample(DIALECTS.bigquery) }),
+  );
   const pipeline = renderDatabricksPipeline();
   blocks['databricks:table'] = fence('sql', pipeline.table);
   blocks['databricks:merge'] = fence('sql', pipeline.merge);

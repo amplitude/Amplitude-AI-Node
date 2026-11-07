@@ -1,0 +1,182 @@
+[
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478400000,
+    "insert_id": "adk_s1:sp0:user",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "support_root",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_1\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_s1:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "adk_s1:sp0:user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Where is order A1?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_12345",
+    "time": 1768478403000,
+    "insert_id": "adk_s1:sp2:tool",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "support_root",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_1\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_s1:trace-1",
+      "[Agent] Turn ID": 2,
+      "[Agent] Invocation ID": "adk_s1:sp2:tool",
+      "[Agent] Component Type": "tool",
+      "[Agent] Tool Name": "lookup_order",
+      "[Agent] Tool Success": true,
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 140,
+      "[Agent] Parent Message ID": "adk_s1:sp0:user",
+      "[Agent] Tool Input": "{\"id\":\"A1\"}",
+      "[Agent] Tool Output": "{\"eta\":\"Thursday\"}"
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478405000,
+    "insert_id": "adk_s1:sp3:reply",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "support_root",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_1\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_s1:trace-1",
+      "[Agent] Turn ID": 3,
+      "[Agent] Message ID": "adk_s1:sp3:reply",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 700,
+      "[Agent] Model Name": "gemini-2.5-flash",
+      "[Agent] Input Tokens": 280,
+      "[Agent] Output Tokens": 20,
+      "$llm_message": {
+        "text": "It arrives Thursday."
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_12345",
+    "time": 1768478430000,
+    "insert_id": "adk_s1:sp4:user",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "support_root",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_2\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_s1:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Message ID": "adk_s1:sp4:user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "Cancel it"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_12345",
+    "time": 1768478433000,
+    "insert_id": "adk_s1:sp6:tool",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "billing_agent",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_2\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_s1:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Invocation ID": "adk_s1:sp6:tool",
+      "[Agent] Component Type": "tool",
+      "[Agent] Tool Name": "cancel_order",
+      "[Agent] Tool Success": false,
+      "[Agent] Is Error": true,
+      "[Agent] Latency Ms": 3000,
+      "[Agent] Parent Message ID": "adk_s1:sp4:user",
+      "[Agent] Tool Input": "{\"id\":\"A1\"}",
+      "[Agent] Tool Output": "order already shipped"
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_12345",
+    "time": 1768478434000,
+    "insert_id": "adk_s1:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "billing_agent",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_2\",\"content_uri\":\"gs://adk-bucket/sessions/adk_s1/sp7.txt\"}",
+      "[Agent] Trace ID": "adk_s1:trace-2"
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_12345",
+    "time": 1768478434000,
+    "insert_id": "adk_s1:sp7:reply",
+    "event_properties": {
+      "[Agent] Session ID": "adk_s1",
+      "[Agent] Agent ID": "billing_agent",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"support_root\",\"invocation_id\":\"inv_2\",\"content_uri\":\"gs://adk-bucket/sessions/adk_s1/sp7.txt\"}",
+      "[Agent] Trace ID": "adk_s1:trace-2",
+      "[Agent] Turn ID": 6,
+      "[Agent] Message ID": "adk_s1:sp7:reply",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 1200,
+      "[Agent] Model Name": "gemini-2.5-pro-002",
+      "[Agent] Input Tokens": 440,
+      "[Agent] Output Tokens": 36,
+      "$llm_message": {
+        "text": "It already shipped, so I started a return"
+      }
+    },
+    "import_cursor": "2026-01-15 14:00:34"
+  }
+]

@@ -7,6 +7,7 @@ import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { checkAgentEvents } from '../docs/integrations/check-agent-events.mjs';
 import { renderBlocks, renderPage, WAREHOUSE_DOCS_DIR } from '../scripts/render-warehouse-sql.mjs';
+import { ADK_BIGQUERY, renderAdkSample } from '../scripts/warehouse-sql/adk-bigquery.mjs';
 import { DIALECTS } from '../scripts/warehouse-sql/dialects.mjs';
 import { MESSAGE_FORMATS, renderSample } from '../scripts/warehouse-sql/formats.mjs';
 import { renderMessageQuery } from '../scripts/warehouse-sql/query.mjs';
@@ -262,6 +263,64 @@ describe('message-rows query', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('adk-bigquery-agent-analytics query on DuckDB', () => {
+  const adkQuery = (options?: { time?: string }) =>
+    renderMessageQuery(ADK_BIGQUERY, 'duckdb', { source: renderAdkSample(DIALECTS.duckdb, options) });
+
+  it('matches the expected events and passes the checker', async () => {
+    const events = await runDuckDb(adkQuery());
+    const fixture = join(FIXTURES, 'adk-bigquery-agent-analytics.expected.json');
+    if (UPDATE) writeFileSync(fixture, `${JSON.stringify(events, null, 2)}\n`);
+    expect(events).toEqual(JSON.parse(readFileSync(fixture, 'utf8')));
+
+    const result = checkAgentEvents(events);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('reads text from content_parts, sums tool-step tokens, and joins the request model', async () => {
+    const byId = new Map((await runDuckDb(adkQuery())).map((e) => [e.insert_id, e]));
+    const first = byId.get('adk_s1:sp3:reply')?.event_properties;
+    expect(first?.$llm_message).toEqual({ text: 'It arrives Thursday.' });
+    expect(first?.['[Agent] Input Tokens']).toBe(280);
+    expect(first?.['[Agent] Output Tokens']).toBe(20);
+    expect(first?.['[Agent] Model Name']).toBe('gemini-2.5-flash');
+    expect(byId.has('adk_s1:sp1:reply')).toBe(false);
+
+    const sub = byId.get('adk_s1:sp7:reply');
+    expect(sub?.user_id).toBe('user_12345');
+    expect(sub?.event_properties['[Agent] Agent ID']).toBe('billing_agent');
+    expect(sub?.event_properties['[Agent] Model Name']).toBe('gemini-2.5-pro-002');
+    expect(JSON.parse(sub?.event_properties['[Agent] Context'] as string)).toMatchObject({
+      root_agent_name: 'support_root',
+      invocation_id: 'inv_2',
+      content_uri: 'gs://adk-bucket/sessions/adk_s1/sp7.txt',
+    });
+
+    const failed = byId.get('adk_s1:sp6:tool')?.event_properties;
+    expect(failed?.['[Agent] Tool Success']).toBe(false);
+    expect(failed?.['[Agent] Tool Input']).toBe('{"id":"A1"}');
+    expect(failed?.['[Agent] Tool Output']).toBe('order already shipped');
+    expect([...byId.values()].some((e) => e.event_properties['[Agent] Session ID'] === 'adk_s2')).toBe(false);
+  });
+
+  it('drops all content when include_content is FALSE', async () => {
+    const events = await runDuckDb(adkQuery().replace('TRUE AS include_content', 'FALSE AS include_content'));
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) {
+      expect(event.event_properties).not.toHaveProperty('$llm_message');
+      expect(event.event_properties).not.toHaveProperty('[Agent] Tool Input');
+      expect(event.event_properties).not.toHaveProperty('[Agent] Tool Output');
+    }
+    expect(checkAgentEvents(events, { metadataOnly: true }).errors).toEqual([]);
+  });
+
+  it('emits nothing for a session that has not settled', async () => {
+    const time = new Date(Date.now() - 60_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    expect(await runDuckDb(adkQuery({ time }))).toEqual([]);
   });
 });
 

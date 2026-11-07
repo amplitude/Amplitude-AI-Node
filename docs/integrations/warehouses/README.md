@@ -34,6 +34,7 @@ Every query has the same two stages. Stage 1 is the only part that depends on yo
 | OpenTelemetry GenAI spans stored in a table | [otel-genai.md](./otel-genai.md) | Replay to the OTLP endpoint |
 | OpenInference spans (for example, exported from Arize Phoenix) | [openinference.md](./openinference.md) | Replay to the OTLP endpoint |
 | MLflow traces | [mlflow-tracing.md](./mlflow-tracing.md) | Replay to the OTLP endpoint |
+| Google ADK's BigQuery Agent Analytics `agent_events` table | [adk-bigquery-agent-analytics.md](./adk-bigquery-agent-analytics.md) | SQL import (BigQuery) |
 | Something else | [Bring your own format](#bring-your-own-format) | SQL import |
 
 Span formats don't need SQL: Amplitude's [OTLP endpoint](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) already understands them. Their pages cover moving stored spans from a table to that endpoint.
