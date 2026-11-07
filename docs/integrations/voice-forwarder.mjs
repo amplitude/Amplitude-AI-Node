@@ -24,6 +24,13 @@ export const VOICE_END_OF_TURN_REASONS = ['completed', 'interrupted', 'silence',
  *   yielded?: boolean,
  *   endOfTurnReason?: EndOfTurnReason,
  *   transcriptConfidence?: number,
+ *   sttMs?: number,
+ *   llmTtftMs?: number,
+ *   ttsTtfbMs?: number,
+ *   turnStartOffsetMs?: number,
+ *   turnEndOffsetMs?: number,
+ *   preReplySilenceMs?: number,
+ *   overlapMs?: number,
  * }} VoiceTurnOptions
  * @typedef {{
  *   direction?: VoiceDirection,
@@ -49,6 +56,17 @@ const bool = (name, value) => {
   if (typeof value !== 'boolean') throw new Error(`${name} must be a boolean`);
   return value;
 };
+
+/** @type {[('sttMs' | 'llmTtftMs' | 'ttsTtfbMs' | 'turnStartOffsetMs' | 'turnEndOffsetMs' | 'preReplySilenceMs' | 'overlapMs'), string][]} */
+const TIMING_FIELDS = [
+  ['sttMs', '[Agent] Voice STT Ms'],
+  ['llmTtftMs', '[Agent] Voice LLM TTFT Ms'],
+  ['ttsTtfbMs', '[Agent] Voice TTS TTFB Ms'],
+  ['turnStartOffsetMs', '[Agent] Voice Turn Start Offset Ms'],
+  ['turnEndOffsetMs', '[Agent] Voice Turn End Offset Ms'],
+  ['preReplySilenceMs', '[Agent] Voice Pre Reply Silence Ms'],
+  ['overlapMs', '[Agent] Voice Overlap Ms'],
+];
 
 /**
  * Voice properties for one User Message or AI Response. Unset fields are omitted, never sent as false.
@@ -77,6 +95,16 @@ export function voiceTurnProperties(options = {}) {
     const confidence = nonNegative('transcriptConfidence', options.transcriptConfidence);
     if (confidence > 1) throw new Error('transcriptConfidence must be in [0, 1]');
     props['[Agent] Voice Transcript Confidence'] = confidence;
+  }
+  for (const [name, prop] of TIMING_FIELDS) {
+    if (options[name] !== undefined) props[prop] = nonNegative(name, options[name]);
+  }
+  if (
+    options.turnStartOffsetMs !== undefined &&
+    options.turnEndOffsetMs !== undefined &&
+    options.turnEndOffsetMs < options.turnStartOffsetMs
+  ) {
+    throw new Error('turnEndOffsetMs must not be before turnStartOffsetMs');
   }
   return props;
 }

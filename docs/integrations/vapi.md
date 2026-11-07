@@ -77,7 +77,7 @@ Fetch or read one real ended call. Compare it to [fixtures/vapi-call.json](./fix
 
 - **Messages.** The adapter reads `artifact.messages`, falling back to `messages`. Caller turns have `role: "user"`; agent turns are documented as `bot` (the adapter also accepts `assistant`). `system`, `tool_calls`, and `tool_call_result` messages are skipped. If the user wants tool calls, map them into `toolCalls` on the next agent turn.
 - **Timestamps.** `time` and `endTime` are epoch milliseconds; `secondsFromStart` and `duration` are seconds. Confirm, because a unit mismatch puts every turn at the wrong time.
-- **Speech and latency.** Speech duration is `endTime - time`, or `duration` when `endTime` is missing. Time to first audio on a reply is its `time` minus the previous caller turn's `endTime`; it is derived, not reported by Vapi. Transcript confidence is the caller turn's `confidence` (0 to 1).
+- **Speech and latency.** Speech duration is `endTime - time`, or `duration` when `endTime` is missing. Time to first audio on a reply is its `time` minus the previous caller turn's `endTime`; it is derived, not reported by Vapi. The turn start offset is `secondsFromStart` (documented as seconds from the start of the conversation, re-read on 2026-11-06), and the end offset adds the speech duration. Transcript confidence is the caller turn's `confidence` (0 to 1).
 - **Direction.** From `type`: `inboundPhoneCall` is `inbound`, `outboundPhoneCall` is `outbound`, `webCall` and `vapi.websocketCall` are `in_app`. Any other type sends no direction.
 - **End reason.** `endedReason` maps through the table in [End reasons](#end-reasons); the raw value is also sent as the `ended_reason` context key. Check that the call's reason is in the table; for an unlisted reason the last turn keeps its own `completed`.
 - **Success.** `analysis.successEvaluation` is a string whose shape depends on the assistant's rubric. `"true"` and `"false"` become score `call_success` = 1 or 0; a numeric string becomes score `success_evaluation`. Any other rubric (a letter grade, a description) sends no score; ask the user whether to map it.
@@ -160,7 +160,7 @@ These come on top of the rules above. voice-forwarder.mjs implements them.
 | `[Agent] Score` | `analysis.successEvaluation`, when it is boolean or numeric | `[Agent] Score Name`, `[Agent] Score Value`, `[Agent] Target ID` (the session ID), `[Agent] Target Type` = `session`, `[Agent] Evaluation Source` = `ai` |
 | `[Agent] Session End` | Once, last, for an ended call | `[Agent] Trace ID` of the final exchange |
 
-Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`; and when Vapi reports them, `[Agent] Voice Speech Duration Ms`, `[Agent] Voice Time To First Audio Ms` (replies), and `[Agent] Voice Transcript Confidence` (caller turns). The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
+Voice properties, on User Message and AI Response: `[Agent] Channel` = `voice`; `[Agent] Voice Direction`; `[Agent] Voice End Of Turn Reason`; and when Vapi reports them, `[Agent] Voice Speech Duration Ms`, `[Agent] Voice Turn Start Offset Ms` and `[Agent] Voice Turn End Offset Ms`, `[Agent] Voice Time To First Audio Ms` (replies), and `[Agent] Voice Transcript Confidence` (caller turns). The last turn also carries `[Agent] Has Attachments`, `[Agent] Attachment Count`, `[Agent] Attachment Types`, and in `full` mode `[Agent] Attachments` when there is a recording.
 
 Common set, on every event: top-level `user_id` and/or `device_id`, `time`, `insert_id`; properties `[Agent] Session ID` (the Vapi call ID), `[Agent] Agent ID`, `[Agent] Runtime` = `custom`, `[Agent] SDK Version`, `[Agent] Ingestion Path` = `http_forwarder`, `[Agent] Source` = `vapi`, `[Agent] Content Mode`, and `[Agent] Context` (`platform`, `call_type`, `assistant_id`, `ended_reason`).
 
@@ -197,7 +197,9 @@ The events the adapter and forwarder core produce from [fixtures/vapi-call.json]
       "[Agent] Channel": "voice",
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 2200,
-      "[Agent] Voice End Of Turn Reason": "completed"
+      "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 1200,
+      "[Agent] Voice Turn End Offset Ms": 3400
     }
   },
   {
@@ -225,7 +227,9 @@ The events the adapter and forwarder core produce from [fixtures/vapi-call.json]
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 1800,
       "[Agent] Voice End Of Turn Reason": "completed",
-      "[Agent] Voice Transcript Confidence": 0.94
+      "[Agent] Voice Transcript Confidence": 0.94,
+      "[Agent] Voice Turn Start Offset Ms": 4100,
+      "[Agent] Voice Turn End Offset Ms": 5900
     }
   },
   {
@@ -254,7 +258,9 @@ The events the adapter and forwarder core produce from [fixtures/vapi-call.json]
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 3200,
       "[Agent] Voice Time To First Audio Ms": 700,
-      "[Agent] Voice End Of Turn Reason": "completed"
+      "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 6600,
+      "[Agent] Voice Turn End Offset Ms": 9800
     }
   },
   {
@@ -282,7 +288,9 @@ The events the adapter and forwarder core produce from [fixtures/vapi-call.json]
       "[Agent] Voice Direction": "inbound",
       "[Agent] Voice Speech Duration Ms": 1100,
       "[Agent] Voice End Of Turn Reason": "completed",
-      "[Agent] Voice Transcript Confidence": 0.97
+      "[Agent] Voice Transcript Confidence": 0.97,
+      "[Agent] Voice Turn Start Offset Ms": 11000,
+      "[Agent] Voice Turn End Offset Ms": 12100
     }
   },
   {
@@ -312,6 +320,8 @@ The events the adapter and forwarder core produce from [fixtures/vapi-call.json]
       "[Agent] Voice Speech Duration Ms": 1650,
       "[Agent] Voice Time To First Audio Ms": 550,
       "[Agent] Voice End Of Turn Reason": "completed",
+      "[Agent] Voice Turn Start Offset Ms": 12650,
+      "[Agent] Voice Turn End Offset Ms": 14300,
       "[Agent] Has Attachments": true,
       "[Agent] Attachment Count": 1,
       "[Agent] Attachment Types": [
@@ -923,6 +933,10 @@ export function normalizeVapiCall(
       typeof message.endTime === 'number' ? message.endTime - timestamp : (message.duration ?? Number.NaN) * 1000,
     );
     if (speech !== undefined) turn.speechDurationMs = speech;
+    if (typeof message.secondsFromStart === 'number' && message.secondsFromStart >= 0) {
+      turn.turnStartOffsetMs = Math.round(message.secondsFromStart * 1000);
+      if (speech !== undefined) turn.turnEndOffsetMs = turn.turnStartOffsetMs + speech;
+    }
     if (role === 'user' && typeof message.confidence === 'number' && message.confidence >= 0 && message.confidence <= 1) {
       turn.transcriptConfidence = message.confidence;
     }

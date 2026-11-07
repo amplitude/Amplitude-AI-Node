@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "schema_version": 49,
-    "generated_at": "2026-11-05T07:05:39.561309+00:00",
+    "schema_version": 15,
+    "generated_at": "2026-10-06T18:28:24.645+00:00",
     "source": "langley/langley/llm_analytics/taxonomy_catalog.py",
     "category": "Agent Analytics"
   },
@@ -251,6 +251,41 @@
           "name": "[Agent] Voice Transcript Confidence",
           "type": "number",
           "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
+        },
+        {
+          "name": "[Agent] Voice STT Ms",
+          "type": "number",
+          "description": "Speech-to-text latency: milliseconds from the end of the caller's speech to the final transcript. Reported on the agent turn it delayed. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice LLM TTFT Ms",
+          "type": "number",
+          "description": "Milliseconds until the model's first token for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice TTS TTFB Ms",
+          "type": "number",
+          "description": "Milliseconds until the speech synthesizer's first audio byte for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn Start Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech started, in milliseconds from the start of the call. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn End Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech ended, in milliseconds from the start of the call. Never before the start offset. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Pre Reply Silence Ms",
+          "type": "number",
+          "description": "On an agent turn: milliseconds of silence the caller heard before the agent started replying. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Ms",
+          "type": "number",
+          "description": "Milliseconds this turn's speech overlapped the other side's previous turn. Set on the turn that started while the other side was still speaking. Omitted when the platform does not report it."
         }
       ]
     },
@@ -663,6 +698,41 @@
           "name": "[Agent] Voice Transcript Confidence",
           "type": "number",
           "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
+        },
+        {
+          "name": "[Agent] Voice STT Ms",
+          "type": "number",
+          "description": "Speech-to-text latency: milliseconds from the end of the caller's speech to the final transcript. Reported on the agent turn it delayed. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice LLM TTFT Ms",
+          "type": "number",
+          "description": "Milliseconds until the model's first token for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice TTS TTFB Ms",
+          "type": "number",
+          "description": "Milliseconds until the speech synthesizer's first audio byte for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn Start Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech started, in milliseconds from the start of the call. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn End Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech ended, in milliseconds from the start of the call. Never before the start offset. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Pre Reply Silence Ms",
+          "type": "number",
+          "description": "On an agent turn: milliseconds of silence the caller heard before the agent started replying. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Ms",
+          "type": "number",
+          "description": "Milliseconds this turn's speech overlapped the other side's previous turn. Set on the turn that started while the other side was still speaking. Omitted when the platform does not report it."
         }
       ]
     },
@@ -1729,7 +1799,7 @@
     },
     {
       "event_type": "[Agent] Session Record",
-      "description": "Fired once per enriched session by the server-side enrichment pipeline, when the session is recorded -- on whichever comes first, an explicit session.close() or a timeout ([Agent] Close Reason distinguishes the two). Contains session-level metrics (turn count, tokens, latency, cost), boolean flags (has_negative_feedback, has_technical_failure, has_data_quality_issues), OOTB evaluator results de-normalized from defaults.json (task completion, response quality, session safety, user intent, user friction, negative feedback, data quality), and optional [Agent] Context echoed from SDK events.",
+      "description": "Fired once per enriched session by the server-side enrichment pipeline. Contains session-level facts: overall outcome, turn count, boolean flags (has_task_failure, has_negative_feedback, has_technical_failure, has_data_quality_issues), cost, and user friction patterns. Enables cohorts like 'users with 3+ task failures in 30 days'.",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -1867,11 +1937,6 @@
           "description": "Total LLM cost in USD for this AI session (aggregated from per-message costs)."
         },
         {
-          "name": "[Agent] Close Reason",
-          "type": "string",
-          "description": "Why this session record fired: 'explicit_close' (the agent called session.close()) or 'timeout' (idle/max-duration/upload). Distinguishes a terminal record from a point-in-time snapshot."
-        },
-        {
           "name": "[Agent] Quality Score",
           "type": "number",
           "description": "Overall quality score (0.0-1.0) computed by the enrichment pipeline for this session."
@@ -1924,42 +1989,6 @@
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
-          "name": "[Agent] Experiments",
-          "type": "string",
-          "description": "Every experiment arm the session ran under, one 'key:variant' string each (at most 32), as the union of [Agent] Experiments across the session's SDK events in first-seen order. A turn-unit experiment that changed arm mid-session contributes each arm. Keys and variants are matched case-sensitively, as the SDK sends them. Split a session-grain metric by it to compare arms.",
-          "is_array_type": true
-        },
-        {
-          "name": "[Agent] Experiment Key",
-          "type": "string",
-          "description": "Session dimension: the experiment key, present only when the session ran under exactly one arm (one 'key:variant'). A session that saw two arms of the same experiment does not carry it."
-        },
-        {
-          "name": "[Agent] Experiment Variant",
-          "type": "string",
-          "description": "Session dimension: the variant, present only when the session ran under exactly one arm (one 'key:variant')."
-        },
-        {
-          "name": "[Agent] Experiment Unit",
-          "type": "string",
-          "description": "Session dimension: the unit of the one arm the session ran under ('agent_session', 'turn' or 'span'), when the SDK events named it."
-        },
-        {
-          "name": "[Agent] Experiment Provider",
-          "type": "string",
-          "description": "Session dimension: the provider of the one arm the session ran under, when the SDK events named it."
-        },
-        {
-          "name": "[Agent] Experiment Source",
-          "type": "string",
-          "description": "Where the session's experiment arms came from: 'sdk', 'otel', 'http' or 'warehouse' when the events carried [Agent] Experiments over that transport; 'context' when they were read from the session's [Agent] Context tags. Present only when the session ran under an experiment and the transport is known; a session whose metadata names no transport carries the arms without this property."
-        },
-        {
-          "name": "[Agent] Experiment Overflow",
-          "type": "number",
-          "description": "Distinct experiment arms dropped because the session ran under more than 32. Present only when nonzero; the arms listed in [Agent] Experiments understate the session by this many. At least 1 when the span read stopped at its size bound, so the count is a lower bound."
-        },
-        {
           "name": "[Agent] Task Completed",
           "type": "string",
           "description": "OOTB detector result: 'True' if agent completed user's request, 'False' otherwise."
@@ -1992,17 +2021,17 @@
         {
           "name": "[Agent] Session Outcome",
           "type": "string",
-          "description": "OOTB classifier result for how the session ended (e.g., 'Response Provided', 'Unable to Complete', 'Escalated'). Only emitted when the outcome evaluator is enabled; disabled in defaults.json."
+          "description": "OOTB classifier result for how the session ended (e.g., 'Response Provided', 'Unable to Complete', 'Escalated')."
         },
         {
           "name": "[Agent] Session Outcome Rationale",
           "type": "string",
-          "description": "Brief rationale for the session outcome classification. Only emitted when the outcome evaluator is enabled; disabled in defaults.json."
+          "description": "Brief rationale for the session outcome classification."
         },
         {
           "name": "[Agent] Session Safety",
           "type": "string",
-          "description": "OOTB classifier result for session safety (e.g., 'Normal', 'Off Topic', 'Prompt Injection', 'Abuse')."
+          "description": "OOTB classifier result for session safety (e.g., 'normal', 'off_topic', 'prompt_injection', 'abuse')."
         },
         {
           "name": "[Agent] Session Safety Rationale",
@@ -2022,7 +2051,7 @@
         {
           "name": "[Agent] Has User Friction",
           "type": "boolean",
-          "description": "OOTB detector result: whether conversation exhibited user friction (retry storms, clarification loops, etc.)."
+          "description": "OOTB detector result: whether conversation exhibited user friction patterns (retry storms, clarification loops, etc.)."
         },
         {
           "name": "[Agent] User Friction Rationale",
@@ -2042,65 +2071,119 @@
           "is_array_type": true
         },
         {
-          "name": "[Agent] Data Quality Rationale",
-          "type": "string",
-          "description": "Brief rationale for the data quality determination, including typed tool-call leaves."
-        },
-        {
-          "name": "[Agent] Data Quality Evidence",
-          "type": "string",
-          "description": "Supporting evidence for the data quality determination. Truncated when written to Nova."
-        },
-        {
-          "name": "[Agent] Detected Negative Feedback",
-          "type": "string",
-          "description": "Specific negative-feedback signals detected (e.g., explicit complaint phrases). JSON array.",
-          "is_array_type": true
-        },
-        {
           "name": "[Agent] Channel",
           "type": "string",
-          "description": "'voice' when any turn in the session is a voice turn. Omitted on chat sessions."
+          "description": "Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
         },
         {
           "name": "[Agent] Voice Direction",
           "type": "string",
-          "description": "Call direction from the first voice turn that reports one: 'inbound', 'outbound', or 'in_app'."
+          "description": "Call direction from the first voice turn that reports one ('inbound', 'outbound', or 'in_app'), omitted (not empty) on chat sessions."
         },
         {
           "name": "[Agent] Voice Avg Time To First Audio Ms",
           "type": "number",
-          "description": "Average time to first audio across the session's agent turns that report it, in milliseconds."
+          "description": "Average time to first audio in milliseconds across the session's agent turns that report it, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Max Time To First Audio Ms",
           "type": "number",
-          "description": "Slowest time to first audio in the session, in milliseconds."
+          "description": "Slowest time to first audio in the session in milliseconds, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Interruption Count",
           "type": "number",
-          "description": "Number of voice turns that were spoken over by either side."
+          "description": "Number of voice turns spoken over by either side, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice User Interruption Count",
           "type": "number",
-          "description": "Number of voice turns the caller spoke over (barge-in)."
+          "description": "Number of voice turns the caller spoke over, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Yield Count",
           "type": "number",
-          "description": "Number of agent turns cut off because the caller spoke."
+          "description": "Number of agent turns cut off because the caller spoke, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Final End Of Turn Reason",
           "type": "string",
-          "description": "End of turn reason of the last voice turn that reports one: completed, interrupted, silence, transferred, or error."
+          "description": "End of turn reason of the last voice turn that reports one (completed, interrupted, silence, transferred, or error), omitted (not empty) on chat sessions."
         },
         {
           "name": "[Agent] Voice Total Speech Duration Ms",
           "type": "number",
-          "description": "Total milliseconds of speech across the session's voice turns that report it."
+          "description": "Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Avg STT Ms",
+          "type": "number",
+          "description": "Average speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 STT Ms",
+          "type": "number",
+          "description": "95th percentile speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg LLM TTFT Ms",
+          "type": "number",
+          "description": "Average model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 LLM TTFT Ms",
+          "type": "number",
+          "description": "95th percentile model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg TTS TTFB Ms",
+          "type": "number",
+          "description": "Average speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 TTS TTFB Ms",
+          "type": "number",
+          "description": "95th percentile speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Slowest Stage",
+          "type": "string",
+          "description": "Pipeline stage with the highest average latency: 'stt', 'llm', or 'tts'. Omitted when no turn reports stage latency."
+        },
+        {
+          "name": "[Agent] Voice Total Pre Reply Silence Ms",
+          "type": "number",
+          "description": "Total milliseconds of silence the caller heard before agent replies, across the turns that report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Count",
+          "type": "number",
+          "description": "Number of voice turns that overlapped the other side's speech by at least 300 ms."
+        },
+        {
+          "name": "[Agent] Voice Call Duration Ms",
+          "type": "number",
+          "description": "Milliseconds from the earliest turn start offset to the latest turn end offset. Omitted when turns report no offsets."
+        },
+        {
+          "name": "[Agent] Voice Long Silence Count",
+          "type": "number",
+          "description": "Number of voice turns where the caller waited at least 2000 ms: pre-reply silence or time to first audio of 2000 ms or more."
+        },
+        {
+          "name": "[Agent] Voice Talk Over Count",
+          "type": "number",
+          "description": "Number of agent turns that started over the caller: overlap of at least 300 ms, or the caller's previous turn reports it was interrupted by the agent."
+        },
+        {
+          "name": "[Agent] Voice Dead Air Hangup",
+          "type": "boolean",
+          "description": "True when the last agent turn followed a wait of at least 2000 ms and was cut off (end of turn reason other than completed) or followed only by caller turns. Omitted when the last agent turn reports no wait timing."
+        },
+        {
+          "name": "[Agent] Voice Slow First Reply",
+          "type": "boolean",
+          "description": "True when the first agent turn that reports time to first audio took 1500 ms or more. Omitted when no agent turn reports it."
         }
       ]
     },
@@ -2183,7 +2266,7 @@
     },
     {
       "event_type": "[Agent] Evaluator Result",
-      "description": "Fired once per custom evaluator per session. Replaces the deprecated [Agent] Topic Classification event for custom classifiers. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on [Agent] Session Record). Each row also carries this evaluator's own enrichment cost ([Agent] Evaluator Enrichment Cost USD) and a denormalized copy of the session-context dimensions (turns, tokens, latency, session cost, flags, agent metadata, close reason) so a session dimension can be cross-queried against an evaluator outcome without a join. Those dimensions are session-level, identical across the session's evaluators — filter to one evaluator and AVG / view distributions; never SUM a dimension across a session's evaluators.",
+      "description": "Fired once per custom evaluator per session. Covers classifiers, detectors, and scorers — distinguished by [Agent] Evaluator Output Type. OOTB evaluators are excluded (their results are de-normalized on Session Record).",
       "properties": [
         {
           "name": "[Agent] Session ID",
@@ -2265,32 +2348,6 @@
           "description": "Whether the condition was detected. Binary only."
         },
         {
-          "name": "[Agent] Binary Value",
-          "type": "number",
-          "description": "Numeric mirror of Binary Label (1=True, 0=False) for uniform charting. Binary only."
-        },
-        {
-          "name": "[Agent] Decision Probability",
-          "type": "number",
-          "description": "Calibrated P(true) for binary Decision evaluators or P(chosen) for categorical Decision evaluators."
-        },
-        {
-          "name": "[Agent] Decision Confidence",
-          "type": "number",
-          "description": "TypeSafe confidence statistic for categorical Decision evaluators."
-        },
-        {
-          "name": "[Agent] Class Probabilities",
-          "type": "any",
-          "description": "Full label/probability distribution returned by a categorical Decision evaluator.",
-          "is_array_type": true
-        },
-        {
-          "name": "[Agent] Evaluation Method",
-          "type": "string",
-          "description": "Evaluator execution method: llm, code, or decision_model."
-        },
-        {
           "name": "[Agent] Score Value",
           "type": "number",
           "description": "Numeric score assigned by the evaluator. Score only."
@@ -2318,7 +2375,7 @@
         {
           "name": "[Agent] Rationale",
           "type": "string",
-          "description": "Explanation or calibrated distribution summary for the result."
+          "description": "LLM-generated explanation for the result."
         },
         {
           "name": "[Agent] Evidence",
@@ -2336,118 +2393,6 @@
           "description": "Cost in USD of running this specific evaluator's LLM inference. Customer-attributable enrichment cost for this evaluator; distinct from the session's own LLM cost ([Agent] Session Cost USD)."
         },
         {
-          "name": "[Agent] Customer Org ID",
-          "type": "string",
-          "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
-        },
-        {
-          "name": "[Agent] Turn Count",
-          "type": "number",
-          "description": "Session dimension: number of conversation turns in this session."
-        },
-        {
-          "name": "[Agent] Session Total Tokens",
-          "type": "number",
-          "description": "Session dimension: total LLM tokens consumed across all turns in this session."
-        },
-        {
-          "name": "[Agent] Session Avg Latency Ms",
-          "type": "number",
-          "description": "Session dimension: average AI response latency in milliseconds across the session."
-        },
-        {
-          "name": "[Agent] Session Cost USD",
-          "type": "number",
-          "description": "Session dimension: total LLM cost in USD for this AI session."
-        },
-        {
-          "name": "[Agent] Has Technical Failure",
-          "type": "boolean",
-          "description": "Session dimension: whether technical errors occurred during the session."
-        },
-        {
-          "name": "[Agent] Has Negative Feedback",
-          "type": "boolean",
-          "description": "Session dimension: whether the user expressed dissatisfaction during the session."
-        },
-        {
-          "name": "[Agent] Has Data Quality Issues",
-          "type": "boolean",
-          "description": "Session dimension: whether the AI output had data quality problems."
-        },
-        {
-          "name": "[Agent] Has User Feedback",
-          "type": "boolean",
-          "description": "Session dimension: whether the session received explicit user feedback."
-        },
-        {
-          "name": "[Agent] Technical Error Count",
-          "type": "number",
-          "description": "Session dimension: count of technical errors during the session."
-        },
-        {
-          "name": "[Agent] Models Used",
-          "type": "string",
-          "description": "Session dimension: LLM models used in this session. JSON array of strings.",
-          "is_array_type": true
-        },
-        {
-          "name": "[Agent] Project ID",
-          "type": "string",
-          "description": "Session dimension: Amplitude project ID that owns the AI session."
-        },
-        {
-          "name": "[Agent] Root Agent Name",
-          "type": "string",
-          "description": "Session dimension: entry-point agent in multi-agent flows."
-        },
-        {
-          "name": "[Agent] Agent Chain Depth",
-          "type": "number",
-          "description": "Session dimension: number of agents in the delegation chain."
-        },
-        {
-          "name": "[Agent] User Score",
-          "type": "number",
-          "description": "Session dimension: aggregate user feedback score for the session (0.0-1.0)."
-        },
-        {
-          "name": "[Agent] Agent Version",
-          "type": "string",
-          "description": "Agent code version (e.g., 'v4.2'). Enables version-over-version quality comparison."
-        },
-        {
-          "name": "[Agent] Close Reason",
-          "type": "string",
-          "description": "Session dimension: why the session record fired ('explicit_close' or 'timeout')."
-        },
-        {
-          "name": "[Agent] Experiments",
-          "type": "string",
-          "description": "Every experiment arm the session ran under, one 'key:variant' string each (at most 32), as the union of [Agent] Experiments across the session's SDK events in first-seen order. A turn-unit experiment that changed arm mid-session contributes each arm. Keys and variants are matched case-sensitively, as the SDK sends them. Split a session-grain metric by it to compare arms.",
-          "is_array_type": true
-        },
-        {
-          "name": "[Agent] Experiment Key",
-          "type": "string",
-          "description": "Session dimension: the experiment key, present only when the session ran under exactly one arm (one 'key:variant'). A session that saw two arms of the same experiment does not carry it."
-        },
-        {
-          "name": "[Agent] Experiment Variant",
-          "type": "string",
-          "description": "Session dimension: the variant, present only when the session ran under exactly one arm (one 'key:variant')."
-        },
-        {
-          "name": "[Agent] Experiment Unit",
-          "type": "string",
-          "description": "Session dimension: the unit of the one arm the session ran under ('agent_session', 'turn' or 'span'), when the SDK events named it."
-        },
-        {
-          "name": "[Agent] Experiment Provider",
-          "type": "string",
-          "description": "Session dimension: the provider of the one arm the session ran under, when the SDK events named it."
-        },
-        {
           "name": "[Agent] Topic Summary",
           "type": "string",
           "description": "Session dimension: concise one-sentence factual summary of what the user was trying to accomplish. Produced by the OOTB batched eval pass-1 at zero marginal cost."
@@ -2455,47 +2400,117 @@
         {
           "name": "[Agent] Channel",
           "type": "string",
-          "description": "Session dimension: 'voice' when any turn in the session is a voice turn. Omitted on chat sessions."
+          "description": "Session dimension: Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
         },
         {
           "name": "[Agent] Voice Direction",
           "type": "string",
-          "description": "Session dimension: Call direction from the first voice turn that reports one: 'inbound', 'outbound', or 'in_app'."
+          "description": "Session dimension: Call direction from the first voice turn that reports one ('inbound', 'outbound', or 'in_app'), omitted (not empty) on chat sessions."
         },
         {
           "name": "[Agent] Voice Avg Time To First Audio Ms",
           "type": "number",
-          "description": "Session dimension: Average time to first audio across the session's agent turns that report it, in milliseconds."
+          "description": "Session dimension: Average time to first audio in milliseconds across the session's agent turns that report it, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Max Time To First Audio Ms",
           "type": "number",
-          "description": "Session dimension: Slowest time to first audio in the session, in milliseconds."
+          "description": "Session dimension: Slowest time to first audio in the session in milliseconds, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Interruption Count",
           "type": "number",
-          "description": "Session dimension: Number of voice turns that were spoken over by either side."
+          "description": "Session dimension: Number of voice turns spoken over by either side, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice User Interruption Count",
           "type": "number",
-          "description": "Session dimension: Number of voice turns the caller spoke over (barge-in)."
+          "description": "Session dimension: Number of voice turns the caller spoke over, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Yield Count",
           "type": "number",
-          "description": "Session dimension: Number of agent turns cut off because the caller spoke."
+          "description": "Session dimension: Number of agent turns cut off because the caller spoke, omitted (not zero) on chat sessions."
         },
         {
           "name": "[Agent] Voice Final End Of Turn Reason",
           "type": "string",
-          "description": "Session dimension: End of turn reason of the last voice turn that reports one: completed, interrupted, silence, transferred, or error."
+          "description": "Session dimension: End of turn reason of the last voice turn that reports one (completed, interrupted, silence, transferred, or error), omitted (not empty) on chat sessions."
         },
         {
           "name": "[Agent] Voice Total Speech Duration Ms",
           "type": "number",
-          "description": "Session dimension: Total milliseconds of speech across the session's voice turns that report it."
+          "description": "Session dimension: Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Avg STT Ms",
+          "type": "number",
+          "description": "Average speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 STT Ms",
+          "type": "number",
+          "description": "95th percentile speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg LLM TTFT Ms",
+          "type": "number",
+          "description": "Average model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 LLM TTFT Ms",
+          "type": "number",
+          "description": "95th percentile model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg TTS TTFB Ms",
+          "type": "number",
+          "description": "Average speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 TTS TTFB Ms",
+          "type": "number",
+          "description": "95th percentile speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Slowest Stage",
+          "type": "string",
+          "description": "Pipeline stage with the highest average latency: 'stt', 'llm', or 'tts'. Omitted when no turn reports stage latency."
+        },
+        {
+          "name": "[Agent] Voice Total Pre Reply Silence Ms",
+          "type": "number",
+          "description": "Total milliseconds of silence the caller heard before agent replies, across the turns that report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Count",
+          "type": "number",
+          "description": "Number of voice turns that overlapped the other side's speech by at least 300 ms."
+        },
+        {
+          "name": "[Agent] Voice Call Duration Ms",
+          "type": "number",
+          "description": "Milliseconds from the earliest turn start offset to the latest turn end offset. Omitted when turns report no offsets."
+        },
+        {
+          "name": "[Agent] Voice Long Silence Count",
+          "type": "number",
+          "description": "Number of voice turns where the caller waited at least 2000 ms: pre-reply silence or time to first audio of 2000 ms or more."
+        },
+        {
+          "name": "[Agent] Voice Talk Over Count",
+          "type": "number",
+          "description": "Number of agent turns that started over the caller: overlap of at least 300 ms, or the caller's previous turn reports it was interrupted by the agent."
+        },
+        {
+          "name": "[Agent] Voice Dead Air Hangup",
+          "type": "boolean",
+          "description": "True when the last agent turn followed a wait of at least 2000 ms and was cut off (end of turn reason other than completed) or followed only by caller turns. Omitted when the last agent turn reports no wait timing."
+        },
+        {
+          "name": "[Agent] Voice Slow First Reply",
+          "type": "boolean",
+          "description": "True when the first agent turn that reports time to first audio took 1500 ms or more. Omitted when no agent turn reports it."
         }
       ]
     },
