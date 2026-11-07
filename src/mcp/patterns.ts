@@ -80,6 +80,48 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       '  s.trackAiMessage(assemble(a, b), { model: "gpt-4o", provider: "openai" });\n' +
       '});',
   },
+  {
+    id: 'coding-agents',
+    title: 'Coding agents (Claude Code, Codex, goose): sessions plus commit outcomes',
+    whenToUse:
+      'Engineers use Claude Code, Codex or goose in this repo (scan_project coding_agents). Sends their sessions ' +
+      'to Amplitude and stamps agent commits so merges, reverts and deploys join back to the session. ' +
+      'The API key goes only to gitignored files; never put it on the command line or in a committed file.',
+    snippet:
+      '# Writes .githooks/prepare-commit-msg, .github/workflows/agent-outcomes.yml, .claude/settings.json,\n' +
+      '# .codex/hooks.json and sets core.hooksPath. Preview first:\n' +
+      'npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\n' +
+      'printf %s "$AMPLITUDE_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --api-key-stdin --privacy full\n' +
+      'npx -y -p @amplitude/ai amplitude-ai coding-agents doctor\n' +
+      '# Then add the AMPLITUDE_API_KEY repository secret for the outcomes workflow.',
+  },
+  {
+    id: 'codex-sdk-tracker',
+    title: 'App built on the Codex SDK: CodexSDKTracker',
+    whenToUse:
+      'The app drives Codex through @openai/codex-sdk (or `codex exec --json`). Maps thread events to User Message, ' +
+      'AI Response (with turn usage) and Tool Call (with commit_sha on git commits).',
+    snippet:
+      'import { Codex } from "@openai/codex-sdk";\n' +
+      'import { CodexSDKTracker } from "@amplitude/ai/integrations/codex-sdk";\n' +
+      'const thread = new Codex().startThread({ model: "gpt-5.5" });\n' +
+      'const tracker = new CodexSDKTracker({ model: "gpt-5.5" });\n' +
+      'const session = ai.agent("codex-runner").session({ userId });\n' +
+      'const { events } = await thread.runStreamed(prompt);\n' +
+      'for await (const event of tracker.track(session, events, prompt)) { /* your handling */ }',
+  },
+  {
+    id: 'agent-protocol-propagation',
+    title: 'Agents in other processes: A2A metadata and ACP _meta',
+    whenToUse:
+      'One agent calls another over A2A or the Agent Client Protocol. Carries the session, parent agent and user ' +
+      'so the remote agent nests under the caller. Only extract from agents you operate.',
+    snippet:
+      'import { injectA2aMetadata, extractA2aMetadata, injectAcpMeta, extractAcpMeta } from "@amplitude/ai";\n' +
+      '// caller, inside session.run(): message.metadata = injectA2aMetadata(message.metadata);\n' +
+      '// ACP request: params._meta = injectAcpMeta(params._meta);\n' +
+      '// receiver: const { sessionId, parentAgentId, userId, traceId } = extractA2aMetadata(message.metadata);',
+  },
 ];
 
 const getIntegrationPatterns = (): IntegrationPattern[] =>

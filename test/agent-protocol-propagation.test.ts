@@ -82,6 +82,55 @@ describe('ACP _meta propagation', () => {
   });
 });
 
+describe('wire format shared with the Python SDK', () => {
+  it('emits the exact A2A and ACP JSON', () => {
+    const [a2a, acp] = inSession(() => [injectA2aMetadata(), injectAcpMeta()]);
+    const traceparent = (a2a[A2A_METADATA_KEY] as { traceparent: string }).traceparent;
+    expect(JSON.stringify(a2a)).toBe(
+      JSON.stringify({
+        'com.amplitude/context': {
+          session_id: 'sess-1',
+          parent_agent_id: 'coordinator',
+          user_id: 'user-1',
+          traceparent,
+        },
+      }),
+    );
+    expect(JSON.stringify(acp)).toBe(
+      JSON.stringify({
+        'com.amplitude/session-id': 'sess-1',
+        'com.amplitude/parent-agent-id': 'coordinator',
+        'com.amplitude/user-id': 'user-1',
+        traceparent: acp.traceparent,
+      }),
+    );
+  });
+
+  it('reads Python-written context', () => {
+    const traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+    const expected = {
+      sessionId: 'py-sess',
+      parentAgentId: 'py-agent',
+      userId: 'py-user',
+      traceId: '0af7651916cd43dd8448eb211c80319c',
+    };
+    expect(
+      extractA2aMetadata(
+        JSON.parse(
+          `{"com.amplitude/context": {"session_id": "py-sess", "parent_agent_id": "py-agent", "user_id": "py-user", "traceparent": "${traceparent}"}}`,
+        ),
+      ),
+    ).toEqual(expected);
+    expect(
+      extractAcpMeta(
+        JSON.parse(
+          `{"com.amplitude/session-id": "py-sess", "com.amplitude/parent-agent-id": "py-agent", "com.amplitude/user-id": "py-user", "traceparent": "${traceparent}"}`,
+        ),
+      ),
+    ).toEqual(expected);
+  });
+});
+
 describe('identity follows the header rule', () => {
   it('omits the user ID when includeIdentity is false', () => {
     const a2a = inSession(() => injectA2aMetadata(undefined, { includeIdentity: false }));

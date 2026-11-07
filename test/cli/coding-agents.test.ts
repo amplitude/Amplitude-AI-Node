@@ -116,7 +116,7 @@ describe('coding-agents init', () => {
     expect(parseLocalEnv(readFileSync(localEnv, 'utf8'))).toEqual({
       AMPLITUDE_SERVER_ZONE: 'US',
       AMPLITUDE_AI_CONTENT_MODE: 'metadata_only',
-      AMPLITUDE_API_KEY: SECRET,
+      AMPLITUDE_AI_API_KEY: SECRET,
     });
     expect(statSync(localEnv).mode & 0o777).toBe(0o600);
     expect(git('check-ignore', '.amplitude-ai/local.env')).toBe('.amplitude-ai/local.env');

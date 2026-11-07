@@ -48,7 +48,7 @@ async function run(transcript: string, extraEnv: Record<string, string> = {}, fe
   const result = await runCodexHook(
     { session_id: THREAD, turn_id: 'turn-1', transcript_path: transcript, cwd: work, hook_event_name: 'Stop' },
     {
-      env: { AMPLITUDE_API_KEY: SECRET, AMPLITUDE_AI_HOME: home, ...extraEnv },
+      env: { AMPLITUDE_AI_API_KEY: SECRET, AMPLITUDE_AI_HOME: home, ...extraEnv },
       fetchImpl,
       stdout: (t) => out.push(t),
       stderr: (t) => err.push(t),
@@ -223,7 +223,7 @@ describe('amplitude-ai hook codex', () => {
   it('prints events instead of sending in dry-run mode, without a key or cursor', async () => {
     const transcript = join(work, ROOT);
     copyFileSync(join(FIXTURES, ROOT), transcript);
-    const { result, out } = await run(transcript, { AMPLITUDE_API_KEY: '', AMPLITUDE_AI_HOOK_DRY_RUN: '1' });
+    const { result, out } = await run(transcript, { AMPLITUDE_AI_API_KEY: '', AMPLITUDE_AI_HOOK_DRY_RUN: '1' });
     expect(result.sent).toBe(5);
     expect(out.trim().split('\n')).toHaveLength(5);
     expect(() => readdirSync(join(home, 'codex'))).toThrow();
@@ -232,7 +232,7 @@ describe('amplitude-ai hook codex', () => {
   it('sends nothing and keeps the cursor without a key, a user, or on HTTP errors', async () => {
     const transcript = join(work, ROOT);
     copyFileSync(join(FIXTURES, ROOT), transcript);
-    const noKey = await run(transcript, { AMPLITUDE_API_KEY: '' });
+    const noKey = await run(transcript, { AMPLITUDE_AI_API_KEY: '' });
     expect(noKey.result.reason).toBe('missing_api_key');
 
     const failing = vi.fn(async () => new Response('bad', { status: 400 })) as unknown as typeof fetch;
@@ -246,6 +246,29 @@ describe('amplitude-ai hook codex', () => {
     expect(bodies).toHaveLength(1);
   });
 
+  it('prefers AMPLITUDE_AI_API_KEY and falls back to AMPLITUDE_API_KEY', async () => {
+    const transcript = join(work, ROOT);
+    copyFileSync(join(FIXTURES, ROOT), transcript);
+    const first = mockFetch();
+    await run(transcript, { AMPLITUDE_AI_API_KEY: 'ai-key', AMPLITUDE_API_KEY: 'plain-key' }, first.fetchImpl);
+    expect(first.bodies[0]!.api_key).toBe('ai-key');
+    rmSync(join(home, 'codex'), { recursive: true, force: true });
+    const second = mockFetch();
+    await run(transcript, { AMPLITUDE_AI_API_KEY: '', AMPLITUDE_API_KEY: 'plain-key' }, second.fetchImpl);
+    expect(second.bodies[0]!.api_key).toBe('plain-key');
+  });
+
+  it('skips compressed (.zst) rollouts without sending', async () => {
+    const transcript = join(work, ROOT);
+    writeFileSync(`${transcript}.zst`, 'compressed');
+    const { fetchImpl, bodies } = mockFetch();
+    const { result, err } = await run(transcript, {}, fetchImpl);
+    expect(result.sent).toBe(0);
+    expect(result.skipped.transcript_compressed).toBe(1);
+    expect(err).toContain('.zst');
+    expect(bodies).toHaveLength(0);
+  });
+
   it('reads the subagent transcript from SubagentStop input', async () => {
     const transcript = join(work, SUB);
     copyFileSync(join(FIXTURES, SUB), transcript);
@@ -253,7 +276,7 @@ describe('amplitude-ai hook codex', () => {
     const result = await runCodexHook(
       { transcript_path: null, agent_transcript_path: transcript, cwd: work, hook_event_name: 'SubagentStop' },
       {
-        env: { AMPLITUDE_API_KEY: SECRET, AMPLITUDE_AI_HOME: home, AMPLITUDE_USER_ID: 'user_1' },
+        env: { AMPLITUDE_AI_API_KEY: SECRET, AMPLITUDE_AI_HOME: home, AMPLITUDE_USER_ID: 'user_1' },
         fetchImpl,
         stderr: () => {},
       },

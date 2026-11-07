@@ -416,7 +416,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     const updates: Record<string, string> = {
       AMPLITUDE_SERVER_ZONE: region === 'eu' ? 'EU' : 'US',
       AMPLITUDE_AI_CONTENT_MODE: privacy === 'metadata' ? 'metadata_only' : 'full',
-      ...(options.apiKey ? { AMPLITUDE_API_KEY: options.apiKey } : {}),
+      ...(options.apiKey ? { AMPLITUDE_AI_API_KEY: options.apiKey } : {}),
     };
     writer.write(
       LOCAL_ENV_PATH,
@@ -425,9 +425,9 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       0o600,
     );
     ensureGitignored(writer, cwd, LOCAL_ENV_PATH);
-    if (!options.apiKey && !parseLocalEnv(existingText).AMPLITUDE_API_KEY) {
+    if (!options.apiKey && !parseLocalEnv(existingText).AMPLITUDE_AI_API_KEY && !parseLocalEnv(existingText).AMPLITUDE_API_KEY) {
       instructions.push(
-        `Codex: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}, or export AMPLITUDE_API_KEY in the shell that starts codex.`,
+        `Codex: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}, or export AMPLITUDE_AI_API_KEY in the shell that starts codex.`,
       );
     }
     instructions.push('Codex: open /hooks in Codex and trust the new project hooks.');
@@ -555,7 +555,7 @@ export function runCodingAgentsDoctor(
     const dir = codexHookDir(env, home);
     const localEnvFile = findLocalEnv(cwd);
     const localEnv = localEnvFile ? parseLocalEnv(readFileSync(localEnvFile, 'utf8')) : {};
-    const hasKey = Boolean(env.AMPLITUDE_API_KEY || env.AMPLITUDE_AI_API_KEY || localEnv.AMPLITUDE_API_KEY);
+    const hasKey = Boolean(env.AMPLITUDE_AI_API_KEY || env.AMPLITUDE_API_KEY || localEnv.AMPLITUDE_AI_API_KEY || localEnv.AMPLITUDE_API_KEY);
     checks.push({
       name: 'coding_agents.codex_api_key',
       ok: hasKey,

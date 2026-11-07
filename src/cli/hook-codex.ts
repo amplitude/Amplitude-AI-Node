@@ -9,8 +9,7 @@
  * the events through the SDK's tracking functions (privacy modes and PII
  * redaction apply) to the HTTP V2 API.
  *
- * Environment (same names as the Python forwarder): `AMPLITUDE_API_KEY`
- * (or `AMPLITUDE_AI_API_KEY`), `AMPLITUDE_SERVER_ZONE` or `AMPLITUDE_REGION`
+ * Environment: `AMPLITUDE_AI_API_KEY` (falls back to `AMPLITUDE_API_KEY`), `AMPLITUDE_SERVER_ZONE` or `AMPLITUDE_REGION`
  * (`US` default, `EU`), `AMPLITUDE_USER_ID` (default `git config user.email`),
  * `AMPLITUDE_AI_CONTENT_MODE` (`full` default, `metadata_only` alias
  * `metadata`, `customer_enriched`), `AMPLITUDE_AGENT_ID` (default `codex`),
@@ -296,10 +295,10 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
   try {
     const dir = codexHookDir(env, options.home);
     const dryRun = options.dryRun ?? ['1', 'true'].includes((env.AMPLITUDE_AI_HOOK_DRY_RUN ?? '').toLowerCase());
-    const apiKey = env.AMPLITUDE_API_KEY || env.AMPLITUDE_AI_API_KEY || '';
+    const apiKey = env.AMPLITUDE_AI_API_KEY || env.AMPLITUDE_API_KEY || '';
     if (!apiKey && !dryRun) {
       result.reason = 'missing_api_key';
-      stderr('amplitude-ai hook codex: AMPLITUDE_API_KEY is not set; nothing sent.\n');
+      stderr('amplitude-ai hook codex: AMPLITUDE_AI_API_KEY is not set; nothing sent.\n');
       return result;
     }
     const userId = env.AMPLITUDE_USER_ID || (options.gitEmail ?? defaultGitEmail)(input.cwd);
@@ -320,6 +319,11 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
     }
 
     for (const path of paths) {
+      if (path.endsWith('.zst') || (!existsSync(path) && existsSync(`${path}.zst`))) {
+        result.skipped.transcript_compressed = (result.skipped.transcript_compressed ?? 0) + 1;
+        stderr('amplitude-ai hook codex: rollout is compressed (.zst); skipping\n');
+        continue;
+      }
       if (!existsSync(path)) {
         result.skipped.transcript_missing = (result.skipped.transcript_missing ?? 0) + 1;
         continue;

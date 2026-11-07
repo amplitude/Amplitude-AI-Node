@@ -17,6 +17,68 @@ import { analyzeFileInstrumentation, redactSecrets } from './validate-file.js';
 
 const MAX_FLAG_READS = 50; // flag_call_sites entries reported per scan
 
+export interface CodingAgentsScan {
+  /** Harnesses with project config here: `claude-code`, `codex`, `goose`. */
+  harnesses: string[];
+  /** Agent SDK dependencies the app is built on. */
+  agent_sdks: string[];
+  has_claude_dir: boolean;
+  has_codex_dir: boolean;
+  has_goose_config: boolean;
+  has_claude_md: boolean;
+  has_agents_md: boolean;
+  has_github_workflows: boolean;
+  /** Repo-relative path of an existing prepare-commit-msg hook, or null. */
+  existing_prepare_commit_msg: string | null;
+  /** True when `amplitude-ai coding-agents init` has already run. */
+  has_amplitude_setup: boolean;
+}
+
+const CODING_AGENT_SDK_DEPS = ['@openai/codex-sdk', '@anthropic-ai/claude-agent-sdk'];
+
+function readGitHooksPath(rootPath: string): string | null {
+  const config = readRegularFileCapped(join(rootPath, '.git', 'config'), 256 * 1024);
+  const match = config ? /^\s*hooksPath\s*=\s*(.+?)\s*$/im.exec(config) : null;
+  return match?.[1] ?? null;
+}
+
+export function scanCodingAgents(rootPath: string, allDeps: Set<string>): CodingAgentsScan {
+  const has = (rel: string) => existsSync(join(rootPath, rel));
+  const hasClaudeDir = has('.claude');
+  const hasCodexDir = has('.codex');
+  const hasGooseConfig = has('.goosehints') || has('.goose');
+  const hasClaudeMd = has('CLAUDE.md');
+  const hasAgentsMd = has('AGENTS.md');
+  const harnesses: string[] = [];
+  if (hasClaudeDir || hasClaudeMd) harnesses.push('claude-code');
+  if (hasCodexDir) harnesses.push('codex');
+  if (hasGooseConfig) harnesses.push('goose');
+
+  const hooksPath = readGitHooksPath(rootPath);
+  const hookCandidates = [
+    ...(hooksPath && !hooksPath.startsWith('/') ? [`${hooksPath.replace(/\/$/, '')}/prepare-commit-msg`] : []),
+    '.githooks/prepare-commit-msg',
+    '.husky/prepare-commit-msg',
+    '.git/hooks/prepare-commit-msg',
+  ];
+  const existingHook = hookCandidates.find((rel) => has(rel)) ?? null;
+  const hookText = existingHook ? readRegularFileCapped(join(rootPath, existingHook), 64 * 1024) : null;
+
+  return {
+    harnesses,
+    agent_sdks: CODING_AGENT_SDK_DEPS.filter((dep) => allDeps.has(dep)),
+    has_claude_dir: hasClaudeDir,
+    has_codex_dir: hasCodexDir,
+    has_goose_config: hasGooseConfig,
+    has_claude_md: hasClaudeMd,
+    has_agents_md: hasAgentsMd,
+    has_github_workflows: has('.github/workflows'),
+    existing_prepare_commit_msg: existingHook,
+    has_amplitude_setup:
+      has('.github/workflows/agent-outcomes.yml') || Boolean(hookText?.includes('Agent-Session-Id')),
+  };
+}
+
 export interface ScanResult {
   project_name: string | null;
   runtime: 'node';
@@ -68,6 +130,8 @@ export interface ScanResult {
   experiment_packages: string[];
   /** Where the code reads a flag or experiment assignment (first 50). */
   flag_call_sites: FlagCallSite[];
+  /** Coding agents used on this repo, and the outcome plumbing already present. */
+  coding_agents: CodingAgentsScan;
   recommendations: string[];
   recommended_tier: 'quick_start' | 'standard' | 'advanced';
 }
@@ -697,6 +761,24 @@ export function scanProject(requestedRoot: string): ScanResult {
     }
   }
 
+  const codingAgents = scanCodingAgents(rootPath, allDeps);
+  if (codingAgents.agent_sdks.length > 0) {
+    recommendations.push(
+      `Agent SDK detected (${codingAgents.agent_sdks.join(', ')}): use CodexSDKTracker from @amplitude/ai/integrations/codex-sdk ` +
+        'or ClaudeAgentSDKTracker from @amplitude/ai/integrations/claude-agent-sdk inside agent.session(). See "Coding agents" in amplitude-ai.md.',
+    );
+  }
+  if (codingAgents.harnesses.length > 0 && !codingAgents.has_amplitude_setup) {
+    const merge = codingAgents.existing_prepare_commit_msg
+      ? ` An existing ${codingAgents.existing_prepare_commit_msg} was found: add the Agent-Session-Id trailer lines to it instead of replacing it.`
+      : '';
+    recommendations.push(
+      `Coding agents configured (${codingAgents.harnesses.join(', ')}): run \`npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\`, ` +
+        `then without --dry-run, to send their sessions and stamp agent commits for merge, revert and deploy outcomes.${merge} ` +
+        'See "Coding agents" in amplitude-ai.md.',
+    );
+  }
+
   if (hasFanOut) {
     recommendations.push(
       'Fan-out LLM pattern detected: one function dispatches multiple LLM calls in parallel. ' +
@@ -737,6 +819,7 @@ export function scanProject(requestedRoot: string): ScanResult {
     otel_packages: otelPackages,
     experiment_packages: experimentPackages,
     flag_call_sites: flagReads,
+    coding_agents: codingAgents,
     recommendations,
     recommended_tier: recommendedTier,
   };
