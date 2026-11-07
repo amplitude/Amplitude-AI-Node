@@ -9,6 +9,10 @@
 //   node check-agent-events.mjs results.ndjson --json
 //
 // Exits 1 when any error is found. Each finding names the row and the fix.
+// Warnings (exit 0) cover what is legal but usually wrong: an identity under
+// 5 characters, [Agent] Tags, an [Agent] Experiments entry that is flag state
+// rather than an assignment, and an experiment key with one arm on every event
+// in the file (a rollout, not a split).
 // Source: https://github.com/amplitude/Amplitude-AI-Node/tree/main/docs/integrations
 
 import { readFileSync } from 'node:fs';
@@ -27,6 +31,29 @@ const AI_RESPONSE_ONLY = [
   '[Agent] Input Tokens',
   '[Agent] Output Tokens',
 ];
+const EXPERIMENTS = '[Agent] Experiments';
+// Arm values that record flag state, not an assignment the flag tool made.
+// `eligible:*` is matched by prefix below.
+const NON_ASSIGNMENT_ARMS = ['on', 'off', 'true', 'false', 'skipped'];
+
+/**
+ * Why an `[Agent] Experiments` entry is not an assignment, or undefined when it
+ * is one. Entries are `key:arm`; the arm may contain `:`, the key may not.
+ */
+export function experimentEntryProblem(entry) {
+  if (typeof entry !== 'string' || entry.trim() === '') return 'is not a "key:arm" string';
+  const colon = entry.indexOf(':');
+  if (colon === -1) return 'has no arm (entries are "key:arm")';
+  const key = entry.slice(0, colon).trim();
+  const arm = entry.slice(colon + 1).trim();
+  if (key === '') return 'has an empty key (entries are "key:arm")';
+  if (arm === '') return 'has an empty arm (entries are "key:arm")';
+  const lower = arm.toLowerCase();
+  if (NON_ASSIGNMENT_ARMS.includes(lower) || lower === 'eligible' || lower.startsWith('eligible:')) {
+    return `records flag state (${JSON.stringify(arm)}), not an assignment`;
+  }
+  return undefined;
+}
 
 /** Parses CSV (RFC 4180), JSON, or NDJSON text into plain row objects. */
 export function parseEvents(text, filename = '') {
@@ -135,6 +162,7 @@ export function checkAgentEvents(rows, options = {}) {
   const metadataOnly =
     options.metadataOnly ?? !events.some((event) => event.props.$llm_message !== undefined);
   const seenInsertIds = new Map();
+  const nonAssignments = new Map();
 
   for (const event of events) {
     const { props } = event;
@@ -198,6 +226,30 @@ export function checkAgentEvents(rows, options = {}) {
       }
     }
     if ('[Agent] Tags' in props) warn(event, '[Agent] Tags is not read on ingest; use [Agent] Context');
+    if (EXPERIMENTS in props) {
+      const entries = props[EXPERIMENTS];
+      if (!Array.isArray(entries)) {
+        warn(event, `${EXPERIMENTS} must be a JSON array of "key:arm" strings (got ${JSON.stringify(entries)})`);
+      } else {
+        for (const entry of entries) {
+          const problem = experimentEntryProblem(entry);
+          const label = JSON.stringify(entry);
+          if (problem && !nonAssignments.has(label)) {
+            nonAssignments.set(label, { event, problem, count: 0 });
+          }
+          if (problem) nonAssignments.get(label).count += 1;
+        }
+      }
+    }
+  }
+
+  // One warning per distinct bad entry, at the first row that carries it: the
+  // same entry usually rides on every event of a session.
+  for (const [label, { event, problem, count }] of nonAssignments) {
+    warn(
+      event,
+      `${EXPERIMENTS} entry ${label} ${problem}; send only the arm the flag tool assigned (gates, skipped, on/off and eligible:* are flag state, not arms)${count > 1 ? ` (on ${count} events)` : ''}`,
+    );
   }
 
   const sessions = new Map();
@@ -206,6 +258,33 @@ export function checkAgentEvents(rows, options = {}) {
     if (!sessionId) continue;
     if (!sessions.has(sessionId)) sessions.set(sessionId, []);
     sessions.get(sessionId).push(event);
+  }
+
+  // A key whose arm is the same on every event, across at least two sessions,
+  // is a rollout, not a split: nothing to compare. One session cannot tell.
+  const armsByKey = new Map();
+  for (const event of events) {
+    const sessionId = event.props['[Agent] Session ID'];
+    const entries = event.props[EXPERIMENTS];
+    if (!sessionId || !Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (experimentEntryProblem(entry)) continue;
+      const colon = entry.indexOf(':');
+      const key = entry.slice(0, colon).trim();
+      const arm = entry.slice(colon + 1).trim();
+      if (!armsByKey.has(key)) armsByKey.set(key, { event, arms: new Set(), sessions: new Set() });
+      const seen = armsByKey.get(key);
+      seen.arms.add(arm);
+      seen.sessions.add(sessionId);
+    }
+  }
+  for (const [key, { event, arms, sessions: keySessions }] of armsByKey) {
+    if (arms.size !== 1 || keySessions.size < 2) continue;
+    const [arm] = arms;
+    warn(
+      event,
+      `${EXPERIMENTS} key ${JSON.stringify(key)} has the same arm ${JSON.stringify(arm)} on every event in this file (${keySessions.size} sessions): one arm is a rollout, not a split; record the arm the flag tool assigned per session, or expect no comparison`,
+    );
   }
 
   for (const sessionEvents of sessions.values()) {

@@ -1989,6 +1989,16 @@
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
         },
         {
+          "name": "[Agent] Experiment Source",
+          "type": "string",
+          "description": "Where the session's experiment arms came from: 'sdk', 'otel', 'http' or 'warehouse' when the events carried [Agent] Experiments over that transport; 'context' when they were read from the session's [Agent] Context tags. Present only when the session ran under an experiment and the transport is known; a session whose metadata names no transport carries the arms without this property."
+        },
+        {
+          "name": "[Agent] Experiment Overflow",
+          "type": "number",
+          "description": "Distinct experiment arms dropped because the session ran under more than 32. Present only when nonzero; the arms listed in [Agent] Experiments understate the session by this many. At least 1 when the span read stopped at its size bound, so the count is a lower bound."
+        },
+        {
           "name": "[Agent] Task Completed",
           "type": "string",
           "description": "OOTB detector result: 'True' if agent completed user's request, 'False' otherwise."
