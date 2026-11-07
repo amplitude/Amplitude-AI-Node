@@ -2,8 +2,8 @@
  * `amplitude-ai coding-agents init|doctor`: wire Claude Code, Codex and goose
  * sessions into Amplitude and stamp agent commits for code outcomes.
  *
- * Committed files never contain secrets. The API key goes only to gitignored
- * `.claude/settings.local.json` or the per-user `~/.amplitude-ai/codex/config.json`
+ * Committed files never contain secrets. The API key goes only to the
+ * gitignored `.claude/settings.local.json` and `.amplitude-ai/local.env`
  * (mode 0600), and is never printed.
  */
 
@@ -21,7 +21,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CodexHookConfig, codexHookDir } from './hook-codex.js';
+import { LOCAL_ENV_PATH, codexHookDir, findLocalEnv, parseLocalEnv } from './hook-codex.js';
 
 export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose';
 export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
@@ -59,7 +59,6 @@ export type CodingAgentsInitOptions = {
   apiKey?: string;
   userId?: string;
   force?: boolean;
-  home?: string;
   env?: NodeJS.ProcessEnv;
   templatesDir?: string;
   git?: GitRunner;
@@ -181,6 +180,24 @@ function detectIndent(text: string): string | number {
   return m?.[1] ?? 2;
 }
 
+/** Sets `KEY=value` lines in an env file, keeping other lines and comments. */
+export function mergeEnvFile(text: string, updates: Record<string, string>): string {
+  const remaining = new Map(Object.entries(updates));
+  const lines = text ? text.replace(/\n$/, '').split('\n') : ['# Amplitude Agent Analytics (gitignored; never commit)'];
+  const out = lines.map((line) => {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
+    const key = m?.[1];
+    if (key && remaining.has(key)) {
+      const value = remaining.get(key) as string;
+      remaining.delete(key);
+      return `${key}=${value}`;
+    }
+    return line;
+  });
+  for (const [key, value] of remaining) out.push(`${key}=${value}`);
+  return `${out.join('\n')}\n`;
+}
+
 export function ensurePrepareScript(existing: string | undefined): string {
   if (!existing || !existing.trim()) return PREPARE_SCRIPT;
   if (existing.includes(HOOKS_PATH_COMMAND)) return existing;
@@ -250,7 +267,6 @@ function writeTemplateFile(
 export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAgentsInitResult {
   const cwd = resolve(options.cwd);
   const env = options.env ?? process.env;
-  const home = options.home ?? homedir();
   const harnesses = options.harnesses?.length ? [...new Set(options.harnesses)] : [...CODING_AGENT_HARNESSES];
   const privacy = options.privacy ?? 'full';
   const region = options.region ?? 'us';
@@ -395,25 +411,23 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       writer.write(CODEX_HOOKS_PATH, stringify(merged), 'Stop hook forwards the rollout transcript (no secrets)');
     }
 
-    const configPath = join(codexHookDir(env, home), 'config.json');
-    const existing = readJsonFile(configPath);
-    const config: CodexHookConfig = existing.ok && existing.value ? (existing.value as CodexHookConfig) : {};
-    const next: CodexHookConfig = {
-      ...config,
-      region,
-      contentMode: privacy === 'metadata' ? 'metadata_only' : 'full',
-      ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    const localEnvPath = join(cwd, LOCAL_ENV_PATH);
+    const existingText = existsSync(localEnvPath) ? readFileSync(localEnvPath, 'utf8') : '';
+    const updates: Record<string, string> = {
+      AMPLITUDE_SERVER_ZONE: region === 'eu' ? 'EU' : 'US',
+      AMPLITUDE_AI_CONTENT_MODE: privacy === 'metadata' ? 'metadata_only' : 'full',
+      ...(options.apiKey ? { AMPLITUDE_API_KEY: options.apiKey } : {}),
     };
     writer.write(
-      configPath,
-      stringify(next),
-      options.apiKey ? 'API key, region, privacy (per user, 0600)' : 'region and privacy (per user, 0600)',
+      LOCAL_ENV_PATH,
+      mergeEnvFile(existingText, updates),
+      options.apiKey ? 'API key, server zone, content mode for hook codex (gitignored)' : 'server zone and content mode for hook codex (gitignored)',
       0o600,
-      true,
     );
-    if (!next.apiKey) {
+    ensureGitignored(writer, cwd, LOCAL_ENV_PATH);
+    if (!options.apiKey && !parseLocalEnv(existingText).AMPLITUDE_API_KEY) {
       instructions.push(
-        'Codex: re-run with --api-key-stdin, or export AMPLITUDE_API_KEY in the shell that starts codex.',
+        `Codex: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}, or export AMPLITUDE_API_KEY in the shell that starts codex.`,
       );
     }
     instructions.push('Codex: open /hooks in Codex and trust the new project hooks.');
@@ -443,7 +457,7 @@ function newestMtime(dir: string): number | null {
   try {
     let newest: number | null = null;
     for (const name of readdirSync(dir)) {
-      if (!name.endsWith('.json') || name === 'config.json') continue;
+      if (!name.endsWith('.json')) continue;
       const m = statSync(join(dir, name)).mtimeMs;
       if (newest === null || m > newest) newest = m;
     }
@@ -455,7 +469,9 @@ function newestMtime(dir: string): number | null {
 
 /** True when `coding-agents init` has written anything into this repo. */
 export function hasCodingAgentsSetup(cwd: string): boolean {
-  return [PREPARE_COMMIT_MSG_PATH, OUTCOMES_WORKFLOW_PATH, CODEX_HOOKS_PATH].some((p) => existsSync(join(cwd, p)));
+  return [PREPARE_COMMIT_MSG_PATH, OUTCOMES_WORKFLOW_PATH, CODEX_HOOKS_PATH, LOCAL_ENV_PATH].some((p) =>
+    existsSync(join(cwd, p)),
+  );
 }
 
 export function runCodingAgentsDoctor(
@@ -537,12 +553,9 @@ export function runCodingAgentsDoctor(
       ...(!forwarder && { fix: `${fixInit} --harness codex` }),
     });
     const dir = codexHookDir(env, home);
-    const config = readJsonFile(join(dir, 'config.json'));
-    const hasKey = Boolean(
-      env.AMPLITUDE_API_KEY ||
-        env.AMPLITUDE_AI_API_KEY ||
-        (config.ok && config.value && typeof config.value.apiKey === 'string' && config.value.apiKey),
-    );
+    const localEnvFile = findLocalEnv(cwd);
+    const localEnv = localEnvFile ? parseLocalEnv(readFileSync(localEnvFile, 'utf8')) : {};
+    const hasKey = Boolean(env.AMPLITUDE_API_KEY || env.AMPLITUDE_AI_API_KEY || localEnv.AMPLITUDE_API_KEY);
     checks.push({
       name: 'coding_agents.codex_api_key',
       ok: hasKey,

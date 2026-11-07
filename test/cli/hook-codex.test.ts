@@ -1,9 +1,14 @@
-import { appendFileSync, copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cursorFileFor, runCodexHook } from '../../src/cli/hook-codex.js';
-import { isContextualCodexUserMessage, mapCodexRollout } from '../../src/integrations/codex-rollout.js';
+import {
+  codexAgentIds,
+  isContextualCodexUserMessage,
+  mapCodexRollout,
+  parseCodexSessionMeta,
+} from '../../src/integrations/codex-rollout.js';
 import type { AmplitudeEvent } from '../../src/types.js';
 
 const FIXTURES = join(__dirname, '../fixtures/codex');
@@ -61,7 +66,7 @@ describe('mapCodexRollout', () => {
     expect(user).toMatchObject({ content: 'Fix the failing test and commit', insertId: `codex:${THREAD}:turn-1:user-0` });
     expect(user!.opts).toMatchObject({ sessionId: THREAD, traceId: 'turn-1', agentId: 'codex' });
     expect(test).toMatchObject({ toolName: 'exec_command', success: false, latencyMs: 5000 });
-    expect(test!.opts.errorMessage).toBe('Exit code: 1');
+    expect(test!.opts.errorMessage).toBe('exit code 1');
     expect(commit).toMatchObject({ toolName: 'shell', success: true, insertId: `codex:${THREAD}:turn-1:call_commit` });
     expect(commit!.opts.eventProperties).toEqual({ commit_sha: '1a2b3c4' });
     expect(pr).toMatchObject({ toolName: 'mcp__github__create_pull_request', success: true });
@@ -114,10 +119,10 @@ describe('mapCodexRollout', () => {
       ['ai', 'src/parser.ts'],
     ]);
     expect(calls[1]!.opts).toMatchObject({
-      sessionId: THREAD,
-      agentId: 'codex:99999999-2222-4333-8444-555555555555',
+      sessionId: '99999999-2222-4333-8444-555555555555',
+      agentId: 'codex/explorer',
       parentAgentId: 'codex',
-      context: { codex_thread_id: '99999999-2222-4333-8444-555555555555', agent_nickname: 'Ada', agent_role: 'explorer' },
+      eventProperties: { codex_parent_thread_id: THREAD, codex_root_session_id: THREAD },
     });
     expect((calls[1] as { model: string }).model).toBe('gpt-5.5-mini');
   });
@@ -134,6 +139,24 @@ describe('mapCodexRollout', () => {
     expect(isContextualCodexUserMessage(msg('hello', ['codex.internal']))).toBe(true);
     expect(isContextualCodexUserMessage(msg('hello', ['user.input']))).toBe(false);
     expect(isContextualCodexUserMessage(msg('use <b>bold</b> please'))).toBe(false);
+  });
+});
+
+describe('codexAgentIds', () => {
+  it('matches the Python forwarder naming', () => {
+    const meta = (extra: Record<string, unknown>) =>
+      parseCodexSessionMeta({ id: 'child', session_id: 'root', ...extra })!;
+    expect(codexAgentIds(meta({}))).toEqual({ agentId: 'codex', parentAgentId: null });
+    expect(codexAgentIds(meta({ parent_thread_id: 'root', agent_nickname: 'Ada' }))).toEqual({
+      agentId: 'codex/Ada',
+      parentAgentId: 'codex',
+    });
+    expect(
+      codexAgentIds(
+        meta({ source: { subagent: { thread_spawn: { parent_thread_id: 'p', depth: 2, agent_path: '/root/a/b' } } } }),
+        'my-agent',
+      ),
+    ).toEqual({ agentId: 'my-agent/a/b', parentAgentId: 'my-agent/a' });
   });
 });
 
@@ -237,5 +260,32 @@ describe('amplitude-ai hook codex', () => {
     );
     expect(result.sent).toBe(2);
     expect(props(bodies[0]!.events[0]!)['[Agent] Parent Agent ID']).toBe('codex');
+  });
+
+  it('reads settings from .amplitude-ai/local.env; the environment wins', async () => {
+    const transcript = join(work, ROOT);
+    copyFileSync(join(FIXTURES, ROOT), transcript);
+    mkdirSync(join(work, '.git'));
+    mkdirSync(join(work, '.amplitude-ai'));
+    writeFileSync(
+      join(work, '.amplitude-ai/local.env'),
+      `# comment\nAMPLITUDE_API_KEY="${SECRET}"\nexport AMPLITUDE_SERVER_ZONE=EU\nAMPLITUDE_AGENT_ID=local-codex\nAMPLITUDE_USER_ID=from-file@example.com\n`,
+    );
+    const urls: string[] = [];
+    const bodies: Array<{ api_key: string; events: AmplitudeEvent[] }> = [];
+    const fetchImpl = (async (url: unknown, init?: { body?: unknown }) => {
+      urls.push(String(url));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await runCodexHook(
+      { session_id: THREAD, transcript_path: transcript, cwd: join(work, '.amplitude-ai') },
+      { env: { AMPLITUDE_AI_HOME: home, AMPLITUDE_USER_ID: 'env@example.com' }, fetchImpl, stderr: () => {} },
+    );
+    expect(result.sent).toBe(5);
+    expect(urls[0]).toBe('https://api.eu.amplitude.com/2/httpapi');
+    expect(bodies[0]!.api_key).toBe(SECRET);
+    expect(bodies[0]!.events[0]!.user_id).toBe('env@example.com');
+    expect(props(bodies[0]!.events[0]!)['[Agent] Agent ID']).toBe('local-codex');
   });
 });

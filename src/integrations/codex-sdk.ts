@@ -244,14 +244,16 @@ export class CodexSDKTracker {
     let errorMessage: string | undefined;
 
     if (item.type === 'command_execution') {
+      toolName = 'shell';
       input = typeof item.command === 'string' ? item.command : jsonText(item.command);
       output = typeof item.aggregated_output === 'string' ? item.aggregated_output : undefined;
       const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
       if (exitCode != null && exitCode !== 0) success = false;
-      if (!success) errorMessage = exitCode != null ? `Exit code: ${exitCode}` : 'Command failed';
+      if (!success) errorMessage = exitCode != null ? `exit code ${exitCode}` : String(item.status ?? 'failed');
     } else if (item.type === 'file_change') {
+      toolName = 'apply_patch';
       input = jsonText(item.changes);
-      if (!success) errorMessage = 'Patch failed';
+      if (!success) errorMessage = String(item.status ?? 'failed');
     } else if (item.type === 'mcp_tool_call') {
       toolName = `mcp__${String(item.server ?? 'unknown')}__${String(item.tool ?? 'unknown')}`;
       input = jsonText(item.arguments);

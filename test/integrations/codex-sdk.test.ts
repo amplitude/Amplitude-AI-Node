@@ -80,13 +80,13 @@ describe('CodexSDKTracker', () => {
 
     const tools = session.trackToolCall.mock.calls as unknown as Array<[string, number, boolean, Record<string, unknown>]>;
     expect(tools.map((c) => [c[0], c[2]])).toEqual([
-      ['command_execution', false],
-      ['command_execution', true],
-      ['file_change', true],
+      ['shell', false],
+      ['shell', true],
+      ['apply_patch', true],
       ['mcp__github__create_pull_request', true],
       ['web_search', true],
     ]);
-    expect(tools[0]![3]).toMatchObject({ input: 'npm test', output: 'fail', errorMessage: 'Exit code: 1', invocationId: 'c1', traceId });
+    expect(tools[0]![3]).toMatchObject({ input: 'npm test', output: 'fail', errorMessage: 'exit code 1', invocationId: 'c1', traceId });
     expect(tools[1]![3].eventProperties).toEqual({ commit_sha: '1a2b3c4' });
     expect(tools[3]![3].eventProperties).toEqual({ commit_sha: 'c'.repeat(40) });
     expect(tools[4]![3].input).toBe('vitest docs');

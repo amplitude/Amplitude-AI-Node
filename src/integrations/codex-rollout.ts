@@ -26,6 +26,8 @@ export type CodexRolloutMeta = {
   parentThreadId: string | null;
   agentNickname: string | null;
   agentRole: string | null;
+  agentPath: string | null;
+  isSubagent: boolean;
   historyStartOrdinal: number | null;
 };
 
@@ -176,24 +178,44 @@ export function parseCodexSessionMeta(payload: Record<string, unknown>): CodexRo
   if (!id) return null;
   const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const ordinal = payload.subagent_history_start_ordinal;
+  const source = payload.source as { subagent?: { thread_spawn?: Record<string, unknown> } } | null | undefined;
+  const spawn =
+    source && typeof source === 'object' && source.subagent && typeof source.subagent.thread_spawn === 'object'
+      ? (source.subagent.thread_spawn ?? null)
+      : null;
+  const parentThreadId = str(payload.parent_thread_id) ?? str(spawn?.parent_thread_id);
   return {
     threadId: id,
     sessionId: str(payload.session_id) ?? id,
-    parentThreadId: str(payload.parent_thread_id),
-    agentNickname: str(payload.agent_nickname),
-    agentRole: str(payload.agent_role),
+    parentThreadId,
+    agentNickname: str(payload.agent_nickname) ?? str(spawn?.agent_nickname),
+    agentRole: str(payload.agent_role) ?? str(spawn?.agent_role),
+    agentPath: str(payload.agent_path) ?? str(spawn?.agent_path),
+    isSubagent: Boolean(parentThreadId || spawn),
     historyStartOrdinal: typeof ordinal === 'number' ? ordinal : null,
   };
 }
 
-/** `codex` for a root thread, `codex:<thread id>` for a subagent thread. */
-export function codexAgentIds(meta: CodexRolloutMeta): { agentId: string; parentAgentId: string | null } {
-  if (!meta.parentThreadId) return { agentId: CODEX_AGENT_ID, parentAgentId: null };
-  return {
-    agentId: `${CODEX_AGENT_ID}:${meta.threadId}`,
-    parentAgentId:
-      meta.parentThreadId === meta.sessionId ? CODEX_AGENT_ID : `${CODEX_AGENT_ID}:${meta.parentThreadId}`,
-  };
+/**
+ * Agent IDs for a thread, the same as the Python forwarder: `codex` for the
+ * root thread; a subagent at agent path `/root/a/b` is `codex/a/b` under
+ * `codex/a`, otherwise `codex/<role or nickname>` under `codex`.
+ */
+export function codexAgentIds(
+  meta: CodexRolloutMeta,
+  baseAgentId: string = CODEX_AGENT_ID,
+): { agentId: string; parentAgentId: string | null } {
+  if (!meta.isSubagent) return { agentId: baseAgentId, parentAgentId: null };
+  if (meta.agentPath?.startsWith('/root/')) {
+    const relative = meta.agentPath.slice('/root'.length);
+    const parentRelative = relative.slice(0, relative.lastIndexOf('/'));
+    return {
+      agentId: `${baseAgentId}${relative}`,
+      parentAgentId: parentRelative ? `${baseAgentId}${parentRelative}` : baseAgentId,
+    };
+  }
+  const name = meta.agentRole ?? meta.agentNickname ?? 'subagent';
+  return { agentId: `${baseAgentId}/${name}`, parentAgentId: baseAgentId };
 }
 
 /**
@@ -203,7 +225,7 @@ export function codexAgentIds(meta: CodexRolloutMeta): { agentId: string; parent
 export function mapCodexRollout(
   lines: string[],
   previous: CodexRolloutState = initialCodexRolloutState(),
-  options: { flush?: boolean } = {},
+  options: { flush?: boolean; agentId?: string } = {},
 ): CodexRolloutResult {
   const state: CodexRolloutState = structuredClone(previous);
   const calls: CodexTrackCall[] = [];
@@ -214,15 +236,13 @@ export function mapCodexRollout(
 
   const base = (): Record<string, unknown> | null => {
     if (!state.meta || !state.turnId) return null;
-    const { agentId, parentAgentId } = codexAgentIds(state.meta);
-    const opts: Record<string, unknown> = { sessionId: state.meta.sessionId, traceId: state.turnId, agentId };
+    const { agentId, parentAgentId } = codexAgentIds(state.meta, options.agentId);
+    const opts: Record<string, unknown> = { sessionId: state.meta.threadId, traceId: state.turnId, agentId };
     if (parentAgentId) opts.parentAgentId = parentAgentId;
-    if (state.meta.parentThreadId) {
-      const context: Record<string, unknown> = { codex_thread_id: state.meta.threadId };
-      if (state.meta.agentNickname) context.agent_nickname = state.meta.agentNickname;
-      if (state.meta.agentRole) context.agent_role = state.meta.agentRole;
-      opts.context = context;
-    }
+    const props: Record<string, unknown> = {};
+    if (parentAgentId && state.meta.parentThreadId) props.codex_parent_thread_id = state.meta.parentThreadId;
+    if (state.meta.sessionId !== state.meta.threadId) props.codex_root_session_id = state.meta.sessionId;
+    if (Object.keys(props).length > 0) opts.eventProperties = props;
     return opts;
   };
   const insertId = (key: string) => `codex:${state.meta?.threadId}:${state.turnId}:${key}`;
@@ -334,16 +354,17 @@ export function mapCodexRollout(
             break;
           }
           case 'turn_aborted': {
-            if (payload.reason === 'interrupted') {
-              flushReply(true);
-              skip('turn_interrupted');
+            const error = payload.error as { message?: unknown } | null | undefined;
+            if (typeof error?.message === 'string' && error.message) {
+              trackError(time, error.message);
               break;
             }
-            const error = payload.error as { message?: unknown } | null | undefined;
-            trackError(
-              time,
-              typeof error?.message === 'string' ? error.message : `Turn aborted: ${String(payload.reason)}`,
-            );
+            if (payload.reason == null || payload.reason === 'interrupted' || payload.reason === 'replaced') {
+              flushReply(true);
+              skip(`turn_${String(payload.reason ?? 'aborted')}`);
+              break;
+            }
+            trackError(time, `turn aborted: ${String(payload.reason)}`);
             break;
           }
           case 'token_count': {
@@ -433,10 +454,12 @@ export function mapCodexRollout(
             const explicit = (payload.output as { success?: unknown } | null)?.success;
             const success = explicit === false ? false : exitCode == null || exitCode === 0;
             const toolOpts: Record<string, unknown> = { ...opts, invocationId: insertId(callId), input: call.input, output };
-            if (!success) toolOpts.errorMessage = exitCode != null ? `Exit code: ${exitCode}` : 'Tool call failed';
+            if (!success) toolOpts.errorMessage = exitCode != null ? `exit code ${exitCode}` : 'tool call failed';
             if (success) {
               const commit = commitShaProperties(call.name, call.input, output);
-              if (commit.commit_sha) toolOpts.eventProperties = commit;
+              if (commit.commit_sha) {
+                toolOpts.eventProperties = { ...(toolOpts.eventProperties as Record<string, unknown>), ...commit };
+              }
             }
             state.lastEventAt = time;
             calls.push({

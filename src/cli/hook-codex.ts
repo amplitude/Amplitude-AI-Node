@@ -9,6 +9,15 @@
  * the events through the SDK's tracking functions (privacy modes and PII
  * redaction apply) to the HTTP V2 API.
  *
+ * Environment (same names as the Python forwarder): `AMPLITUDE_API_KEY`
+ * (or `AMPLITUDE_AI_API_KEY`), `AMPLITUDE_SERVER_ZONE` or `AMPLITUDE_REGION`
+ * (`US` default, `EU`), `AMPLITUDE_USER_ID` (default `git config user.email`),
+ * `AMPLITUDE_AI_CONTENT_MODE` (`full` default, `metadata_only` alias
+ * `metadata`, `customer_enriched`), `AMPLITUDE_AGENT_ID` (default `codex`),
+ * `AMPLITUDE_AI_HOME` (default `~/.amplitude-ai`). Variables not set in the
+ * environment are read from the gitignored `.amplitude-ai/local.env` that
+ * `coding-agents init` writes at the repo root.
+ *
  * Never blocks Codex: every failure is reported on stderr and the process
  * exits 0. The API key is never printed.
  */
@@ -17,7 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { AmplitudeAI } from '../client.js';
 import { AIConfig, type ContentMode } from '../config.js';
 import type { AmplitudeEvent } from '../types.js';
@@ -43,12 +52,8 @@ export type CodexHookInput = {
   hook_event_name?: string;
 };
 
-export type CodexHookConfig = {
-  apiKey?: string;
-  region?: string;
-  userId?: string;
-  contentMode?: string;
-};
+/** Repo-relative path of the gitignored env file `coding-agents init` writes. */
+export const LOCAL_ENV_PATH = '.amplitude-ai/local.env';
 
 type Cursor = {
   version: 1;
@@ -82,14 +87,47 @@ export function codexHookDir(env: CodexHookEnv, home = homedir()): string {
   return join(env.AMPLITUDE_AI_HOME || join(home, '.amplitude-ai'), 'codex');
 }
 
-function readConfig(dir: string): CodexHookConfig {
-  const path = join(dir, 'config.json');
-  if (!existsSync(path)) return {};
+/** Parses `KEY=value` lines (optional `export `, optional quotes). */
+export function parseLocalEnv(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) continue;
+    const eq = line.indexOf('=');
+    const key = line.slice(0, eq).trim().replace(/^export\s+/, '').trim();
+    let value = line.slice(eq + 1).trim();
+    if (value.length >= 2 && value[0] === value[value.length - 1] && (value[0] === '"' || value[0] === "'")) {
+      value = value.slice(1, -1);
+    }
+    if (key) values[key] = value;
+  }
+  return values;
+}
+
+/** The nearest `.amplitude-ai/local.env` from `cwd` up to the repo root. */
+export function findLocalEnv(cwd: string | undefined): string | null {
+  if (!cwd) return null;
+  let dir = resolve(cwd);
+  for (;;) {
+    const candidate = join(dir, LOCAL_ENV_PATH);
+    if (existsSync(candidate)) return candidate;
+    if (existsSync(join(dir, '.git'))) return null;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function withLocalEnv(env: CodexHookEnv, cwd: string | undefined, stderr: (t: string) => void): CodexHookEnv {
+  const path = findLocalEnv(cwd);
+  if (!path) return env;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as CodexHookConfig) : {};
-  } catch {
-    return {};
+    const merged: CodexHookEnv = { ...parseLocalEnv(readFileSync(path, 'utf8')) };
+    for (const [k, v] of Object.entries(env)) if (v) merged[k] = v;
+    return merged;
+  } catch (err) {
+    stderr(`amplitude-ai hook codex: could not read ${LOCAL_ENV_PATH}: ${err instanceof Error ? err.name : 'error'}\n`);
+    return env;
   }
 }
 
@@ -159,11 +197,13 @@ export function readNewLines(path: string, offset: number): { lines: string[]; o
   return { lines: text.split('\n').filter((l) => l.length > 0), offset: start + lastNewline + 1, reset };
 }
 
-function contentModeFrom(value: string | undefined): ContentMode {
+function contentModeFrom(value: string | undefined, stderr: (t: string) => void): ContentMode {
   const v = (value ?? '').trim().toLowerCase();
+  if (!v || v === 'full') return 'full';
   if (v === 'metadata' || v === 'metadata_only') return 'metadata_only';
   if (v === 'customer_enriched') return 'customer_enriched';
-  return 'full';
+  stderr(`amplitude-ai hook codex: unknown AMPLITUDE_AI_CONTENT_MODE "${v}"; using metadata_only\n`);
+  return 'metadata_only';
 }
 
 function endpointFor(region: string | undefined): string {
@@ -211,11 +251,8 @@ export function buildCodexEvents(
   let pending: { insertId: string; time: number } | null = null;
   const transport = {
     track: (event: AmplitudeEvent) => {
-      const props = { ...(event.event_properties ?? {}) };
-      props['[Agent] Source'] = 'codex-hook';
       events.push({
         ...event,
-        event_properties: props,
         ...(pending ? { insert_id: pending.insertId, time: pending.time } : {}),
       });
     },
@@ -252,28 +289,28 @@ export function buildCodexEvents(
 
 /** Runs the hook for one parsed input. Never throws. */
 export async function runCodexHook(input: CodexHookInput, options: CodexHookOptions = {}): Promise<CodexHookResult> {
-  const env = options.env ?? process.env;
   const stderr = options.stderr ?? ((t: string) => process.stderr.write(t));
+  const env = withLocalEnv(options.env ?? process.env, input.cwd, stderr);
   const stdout = options.stdout ?? ((t: string) => process.stdout.write(t));
   const result: CodexHookResult = { sent: 0, skipped: {}, transcripts: 0 };
   try {
     const dir = codexHookDir(env, options.home);
-    const config = readConfig(dir);
     const dryRun = options.dryRun ?? ['1', 'true'].includes((env.AMPLITUDE_AI_HOOK_DRY_RUN ?? '').toLowerCase());
-    const apiKey = env.AMPLITUDE_API_KEY || env.AMPLITUDE_AI_API_KEY || config.apiKey || '';
+    const apiKey = env.AMPLITUDE_API_KEY || env.AMPLITUDE_AI_API_KEY || '';
     if (!apiKey && !dryRun) {
       result.reason = 'missing_api_key';
       stderr('amplitude-ai hook codex: AMPLITUDE_API_KEY is not set; nothing sent.\n');
       return result;
     }
-    const userId = env.AMPLITUDE_USER_ID || config.userId || (options.gitEmail ?? defaultGitEmail)(input.cwd);
+    const userId = env.AMPLITUDE_USER_ID || (options.gitEmail ?? defaultGitEmail)(input.cwd);
     if (!userId) {
       result.reason = 'missing_user_id';
       stderr('amplitude-ai hook codex: no AMPLITUDE_USER_ID and no git user.email; nothing sent.\n');
       return result;
     }
-    const contentMode = contentModeFrom(env.AMPLITUDE_AI_CONTENT_MODE || config.contentMode);
-    const region = env.AMPLITUDE_REGION || config.region;
+    const contentMode = contentModeFrom(env.AMPLITUDE_AI_CONTENT_MODE, stderr);
+    const region = env.AMPLITUDE_SERVER_ZONE || env.AMPLITUDE_REGION;
+    const agentId = env.AMPLITUDE_AGENT_ID || undefined;
     const paths = [input.transcript_path, input.agent_transcript_path].filter(
       (p, i, all): p is string => typeof p === 'string' && p.length > 0 && all.indexOf(p) === i,
     );
@@ -291,7 +328,7 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
       let cursor = loadCursor(cursorFile, path);
       const read = readNewLines(path, cursor.offset);
       if (read.reset) cursor = { ...cursor, offset: 0, turnCounter: 0, state: initialCodexRolloutState() };
-      const mapped = mapCodexRollout(read.lines, cursor.state);
+      const mapped = mapCodexRollout(read.lines, cursor.state, { agentId });
       for (const [k, v] of Object.entries(mapped.skipped)) result.skipped[k] = (result.skipped[k] ?? 0) + v;
       const { events, turnCounter } = buildCodexEvents(mapped.calls, {
         userId,

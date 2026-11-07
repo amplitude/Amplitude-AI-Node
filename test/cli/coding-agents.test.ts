@@ -10,6 +10,7 @@ import {
   runCodingAgentsInit,
 } from '../../src/cli/coding-agents.js';
 import { runDoctor } from '../../src/cli/doctor.js';
+import { parseLocalEnv } from '../../src/cli/hook-codex.js';
 
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
@@ -35,7 +36,7 @@ afterEach(() => {
 });
 
 const init = (extra: Partial<Parameters<typeof runCodingAgentsInit>[0]> = {}) =>
-  runCodingAgentsInit({ cwd: repo, home, env: {}, ...extra });
+  runCodingAgentsInit({ cwd: repo, env: {}, ...extra });
 const readJson = (rel: string) => JSON.parse(readFileSync(join(repo, rel), 'utf8'));
 
 describe('coding-agents templates', () => {
@@ -94,7 +95,7 @@ describe('coding-agents init', () => {
     expect(env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).toBe('https://api.eu.amplitude.com/otlp/v1/logs');
   });
 
-  it('merges Codex hooks and stores the key per user with mode 0600', () => {
+  it('merges Codex hooks and keeps the key in the gitignored local.env', () => {
     mkdirSync(join(repo, '.codex'));
     writeFileSync(
       join(repo, '.codex/hooks.json'),
@@ -111,13 +112,14 @@ describe('coding-agents init', () => {
     ]);
     expect(readFileSync(join(repo, '.codex/hooks.json'), 'utf8')).not.toContain(SECRET);
 
-    const configPath = join(home, '.amplitude-ai/codex/config.json');
-    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
-      apiKey: SECRET,
-      region: 'us',
-      contentMode: 'metadata_only',
+    const localEnv = join(repo, '.amplitude-ai/local.env');
+    expect(parseLocalEnv(readFileSync(localEnv, 'utf8'))).toEqual({
+      AMPLITUDE_SERVER_ZONE: 'US',
+      AMPLITUDE_AI_CONTENT_MODE: 'metadata_only',
+      AMPLITUDE_API_KEY: SECRET,
     });
-    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(statSync(localEnv).mode & 0o777).toBe(0o600);
+    expect(git('check-ignore', '.amplitude-ai/local.env')).toBe('.amplitude-ai/local.env');
   });
 
   it('is idempotent', () => {
@@ -134,7 +136,7 @@ describe('coding-agents init', () => {
     expect(result.changes.some((c) => c.action === 'create')).toBe(true);
     expect(existsSync(join(repo, '.githooks'))).toBe(false);
     expect(existsSync(join(repo, '.claude'))).toBe(false);
-    expect(existsSync(join(home, '.amplitude-ai'))).toBe(false);
+    expect(existsSync(join(repo, '.amplitude-ai'))).toBe(false);
     expect(git('config', '--get', 'core.hooksPath')).toBe('');
   });
 
@@ -162,6 +164,15 @@ describe('coding-agents init', () => {
     expect(goose).toContain('OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
     expect(JSON.stringify(result)).not.toContain(SECRET);
     expect(existsSync(join(repo, '.claude'))).toBe(false);
+  });
+
+  it('updates local.env in place and keeps unrelated lines', () => {
+    mkdirSync(join(repo, '.amplitude-ai'));
+    writeFileSync(join(repo, '.amplitude-ai/local.env'), '# mine\nOTHER=1\nAMPLITUDE_SERVER_ZONE=US\n');
+    init({ harnesses: ['codex'], region: 'eu' });
+    expect(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8')).toBe(
+      '# mine\nOTHER=1\nAMPLITUDE_SERVER_ZONE=EU\nAMPLITUDE_AI_CONTENT_MODE=full\n',
+    );
   });
 
   it('chains onto an existing prepare script', () => {
