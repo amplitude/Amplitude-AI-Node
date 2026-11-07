@@ -8,9 +8,16 @@ import {
   PROP_VOICE_END_OF_TURN_REASON,
   PROP_VOICE_INTERRUPTED,
   PROP_VOICE_INTERRUPTED_BY,
+  PROP_VOICE_LLM_TTFT_MS,
+  PROP_VOICE_OVERLAP_MS,
+  PROP_VOICE_PRE_REPLY_SILENCE_MS,
   PROP_VOICE_SPEECH_DURATION_MS,
+  PROP_VOICE_STT_MS,
   PROP_VOICE_TIME_TO_FIRST_AUDIO_MS,
   PROP_VOICE_TRANSCRIPT_CONFIDENCE,
+  PROP_VOICE_TTS_TTFB_MS,
+  PROP_VOICE_TURN_END_OFFSET_MS,
+  PROP_VOICE_TURN_START_OFFSET_MS,
   PROP_VOICE_YIELDED,
   VOICE_CHANNELS,
   VOICE_DIRECTIONS,
@@ -28,7 +35,31 @@ export interface VoiceTurnOptions {
   yielded?: boolean;
   endOfTurnReason?: (typeof VOICE_END_OF_TURN_REASONS)[number];
   transcriptConfidence?: number;
+  /** Speech-to-text time for the caller turn this reply answers. */
+  sttMs?: number;
+  /** LLM time to first token for this reply. */
+  llmTtftMs?: number;
+  /** Text-to-speech time to first audio byte for this reply. */
+  ttsTtfbMs?: number;
+  /** When the turn's audio starts, in ms from the start of the call. */
+  turnStartOffsetMs?: number;
+  /** When the turn's audio ends, in ms from the start of the call. Not before `turnStartOffsetMs`. */
+  turnEndOffsetMs?: number;
+  /** Silence between the end of the previous turn and the start of this reply. */
+  preReplySilenceMs?: number;
+  /** How long this turn's audio overlapped the other speaker's. */
+  overlapMs?: number;
 }
+
+const TIMING_FIELDS = [
+  ['sttMs', PROP_VOICE_STT_MS],
+  ['llmTtftMs', PROP_VOICE_LLM_TTFT_MS],
+  ['ttsTtfbMs', PROP_VOICE_TTS_TTFB_MS],
+  ['turnStartOffsetMs', PROP_VOICE_TURN_START_OFFSET_MS],
+  ['turnEndOffsetMs', PROP_VOICE_TURN_END_OFFSET_MS],
+  ['preReplySilenceMs', PROP_VOICE_PRE_REPLY_SILENCE_MS],
+  ['overlapMs', PROP_VOICE_OVERLAP_MS],
+] as const;
 
 function requireOneOf<T extends string>(
   name: string,
@@ -118,6 +149,19 @@ export function voiceTurnProperties(
       throw new ValidationError('transcriptConfidence must be in [0, 1]');
     }
     props[PROP_VOICE_TRANSCRIPT_CONFIDENCE] = c;
+  }
+  for (const [name, prop] of TIMING_FIELDS) {
+    const value = options[name];
+    if (value !== undefined) {
+      props[prop] = requireNonNegativeNumber(name, value);
+    }
+  }
+  if (
+    options.turnStartOffsetMs !== undefined &&
+    options.turnEndOffsetMs !== undefined &&
+    options.turnEndOffsetMs < options.turnStartOffsetMs
+  ) {
+    throw new ValidationError('turnEndOffsetMs must not be before turnStartOffsetMs');
   }
   return props;
 }

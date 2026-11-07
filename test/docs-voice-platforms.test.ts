@@ -320,6 +320,18 @@ describe('voice platform guides', () => {
     const retell = turns(events(build(PLATFORMS[1], readFixture('retell-call.json')))).map((e) => e.event_properties);
     expect(retell.map((e) => e['[Agent] Voice Speech Duration Ms'])).toEqual([1000, 1200, 1200, 800, 550]);
     expect(retell.map((e) => e['[Agent] Voice Time To First Audio Ms'])).toEqual([undefined, undefined, 700, undefined, 550]);
+    expect(retell.map((e) => [e['[Agent] Voice Turn Start Offset Ms'], e['[Agent] Voice Turn End Offset Ms']])).toEqual([
+      [400, 1400],
+      [2200, 3400],
+      [4100, 5300],
+      [7000, 7800],
+      [8350, 8900],
+    ]);
+    for (const e of vapi) {
+      expect(Number(e['[Agent] Voice Turn End Offset Ms']) - Number(e['[Agent] Voice Turn Start Offset Ms'])).toBe(
+        e['[Agent] Voice Speech Duration Ms'],
+      );
+    }
   });
 
   it('marks the ElevenLabs agent turn the user talked over', () => {
@@ -616,9 +628,27 @@ describe('voice-forwarder.mjs', () => {
       {},
       { direction: 'inbound' as const, speechDurationMs: 1200, timeToFirstAudioMs: 0, endOfTurnReason: 'silence' as const },
       { interrupted: true, interruptedBy: 'user' as const, yielded: false, transcriptConfidence: 0.5 },
+      {
+        sttMs: 310,
+        llmTtftMs: 680,
+        ttsTtfbMs: 360,
+        turnStartOffsetMs: 10600,
+        turnEndOffsetMs: 10900,
+        preReplySilenceMs: 4400,
+        overlapMs: 0,
+      },
     ];
-    for (const options of cases) expect(docsVoiceTurnProperties(options)).toEqual(voiceTurnProperties(options));
-    for (const bad of [{ direction: 'sideways' }, { speechDurationMs: -1 }, { transcriptConfidence: 1.5 }]) {
+    for (const options of cases) {
+      expect(JSON.stringify(docsVoiceTurnProperties(options))).toBe(JSON.stringify(voiceTurnProperties(options)));
+    }
+    for (const bad of [
+      { direction: 'sideways' },
+      { speechDurationMs: -1 },
+      { transcriptConfidence: 1.5 },
+      { sttMs: -1 },
+      { overlapMs: '3' },
+      { turnStartOffsetMs: 500, turnEndOffsetMs: 499 },
+    ]) {
       expect(() => docsVoiceTurnProperties(bad as Any)).toThrow();
       expect(() => voiceTurnProperties(bad as Any)).toThrow();
     }

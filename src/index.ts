@@ -176,6 +176,13 @@ export {
   PROP_VOICE_YIELDED,
   PROP_VOICE_END_OF_TURN_REASON,
   PROP_VOICE_TRANSCRIPT_CONFIDENCE,
+  PROP_VOICE_STT_MS,
+  PROP_VOICE_LLM_TTFT_MS,
+  PROP_VOICE_TTS_TTFB_MS,
+  PROP_VOICE_TURN_START_OFFSET_MS,
+  PROP_VOICE_TURN_END_OFFSET_MS,
+  PROP_VOICE_PRE_REPLY_SILENCE_MS,
+  PROP_VOICE_OVERLAP_MS,
   VOICE_CHANNELS,
   VOICE_DIRECTIONS,
   VOICE_INTERRUPTED_BY,
@@ -341,6 +348,22 @@ export type {
   RealtimeTurnMapperOptions,
   VoiceTurn,
 } from './integrations/openai-realtime.js';
+export { NovaSonicTurnMapper } from './integrations/nova-sonic.js';
+export type { NovaSonicTurnMapperOptions } from './integrations/nova-sonic.js';
+export {
+  LiveKitVoiceTracker,
+  attach as attachLiveKit,
+} from './integrations/livekit.js';
+export type {
+  LiveKitSessionLike,
+  LiveKitVoiceTrackerOptions,
+  VoiceTurnSink,
+} from './integrations/livekit.js';
+export {
+  PipecatVoiceTracker,
+  amplitudeObserver,
+} from './integrations/pipecat.js';
+export type { PipecatVoiceTrackerOptions } from './integrations/pipecat.js';
 
 // Streaming
 export { StreamingAccumulator } from './utils/streaming.js';
