@@ -45,6 +45,15 @@ const STAGES = [
 ] as const;
 
 type Stage = (typeof STAGES)[number][0];
+// "ElevenLabsTTSService" contains "STT" and "DeepgramSTTService" contains "TTS", so match the service suffix first.
+const STAGE_SERVICE = /(STT|LLM|TTS)SERVICE/;
+
+interface UserTurn {
+  started?: number;
+  ended?: number;
+  text: string[];
+  overlapMs?: number;
+}
 
 export interface PipecatVoiceTrackerOptions {
   /** `inbound`, `outbound`, or `in_app`. Omitted when unset. */
@@ -84,16 +93,16 @@ export class PipecatVoiceTracker {
   private readonly _clock: () => number;
   private readonly _seen: number[] = [];
   private _callStart: number | undefined;
-  private _userStarted: number | undefined;
   private _userStopped: number | undefined;
-  private _userEnd: number | undefined;
-  private _userText: string[] = [];
-  private _userOverlapMs: number | undefined;
+  private _lastUserStopped: number | undefined;
+  private _userTurns: UserTurn[] = [];
   private _bargeInAt: number | undefined;
+  private _bargeInTurn: UserTurn | undefined;
   private _botSpeaking = false;
   private _botStarted: number | undefined;
   private _botText: string[] = [];
   private _ttfaMs: number | undefined;
+  private _preReplyMs: number | undefined;
   private _interrupted = false;
   private _stages: Partial<Record<Stage, number>> = {};
 
@@ -118,21 +127,25 @@ export class PipecatVoiceTracker {
     if (this._callStart === undefined) this._callStart = now;
 
     if (name === 'UserStartedSpeakingFrame') {
+      const turn: UserTurn = { started: now, text: [] };
       if (this._botSpeaking) {
         this._interrupted = true;
         this._bargeInAt = now;
+        this._bargeInTurn = turn;
         this._finishAssistant(now);
-      } else if (this._userEnd !== undefined) {
-        this._flushUser();
+      } else {
+        this._flushUser(true);
       }
-      this._userStarted = now;
-      this._userEnd = undefined;
+      this._userTurns.push(turn);
     } else if (name === 'UserStoppedSpeakingFrame') {
-      this._userStopped = now;
-      this._userEnd = now;
+      // The caller's wait starts at the first stop since the last reply; later utterances don't reset it.
+      if (this._userStopped === undefined) this._userStopped = now;
+      const last = this._userTurns[this._userTurns.length - 1];
+      if (last && last.ended === undefined) last.ended = now;
+      this._lastUserStopped = now;
     } else if (name === 'TranscriptionFrame') {
       const text = textOf(frame);
-      if (text) this._userText.push(text);
+      if (text) this._transcriptTurn().text.push(text);
     } else if (name === 'BotStartedSpeakingFrame') {
       this._flushUser();
       this._botSpeaking = true;
@@ -141,15 +154,20 @@ export class PipecatVoiceTracker {
         this._ttfaMs = Math.max(0, (now - this._userStopped) * 1000);
         this._userStopped = undefined;
       }
+      if (this._lastUserStopped !== undefined) {
+        this._preReplyMs = Math.max(0, (now - this._lastUserStopped) * 1000);
+        this._lastUserStopped = undefined;
+      }
     } else if (name === 'TTSTextFrame') {
       const text = textOf(frame);
       if (text) this._botText.push(text);
     } else if (name === 'BotStoppedSpeakingFrame') {
       if (this._botSpeaking) {
         this._finishAssistant(now);
-      } else if (this._bargeInAt !== undefined) {
-        this._userOverlapMs = Math.max(0, (now - this._bargeInAt) * 1000);
+      } else if (this._bargeInAt !== undefined && this._bargeInTurn !== undefined) {
+        this._bargeInTurn.overlapMs = Math.max(0, (now - this._bargeInAt) * 1000);
         this._bargeInAt = undefined;
+        this._bargeInTurn = undefined;
       }
     } else if (name === 'MetricsFrame') {
       this._readMetrics(frame);
@@ -177,23 +195,47 @@ export class PipecatVoiceTracker {
       const processor = String((item as { processor?: unknown }).processor ?? '').toUpperCase();
       const value = (item as { value?: unknown }).value;
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) continue;
-      for (const [stage, marker] of STAGES) {
-        if (processor.includes(marker)) {
-          this._stages[stage] = value * 1000;
-          break;
-        }
-      }
+      const service = STAGE_SERVICE.exec(processor)?.[1];
+      const markers = service
+        ? [service]
+        : STAGES.filter(([, marker]) => processor.includes(marker)).map(([, marker]) => marker);
+      if (markers.length !== 1) continue;
+      const match = STAGES.find(([, marker]) => marker === markers[0]);
+      if (match) this._stages[match[0]] = value * 1000;
     }
   }
 
-  private _flushUser(): void {
-    if (this._userText.length === 0) return;
-    const start = this._offset(this._userStarted);
-    let end = this._offset(this._userEnd);
+  /** The finished utterance still waiting on its transcript, else the latest one. */
+  private _transcriptTurn(): UserTurn {
+    const waiting = this._userTurns.find((turn) => turn.ended !== undefined && turn.text.length === 0);
+    if (waiting) return waiting;
+    const latest = this._userTurns[this._userTurns.length - 1];
+    if (latest) return latest;
+    const turn: UserTurn = { text: [] };
+    this._userTurns.push(turn);
+    return turn;
+  }
+
+  /** Track caller turns in order; with `finishedOnly`, stop at the first one still waiting on speech or text. */
+  private _flushUser(finishedOnly = false): void {
+    for (let turn = this._userTurns[0]; turn; turn = this._userTurns[0]) {
+      if (finishedOnly && (turn.ended === undefined || turn.text.length === 0)) return;
+      this._userTurns.shift();
+      if (turn === this._bargeInTurn) {
+        this._bargeInTurn = undefined;
+        this._bargeInAt = undefined;
+      }
+      if (turn.text.length > 0) this._trackUser(turn);
+    }
+  }
+
+  private _trackUser(turn: UserTurn): void {
+    const start = this._offset(turn.started);
+    let end = this._offset(turn.ended);
     let speechDurationMs: number | undefined;
-    if (this._userStarted !== undefined && this._userEnd !== undefined) {
-      if (this._userEnd >= this._userStarted) {
-        speechDurationMs = (this._userEnd - this._userStarted) * 1000;
+    if (turn.started !== undefined && turn.ended !== undefined) {
+      if (turn.ended >= turn.started) {
+        speechDurationMs = (turn.ended - turn.started) * 1000;
       } else {
         end = undefined;
       }
@@ -204,13 +246,9 @@ export class PipecatVoiceTracker {
       endOfTurnReason: 'completed',
       turnStartOffsetMs: start,
       turnEndOffsetMs: end,
-      overlapMs: this._userOverlapMs,
+      overlapMs: turn.overlapMs,
     });
-    this._agent.trackUserMessage(this._userText.join(' '), { eventProperties });
-    this._userText = [];
-    this._userStarted = undefined;
-    this._userEnd = undefined;
-    this._userOverlapMs = undefined;
+    this._agent.trackUserMessage(turn.text.join(' '), { eventProperties });
   }
 
   private _finishAssistant(now: number): void {
@@ -229,7 +267,7 @@ export class PipecatVoiceTracker {
       ttsTtfbMs: this._stages.tts,
       turnStartOffsetMs: this._offset(started),
       turnEndOffsetMs: started !== undefined ? this._offset(now) : undefined,
-      preReplySilenceMs: this._ttfaMs,
+      preReplySilenceMs: this._preReplyMs,
     });
     this._agent.trackAiMessage(this._botText.join(' '), this._model, this._provider, 0, {
       eventProperties,
@@ -238,6 +276,7 @@ export class PipecatVoiceTracker {
     this._botStarted = undefined;
     this._botText = [];
     this._ttfaMs = undefined;
+    this._preReplyMs = undefined;
     this._interrupted = false;
     this._stages = {};
   }

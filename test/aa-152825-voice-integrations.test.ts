@@ -181,6 +181,32 @@ describe('LiveKit attach', () => {
     expect(user).not.toHaveProperty(PROP_VOICE_DIRECTION);
   });
 
+  it('tracks a turn that started before the first item seen', () => {
+    const mock = new MockAmplitudeAI();
+    const session = new FakeLiveKitSession();
+    attach(session, mock.agent('sam', { userId: 'customer-1042' }));
+    session.add({ role: 'user', textContent: 'Hi', metrics: { startedSpeakingAt: 5.0, stoppedSpeakingAt: 5.5 } });
+    session.add({
+      role: 'assistant',
+      textContent: 'Hello, how can I help?',
+      metrics: { startedSpeakingAt: 4.0, stoppedSpeakingAt: 6.0 },
+    });
+    const [, ai] = props(mock) as [Props, Props];
+    expect(ai[PROP_VOICE_TURN_START_OFFSET_MS]).toBe(0);
+    expect(ai[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(1000);
+  });
+
+  it('keeps a pending STT delay when a later user turn reports none', () => {
+    const mock = new MockAmplitudeAI();
+    const session = new FakeLiveKitSession();
+    attach(session, mock.agent('sam', { userId: 'customer-1042' }));
+    session.add({ role: 'user', textContent: 'Hi', metrics: { transcriptionDelay: 0.31 } });
+    session.add({ role: 'user', textContent: 'Hello?', metrics: {} });
+    session.add({ role: 'assistant', textContent: 'Hi there', metrics: {} });
+    const [ai] = props(mock, EVENT_AI_RESPONSE) as [Props];
+    expect(ai[PROP_VOICE_STT_MS]).toBe(310);
+  });
+
   it('sends no timing for items without metrics, and skips other roles', () => {
     const mock = new MockAmplitudeAI();
     const session = new FakeLiveKitSession();
@@ -292,6 +318,52 @@ describe('PipecatVoiceTracker', () => {
     expect(reply[PROP_VOICE_TURN_START_OFFSET_MS]).toBe(10600);
     expect(reply[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(10900);
     expect(reply[PROP_VOICE_END_OF_TURN_REASON]).toBe('completed');
+    expect(reply[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS]).toBe(4400);
+    expect(reply[PROP_VOICE_PRE_REPLY_SILENCE_MS]).toBe(0);
+  });
+
+  it('keeps a late transcript on its own utterance', () => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('UserStartedSpeakingFrame')],
+      [1.0, frame('UserStoppedSpeakingFrame')],
+      [1.2, frame('UserStartedSpeakingFrame')],
+      [1.4, frame('TranscriptionFrame', { text: "Where's my order?" })],
+      [2.0, frame('UserStoppedSpeakingFrame')],
+      [2.1, frame('TranscriptionFrame', { text: 'Hello?' })],
+      [2.5, frame('BotStartedSpeakingFrame')],
+      [2.6, frame('EndFrame')],
+    ]);
+    const users = mock.getEvents(EVENT_USER_MESSAGE);
+    expect(users.map((u) => (u.event_properties as Props).$llm_message)).toEqual([
+      { text: "Where's my order?" },
+      { text: 'Hello?' },
+    ]);
+    expect(
+      props(mock, EVENT_USER_MESSAGE).map((u) => [u[PROP_VOICE_TURN_START_OFFSET_MS], u[PROP_VOICE_TURN_END_OFFSET_MS]]),
+    ).toEqual([
+      [0, 1000],
+      [1200, 2000],
+    ]);
+  });
+
+  it.each([
+    ['ElevenLabsTTSService#0', PROP_VOICE_TTS_TTFB_MS],
+    ['DeepgramSTTService#0', PROP_VOICE_STT_MS],
+    ['OpenAILLMService#0', PROP_VOICE_LLM_TTFT_MS],
+  ])('reads the stage of %s from its service suffix', (processor, stage) => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('MetricsFrame', { data: [new TTFBMetricsData(processor, 0.25)] })],
+      [0.1, frame('BotStartedSpeakingFrame')],
+      [0.5, frame('EndFrame')],
+    ]);
+    const [ai] = props(mock, EVENT_AI_RESPONSE) as [Props];
+    expect(pick(ai, [PROP_VOICE_STT_MS, PROP_VOICE_LLM_TTFT_MS, PROP_VOICE_TTS_TTFB_MS])).toEqual({ [stage]: 250 });
   });
 
   it('interrupts the agent on barge-in and measures the overlap', () => {

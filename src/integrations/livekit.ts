@@ -135,9 +135,10 @@ export class LiveKitVoiceTracker {
       timing.speechDurationMs = (stopped - started) * 1000;
     }
     if (this._callStart !== undefined && started !== undefined) {
-      timing.turnStartOffsetMs = (started - this._callStart) * 1000;
+      // Items arrive when they finish, so a longer earlier turn can start before the first item seen.
+      timing.turnStartOffsetMs = Math.max(0, (started - this._callStart) * 1000);
       if (stopped !== undefined) {
-        timing.turnEndOffsetMs = (stopped - this._callStart) * 1000;
+        timing.turnEndOffsetMs = Math.max(0, (stopped - this._callStart) * 1000);
       }
     }
     const previousStopped =
@@ -161,7 +162,8 @@ export class LiveKitVoiceTracker {
   }
 
   private _trackUser(item: object, text: string, metrics: unknown, timing: Timing): void {
-    this._pendingSttMs = ms(seconds(metrics, 'transcriptionDelay', 'transcription_delay'));
+    const sttMs = ms(seconds(metrics, 'transcriptionDelay', 'transcription_delay'));
+    if (sttMs !== undefined) this._pendingSttMs = sttMs;
     const confidence = field(item, 'transcriptConfidence', 'transcript_confidence');
     const eventProperties = voiceTurnProperties({
       direction: this._direction,
