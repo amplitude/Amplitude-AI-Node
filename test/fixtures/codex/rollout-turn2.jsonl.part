@@ -1,0 +1,7 @@
+{"timestamp": "2026-11-06T12:00:30.000Z", "type": "turn_context", "payload": {"turn_id": "turn-2", "cwd": "/repo", "model": "gpt-5.5"}}
+{"timestamp": "2026-11-06T12:00:30.000Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-2"}}
+{"timestamp": "2026-11-06T12:00:31.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Now deploy it"}]}}
+{"timestamp": "2026-11-06T12:00:35.000Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn-2", "last_agent_message": null, "error": {"message": "stream disconnected before completion", "codex_error_info": null}}}
+{"timestamp": "2026-11-06T12:00:40.000Z", "type": "turn_context", "payload": {"turn_id": "turn-3", "cwd": "/repo", "model": "gpt-5.5"}}
+{"timestamp": "2026-11-06T12:00:41.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "stop"}]}}
+{"timestamp": "2026-11-06T12:00:42.000Z", "type": "event_msg", "payload": {"type": "turn_aborted", "turn_id": "turn-3", "reason": "interrupted"}}

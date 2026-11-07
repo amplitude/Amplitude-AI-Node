@@ -11,6 +11,8 @@ const commandToBin = {
   mcp: './amplitude-ai-mcp.mjs',
   doctor: './amplitude-ai-doctor.mjs',
   status: './amplitude-ai-status.mjs',
+  'coding-agents': './amplitude-ai-coding-agents.mjs',
+  hook: './amplitude-ai-hook.mjs',
 };
 
 const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
@@ -28,6 +30,8 @@ CLI commands:
   mcp            Start the MCP server (optional, for advanced tooling)
   doctor         Validate environment, deps, and event pipeline
   status         Show SDK version, installed providers, and env config
+  coding-agents  Set up Claude Code, Codex, and goose sessions and commit outcomes (init, doctor)
+  hook codex     Codex Stop hook: forward the session transcript to Amplitude
   --print-guide  Print the full amplitude-ai.md instrumentation guide to stdout
 `
   );
@@ -60,5 +64,5 @@ if (command in commandToBin) {
   process.exit(result.status ?? 1);
 }
 
-process.stderr.write(`Unknown command: ${command}\nUsage: amplitude-ai <mcp|doctor|status|--print-guide>\n`);
+process.stderr.write(`Unknown command: ${command}\nUsage: amplitude-ai <mcp|doctor|status|coding-agents|hook|--print-guide>\n`);
 process.exit(1);

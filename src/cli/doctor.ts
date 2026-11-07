@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { redactPiiPatterns } from '../core/privacy.js';
 import { MockAmplitudeAI } from '../testing.js';
+import { hasCodingAgentsSetup, runCodingAgentsDoctor } from './coding-agents.js';
 import { PROVIDER_NPM_PACKAGES } from './providers.js';
 
 type DoctorResult = {
@@ -227,6 +228,10 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
         fix: 'Ensure @amplitude/analytics-node is installed: pnpm add @amplitude/analytics-node',
       });
     }
+  }
+
+  if (hasCodingAgentsSetup(cwd)) {
+    checks.push(...runCodingAgentsDoctor(cwd).checks);
   }
 
   const ok = checks.every((check) => check.ok);
