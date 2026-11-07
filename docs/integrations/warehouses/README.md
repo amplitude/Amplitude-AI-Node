@@ -182,6 +182,8 @@ Stage 1 produces one row per message, tool call, or span, with these columns:
 | `experiment_key` | string | No | Experiment or feature flag key the row ran under, such as `planner`. With `experiment_variant`, becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Trimmed, 1 to 256 characters, no `:`; an invalid pair is dropped. |
 | `experiment_variant` | string | No | Variant of `experiment_key` the row ran under, such as `treatment`. Trimmed, 1 to 256 characters. |
 | `updated_at` | timestamp (UTC) | No | When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded. |
+| `is_error` | boolean | No | Assistant rows: the model call failed. Becomes `[Agent] Is Error`; `NULL` means no error. |
+| `error_message` | string | No | Assistant rows with `is_error`: the error text. Becomes `[Agent] Error Message`, which is content: not sent when `include_content` is FALSE. |
 <!-- warehouse-sql:canonical-columns:end -->
 
 ### What Stage 2 does
@@ -269,7 +271,7 @@ SELECT
   device_id,
   time,
   insert_id,
-  from_json(event_properties, '`[Agent] Session ID` STRING, `[Agent] Agent ID` STRING, `[Agent] Runtime` STRING, `[Agent] SDK Version` STRING, `[Agent] Ingestion Path` STRING, `[Agent] Source` STRING, `[Agent] Content Mode` STRING, `[Agent] Context` STRING, `[Agent] Experiments` ARRAY<STRING>, `[Agent] Experiment Key` STRING, `[Agent] Experiment Variant` STRING, `[Agent] Experiment Unit` STRING, `[Agent] Trace ID` STRING, `[Agent] Turn ID` BIGINT, `[Agent] Message ID` STRING, `[Agent] Invocation ID` STRING, `[Agent] Component Type` STRING, `[Agent] Tool Name` STRING, `[Agent] Tool Success` BOOLEAN, `[Agent] Is Error` BOOLEAN, `[Agent] Latency Ms` DOUBLE, `[Agent] Parent Message ID` STRING, `[Agent] Tool Input` STRING, `[Agent] Tool Output` STRING, `[Agent] Model Name` STRING, `[Agent] Provider` STRING, `[Agent] Input Tokens` BIGINT, `[Agent] Output Tokens` BIGINT, `[Agent] Cost USD` DOUBLE, `[Agent] Span ID` STRING, `[Agent] Span Name` STRING, `[Agent] Input State` STRING, `[Agent] Output State` STRING, `$llm_message` STRUCT<text: STRING>') AS event_properties
+  from_json(event_properties, '`[Agent] Session ID` STRING, `[Agent] Agent ID` STRING, `[Agent] Runtime` STRING, `[Agent] SDK Version` STRING, `[Agent] Ingestion Path` STRING, `[Agent] Source` STRING, `[Agent] Content Mode` STRING, `[Agent] Context` STRING, `[Agent] Experiments` ARRAY<STRING>, `[Agent] Experiment Key` STRING, `[Agent] Experiment Variant` STRING, `[Agent] Experiment Unit` STRING, `[Agent] Trace ID` STRING, `[Agent] Turn ID` BIGINT, `[Agent] Message ID` STRING, `[Agent] Invocation ID` STRING, `[Agent] Component Type` STRING, `[Agent] Tool Name` STRING, `[Agent] Tool Success` BOOLEAN, `[Agent] Is Error` BOOLEAN, `[Agent] Error Message` STRING, `[Agent] Latency Ms` DOUBLE, `[Agent] Parent Message ID` STRING, `[Agent] Tool Input` STRING, `[Agent] Tool Output` STRING, `[Agent] Model Name` STRING, `[Agent] Provider` STRING, `[Agent] Input Tokens` BIGINT, `[Agent] Output Tokens` BIGINT, `[Agent] Cost USD` DOUBLE, `[Agent] Span ID` STRING, `[Agent] Span Name` STRING, `[Agent] Input State` STRING, `[Agent] Output State` STRING, `$llm_message` STRUCT<text: STRING>') AS event_properties
 FROM amplitude_agent_events
 ```
 <!-- warehouse-sql:databricks:import:end -->

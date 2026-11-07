@@ -2,8 +2,11 @@
 // plugin/agentanalytics). BigQuery only, so it is not one of the three-warehouse
 // MESSAGE_FORMATS; DuckDB renders it for the tests.
 //
-// Rows kept: USER_MESSAGE_RECEIVED (user), LLM_RESPONSE (assistant),
-// TOOL_COMPLETED and TOOL_ERROR (tool). Everything else is dropped.
+// Rows kept: USER_MESSAGE_RECEIVED (user), LLM_RESPONSE and LLM_ERROR
+// (assistant), TOOL_COMPLETED and TOOL_ERROR (tool). Everything else is dropped.
+// - LLM_ERROR is a failed model call with no response, on the LLM_REQUEST span
+//   (trace_manager.go): each one is an errored AI Response, outside the
+//   one-reply-per-agent ranking so a retry that succeeds doesn't hide it.
 // - Text is the content_parts text/plain parts. A GCS_REFERENCE part keeps its
 //   inline preview (json_formatter.go addText); its object_ref.uri goes in context.
 // - The model is on LLM_REQUEST (attributes.model), joined by span_id; else
@@ -70,6 +73,8 @@ const SAMPLE = [
   [5, 'LLM_RESPONSE', 'support_root', 'adk_s1', 'inv_1', 'user_12345', 'sp3', 'sp0', { response: "text: 'It arrives Thursday.'" }, { ...ROOT, model_version: 'gemini-2.5-flash-001', usage_metadata: { prompt_token_count: 160, candidates_token_count: 12 } }, { total_ms: 700 }, 'OK', null, [text('It arrives Thursday.')]],
   [6, 'INVOCATION_COMPLETED', 'support_root', 'adk_s1', 'inv_1', 'user_12345', 'sp0', null, null, ROOT, null, 'OK', null, []],
   [30, 'USER_MESSAGE_RECEIVED', 'support_root', 'adk_s1', 'inv_2', null, 'sp4', null, { text_summary: 'Cancel it' }, ROOT, null, 'OK', null, [text('Cancel it')]],
+  [30, 'LLM_REQUEST', 'billing_agent', 'adk_s1', 'inv_2', null, 'sp10', 'sp4', {}, { ...ROOT, model: 'gemini-2.5-pro' }, null, 'OK', null, []],
+  [30, 'LLM_ERROR', 'billing_agent', 'adk_s1', 'inv_2', null, 'sp10', 'sp4', null, ROOT, { total_ms: 450 }, 'ERROR', '429 RESOURCE_EXHAUSTED', []],
   [31, 'LLM_REQUEST', 'billing_agent', 'adk_s1', 'inv_2', null, 'sp5', 'sp4', {}, { ...ROOT, model: 'gemini-2.5-pro' }, null, 'OK', null, []],
   [32, 'LLM_RESPONSE', 'billing_agent', 'adk_s1', 'inv_2', null, 'sp5', 'sp4', { response: 'call: cancel_order' }, { ...ROOT, usage_metadata: { prompt_token_count: 200, candidates_token_count: 6 } }, { total_ms: 800 }, 'OK', null, [call('cancel_order')]],
   [32, 'TOOL_STARTING', 'billing_agent', 'adk_s1', 'inv_2', null, 'sp6', 'sp5', { tool: 'cancel_order', args: { id: 'A1' }, tool_origin: 'LOCAL' }, ROOT, null, 'OK', null, []],
@@ -178,7 +183,9 @@ responses AS (
     ${context('a')} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM adk a
   WHERE a.event_type = 'USER_MESSAGE_RECEIVED' AND a.part_text IS NOT NULL
   UNION ALL
@@ -190,10 +197,7 @@ responses AS (
     r.agent AS agent_id,
     r.session_user_id AS user_id,
     ${nullOf(d, 'string')} AS device_id,
-    CASE
-      WHEN r.status = 'ERROR' THEN '[Error: ' || COALESCE(r.error_message, 'model error') || ']'
-      ELSE COALESCE(r.part_text, '[No text output]')
-    END AS content,
+    CASE WHEN r.status = 'ERROR' THEN r.part_text ELSE COALESCE(r.part_text, '[No text output]') END AS content,
     ${nullOf(d, 'string')} AS tool_name,
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
@@ -210,10 +214,44 @@ responses AS (
     ${context('r')} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    CASE WHEN r.status = 'ERROR' THEN TRUE END AS is_error,
+    CASE WHEN r.status = 'ERROR' THEN COALESCE(r.error_message, 'model error') END AS error_message
   FROM responses r
   LEFT JOIN requests q ON q.span_id = r.span_id
   WHERE r.reply_rank = 1
+  UNION ALL
+  SELECT
+    e.session_id,
+    e.span_id || ':error' AS message_id,
+    'assistant' AS role,
+    e.timestamp AS event_time,
+    e.agent AS agent_id,
+    e.session_user_id AS user_id,
+    ${nullOf(d, 'string')} AS device_id,
+    ${nullOf(d, 'string')} AS content,
+    ${nullOf(d, 'string')} AS tool_name,
+    ${nullOf(d, 'string')} AS tool_input,
+    ${nullOf(d, 'string')} AS tool_output,
+    ${nullOf(d, 'bool')} AS tool_success,
+    CAST(${j.value('e.latency_ms', '$.total_ms')} AS ${d.types.int}) AS latency_ms,
+    q.request_model AS model,
+    ${nullOf(d, 'string')} AS provider,
+    ${nullOf(d, 'int')} AS input_tokens,
+    ${nullOf(d, 'int')} AS output_tokens,
+    ${nullOf(d, 'float')} AS cost_usd,
+    ${nullOf(d, 'string')} AS span_name,
+    ${nullOf(d, 'string')} AS span_input,
+    ${nullOf(d, 'string')} AS span_output,
+    ${context('e')} AS context,
+    ${nullOf(d, 'string')} AS experiment_key,
+    ${nullOf(d, 'string')} AS experiment_variant,
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    TRUE AS is_error,
+    COALESCE(e.error_message, 'model error') AS error_message
+  FROM adk e
+  LEFT JOIN requests q ON q.span_id = e.span_id
+  WHERE e.event_type = 'LLM_ERROR'
   UNION ALL
   SELECT
     a.session_id,
@@ -240,7 +278,9 @@ responses AS (
     ${context('a')} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM adk a
   LEFT JOIN tool_starts t ON t.span_id = a.span_id
   WHERE a.event_type IN ('TOOL_COMPLETED', 'TOOL_ERROR')`;

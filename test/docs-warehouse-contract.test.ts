@@ -304,6 +304,18 @@ describe('adk-bigquery-agent-analytics query on DuckDB', () => {
     expect(failed?.['[Agent] Tool Success']).toBe(false);
     expect(failed?.['[Agent] Tool Input']).toBe('{"id":"A1"}');
     expect(failed?.['[Agent] Tool Output']).toBe('order already shipped');
+
+    const modelError = byId.get('adk_s1:sp10:error');
+    expect(modelError?.event_type).toBe('[Agent] AI Response');
+    expect(modelError?.event_properties).toMatchObject({
+      '[Agent] Is Error': true,
+      '[Agent] Error Message': '429 RESOURCE_EXHAUSTED',
+      '[Agent] Model Name': 'gemini-2.5-pro',
+      '[Agent] Latency Ms': 450,
+      '[Agent] Agent ID': 'billing_agent',
+    });
+    expect(modelError?.event_properties).not.toHaveProperty('$llm_message');
+    expect(byId.get('adk_s1:sp7:reply')?.event_properties['[Agent] Is Error']).toBe(false);
     expect([...byId.values()].some((e) => e.event_properties['[Agent] Session ID'] === 'adk_s2')).toBe(false);
   });
 
@@ -314,7 +326,9 @@ describe('adk-bigquery-agent-analytics query on DuckDB', () => {
       expect(event.event_properties).not.toHaveProperty('$llm_message');
       expect(event.event_properties).not.toHaveProperty('[Agent] Tool Input');
       expect(event.event_properties).not.toHaveProperty('[Agent] Tool Output');
+      expect(event.event_properties).not.toHaveProperty('[Agent] Error Message');
     }
+    expect(events.find((e) => e.insert_id === 'adk_s1:sp10:error')?.event_properties['[Agent] Is Error']).toBe(true);
     expect(checkAgentEvents(events, { metadataOnly: true }).errors).toEqual([]);
   });
 

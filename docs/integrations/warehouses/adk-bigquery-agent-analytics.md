@@ -29,7 +29,8 @@ The plugin writes one row per event. Stage 1b reads these columns.
 | ADK rows | Canonical row |
 |---|---|
 | `USER_MESSAGE_RECEIVED` | `user`. Text is the `text/plain` parts of `content_parts` in `part_index` order |
-| `LLM_RESPONSE` | `assistant`, one per agent per invocation: the agent's last reply with text, or with `status = 'ERROR'` |
+| `LLM_RESPONSE` | `assistant`, one per agent per invocation: the agent's last reply with text, or with `status = 'ERROR'` (then `is_error` and `error_message`) |
+| `LLM_ERROR` | `assistant` with `is_error` and `error_message`, one per failed model call. Model from the `LLM_REQUEST` on the same span; latency from `latency_ms.total_ms`; no text or tokens. Kept even when a retry later succeeds |
 | `TOOL_COMPLETED`, `TOOL_ERROR` | `tool`. Name from `content.tool`; arguments from the `TOOL_STARTING` row with the same `span_id`; output is `content.result` or `error_message` |
 | Everything else | Dropped |
 
@@ -41,7 +42,9 @@ The plugin writes one row per event. Stage 1b reads these columns.
 - **Context.** `root_agent_name`, `invocation_id`, and `content_uri`, as filterable JSON in `[Agent] Context`.
 - **Multi-agent.** Each row keeps its own `agent`, so a sub-agent's replies and tool calls appear under its own Agent ID in the same session.
 
-Not mapped: `LLM_ERROR` rows (a failed model call that returned no response), `AGENT_STARTING`/`AGENT_COMPLETED`, `INVOCATION_*`, `STATE_DELTA`, and human-in-the-loop events. `time_to_first_token_ms` has no canonical column. Add extra `UNION ALL` branches in Stage 1b if you need them, for example `role = 'span'` for `STATE_DELTA`.
+- **Errors.** A failed model call becomes an `[Agent] AI Response` with `[Agent] Is Error` true and the error text in `[Agent] Error Message`. The message is content, so it is not sent when `include_content` is FALSE.
+
+Not mapped: `AGENT_STARTING`/`AGENT_COMPLETED`, `INVOCATION_*`, `STATE_DELTA`, and human-in-the-loop events. `time_to_first_token_ms` has no canonical column. Add extra `UNION ALL` branches in Stage 1b if you need them, for example `role = 'span'` for `STATE_DELTA`.
 
 ## What the sample shows
 
@@ -78,6 +81,10 @@ source AS (
   SELECT TIMESTAMP '2026-01-15 12:00:06+00' AS timestamp, 'INVOCATION_COMPLETED' AS event_type, 'support_root' AS agent, 'adk_s1' AS session_id, 'inv_1' AS invocation_id, 'user_12345' AS user_id, 'sp0' AS span_id, CAST(NULL AS STRING) AS parent_span_id, CAST(NULL AS JSON) AS content, JSON '{"root_agent_name":"support_root"}' AS attributes, CAST(NULL AS JSON) AS latency_ms, 'OK' AS status, CAST(NULL AS STRING) AS error_message, ARRAY<STRUCT<part_index INT64, mime_type STRING, text STRING, storage_mode STRING, object_ref STRUCT<uri STRING>>>[] AS content_parts
   UNION ALL
   SELECT TIMESTAMP '2026-01-15 12:00:30+00' AS timestamp, 'USER_MESSAGE_RECEIVED' AS event_type, 'support_root' AS agent, 'adk_s1' AS session_id, 'inv_2' AS invocation_id, CAST(NULL AS STRING) AS user_id, 'sp4' AS span_id, CAST(NULL AS STRING) AS parent_span_id, JSON '{"text_summary":"Cancel it"}' AS content, JSON '{"root_agent_name":"support_root"}' AS attributes, CAST(NULL AS JSON) AS latency_ms, 'OK' AS status, CAST(NULL AS STRING) AS error_message, ARRAY<STRUCT<part_index INT64, mime_type STRING, text STRING, storage_mode STRING, object_ref STRUCT<uri STRING>>>[STRUCT(0 AS part_index, 'text/plain' AS mime_type, 'Cancel it' AS text, 'INLINE' AS storage_mode, STRUCT(CAST(NULL AS STRING) AS uri) AS object_ref)] AS content_parts
+  UNION ALL
+  SELECT TIMESTAMP '2026-01-15 12:00:30+00' AS timestamp, 'LLM_REQUEST' AS event_type, 'billing_agent' AS agent, 'adk_s1' AS session_id, 'inv_2' AS invocation_id, CAST(NULL AS STRING) AS user_id, 'sp10' AS span_id, 'sp4' AS parent_span_id, JSON '{}' AS content, JSON '{"root_agent_name":"support_root","model":"gemini-2.5-pro"}' AS attributes, CAST(NULL AS JSON) AS latency_ms, 'OK' AS status, CAST(NULL AS STRING) AS error_message, ARRAY<STRUCT<part_index INT64, mime_type STRING, text STRING, storage_mode STRING, object_ref STRUCT<uri STRING>>>[] AS content_parts
+  UNION ALL
+  SELECT TIMESTAMP '2026-01-15 12:00:30+00' AS timestamp, 'LLM_ERROR' AS event_type, 'billing_agent' AS agent, 'adk_s1' AS session_id, 'inv_2' AS invocation_id, CAST(NULL AS STRING) AS user_id, 'sp10' AS span_id, 'sp4' AS parent_span_id, CAST(NULL AS JSON) AS content, JSON '{"root_agent_name":"support_root"}' AS attributes, JSON '{"total_ms":450}' AS latency_ms, 'ERROR' AS status, '429 RESOURCE_EXHAUSTED' AS error_message, ARRAY<STRUCT<part_index INT64, mime_type STRING, text STRING, storage_mode STRING, object_ref STRUCT<uri STRING>>>[] AS content_parts
   UNION ALL
   SELECT TIMESTAMP '2026-01-15 12:00:31+00' AS timestamp, 'LLM_REQUEST' AS event_type, 'billing_agent' AS agent, 'adk_s1' AS session_id, 'inv_2' AS invocation_id, CAST(NULL AS STRING) AS user_id, 'sp5' AS span_id, 'sp4' AS parent_span_id, JSON '{}' AS content, JSON '{"root_agent_name":"support_root","model":"gemini-2.5-pro"}' AS attributes, CAST(NULL AS JSON) AS latency_ms, 'OK' AS status, CAST(NULL AS STRING) AS error_message, ARRAY<STRUCT<part_index INT64, mime_type STRING, text STRING, storage_mode STRING, object_ref STRUCT<uri STRING>>>[] AS content_parts
   UNION ALL
@@ -156,7 +163,9 @@ canonical AS (
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('root_agent_name', JSON_VALUE(a.attributes, '$.root_agent_name'), 'invocation_id', a.invocation_id, 'content_uri', a.gcs_uri))) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CAST(NULL AS BOOL) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM adk a
   WHERE a.event_type = 'USER_MESSAGE_RECEIVED' AND a.part_text IS NOT NULL
   UNION ALL
@@ -168,10 +177,7 @@ canonical AS (
     r.agent AS agent_id,
     r.session_user_id AS user_id,
     CAST(NULL AS STRING) AS device_id,
-    CASE
-      WHEN r.status = 'ERROR' THEN '[Error: ' || COALESCE(r.error_message, 'model error') || ']'
-      ELSE COALESCE(r.part_text, '[No text output]')
-    END AS content,
+    CASE WHEN r.status = 'ERROR' THEN r.part_text ELSE COALESCE(r.part_text, '[No text output]') END AS content,
     CAST(NULL AS STRING) AS tool_name,
     CAST(NULL AS STRING) AS tool_input,
     CAST(NULL AS STRING) AS tool_output,
@@ -188,10 +194,44 @@ canonical AS (
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('root_agent_name', JSON_VALUE(r.attributes, '$.root_agent_name'), 'invocation_id', r.invocation_id, 'content_uri', r.gcs_uri))) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CASE WHEN r.status = 'ERROR' THEN TRUE END AS is_error,
+    CASE WHEN r.status = 'ERROR' THEN COALESCE(r.error_message, 'model error') END AS error_message
   FROM responses r
   LEFT JOIN requests q ON q.span_id = r.span_id
   WHERE r.reply_rank = 1
+  UNION ALL
+  SELECT
+    e.session_id,
+    e.span_id || ':error' AS message_id,
+    'assistant' AS role,
+    e.timestamp AS event_time,
+    e.agent AS agent_id,
+    e.session_user_id AS user_id,
+    CAST(NULL AS STRING) AS device_id,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS tool_name,
+    CAST(NULL AS STRING) AS tool_input,
+    CAST(NULL AS STRING) AS tool_output,
+    CAST(NULL AS BOOL) AS tool_success,
+    CAST(JSON_VALUE(e.latency_ms, '$.total_ms') AS INT64) AS latency_ms,
+    q.request_model AS model,
+    CAST(NULL AS STRING) AS provider,
+    CAST(NULL AS INT64) AS input_tokens,
+    CAST(NULL AS INT64) AS output_tokens,
+    CAST(NULL AS FLOAT64) AS cost_usd,
+    CAST(NULL AS STRING) AS span_name,
+    CAST(NULL AS STRING) AS span_input,
+    CAST(NULL AS STRING) AS span_output,
+    TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('root_agent_name', JSON_VALUE(e.attributes, '$.root_agent_name'), 'invocation_id', e.invocation_id, 'content_uri', e.gcs_uri))) AS context,
+    CAST(NULL AS STRING) AS experiment_key,
+    CAST(NULL AS STRING) AS experiment_variant,
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    TRUE AS is_error,
+    COALESCE(e.error_message, 'model error') AS error_message
+  FROM adk e
+  LEFT JOIN requests q ON q.span_id = e.span_id
+  WHERE e.event_type = 'LLM_ERROR'
   UNION ALL
   SELECT
     a.session_id,
@@ -218,7 +258,9 @@ canonical AS (
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('root_agent_name', JSON_VALUE(a.attributes, '$.root_agent_name'), 'invocation_id', a.invocation_id, 'content_uri', a.gcs_uri))) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CAST(NULL AS BOOL) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM adk a
   LEFT JOIN tool_starts t ON t.span_id = a.span_id
   WHERE a.event_type IN ('TOOL_COMPLETED', 'TOOL_ERROR')
@@ -313,7 +355,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,

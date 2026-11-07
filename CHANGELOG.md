@@ -13,6 +13,7 @@
 - **Coding-agent guide.** Step 3m of `amplitude-ai.md`, the instrument skill and command, `AGENTS.md`, `llms.txt` and the integrations manifest (`coding_agents`) route to the above.
 
 ### Changed
+- **Warehouse templates: model errors.** Two optional canonical columns, `is_error` and `error_message`, set `[Agent] Is Error` and `[Agent] Error Message` on assistant rows (the message only when `include_content` is TRUE). The existing formats emit them as `NULL`, so their output is unchanged. The ADK BigQuery query maps every `LLM_ERROR` row (a failed model call) to an errored `[Agent] AI Response` with the request's model and latency, and an `LLM_RESPONSE` with `status = 'ERROR'` sets the columns instead of replying `[Error: …]`. `check-agent-events.mjs` accepts an AI Response with no text when `[Agent] Is Error` is true.
 - **API key variable.** The coding-agent CLI reads `AMPLITUDE_AI_API_KEY` first and falls back to `AMPLITUDE_API_KEY`, as the Python SDK does.
 
 ## 0.27.0
