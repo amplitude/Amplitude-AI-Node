@@ -64,12 +64,11 @@ function hasArgvGitCommit(value, depth = 0) {
 }
 
 function shaAt(value, ...path) {
-  let current = value;
-  for (const key of path) {
-    if (current == null || typeof current !== 'object' || Array.isArray(current)) return null;
-    current = current[key];
-  }
-  return typeof current === 'string' && FULL_SHA.test(current) ? current.toLowerCase() : null;
+  const found = path.reduce(
+    (node, key) => (node != null && typeof node === 'object' && !Array.isArray(node) ? node[key] : undefined),
+    value,
+  );
+  return typeof found === 'string' && FULL_SHA.test(found) ? found.toLowerCase() : null;
 }
 
 export function parseCommitSha(toolName, input, output) {

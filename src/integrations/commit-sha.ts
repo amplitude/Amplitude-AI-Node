@@ -56,12 +56,12 @@ function mentionsGitCommit(input: unknown, inputText: string): boolean {
 }
 
 function shaAt(value: unknown, ...path: string[]): string | null {
-  let current: unknown = value;
-  for (const key of path) {
-    if (current == null || typeof current !== 'object' || Array.isArray(current)) return null;
-    current = (current as Record<string, unknown>)[key];
-  }
-  return typeof current === 'string' && FULL_SHA.test(current) ? current.toLowerCase() : null;
+  const found = path.reduce<unknown>(
+    (node, key) =>
+      node != null && typeof node === 'object' && !Array.isArray(node) ? (node as Record<string, unknown>)[key] : undefined,
+    value,
+  );
+  return typeof found === 'string' && FULL_SHA.test(found) ? found.toLowerCase() : null;
 }
 
 /**
