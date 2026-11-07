@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Package: `@amplitude/ai` v0.27.0
+Package: `@amplitude/ai` v0.28.0
 
 ## Install
 
@@ -66,8 +66,12 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce, Vapi, Retell AI, ElevenLabs Agents, Bland AI): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Voice agent you run yourself: add `voiceTurnProperties({ direction, ... })` as `eventProperties` on each turn, add `sttMs` / `llmTtftMs` / `ttsTtfbMs` stage latency and `turnStartOffsetMs` / `turnEndOffsetMs` call offsets when the stack reports them, use `attach` from `@amplitude/ai/integrations/livekit` for LiveKit Agents, `PipecatVoiceTracker` for Pipecat, `RealtimeTurnMapper` for the OpenAI Realtime API, and `NovaSonicTurnMapper` for Amazon Nova Sonic, and put `recordingAttachment(url)` on the last turn (a link only; Amplitude never fetches it). Never put a raw phone number in `userId` or `deviceId`; `deviceId` is the customer's choice, a hash is allowed, and no algorithm is required. See Step 3l in `amplitude-ai.md`.
 - Agent built on the Cursor Agent SDK: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following `docs/integrations/cursor-agent-sdk.md`.
+- Developers use Claude Code, Codex, or goose and you want those sessions and their commits in Agent Analytics: run `amplitude-ai coding-agents init`, then `amplitude-ai coding-agents doctor`, and follow `docs/integrations/<harness>.md` (claude-code, codex, goose). The key is `AMPLITUDE_AI_API_KEY`, falling back to `AMPLITUDE_API_KEY`; the outcomes workflow reads the `AMPLITUDE_API_KEY` repository secret. Join sessions to commits with `docs/integrations/recipes/code-outcomes.md`.
+- Agent built on the Claude Agent SDK or the Codex SDK in your own app: use `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk` or `CodexSDKTracker` from `@amplitude/ai/integrations/codex-sdk` inside `ai.agent(...).session(...).run(...)` (Path 1 of `docs/integrations/claude-code.md` and `docs/integrations/codex.md`).
+- Agents talk in Buzz (block/buzz): read the relay archive and forward with `docs/integrations/buzz.md`.
+- Agents call each other over A2A or ACP: carry session, parent agent, user, and trace with `injectA2aMetadata` / `extractA2aMetadata` or `injectAcpMeta` / `extractAcpMeta` so child sessions link to the parent.
 - Conversations already traced in Langfuse, LangSmith, Braintrust: forward them, including history, over HTTP by following `docs/integrations/<tool>.md`.
-- Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
+- Conversations or traces already in a warehouse (Snowflake, BigQuery, Databricks), including Google ADK's BigQuery Agent Analytics table (`docs/integrations/warehouses/adk-bigquery-agent-analytics.md`): follow `docs/integrations/warehouses/README.md`; check output with `docs/integrations/check-agent-events.mjs`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow `docs/integrations/routers.md` for the base URL, the `context: { ingestion_path: 'gateway', gateway: '...' }` tag, the routed model ID rule, and pricing; the per-request identity contract is `docs/integrations/analytics-metadata.schema.json`.
 - Agent runs on AWS Strands (Python): export native OTLP by following `docs/integrations/strands.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
 - Agent runs on Google ADK: export native OTLP by following `docs/integrations/google-adk.md`. Scrub content before export with `docs/integrations/privacy.md`. When the app already runs this SDK, `AmplitudeAgentExporter` / `enableOtel()` can map spans in process.
@@ -128,6 +132,9 @@ Prompt:
 - `amplitude-ai mcp` — Start the MCP server for AI coding agents
 - `amplitude-ai doctor [--json]` — Validate environment, deps, and event pipeline
 - `amplitude-ai status [--json]` — Show SDK version, installed providers, and env config
+- `amplitude-ai coding-agents init [--harness claude-code|codex|goose] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]` — Wire coding-agent sessions and commit outcomes into a repo
+- `amplitude-ai coding-agents doctor [--dir PATH] [--json]` — Check that setup
+- `amplitude-ai hook codex [--dry-run]` — Codex `Stop` hook: forward the finished turn (reads hook JSON on stdin, always exits 0)
 
 ## Testing
 
@@ -166,6 +173,11 @@ Fetch the public guide for the job. These URLs track `main`.
 - `docs/integrations/langsmith.md` — LangSmith trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/braintrust.md` — Braintrust trace forwarding over the HTTP API (no SDK)
 - `docs/integrations/warehouses/README.md` — Snowflake, BigQuery, Databricks ingestion through a SQL view and warehouse import (no SDK)
+- `docs/integrations/claude-code.md` — Claude Code sessions and commit outcomes
+- `docs/integrations/codex.md` — Codex sessions and commit outcomes
+- `docs/integrations/goose.md` — goose sessions and commit outcomes
+- `docs/integrations/buzz.md` — Buzz conversations from the relay archive (no SDK)
+- `docs/integrations/recipes/code-outcomes.md` — Join coding-agent sessions to commits, PRs, and CI
 - `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API
 - `docs/integrations/strands.md` — AWS Strands (Python) native OTLP export
 - `docs/integrations/google-adk.md` — Google ADK native OTLP export

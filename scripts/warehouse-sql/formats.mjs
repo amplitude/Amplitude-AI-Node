@@ -115,7 +115,9 @@ const messageRows = {
     ${d.jsonText([['channel', 'channel']])} AS context,
     experiment_key,
     experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
   UNION ALL
@@ -144,7 +146,9 @@ const messageRows = {
     ${d.jsonText([['channel', 'channel']])} AS context,
     experiment_key,
     experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM source
   WHERE ui_component IS NOT NULL`,
 };
@@ -204,7 +208,9 @@ const turnRows = {
     ${d.jsonText([['locale', 'locale']])} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM source
   WHERE user_text IS NOT NULL
   UNION ALL
@@ -231,7 +237,9 @@ const turnRows = {
     ${d.jsonText([['locale', 'locale']])} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    ${nullOf(d, 'timestamp')} AS updated_at
+    ${nullOf(d, 'timestamp')} AS updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM source
   WHERE response_text IS NOT NULL`,
 };
@@ -295,7 +303,9 @@ const openaiCanonical = (d, { time, callTime, usage }) => `  SELECT
     ${nullOf(d, 'string')} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    updated_at
+    updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
@@ -326,7 +336,9 @@ const openaiCanonical = (d, { time, callTime, usage }) => `  SELECT
     ${nullOf(d, 'string')} AS context,
     ${nullOf(d, 'string')} AS experiment_key,
     ${nullOf(d, 'string')} AS experiment_variant,
-    c.updated_at
+    c.updated_at,
+    ${nullOf(d, 'bool')} AS is_error,
+    ${nullOf(d, 'string')} AS error_message
   FROM tool_calls c
   LEFT JOIN tool_results r
     ON r.conversation_id = c.conversation_id

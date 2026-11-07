@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git config --local --get core.hooksPath >/dev/null 2>&1 || git config --local core.hooksPath .githooks 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx --yes -p @amplitude/ai amplitude-ai hook codex"
+          }
+        ]
+      }
+    ]
+  }
+}

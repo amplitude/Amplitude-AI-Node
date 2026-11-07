@@ -1,0 +1,146 @@
+{
+ "python/rollout_root_turn1.jsonl": [
+  {
+   "kind": "user",
+   "insertId": "8bddc1ca-8bbc-59dd-85ab-1f22532ee86d"
+  },
+  {
+   "kind": "tool:exec_command",
+   "insertId": "d7350f8f-8d70-57dc-b9d9-225d19635e1a"
+  },
+  {
+   "kind": "tool:exec_command",
+   "insertId": "c0b0bcd8-abaa-5606-8980-10366aa8b016"
+  },
+  {
+   "kind": "tool:web_search",
+   "insertId": "eb44053c-73c7-58f1-9d27-10e242f778d7"
+  },
+  {
+   "kind": "ai",
+   "insertId": "b1f9b614-858d-5995-a2d4-9ff887f8215a"
+  },
+  {
+   "kind": "ai",
+   "insertId": "6587053b-f14b-51a4-b041-47fc0ecfdbf2"
+  }
+ ],
+ "python/rollout_root_turn1.jsonl+python/rollout_root_turn2.jsonl": [
+  {
+   "kind": "user",
+   "insertId": "8bddc1ca-8bbc-59dd-85ab-1f22532ee86d"
+  },
+  {
+   "kind": "tool:exec_command",
+   "insertId": "d7350f8f-8d70-57dc-b9d9-225d19635e1a"
+  },
+  {
+   "kind": "tool:exec_command",
+   "insertId": "c0b0bcd8-abaa-5606-8980-10366aa8b016"
+  },
+  {
+   "kind": "tool:web_search",
+   "insertId": "eb44053c-73c7-58f1-9d27-10e242f778d7"
+  },
+  {
+   "kind": "ai",
+   "insertId": "b1f9b614-858d-5995-a2d4-9ff887f8215a"
+  },
+  {
+   "kind": "ai",
+   "insertId": "6587053b-f14b-51a4-b041-47fc0ecfdbf2"
+  },
+  {
+   "kind": "user",
+   "insertId": "d2d5813f-b156-5778-a85c-73496e5a9823"
+  },
+  {
+   "kind": "tool:mcp__github__create_pull_request",
+   "insertId": "dd4cbd2a-47a8-5a4d-9fd8-5dc7eca5a33a"
+  },
+  {
+   "kind": "ai",
+   "insertId": "89ab8cef-8d56-5cc5-8e31-640491aa0e0e"
+  }
+ ],
+ "python/rollout_subagent.jsonl": [
+  {
+   "kind": "user",
+   "insertId": "50531610-4449-5d90-9109-ec8a4394f819"
+  },
+  {
+   "kind": "tool:apply_patch",
+   "insertId": "ca482765-7fff-545a-8621-8fc9dc416e17"
+  },
+  {
+   "kind": "ai",
+   "insertId": "1969d814-5afe-50db-8086-ecd7b8074cc8"
+  }
+ ],
+ "rollout-2026-11-06T12-00-00-11111111-2222-4333-8444-555555555555.jsonl": [
+  {
+   "kind": "user",
+   "insertId": "a231b923-48ca-58f7-85a9-3c9d9cacf3bb"
+  },
+  {
+   "kind": "tool:exec_command",
+   "insertId": "70a0ccce-ae7e-5f13-8888-44687bb35c21"
+  },
+  {
+   "kind": "tool:shell",
+   "insertId": "25494fe7-4ee9-57e2-9a31-29f3078c15cf"
+  },
+  {
+   "kind": "tool:mcp__github__create_pull_request",
+   "insertId": "d6f3f3a5-fd58-5b61-aa27-9474229ad263"
+  },
+  {
+   "kind": "ai",
+   "insertId": "26132df1-0d32-5aa1-9c37-f05e03658ecd"
+  }
+ ],
+ "rollout-2026-11-06T12-00-00-11111111-2222-4333-8444-555555555555.jsonl+rollout-turn2.jsonl.part": [
+  {
+   "kind": "user",
+   "insertId": "a231b923-48ca-58f7-85a9-3c9d9cacf3bb"
+  },
+  {
+   "kind": "tool:exec_command",
+   "insertId": "70a0ccce-ae7e-5f13-8888-44687bb35c21"
+  },
+  {
+   "kind": "tool:shell",
+   "insertId": "25494fe7-4ee9-57e2-9a31-29f3078c15cf"
+  },
+  {
+   "kind": "tool:mcp__github__create_pull_request",
+   "insertId": "d6f3f3a5-fd58-5b61-aa27-9474229ad263"
+  },
+  {
+   "kind": "ai",
+   "insertId": "26132df1-0d32-5aa1-9c37-f05e03658ecd"
+  },
+  {
+   "kind": "user",
+   "insertId": "532df30e-74cc-5a17-b1b9-296e1542646d"
+  },
+  {
+   "kind": "ai",
+   "insertId": "3429001e-54fc-5399-93e6-868528221299"
+  },
+  {
+   "kind": "user",
+   "insertId": "bc929b01-c15c-5645-a42a-f74d1476264f"
+  }
+ ],
+ "rollout-2026-11-06T12-00-50-99999999-2222-4333-8444-555555555555.jsonl": [
+  {
+   "kind": "user",
+   "insertId": "6d35f67f-d60e-54f8-a07a-4bfb1b0a1bb5"
+  },
+  {
+   "kind": "ai",
+   "insertId": "09af37e8-57b2-5718-b287-a706107ced3d"
+  }
+ ]
+}

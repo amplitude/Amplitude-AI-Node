@@ -103,7 +103,9 @@ canonical AS (
     TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context,
     experiment_key,
     experiment_variant,
-    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
+    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
   UNION ALL
@@ -132,7 +134,9 @@ canonical AS (
     TO_JSON(OBJECT_CONSTRUCT('channel', channel)) AS context,
     experiment_key,
     experiment_variant,
-    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at
+    CAST(NULL AS TIMESTAMP_NTZ) AS updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM source
   WHERE ui_component IS NOT NULL
 ),
@@ -226,7 +230,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -344,7 +349,9 @@ canonical AS (
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context,
     experiment_key,
     experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CAST(NULL AS BOOL) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
   UNION ALL
@@ -373,7 +380,9 @@ canonical AS (
     TO_JSON_STRING(JSON_STRIP_NULLS(JSON_OBJECT('channel', channel))) AS context,
     experiment_key,
     experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CAST(NULL AS BOOL) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM source
   WHERE ui_component IS NOT NULL
 ),
@@ -467,7 +476,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -588,7 +598,9 @@ canonical AS (
     to_json(named_struct('channel', channel)) AS context,
     experiment_key,
     experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM source
   WHERE ui_component IS NULL OR NULLIF(body, '') IS NOT NULL
   UNION ALL
@@ -617,7 +629,9 @@ canonical AS (
     to_json(named_struct('channel', channel)) AS context,
     experiment_key,
     experiment_variant,
-    CAST(NULL AS TIMESTAMP) AS updated_at
+    CAST(NULL AS TIMESTAMP) AS updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM source
   WHERE ui_component IS NOT NULL
 ),
@@ -711,7 +725,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,

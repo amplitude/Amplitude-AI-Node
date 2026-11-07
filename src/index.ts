@@ -246,7 +246,26 @@ export { instrumentFile } from './mcp/instrument-file.js';
 export type { InstrumentFileOptions } from './mcp/instrument-file.js';
 
 // Propagation
-export { injectContext, extractContext } from './propagation.js';
+export {
+  injectContext,
+  extractContext,
+  injectA2aMetadata,
+  extractA2aMetadata,
+  injectAcpMeta,
+  extractAcpMeta,
+  A2A_METADATA_KEY,
+  A2A_EXTENSION_URI,
+  A2A_EXTENSION_DESCRIPTION,
+  a2aAgentExtension,
+  declareA2aExtension,
+  type A2aAgentExtension,
+  ACP_SESSION_ID_KEY,
+  ACP_PARENT_AGENT_ID_KEY,
+  ACP_USER_ID_KEY,
+  ACP_TRACEPARENT_KEY,
+  type AgentProtocolContext,
+  type AgentProtocolOptions,
+} from './propagation.js';
 
 // Middleware
 export { createAmplitudeAIMiddleware } from './middleware.js';

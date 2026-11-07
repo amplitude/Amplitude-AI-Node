@@ -35,6 +35,8 @@ export const CANONICAL_COLUMNS = [
   ['experiment_key', 'string', false, 'Experiment or feature flag key the row ran under, such as `planner`. With `experiment_variant`, becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Trimmed, 1 to 256 characters, no `:`; an invalid pair is dropped.'],
   ['experiment_variant', 'string', false, 'Variant of `experiment_key` the row ran under, such as `treatment`. Trimmed, 1 to 256 characters.'],
   ['updated_at', 'timestamp (UTC)', false, 'When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded.'],
+  ['is_error', 'boolean', false, 'Assistant rows: the model call failed. Becomes `[Agent] Is Error`; `NULL` means no error.'],
+  ['error_message', 'string', false, 'Assistant rows with `is_error`: the error text. Becomes `[Agent] Error Message`, which is content: not sent when `include_content` is FALSE.'],
 ];
 
 /** Every event property the tail can emit, with the Databricks import type. */
@@ -59,6 +61,7 @@ export const EVENT_PROPERTIES = [
   ['[Agent] Tool Name', 'STRING'],
   ['[Agent] Tool Success', 'BOOLEAN'],
   ['[Agent] Is Error', 'BOOLEAN'],
+  ['[Agent] Error Message', 'STRING'],
   ['[Agent] Latency Ms', 'DOUBLE'],
   ['[Agent] Parent Message ID', 'STRING'],
   ['[Agent] Tool Input', 'STRING'],
@@ -126,8 +129,9 @@ export function renderTail(d) {
     ['[Agent] Tool Success', "CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END"],
     [
       '[Agent] Is Error',
-      "CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END",
+      "CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END",
     ],
+    ['[Agent] Error Message', "CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END"],
     ['[Agent] Latency Ms', "CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END"],
     [
       '[Agent] Parent Message ID',
