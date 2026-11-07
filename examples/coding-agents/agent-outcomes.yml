@@ -128,10 +128,14 @@ jobs:
               }
               let commits;
               if (previousSha) {
-                const cmp = await github.rest.repos.compareCommitsWithBasehead({
-                  owner, repo, basehead: `${previousSha}...${deployment.sha}`, per_page: 250,
-                });
-                commits = cmp.data.commits;
+                commits = [];
+                for (let page = 1; ; page++) {
+                  const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${previousSha}...${deployment.sha}`, per_page: 100, page,
+                  });
+                  commits.push(...cmp.data.commits);
+                  if (cmp.data.commits.length < 100 || commits.length >= cmp.data.total_commits) break;
+                }
               } else {
                 commits = [(await github.rest.repos.getCommit({ owner, repo, ref: deployment.sha })).data];
               }
