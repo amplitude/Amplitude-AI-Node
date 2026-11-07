@@ -138,11 +138,18 @@ export class PipecatVoiceTracker {
       }
       this._userTurns.push(turn);
     } else if (name === 'UserStoppedSpeakingFrame') {
-      // The caller's wait starts at the first stop since the last reply; later utterances don't reset it.
-      if (this._userStopped === undefined) this._userStopped = now;
-      const last = this._userTurns[this._userTurns.length - 1];
-      if (last && last.ended === undefined) last.ended = now;
-      this._lastUserStopped = now;
+      const closing = this._userTurns.find((turn) => turn.ended === undefined);
+      if (closing) closing.ended = now;
+      // A stop for an utterance the bot is already answering doesn't start a new wait.
+      const answered =
+        this._botStarted !== undefined &&
+        closing?.started !== undefined &&
+        closing.started < this._botStarted;
+      if (!answered) {
+        // The caller's wait starts at the first stop since the last reply; later utterances don't reset it.
+        if (this._userStopped === undefined) this._userStopped = now;
+        this._lastUserStopped = now;
+      }
     } else if (name === 'TranscriptionFrame') {
       const text = textOf(frame);
       if (text) this._transcriptTurn().text.push(text);
@@ -223,7 +230,8 @@ export class PipecatVoiceTracker {
    * Track caller turns in order.
    *
    * With `finishedOnly`, stop at the first one still waiting on speech or text. With
-   * `keepUntranscribed`, keep turns with no text queued so a late transcript still finds them.
+   * `keepUntranscribed`, keep turns with no text or no stop yet queued, so a late transcript
+   * or `UserStoppedSpeakingFrame` still finds them.
    * At the end of the call, a turn that never got a transcript is dropped: voice activity
    * detection also fires on noise.
    */
@@ -232,7 +240,7 @@ export class PipecatVoiceTracker {
     for (let turn = this._userTurns[0]; turn; turn = this._userTurns[0]) {
       if (finishedOnly && (turn.ended === undefined || turn.text.length === 0)) break;
       this._userTurns.shift();
-      if (keepUntranscribed && turn.text.length === 0) {
+      if (keepUntranscribed && (turn.text.length === 0 || turn.ended === undefined)) {
         kept.push(turn);
         continue;
       }

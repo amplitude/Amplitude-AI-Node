@@ -398,6 +398,29 @@ describe('PipecatVoiceTracker', () => {
     expect(users[0]?.[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(1000);
   });
 
+  it("closes the caller's turn when the stop arrives after the reply starts", () => {
+    const mock = new MockAmplitudeAI();
+    const clock = new Clock();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: clock.fn });
+    drive(tracker, clock, [
+      [0.0, frame('UserStartedSpeakingFrame')],
+      [0.8, frame('TranscriptionFrame', { text: "What's my balance?" })],
+      [1.0, frame('BotStartedSpeakingFrame')],
+      [1.2, frame('UserStoppedSpeakingFrame')],
+      [3.0, frame('BotStoppedSpeakingFrame')],
+      [4.0, frame('UserStartedSpeakingFrame')],
+      [5.0, frame('UserStoppedSpeakingFrame')],
+      [5.1, frame('TranscriptionFrame', { text: 'And savings?' })],
+      [5.5, frame('BotStartedSpeakingFrame')],
+      [6.0, frame('EndFrame')],
+    ]);
+    const [first] = props(mock, EVENT_USER_MESSAGE) as [Props];
+    expect(first[PROP_VOICE_TURN_END_OFFSET_MS]).toBe(1200);
+    expect(first[PROP_VOICE_SPEECH_DURATION_MS]).toBe(1200);
+    const [, second] = props(mock, EVENT_AI_RESPONSE) as [Props, Props];
+    expect(second[PROP_VOICE_TIME_TO_FIRST_AUDIO_MS]).toBe(500);
+  });
+
   it('keeps a late transcript on its own utterance', () => {
     const mock = new MockAmplitudeAI();
     const clock = new Clock();
