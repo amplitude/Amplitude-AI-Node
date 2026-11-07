@@ -19,7 +19,8 @@
  * Frames are matched by class name (or a `type` / `name` string such as
  * `"TranscriptionFrame#3"` on plain objects), so this module does not import
  * Pipecat. Offsets are milliseconds from the first frame the tracker saw. A
- * frame seen again on a later hop (same numeric `id`) is ignored.
+ * frame seen again on a later hop (same numeric `id`) is ignored; only the
+ * frames above are remembered, so audio frames don't push them out.
  *
  * ```ts
  * import { PipecatVoiceTracker, amplitudeObserver } from '@amplitude/ai/integrations/pipecat';
@@ -37,7 +38,18 @@ import type { VoiceTurnOptions } from '../core/voice.js';
 import { voiceTurnProperties } from '../core/voice.js';
 import type { VoiceTurnSink } from './livekit.js';
 
-const SEEN_FRAME_IDS = 256;
+const SEEN_FRAME_IDS = 4096;
+const HANDLED_FRAMES = new Set([
+  'UserStartedSpeakingFrame',
+  'UserStoppedSpeakingFrame',
+  'TranscriptionFrame',
+  'BotStartedSpeakingFrame',
+  'TTSTextFrame',
+  'BotStoppedSpeakingFrame',
+  'MetricsFrame',
+  'EndFrame',
+  'CancelFrame',
+]);
 const STAGES = [
   ['stt', 'STT'],
   ['llm', 'LLM'],
@@ -116,15 +128,16 @@ export class PipecatVoiceTracker {
 
   onFrame(frame: unknown): void {
     if (frame == null || typeof frame !== 'object') return;
+    const name = kindOf(frame);
+    if (this._callStart === undefined) this._callStart = this._clock();
+    if (!HANDLED_FRAMES.has(name)) return;
     const id = (frame as { id?: unknown }).id;
     if (typeof id === 'number' && Number.isInteger(id)) {
       if (this._seen.includes(id)) return;
       this._seen.push(id);
       if (this._seen.length > SEEN_FRAME_IDS) this._seen.shift();
     }
-    const name = kindOf(frame);
     const now = this._clock();
-    if (this._callStart === undefined) this._callStart = now;
 
     if (name === 'UserStartedSpeakingFrame') {
       const turn: UserTurn = { started: now, text: [] };

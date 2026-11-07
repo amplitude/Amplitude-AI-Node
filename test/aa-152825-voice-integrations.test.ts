@@ -530,6 +530,19 @@ describe('PipecatVoiceTracker', () => {
     expect(barge?.[PROP_VOICE_OVERLAP_MS]).toBe(300);
   });
 
+  it('does not let audio frames age out a relayed frame', () => {
+    const mock = new MockAmplitudeAI();
+    const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: () => 0 });
+    const transcription = frame('TranscriptionFrame', { text: 'Hi', id: 7 });
+    tracker.onFrame(transcription);
+    for (let id = 100; id < 1100; id++) tracker.onFrame(frame('InputAudioRawFrame', { id }));
+    tracker.onFrame(transcription);
+    tracker.onFrame(frame('EndFrame', { id: 8 }));
+    const users = mock.getEvents(EVENT_USER_MESSAGE);
+    expect(users).toHaveLength(1);
+    expect((users[0]?.event_properties as Props).$llm_message).toEqual({ text: 'Hi' });
+  });
+
   it('counts a frame relayed on a later hop once, through the observer, for plain-object frames', () => {
     const mock = new MockAmplitudeAI();
     const tracker = new PipecatVoiceTracker(mock.agent('sam', { userId: 'customer-1042' }), { clock: () => 0 });
