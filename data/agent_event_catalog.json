@@ -251,6 +251,41 @@
           "name": "[Agent] Voice Transcript Confidence",
           "type": "number",
           "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
+        },
+        {
+          "name": "[Agent] Voice STT Ms",
+          "type": "number",
+          "description": "Speech-to-text latency: milliseconds from the end of the caller's speech to the final transcript. Reported on the agent turn it delayed. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice LLM TTFT Ms",
+          "type": "number",
+          "description": "Milliseconds until the model's first token for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice TTS TTFB Ms",
+          "type": "number",
+          "description": "Milliseconds until the speech synthesizer's first audio byte for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn Start Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech started, in milliseconds from the start of the call. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn End Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech ended, in milliseconds from the start of the call. Never before the start offset. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Pre Reply Silence Ms",
+          "type": "number",
+          "description": "On an agent turn: milliseconds of silence the caller heard before the agent started replying. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Ms",
+          "type": "number",
+          "description": "Milliseconds this turn's speech overlapped the other side's previous turn. Set on the turn that started while the other side was still speaking. Omitted when the platform does not report it."
         }
       ]
     },
@@ -663,6 +698,41 @@
           "name": "[Agent] Voice Transcript Confidence",
           "type": "number",
           "description": "Recognizer confidence for the transcript, from 0 to 1. Omitted when the recognizer does not return one."
+        },
+        {
+          "name": "[Agent] Voice STT Ms",
+          "type": "number",
+          "description": "Speech-to-text latency: milliseconds from the end of the caller's speech to the final transcript. Reported on the agent turn it delayed. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice LLM TTFT Ms",
+          "type": "number",
+          "description": "Milliseconds until the model's first token for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice TTS TTFB Ms",
+          "type": "number",
+          "description": "Milliseconds until the speech synthesizer's first audio byte for this agent turn. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn Start Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech started, in milliseconds from the start of the call. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Turn End Offset Ms",
+          "type": "number",
+          "description": "When this turn's speech ended, in milliseconds from the start of the call. Never before the start offset. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Pre Reply Silence Ms",
+          "type": "number",
+          "description": "On an agent turn: milliseconds of silence the caller heard before the agent started replying. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Ms",
+          "type": "number",
+          "description": "Milliseconds this turn's speech overlapped the other side's previous turn. Set on the turn that started while the other side was still speaking. Omitted when the platform does not report it."
         }
       ]
     },
@@ -2054,6 +2124,76 @@
           "name": "[Agent] Voice Total Speech Duration Ms",
           "type": "number",
           "description": "Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Avg STT Ms",
+          "type": "number",
+          "description": "Average speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 STT Ms",
+          "type": "number",
+          "description": "95th percentile speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg LLM TTFT Ms",
+          "type": "number",
+          "description": "Average model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 LLM TTFT Ms",
+          "type": "number",
+          "description": "95th percentile model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg TTS TTFB Ms",
+          "type": "number",
+          "description": "Average speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 TTS TTFB Ms",
+          "type": "number",
+          "description": "95th percentile speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Slowest Stage",
+          "type": "string",
+          "description": "Pipeline stage with the highest average latency: 'stt', 'llm', or 'tts'. Omitted when no turn reports stage latency."
+        },
+        {
+          "name": "[Agent] Voice Total Pre Reply Silence Ms",
+          "type": "number",
+          "description": "Total milliseconds of silence the caller heard before agent replies, across the turns that report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Count",
+          "type": "number",
+          "description": "Number of voice turns that overlapped the other side's speech by at least 300 ms."
+        },
+        {
+          "name": "[Agent] Voice Call Duration Ms",
+          "type": "number",
+          "description": "Milliseconds from the earliest turn start offset to the latest turn end offset. Omitted when turns report no offsets."
+        },
+        {
+          "name": "[Agent] Voice Long Silence Count",
+          "type": "number",
+          "description": "Number of voice turns where the caller waited at least 2000 ms: pre-reply silence or time to first audio of 2000 ms or more."
+        },
+        {
+          "name": "[Agent] Voice Talk Over Count",
+          "type": "number",
+          "description": "Number of agent turns that started over the caller: overlap of at least 300 ms, or the caller's previous turn reports it was interrupted by the agent."
+        },
+        {
+          "name": "[Agent] Voice Dead Air Hangup",
+          "type": "boolean",
+          "description": "True when the last agent turn followed a wait of at least 2000 ms and was cut off (end of turn reason other than completed) or followed only by caller turns. Omitted when the last agent turn reports no wait timing."
+        },
+        {
+          "name": "[Agent] Voice Slow First Reply",
+          "type": "boolean",
+          "description": "True when the first agent turn that reports time to first audio took 1500 ms or more. Omitted when no agent turn reports it."
         }
       ]
     },
@@ -2306,6 +2446,76 @@
           "name": "[Agent] Voice Total Speech Duration Ms",
           "type": "number",
           "description": "Session dimension: Total milliseconds of speech across the session's voice turns that report it, omitted (not zero) on chat sessions."
+        },
+        {
+          "name": "[Agent] Voice Avg STT Ms",
+          "type": "number",
+          "description": "Average speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 STT Ms",
+          "type": "number",
+          "description": "95th percentile speech-to-text latency across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg LLM TTFT Ms",
+          "type": "number",
+          "description": "Average model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 LLM TTFT Ms",
+          "type": "number",
+          "description": "95th percentile model time to first token across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Avg TTS TTFB Ms",
+          "type": "number",
+          "description": "Average speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice P95 TTS TTFB Ms",
+          "type": "number",
+          "description": "95th percentile speech synthesizer time to first byte across the session's agent turns that report it, in milliseconds."
+        },
+        {
+          "name": "[Agent] Voice Slowest Stage",
+          "type": "string",
+          "description": "Pipeline stage with the highest average latency: 'stt', 'llm', or 'tts'. Omitted when no turn reports stage latency."
+        },
+        {
+          "name": "[Agent] Voice Total Pre Reply Silence Ms",
+          "type": "number",
+          "description": "Total milliseconds of silence the caller heard before agent replies, across the turns that report it."
+        },
+        {
+          "name": "[Agent] Voice Overlap Count",
+          "type": "number",
+          "description": "Number of voice turns that overlapped the other side's speech by at least 300 ms."
+        },
+        {
+          "name": "[Agent] Voice Call Duration Ms",
+          "type": "number",
+          "description": "Milliseconds from the earliest turn start offset to the latest turn end offset. Omitted when turns report no offsets."
+        },
+        {
+          "name": "[Agent] Voice Long Silence Count",
+          "type": "number",
+          "description": "Number of voice turns where the caller waited at least 2000 ms: pre-reply silence or time to first audio of 2000 ms or more."
+        },
+        {
+          "name": "[Agent] Voice Talk Over Count",
+          "type": "number",
+          "description": "Number of agent turns that started over the caller: overlap of at least 300 ms, or the caller's previous turn reports it was interrupted by the agent."
+        },
+        {
+          "name": "[Agent] Voice Dead Air Hangup",
+          "type": "boolean",
+          "description": "True when the last agent turn followed a wait of at least 2000 ms and was cut off (end of turn reason other than completed) or followed only by caller turns. Omitted when the last agent turn reports no wait timing."
+        },
+        {
+          "name": "[Agent] Voice Slow First Reply",
+          "type": "boolean",
+          "description": "True when the first agent turn that reports time to first audio took 1500 ms or more. Omitted when no agent turn reports it."
         }
       ]
     }
