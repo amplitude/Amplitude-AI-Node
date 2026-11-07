@@ -2393,6 +2393,11 @@
           "description": "Cost in USD of running this specific evaluator's LLM inference. Customer-attributable enrichment cost for this evaluator; distinct from the session's own LLM cost ([Agent] Session Cost USD)."
         },
         {
+          "name": "[Agent] Topic Summary",
+          "type": "string",
+          "description": "Session dimension: concise one-sentence factual summary of what the user was trying to accomplish. Produced by the OOTB batched eval pass-1 at zero marginal cost."
+        },
+        {
           "name": "[Agent] Channel",
           "type": "string",
           "description": "Session dimension: Set to 'voice' when any turn in the session is a voice turn, and omitted (not set to 'chat') on chat sessions."
@@ -2506,6 +2511,48 @@
           "name": "[Agent] Voice Slow First Reply",
           "type": "boolean",
           "description": "True when the first agent turn that reports time to first audio took 1500 ms or more. Omitted when no agent turn reports it."
+        }
+      ]
+    },
+    {
+      "event_type": "[Agent] Cluster Assignment",
+      "description": "Fired by the server-side topic clustering pipeline when a session is assigned to a topic cluster. Occurs either during batch clustering (ClusterSessionsWorkflow) or real-time centroid assignment in EmbedSessionWorkflow. Contains the cluster label, distance to centroid, and stability information for tracking topic evolution over time.",
+      "properties": [
+        {
+          "name": "[Agent] Session ID",
+          "type": "string",
+          "description": "Unique session identifier. All events in one conversation share the same session ID.",
+          "is_required": true
+        },
+        {
+          "name": "[Agent] Cluster Label",
+          "type": "string",
+          "description": "Human-readable label summarizing the topic of the assigned cluster."
+        },
+        {
+          "name": "[Agent] Cluster ID",
+          "type": "string",
+          "description": "Internal numeric cluster identifier within the clustering run."
+        },
+        {
+          "name": "[Agent] Stable Cluster ID",
+          "type": "string",
+          "description": "Cross-run stable identifier for this topic. Persists across re-clustering runs via centroid similarity matching (Hungarian algorithm)."
+        },
+        {
+          "name": "[Agent] Distance to Centroid",
+          "type": "number",
+          "description": "Cosine distance from the session embedding to the cluster centroid. Lower is more central."
+        },
+        {
+          "name": "[Agent] Is Noise",
+          "type": "boolean",
+          "description": "True if HDBSCAN classified this session as noise (not belonging to any cluster)."
+        },
+        {
+          "name": "[Agent] Clustering Run ID",
+          "type": "string",
+          "description": "ID of the clustering run that produced this assignment."
         }
       ]
     }

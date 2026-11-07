@@ -180,6 +180,7 @@ Fetch the public guide for the job. These URLs track `main`.
 ## Event Schema (names)
 
 - `[Agent] AI Response`
+- `[Agent] Cluster Assignment`
 - `[Agent] Embedding`
 - `[Agent] Evaluator Result`
 - `[Agent] Score`
