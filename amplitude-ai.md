@@ -900,7 +900,7 @@ Skip this step unless Phase 1 found coding agents. There are two different jobs;
 3. Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor` and fix every failure it reports.
 4. Point the developer at `docs/integrations/claude-code.md`, `codex.md` and `goose.md` for the content gates and verification, and at `docs/integrations/recipes/code-outcomes.md` for the commit evaluators and the session-to-commit join.
 
-**Agents calling agents.** If agents call each other over A2A or ACP, carry the session across the call so child sessions link to the parent: `injectA2aMetadata(metadata)` / `extractA2aMetadata(metadata)` or `injectAcpMeta(meta)` / `extractAcpMeta(meta)` from `@amplitude/ai`. The wire format matches the Python SDK, so a Node agent and a Python agent can call each other.
+**Agents calling agents.** If agents call each other over A2A or ACP, carry the session across the call so child sessions link to the parent: `injectA2aMetadata(metadata)` / `extractA2aMetadata(metadata)` or `injectAcpMeta(meta)` / `extractAcpMeta(meta)` from `@amplitude/ai`. The wire format matches the Python SDK, so a Node agent and a Python agent can call each other. An A2A server can advertise this with `declareA2aExtension(agentCard)`, which adds the optional (`required: false`) extension `https://amplitude.com/a2a/extensions/agent-context/v1` to `capabilities.extensions`.
 
 ## Phase 4: Verify
 

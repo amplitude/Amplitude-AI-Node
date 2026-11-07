@@ -1,9 +1,12 @@
-import { Message } from '@a2a-js/sdk';
+import { AgentCard, type AgentExtension, Message } from '@a2a-js/sdk';
 import type { PromptRequest } from '@agentclientprotocol/sdk';
 import { describe, expect, it } from 'vitest';
 import { _sessionStorage, SessionContext } from '../src/context.js';
 import {
+  A2A_EXTENSION_URI,
   A2A_METADATA_KEY,
+  a2aAgentExtension,
+  declareA2aExtension,
   ACP_PARENT_AGENT_ID_KEY,
   ACP_SESSION_ID_KEY,
   ACP_USER_ID_KEY,
@@ -56,6 +59,34 @@ describe('A2A Message.metadata propagation', () => {
         [A2A_METADATA_KEY]: { session_id: 'a\nb', traceparent: '00-00000000000000000000000000000000-0000000000000001-01' },
       }),
     ).toEqual({});
+  });
+});
+
+describe('A2A AgentCard extension', () => {
+  const card = AgentCard.fromJSON({
+    name: 'planner',
+    description: 'Plans work',
+    version: '1.0.0',
+    capabilities: { streaming: true, extensions: [{ uri: 'https://example.com/ext', required: true }] },
+  });
+
+  it('declares the agent-context extension as optional in capabilities.extensions', () => {
+    const declared: AgentCard = declareA2aExtension(card);
+    const extension: AgentExtension = a2aAgentExtension();
+    expect(declared.capabilities!.extensions.map((e) => e.uri)).toEqual(['https://example.com/ext', A2A_EXTENSION_URI]);
+    expect(declared.capabilities!.extensions[1]).toEqual(extension);
+    expect(A2A_EXTENSION_URI).toBe('https://amplitude.com/a2a/extensions/agent-context/v1');
+    expect(extension.required).toBe(false);
+    expect(declared.capabilities!.streaming).toBe(true);
+    expect(card.capabilities!.extensions).toHaveLength(1);
+  });
+
+  it('is a no-op the second time and survives the SDK JSON round trip', () => {
+    const twice = declareA2aExtension(declareA2aExtension(card));
+    expect(twice.capabilities.extensions.filter((e) => e.uri === A2A_EXTENSION_URI)).toHaveLength(1);
+    const wire = AgentCard.fromJSON(JSON.parse(JSON.stringify(AgentCard.toJSON(twice))));
+    expect(wire.capabilities!.extensions[1]).toMatchObject({ uri: A2A_EXTENSION_URI, required: false });
+    expect(declareA2aExtension({ name: 'bare' }).capabilities.extensions).toEqual([a2aAgentExtension()]);
   });
 });
 

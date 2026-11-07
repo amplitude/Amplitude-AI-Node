@@ -781,7 +781,7 @@ printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-
 npx -y -p @amplitude/ai amplitude-ai coding-agents doctor
 ```
 
-Commit evaluators and the session-to-commit join: [code outcomes recipe](docs/integrations/recipes/code-outcomes.md). Templates: [examples/coding-agents](examples/coding-agents). Agents that call each other over A2A or ACP keep one session with `injectA2aMetadata` / `extractA2aMetadata` and `injectAcpMeta` / `extractAcpMeta`, in the same wire format as the Python SDK.
+Commit evaluators and the session-to-commit join: [code outcomes recipe](docs/integrations/recipes/code-outcomes.md). Templates: [examples/coding-agents](examples/coding-agents). Agents that call each other over A2A or ACP keep one session with `injectA2aMetadata` / `extractA2aMetadata` and `injectAcpMeta` / `extractAcpMeta`, in the same wire format as the Python SDK; `declareA2aExtension(agentCard)` advertises it in the AgentCard's `capabilities.extensions` as the optional extension `https://amplitude.com/a2a/extensions/agent-context/v1`.
 
 ## Privacy & Content Control
 

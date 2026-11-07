@@ -330,6 +330,47 @@ export function extractA2aMetadata(metadata: unknown): AgentProtocolContext {
   return _inboundAgentContext(context.session_id, context.parent_agent_id, context.user_id, context.traceparent);
 }
 
+export const A2A_EXTENSION_URI = 'https://amplitude.com/a2a/extensions/agent-context/v1';
+export const A2A_EXTENSION_DESCRIPTION =
+  "Amplitude agent context: session, parent agent, user and trace ids in Message.metadata['com.amplitude/context'].";
+
+/** Structurally an A2A `AgentExtension` (`@a2a-js/sdk`). */
+export type A2aAgentExtension = {
+  uri: string;
+  description: string;
+  required: boolean;
+  params: Record<string, unknown> | undefined;
+};
+
+/**
+ * The `AgentExtension` entry that declares Amplitude agent context.
+ * Optional (`required: false`): clients that don't send the metadata still
+ * work.
+ */
+export function a2aAgentExtension(): A2aAgentExtension {
+  return { uri: A2A_EXTENSION_URI, description: A2A_EXTENSION_DESCRIPTION, required: false, params: undefined };
+}
+
+/**
+ * Add {@link a2aAgentExtension} to an AgentCard's `capabilities.extensions`.
+ * Returns a new card; the input is not mutated. Adding it twice is a no-op.
+ *
+ * ```ts
+ * const card: AgentCard = declareA2aExtension({ ...card, capabilities: { streaming: true, extensions: [] } });
+ * ```
+ */
+export function declareA2aExtension<T extends { capabilities?: { extensions?: unknown } | undefined }>(
+  agentCard: T,
+): T & { capabilities: NonNullable<T['capabilities']> & { extensions: A2aAgentExtension[] } } {
+  const capabilities = { ...(agentCard.capabilities ?? {}) } as Record<string, unknown>;
+  const existing = Array.isArray(capabilities.extensions) ? capabilities.extensions : [];
+  const extensions = existing.filter(_isPlainObject) as A2aAgentExtension[];
+  if (!extensions.some((e) => e.uri === A2A_EXTENSION_URI)) extensions.push(a2aAgentExtension());
+  return { ...agentCard, capabilities: { ...capabilities, extensions } } as T & {
+    capabilities: NonNullable<T['capabilities']> & { extensions: A2aAgentExtension[] };
+  };
+}
+
 /**
  * Add the active session context to an ACP `_meta` object:
  * `com.amplitude/session-id`, `com.amplitude/parent-agent-id` (this agent),
