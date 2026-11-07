@@ -57,11 +57,11 @@ npx -y -p @amplitude/ai amplitude-ai coding-agents doctor
 
 `init` writes:
 
-- `.claude/settings.json` (committed): `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, the content gates, and a `SessionStart` hook running `git config core.hooksPath .githooks`.
+- `.claude/settings.json` (committed): `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, the content gates, and a `SessionStart` hook that sets `git config --local core.hooksPath .githooks` when the repo has no hooks path yet (an existing one, such as husky's, is kept).
 - `.claude/settings.local.json` (gitignored, mode 0600): `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <key>` and `OTEL_RESOURCE_ATTRIBUTES=enduser.id=<git email>`. The key never goes in the committed file or on the command line.
 - `.githooks/prepare-commit-msg` and `.github/workflows/agent-outcomes.yml` (see [Connect to outcomes](#connect-to-outcomes)).
 
-Flags: `--privacy metadata` drops `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES` and `OTEL_LOG_TOOL_DETAILS`; `--region eu` uses the EU host; `--force` overwrites changed files.
+Flags: `--privacy metadata` drops `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES` and `OTEL_LOG_TOOL_DETAILS`; `--region eu` uses the EU host (without `--region`, init uses `$AMPLITUDE_REGION`, then the region a previous init set, then `us`); `--force` overwrites changed files and an existing `core.hooksPath`. Without `--force` those are reported as `conflict` and init exits 1.
 
 ### Content gates
 

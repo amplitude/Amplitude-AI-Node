@@ -62,7 +62,7 @@ printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-
 
 Then open `/hooks` in Codex and trust the new project hooks. `init` writes:
 
-- `.codex/hooks.json` (committed): a `Stop` hook running `npx --yes -p @amplitude/ai amplitude-ai hook codex`, and a `SessionStart` hook running `git config core.hooksPath .githooks`. Python projects use `amplitude-ai hook codex` from the `amplitude-ai` package instead.
+- `.codex/hooks.json` (committed): a `Stop` hook running `npx --yes -p @amplitude/ai amplitude-ai hook codex`, and a `SessionStart` hook that sets `git config --local core.hooksPath .githooks` when the repo has no hooks path yet. Python projects use `amplitude-ai hook codex` from the `amplitude-ai` package instead; init treats any existing `Stop` command ending in `amplitude-ai hook codex` as the forwarder and doesn't add a second.
 - `.amplitude-ai/local.env` (gitignored, mode 0600): `AMPLITUDE_AI_API_KEY`, `AMPLITUDE_SERVER_ZONE`, `AMPLITUDE_AI_CONTENT_MODE`.
 - `.githooks/prepare-commit-msg` and `.github/workflows/agent-outcomes.yml`.
 

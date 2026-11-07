@@ -2,7 +2,7 @@
   "description": "Golden cases for the shared commit_sha parser. Implementations: Python amplitude_ai/integrations/commit_sha.py, Node src/integrations/commit-sha.ts, Java receiver CommitShaParser. Input is a tool call (name, input string, output string); expected is the commit SHA or null.",
   "rules": [
     "git commit output: first match of ^\\[<branch>( \\(root-commit\\))? <7-40 hex>\\] on any line; requires the tool input to contain 'git commit' (or 'git' and 'commit' as separate argv items) OR the output to start with that bracket line",
-    "JSON output: top-level sha (40 hex), else commit.sha (40 hex), else head.sha (40 hex); only when the tool name or input mentions commit, pull, pr, push_files, create_or_update_file",
+    "JSON output: top-level sha (40 hex), else commit.sha (40 hex), else head.sha (40 hex); only when the tool name or input contains a hint token, matched case-insensitively with (?<![a-z0-9])(?:commits?|pulls?|pr|push_files|create_or_update_file)(?![a-z0-9]) (underscores, slashes and punctuation are boundaries, so preview or improve_prompt never match)",
     "Never parse git log, git show, git rev-parse or arbitrary hex strings",
     "Return lowercase"
   ],
@@ -90,6 +90,27 @@
       "input": "git commit -m x",
       "output": "",
       "expected": null
+    },
+    {
+      "name": "hint inside a word is ignored (preview)",
+      "tool_name": "preview_page",
+      "input": "{\"path\":\"index.html\"}",
+      "output": "{\"sha\":\"5555555555555555555555555555555555555555\"}",
+      "expected": null
+    },
+    {
+      "name": "hint inside a word is ignored (improve_prompt)",
+      "tool_name": "improve_prompt",
+      "input": "{\"text\":\"compress this\"}",
+      "output": "{\"sha\":\"6666666666666666666666666666666666666666\"}",
+      "expected": null
+    },
+    {
+      "name": "rest pulls path in input",
+      "tool_name": "Bash",
+      "input": "gh api repos/acme/app/pulls/7",
+      "output": "{\"number\":7,\"head\":{\"ref\":\"fix\",\"sha\":\"7777777777777777777777777777777777777777\"}}",
+      "expected": "7777777777777777777777777777777777777777"
     }
   ]
 }

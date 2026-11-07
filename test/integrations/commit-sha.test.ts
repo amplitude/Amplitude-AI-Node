@@ -36,6 +36,14 @@ describe('parseCommitSha', () => {
     expect(parseCommitSha('print_file', '{}', `{"sha":"${'b'.repeat(40)}"}`)).toBeNull();
   });
 
+  it('matches hint tokens only as whole words', () => {
+    const sha = `{"sha":"${'c'.repeat(40)}"}`;
+    expect(parseCommitSha('precommit_check', '{}', sha)).toBeNull();
+    expect(parseCommitSha('autopull', '{}', sha)).toBeNull();
+    expect(parseCommitSha('mcp__github__create_commit', '{}', sha)).toBe('c'.repeat(40));
+    expect(parseCommitSha('list_pulls', '{}', sha)).toBe('c'.repeat(40));
+  });
+
   it('commitShaProperties returns the plain commit_sha property', () => {
     expect(commitShaProperties('Bash', 'git commit -m x', '[main abc1234] x')).toEqual({ commit_sha: 'abc1234' });
     expect(commitShaProperties('Bash', 'ls', 'a b')).toEqual({});

@@ -39,6 +39,8 @@ export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
  * an executable (the package ships several bins), so it names the bin with `-p`.
  */
 export const CODEX_STOP_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook codex';
+/** Any Stop command ending in this (Node `npx` form, Python CLI, `uv run`, ...) is the same forwarder. */
+const PYTHON_CODEX_STOP_COMMAND = 'amplitude-ai hook codex';
 
 const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_TOOL_DETAILS'];
 const GOOSE_TRACES_PATH = '/otlp/v1/traces';
@@ -65,12 +67,15 @@ export type CodingAgentsInitOptions = {
 
 export type CodingAgentsChange = {
   path: string;
-  action: 'create' | 'update' | 'unchanged' | 'skipped';
+  action: 'create' | 'update' | 'unchanged' | 'skipped' | 'conflict';
   detail: string;
 };
 
 export type CodingAgentsInitResult = {
+  /** False when something was left alone because it conflicts (see `changes`). */
+  ok: boolean;
   dryRun: boolean;
+  region: CodingAgentsRegion;
   harnesses: CodingAgentHarness[];
   changes: CodingAgentsChange[];
   warnings: string[];
@@ -230,6 +235,34 @@ class Writer {
   skip(rel: string, detail: string): void {
     this.changes.push({ path: rel, action: 'skipped', detail });
   }
+
+  conflict(rel: string, detail: string): void {
+    this.changes.push({ path: rel, action: 'conflict', detail });
+  }
+}
+
+const isRegion = (v: string | undefined): v is CodingAgentsRegion => v === 'us' || v === 'eu';
+
+/** The region a previous `init` set up, from `.amplitude-ai/local.env` or the Claude Code endpoint. */
+export function existingCodingAgentsRegion(cwd: string): CodingAgentsRegion | null {
+  const localEnvPath = join(cwd, LOCAL_ENV_PATH);
+  if (existsSync(localEnvPath)) {
+    try {
+      const local = parseLocalEnv(readFileSync(localEnvPath, 'utf8'));
+      const zone = (local.AMPLITUDE_REGION || local.AMPLITUDE_SERVER_ZONE || '').toLowerCase();
+      if (isRegion(zone)) return zone;
+    } catch {
+      // Fall through to the Claude Code settings.
+    }
+  }
+  const settings = readJsonFile(join(cwd, CLAUDE_SETTINGS_PATH));
+  const env = settings.ok && settings.value && isObject(settings.value.env) ? settings.value.env : {};
+  for (const value of Object.values(env)) {
+    if (typeof value !== 'string') continue;
+    if (value.includes(`//${amplitudeHost('eu')}/`)) return 'eu';
+    if (value.includes(`//${amplitudeHost('us')}/`)) return 'us';
+  }
+  return null;
 }
 
 function ensureGitignored(writer: Writer, cwd: string, entry: string): void {
@@ -256,7 +289,7 @@ function writeTemplateFile(
 ): void {
   const path = join(cwd, rel);
   if (existsSync(path) && readFileSync(path, 'utf8') !== content && !force) {
-    writer.skip(rel, 'exists with different content (re-run with --force to replace)');
+    writer.conflict(rel, 'exists with different content (re-run with --force to replace)');
     warnings.push(`${rel} already exists and differs from the template; left as is. Use --force to replace it.`);
     return;
   }
@@ -268,7 +301,8 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
   const env = options.env ?? process.env;
   const harnesses = options.harnesses?.length ? [...new Set(options.harnesses)] : [...CODING_AGENT_HARNESSES];
   const privacy = options.privacy ?? 'full';
-  const region = options.region ?? 'us';
+  const envRegion = (env.AMPLITUDE_REGION ?? '').toLowerCase();
+  const region = options.region ?? (isRegion(envRegion) ? envRegion : (existingCodingAgentsRegion(cwd) ?? 'us'));
   const dryRun = options.dryRun ?? false;
   const force = options.force ?? false;
   const git = options.git ?? defaultGit;
@@ -307,12 +341,12 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     hooksPathOk = false;
     warnings.push(`Not a git repository; run \`${HOOKS_PATH_COMMAND}\` after \`git init\`.`);
   } else {
-    const current = git(['config', '--get', 'core.hooksPath'], cwd).stdout;
+    const current = git(['config', '--local', '--get', 'core.hooksPath'], cwd).stdout;
     if (current === HOOKS_PATH) {
       writer.changes.push({ path: 'git config core.hooksPath', action: 'unchanged', detail: HOOKS_PATH });
     } else if (current && !force) {
       hooksPathOk = false;
-      writer.skip('git config core.hooksPath', `already set to ${current}`);
+      writer.conflict('git config core.hooksPath', `already set to ${current}`);
       warnings.push(
         `core.hooksPath is already ${current} (husky or another hook manager). Copy ${PREPARE_COMMIT_MSG_PATH} into ${current}/prepare-commit-msg, or re-run with --force.`,
       );
@@ -322,7 +356,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
         action: current ? 'update' : 'create',
         detail: HOOKS_PATH,
       });
-      if (!dryRun) git(['config', 'core.hooksPath', HOOKS_PATH], cwd);
+      if (!dryRun) git(['config', '--local', 'core.hooksPath', HOOKS_PATH], cwd);
     }
   }
 
@@ -402,7 +436,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     } else {
       const merged: JsonObject = hooksFile.value ?? {};
       const existingStop = hookCommands(isObject(merged.hooks) ? merged.hooks.Stop : undefined);
-      const hasForwarder = existingStop.some((c) => /\bhook codex\b/.test(c));
+      const hasForwarder = existingStop.some((c) => c.trim().endsWith(PYTHON_CODEX_STOP_COMMAND));
       const templateHooks = template.hooks as JsonObject;
       mergeHooks(merged, hasForwarder ? { SessionStart: templateHooks.SessionStart } : templateHooks);
       writer.write(CODEX_HOOKS_PATH, stringify(merged), 'Stop hook forwards the rollout transcript (no secrets)');
@@ -448,7 +482,8 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     'Outcomes: add the AMPLITUDE_API_KEY repository secret in GitHub (Settings → Secrets and variables → Actions).',
   );
 
-  return { dryRun, harnesses, changes: writer.changes, warnings, instructions };
+  const ok = !writer.changes.some((c) => c.action === 'conflict');
+  return { ok, dryRun, region, harnesses, changes: writer.changes, warnings, instructions };
 }
 
 function newestMtime(dir: string): number | null {
@@ -663,8 +698,6 @@ export async function main(argv: string[]): Promise<number> {
       apiKey = process.env[apiKeyEnv] || undefined;
       if (!apiKey) throw new Error(`${apiKeyEnv} is not set`);
     }
-    if (!region && (process.env.AMPLITUDE_REGION ?? '').toLowerCase() === 'eu') region = 'eu';
-
     const result = runCodingAgentsInit({
       cwd: dir,
       harnesses: parseHarnesses(harnessArgs),
@@ -676,16 +709,18 @@ export async function main(argv: string[]): Promise<number> {
     });
     if (json) {
       process.stdout.write(stringify(result));
-      return 0;
+      return result.ok ? 0 : 1;
     }
-    process.stdout.write(`amplitude-ai coding-agents init${dryRun ? ' (dry run, nothing written)' : ''}\n\n`);
+    process.stdout.write(
+      `amplitude-ai coding-agents init${dryRun ? ' (dry run, nothing written)' : ''} (region=${result.region})\n\n`,
+    );
     for (const c of result.changes) process.stdout.write(`  ${c.action.padEnd(9)} ${c.path}: ${c.detail}\n`);
     for (const w of result.warnings) process.stdout.write(`\n  warning: ${w}\n`);
     if (result.instructions.length > 0) {
       process.stdout.write('\nNext steps:\n');
       for (const line of result.instructions) process.stdout.write(`  - ${line}\n`);
     }
-    return 0;
+    return result.ok ? 0 : 1;
   } catch (e) {
     process.stderr.write(`amplitude-ai coding-agents: ${e instanceof Error ? e.message : String(e)}\n${USAGE}`);
     return 2;

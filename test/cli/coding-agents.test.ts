@@ -158,10 +158,71 @@ describe('coding-agents init', () => {
     expect(readFileSync(join(repo, '.githooks/prepare-commit-msg'), 'utf8')).toBe('#!/bin/sh\necho mine\n');
     expect(readJson('package.json').scripts).toBeUndefined();
     expect(result.warnings.join('\n')).toMatch(/\.husky/);
+    expect(result.ok).toBe(false);
+    const byPath = Object.fromEntries(result.changes.map((c) => [c.path, c.action]));
+    expect(byPath['git config core.hooksPath']).toBe('conflict');
+    expect(byPath['.githooks/prepare-commit-msg']).toBe('conflict');
 
-    init({ harnesses: ['goose'], force: true });
+    expect(init({ harnesses: ['goose'], force: true }).ok).toBe(true);
     expect(git('config', '--get', 'core.hooksPath')).toBe('.githooks');
     expect(readFileSync(join(repo, '.githooks/prepare-commit-msg'), 'utf8')).toBe(template('prepare-commit-msg'));
+  });
+
+  it('reads and sets core.hooksPath in the repo config only', () => {
+    const globalConfig = join(home, 'gitconfig');
+    writeFileSync(globalConfig, '[core]\n\thooksPath = /global/hooks\n');
+    const result = init({ harnesses: ['goose'], git: (args, cwd) => {
+      const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig } });
+      return { status: r.status ?? 1, stdout: (r.stdout ?? '').trim() };
+    } });
+    expect(result.changes.find((c) => c.path === 'git config core.hooksPath')?.action).toBe('create');
+    expect(git('config', '--local', '--get', 'core.hooksPath')).toBe('.githooks');
+  });
+
+  it.each([
+    ['sets .githooks when nothing is configured', undefined, '.githooks'],
+    ['keeps an existing hooks path (husky)', '.husky', '.husky'],
+  ])('SessionStart command %s', (_name, existing, expected) => {
+    if (existing) git('config', 'core.hooksPath', existing);
+    for (const name of ['claude-settings.json', 'codex-hooks.json']) {
+      const command = JSON.parse(template(name)).hooks.SessionStart[0].hooks[0].command as string;
+      expect(spawnSync('sh', ['-c', command], { cwd: repo }).status).toBe(0);
+      expect(git('config', '--local', '--get', 'core.hooksPath')).toBe(expected);
+    }
+  });
+
+  it.each([
+    ['the Python form', 'amplitude-ai hook codex'],
+    ['a uv launcher', 'uv run amplitude-ai hook codex'],
+    ['the Node form', CODEX_STOP_COMMAND],
+  ])('treats an existing Stop hook in %s as the same forwarder', (_name, command) => {
+    mkdirSync(join(repo, '.codex'));
+    writeFileSync(
+      join(repo, '.codex/hooks.json'),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } }),
+    );
+    init({ harnesses: ['codex'] });
+    const stop = readJson('.codex/hooks.json').hooks.Stop as Array<{ hooks: Array<{ command: string }> }>;
+    expect(stop.flatMap((g) => g.hooks.map((h) => h.command))).toEqual([command]);
+  });
+
+  it('resolves the region from --region, then $AMPLITUDE_REGION, then the previous init, then us', () => {
+    const zone = () => parseLocalEnv(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8')).AMPLITUDE_SERVER_ZONE;
+    const logsEndpoint = () => readJson('.claude/settings.json').env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT as string;
+
+    expect(init({ harnesses: ['codex', 'claude-code'] }).region).toBe('us');
+    expect(init({ harnesses: ['codex', 'claude-code'], env: { AMPLITUDE_REGION: 'EU' } }).region).toBe('eu');
+    expect(zone()).toBe('EU');
+    expect(init({ harnesses: ['codex', 'claude-code'] }).region).toBe('eu');
+    expect(logsEndpoint()).toContain('api.eu.amplitude.com');
+    expect(init({ harnesses: ['codex'], env: { AMPLITUDE_REGION: 'us' } }).region).toBe('us');
+    expect(init({ harnesses: ['codex'], region: 'eu', env: { AMPLITUDE_REGION: 'us' } }).region).toBe('eu');
+
+    rmSync(join(repo, '.amplitude-ai'), { recursive: true });
+    expect(init({ harnesses: ['claude-code'] }).region).toBe('eu');
+    mkdirSync(join(repo, '.amplitude-ai'));
+    writeFileSync(join(repo, '.amplitude-ai/local.env'), 'AMPLITUDE_REGION=US\n');
+    expect(init({ harnesses: ['goose'] }).region).toBe('us');
   });
 
   it('prints a goose env block with a key placeholder only', () => {

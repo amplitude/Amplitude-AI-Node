@@ -205,6 +205,96 @@ describe('Codex tool failures from end events', () => {
       ['apply_patch', false, 'patch declined'],
     ]);
   });
+
+  it('keeps an end-event failure in thread state until the output arrives in a later run', () => {
+    const ts = '2026-11-06T10:01:00.000Z';
+    const line = (type: string, payload: Record<string, unknown>) => JSON.stringify({ timestamp: ts, type, payload });
+    const first = mapCodexRollout([
+      line('session_meta', { id: 'root', timestamp: ts, cwd: '/repo', source: 'cli' }),
+      line('event_msg', { type: 'task_started', turn_id: 'turn-1' }),
+      line('turn_context', { turn_id: 'turn-1', model: 'gpt-5.5' }),
+      line('response_item', { type: 'function_call', name: 'get_issue', arguments: '{}', call_id: 'mcp_1' }),
+      line('event_msg', { type: 'mcp_tool_call_end', call_id: 'mcp_1', result: { Err: 'down' } }),
+    ]);
+    expect(first.calls.filter((c) => c.kind === 'tool')).toEqual([]);
+    const persisted = JSON.parse(JSON.stringify(first.state));
+    expect(persisted.toolFailures).toEqual({ mcp_1: 'down' });
+    const second = mapCodexRollout(
+      [
+        line('response_item', { type: 'function_call_output', call_id: 'mcp_1', output: 'down' }),
+        line('event_msg', { type: 'task_complete', turn_id: 'turn-1' }),
+      ],
+      persisted,
+    );
+    const tool = second.calls.find((c) => c.kind === 'tool');
+    expect(tool).toMatchObject({ success: false });
+    expect(tool!.opts.errorMessage).toBe('down');
+    expect(second.state.toolFailures).toEqual({});
+  });
+
+  it('marks success:false output failed with its error or message (Python test vectors)', () => {
+    const ts = '2026-11-06T10:01:00.000Z';
+    const line = (type: string, payload: Record<string, unknown>) => JSON.stringify({ timestamp: ts, type, payload });
+    const pair = (callId: string, output: unknown) => [
+      line('response_item', { type: 'function_call', name: 'deploy', arguments: '{}', call_id: callId }),
+      line('response_item', { type: 'function_call_output', call_id: callId, output }),
+    ];
+    const { calls } = mapCodexRollout([
+      line('session_meta', { id: 'root', timestamp: ts, cwd: '/repo', source: 'cli' }),
+      line('event_msg', { type: 'task_started', turn_id: 'turn-1' }),
+      ...pair('json_text', '{"success": false, "error": "quota exceeded"}'),
+      ...pair('legacy_object', { content: 'denied', success: false }),
+      ...pair('nested_message', '{"success": false, "error": {"message": "no access"}}'),
+      ...pair('message_field', { success: false, message: 'blocked' }),
+      ...pair('ok_json', '{"success": true, "id": 3}'),
+      ...pair('plain', 'done'),
+    ]);
+    const tools = calls.flatMap((c) => (c.kind === 'tool' ? [[c.success, c.opts.errorMessage ?? null]] : []));
+    expect(tools).toEqual([
+      [false, 'quota exceeded'],
+      [false, 'tool reported success: false'],
+      [false, 'no access'],
+      [false, 'blocked'],
+      [true, null],
+      [true, null],
+    ]);
+    expect(calls.filter((c) => c.kind === 'tool')[1]!.opts.output).toBe('denied');
+  });
+});
+
+describe('Codex usage-only and error AI Responses', () => {
+  const ts = '2026-11-06T10:01:00.000Z';
+  const line = (type: string, payload: Record<string, unknown>) => JSON.stringify({ timestamp: ts, type, payload });
+  const usage = { input_tokens: 300, cached_input_tokens: 0, output_tokens: 12, reasoning_output_tokens: 0, total_tokens: 312 };
+  const head = [
+    line('session_meta', { id: 'root', timestamp: ts, cwd: '/repo', source: 'cli' }),
+    line('event_msg', { type: 'task_started', turn_id: 'turn-1' }),
+    line('event_msg', { type: 'token_count', info: { total_token_usage: usage, last_token_usage: usage } }),
+  ];
+
+  it('keys a usage-only turn <trace>:usage and reports it once when the turn closes twice', () => {
+    const first = mapCodexRollout([...head, line('event_msg', { type: 'task_complete', turn_id: 'turn-1' })]);
+    const ai = first.calls.filter((c) => c.kind === 'ai');
+    expect(ai.map((c) => [c.insertId, c.opts.inputTokens])).toEqual([['22c9c766-d665-52ba-b3ad-469461382b3d', 300]]);
+    const again = mapCodexRollout(
+      [
+        line('event_msg', { type: 'token_count', info: { total_token_usage: usage, last_token_usage: usage } }),
+        line('event_msg', { type: 'task_complete', turn_id: 'turn-1' }),
+      ],
+      JSON.parse(JSON.stringify(first.state)),
+    );
+    expect(again.calls).toEqual([]);
+  });
+
+  it('keys a turn error <trace>:error', () => {
+    const { calls } = mapCodexRollout([
+      ...head,
+      line('event_msg', { type: 'task_complete', turn_id: 'turn-1', error: { message: 'budget exhausted' } }),
+    ]);
+    expect(calls.map((c) => [c.kind, c.insertId, c.opts.errorMessage, c.opts.inputTokens])).toEqual([
+      ['ai', '5338c429-3ca7-521d-9e40-7ec835dd7c8a', 'budget exhausted', 300],
+    ]);
+  });
 });
 
 describe('Codex hook lock and quiescence', () => {

@@ -16,7 +16,7 @@ export const COMMIT_SHA_PROPERTY = 'commit_sha';
 const GIT_COMMIT_LINE = /^\[[^\]\n]+?(?: \(root-commit\))? ([0-9a-fA-F]{7,40})\]/m;
 const GIT_COMMIT_FIRST_LINE = /^\[[^\]\n]+?(?: \(root-commit\))? ([0-9a-fA-F]{7,40})\]/;
 const FULL_SHA = /^[0-9a-fA-F]{40}$/;
-const JSON_TOOL_HINT = /commit|pull|(?:^|[^a-z])pr(?:[^a-z]|$)|push_files|create_or_update_file/i;
+const JSON_TOOL_HINT = /(?<![a-z0-9])(?:commits?|pulls?|pr|push_files|create_or_update_file)(?![a-z0-9])/i;
 
 function textOf(value: unknown): string {
   if (value == null) return '';

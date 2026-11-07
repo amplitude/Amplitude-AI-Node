@@ -33,6 +33,7 @@ import {
   CODEX_PROVIDER,
   type CodexUsage,
   codexInputText,
+  codexOutputFailure,
   codexUsageOpts,
 } from './codex-core.js';
 import { commitShaProperties } from './commit-sha.js';
@@ -93,6 +94,16 @@ const jsonText = (value: unknown): string | undefined => {
   }
 };
 
+const mcpContentText = (content: unknown): unknown => {
+  if (!Array.isArray(content)) return content;
+  const texts = content.flatMap((c) =>
+    c != null && typeof c === 'object' && typeof (c as { text?: unknown }).text === 'string' && (c as { text: string }).text
+      ? [(c as { text: string }).text]
+      : [],
+  );
+  return texts.length > 0 ? texts.join('\n') : null;
+};
+
 export class CodexSDKTracker {
   private readonly _model: string;
   private readonly _provider: string;
@@ -114,12 +125,24 @@ export class CodexSDKTracker {
 
   /**
    * The input of the next `run` / `runStreamed`; tracked as a User Message at
-   * `turn.started`. Pass the session when one tracker serves several.
+   * `turn.started` so it shares the turn's trace. With a session, input given
+   * while a turn is open is tracked at once on that turn, and an earlier
+   * prompt whose turn never started is tracked on a trace of its own. Pass
+   * the session when one tracker serves several.
    */
   setInput(input: unknown, session?: SessionLike): void {
     const text = codexInputText(input) || null;
-    if (session) this._state(session).pendingInput = text;
-    else this._unboundInput = text;
+    if (!session) {
+      this._unboundInput = text;
+      return;
+    }
+    const state = this._state(session);
+    if (text && state.traceId) {
+      safeTrack(() => session.trackUserMessage(text, this._common(session)));
+      return;
+    }
+    this._flushUnstarted(session);
+    state.pendingInput = text;
   }
 
   /** Passes `events` through unchanged while tracking each one. */
@@ -183,12 +206,9 @@ export class CodexSDKTracker {
     const state = this._states.get(session);
     if (!state) return;
     try {
-      if (state.pendingInput) {
-        const input = state.pendingInput;
-        state.pendingInput = null;
-        safeTrack(() => session.trackUserMessage(input, this._common(session)));
-      }
       this._flush(session, null);
+      this._endTurn(session);
+      this._flushUnstarted(session);
     } catch (err) {
       logger.warn(`Failed to flush Codex SDK session: ${err}`);
     } finally {
@@ -224,6 +244,16 @@ export class CodexSDKTracker {
     state.pendingInput = null;
     this._unboundInput = null;
     if (input) safeTrack(() => session.trackUserMessage(input, this._common(session)));
+  }
+
+  /** Tracks a prompt whose turn never started, on a trace of its own. */
+  private _flushUnstarted(session: SessionLike): void {
+    const state = this._state(session);
+    const input = state.pendingInput;
+    if (!input) return;
+    state.pendingInput = null;
+    const opts = { ...this._common(session), traceId: randomUUID() };
+    safeTrack(() => session.trackUserMessage(input, opts));
   }
 
   private _endTurn(session: SessionLike): void {
@@ -311,9 +341,13 @@ export class CodexSDKTracker {
       const result = item.result as { content?: unknown; structured_content?: unknown } | null | undefined;
       if (result != null) output = jsonText(result.structured_content ?? result.content);
       const error = item.error as { message?: unknown } | null | undefined;
+      const reported = result != null ? codexOutputFailure(result.structured_content ?? mcpContentText(result.content)) : null;
       if (error != null) {
         success = false;
         errorMessage = typeof error.message === 'string' ? error.message : 'MCP tool call failed';
+      } else if (reported != null) {
+        success = false;
+        errorMessage = reported;
       }
     } else if (item.type === 'web_search') {
       input = typeof item.query === 'string' ? item.query : undefined;

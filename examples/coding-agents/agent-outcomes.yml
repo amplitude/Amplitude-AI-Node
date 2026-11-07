@@ -115,16 +115,19 @@ jobs:
             } else {
               const deployment = context.payload.deployment;
               const environment = deployment.environment;
-              const deployments = await github.rest.repos.listDeployments({
-                owner, repo, environment, per_page: 30,
-              });
               let previousSha = null;
-              for (const d of deployments.data) {
-                if (d.id === deployment.id || new Date(d.created_at) >= new Date(deployment.created_at)) continue;
-                const statuses = await github.rest.repos.listDeploymentStatuses({
-                  owner, repo, deployment_id: d.id, per_page: 10,
-                });
-                if (statuses.data.some((s) => s.state === 'success')) { previousSha = d.sha; break; }
+              let pagesRead = 0;
+              search: for await (const page of github.paginate.iterator(github.rest.repos.listDeployments, {
+                owner, repo, environment, per_page: 100,
+              })) {
+                for (const d of page.data) {
+                  if (d.id === deployment.id || new Date(d.created_at) >= new Date(deployment.created_at)) continue;
+                  const statuses = await github.rest.repos.listDeploymentStatuses({
+                    owner, repo, deployment_id: d.id, per_page: 10,
+                  });
+                  if (statuses.data.some((s) => s.state === 'success')) { previousSha = d.sha; break search; }
+                }
+                if (++pagesRead >= 5) break;
               }
               let commits;
               if (previousSha) {

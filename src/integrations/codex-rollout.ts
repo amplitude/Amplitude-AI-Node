@@ -18,6 +18,7 @@ import {
   addCodexUsage,
   codexExitCode,
   codexInsertId,
+  codexOutputFailure,
   codexUsageOpts,
 } from './codex-core.js';
 import { commitShaProperties } from './commit-sha.js';
@@ -569,11 +570,11 @@ export function mapCodexRollout(
             delete state.pendingCalls[callId];
             const output = outputText(payload.output);
             const exitCode = codexExitCode(output);
-            const explicit = (payload.output as { success?: unknown } | null)?.success;
+            const raw = payload.output;
             let failure = state.toolFailures?.[callId] ?? null;
             if (state.toolFailures) delete state.toolFailures[callId];
             if (failure == null && exitCode != null && exitCode !== 0) failure = `exit code ${exitCode}`;
-            if (failure == null && explicit === false) failure = 'tool call failed';
+            failure ??= codexOutputFailure(raw != null && typeof raw === 'object' && !Array.isArray(raw) ? raw : output);
             const success = failure == null;
             const toolOpts: Record<string, unknown> = { ...opts, invocationId: insertId('tool', callId), input: call.input, output };
             if (failure != null) toolOpts.errorMessage = failure;

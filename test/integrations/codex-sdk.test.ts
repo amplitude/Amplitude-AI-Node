@@ -196,6 +196,57 @@ describe('CodexSDKTracker', () => {
     expect(session.trackUserMessage).toHaveBeenCalledTimes(1);
   });
 
+  it('marks an MCP result reporting success:false as failed, with its error', () => {
+    const session = mockSession();
+    const tracker = new CodexSDKTracker();
+    tracker.process(session, { type: 'turn.started' });
+    const mcp = (id: string, result: unknown) => ({
+      type: 'item.completed',
+      item: { id, type: 'mcp_tool_call', server: 'deploy', tool: 'run', arguments: {}, result, status: 'completed' },
+    });
+    tracker.process(session, mcp('a', { content: [], structured_content: { success: false, error: 'quota exceeded' } }));
+    tracker.process(session, mcp('b', { content: [{ type: 'text', text: '{"success": false}' }] }));
+    tracker.process(session, mcp('c', { content: [], structured_content: { success: true } }));
+    const tools = session.trackToolCall.mock.calls as unknown as Array<[string, number, boolean, Record<string, unknown>]>;
+    expect(tools.map((c) => [c[2], c[3].errorMessage ?? null])).toEqual([
+      [false, 'quota exceeded'],
+      [false, 'tool reported success: false'],
+      [true, null],
+    ]);
+  });
+
+  it('gives a prompt whose turn never started its own trace, and keeps the next prompt', () => {
+    const session = mockSession();
+    const tracker = new CodexSDKTracker({ model: 'gpt-5.5' });
+    tracker.setInput('first', session);
+    tracker.process(session, { type: 'turn.started' });
+    tracker.process(session, { type: 'item.completed', item: { id: 'm', type: 'agent_message', text: 'Hi' } });
+    tracker.setInput('mid-turn', session);
+    tracker.process(session, { type: 'turn.completed', usage });
+    tracker.setInput('abandoned', session);
+    tracker.setInput('second', session);
+    tracker.process(session, { type: 'turn.started' });
+    tracker.process(session, { type: 'turn.completed', usage });
+    tracker.setInput('never started', session);
+    tracker.endSession(session);
+
+    const user = (session.trackUserMessage.mock.calls as unknown as Array<[string, Record<string, unknown>]>).map(
+      (c) => [c[0], c[1].traceId],
+    );
+    const ai = (session.trackAiMessage.mock.calls as unknown as Array<[string, string, string, number, Record<string, unknown>]>).map(
+      (c) => c[4].traceId,
+    );
+    expect(user.map((u) => u[0])).toEqual(['first', 'mid-turn', 'abandoned', 'second', 'never started']);
+    const [first, mid, abandoned, second, never] = user.map((u) => u[1]);
+    expect(mid).toBe(first);
+    expect(ai).toEqual([first, second]);
+    for (const own of [abandoned, never]) {
+      expect(typeof own).toBe('string');
+      expect([first, second]).not.toContain(own);
+    }
+    expect(abandoned).not.toBe(never);
+  });
+
   it('never throws on malformed events', () => {
     const session = mockSession();
     const tracker = new CodexSDKTracker();

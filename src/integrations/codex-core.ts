@@ -109,6 +109,33 @@ export function codexExitCode(output: string): number | null {
   return null;
 }
 
+/**
+ * Error message when a tool's output reports `success: false`, else null.
+ * `output` is an object (older rollouts wrote `{ content, success }`) or text
+ * holding a JSON object. Same rule as the Python SDK's `output_failure`.
+ */
+export function codexOutputFailure(output: unknown): string | null {
+  let value = output;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text.startsWith('{')) return null;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  if (obj.success !== false) return null;
+  for (const key of ['error', 'message']) {
+    let field = obj[key];
+    if (field != null && typeof field === 'object') field = (field as Record<string, unknown>).message;
+    if (typeof field === 'string' && field.trim()) return field.trim().slice(0, 500);
+  }
+  return 'tool reported success: false';
+}
+
 /** Text of a Codex SDK `Input` (`string` or `[{type: 'text', text}, {type: 'local_image', path}]`). */
 export function codexInputText(input: unknown): string {
   if (typeof input === 'string') return input;
