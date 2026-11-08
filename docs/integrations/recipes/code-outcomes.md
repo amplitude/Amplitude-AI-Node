@@ -60,9 +60,9 @@ Commits made through the GitHub API or MCP tools carry no trailer. They join by 
 
 | Trigger | Event | Properties |
 |---|---|---|
-| `pull_request` closed and merged | `Commit Merged`, one per commit in the PR (attributed or not) | `commit_sha`, `merge_commit_sha`, `pr_number`, `base_branch`, `agent_session_id`, `agent_name`, `agent_authored`, `repo` |
+| `pull_request` closed and merged | `Commit Merged`, one per commit in the PR (attributed or not) | `commit_sha`, `merge_commit_sha`, `pr_number`, `base_branch`, `agent_session_id`, `agent_name`, `agent_authored`, `agent_attribution`, `attributed_agent`, `repo` |
 | A merged PR containing `This reverts commit <sha>` | `Commit Reverted` for the original commit | `commit_sha`, `revert_pr_number`, `revert_merge_commit_sha`, plus the original's trailers |
-| `pull_request` closed and merged | `Pull Request Merged`, one per PR (attributed or not) | `pr_number`, `merge_commit_sha`, `base_branch`, `commit_count`, `agent_commit_count`, `unattributed_commit_count`, `agent_authored`, `agent_names`, `agent_session_ids`, `review_count`, `changes_requested_count`, `ci_passed_first_run`, `agent_setup_version`, `repo` |
+| `pull_request` closed and merged | `Pull Request Merged`, one per PR (attributed or not) | `pr_number`, `merge_commit_sha`, `base_branch`, `commit_count`, `agent_commit_count`, `unattributed_commit_count`, `agent_authored`, `agent_names`, `agent_session_ids`, `attributed_commit_count`, `attributed_agents`, `review_count`, `changes_requested_count`, `ci_passed_first_run`, `agent_setup_version`, `repo` |
 | `deployment_status` success | `Deploy Succeeded` for each commit since the previous successful deployment | `commit_sha`, `deployment_sha`, `environment`, plus trailers |
 | `deployment_status` failure or error | `Deploy Failed` for the same range | `commit_sha`, `deployment_sha`, `environment`, `deployment_state`, plus trailers |
 
@@ -73,7 +73,20 @@ Every event also carries `outcomes_workflow_version` (currently `2`), and every 
 - **Dry run:** set the repository variable `AMPLITUDE_OUTCOMES_DRY_RUN=true` and the job prints events instead of sending.
 - **EU:** set the repository variable `AMPLITUDE_REGION=eu`.
 - Insert IDs are `<event>:<repo>:<sha>` (`<event>:<repo>:<sha>:<deployment id>` for deploys, `Pull Request Merged:<repo>:<pr number>` for PRs), so a re-run never double-counts.
-- **Fork PRs** have no access to repository secrets. Their merge runs end with a notice instead of failing.
+- **Fork PRs** (head branch in another repository) have no access to repository secrets. Their merge runs end with a notice instead of failing.
+
+#### Agents without the commit hook
+
+Many coding agents sign the commits they write, so an agent commit is recognized even where the commit hook isn't installed. Every commit-level event carries `agent_attribution` and `attributed_agent`:
+
+| `agent_attribution` | Meaning | `attributed_agent` |
+|---|---|---|
+| `session_trailer` | The commit carries `Agent-Session-Id` from the commit hook | `Agent-Name` |
+| `agent_author` | The commit author is a coding agent | The agent |
+| `co_author` | A `Co-authored-by` line names a coding agent | The agent |
+| `none` | No agent signal | `null` |
+
+Agents are matched by email, not display name: Cursor (`cursoragent@cursor.com`, `cursor[bot]`), Claude Code (`noreply@anthropic.com`, `claude[bot]`), GitHub Copilot (the coding agent and IDE co-author accounts), Devin and Warp. `Pull Request Merged` adds `attributed_commit_count` and `attributed_agents`. Only `session_trailer` links a commit to its session (`agent_session_id`); the others say which agent wrote it, not in which session. People can delete the line and some agents let users turn it off, so read the counts as a minimum. `agent_authored` and `agent_name` keep their meaning: they come from the session trailer only.
 
 #### Agent setup version
 
@@ -82,7 +95,7 @@ Every event also carries `outcomes_workflow_version` (currently `2`), and every 
 #### Reviews and first-run CI
 
 - `review_count` and `changes_requested_count` count human reviews: `APPROVED`, `CHANGES_REQUESTED` and `COMMENTED`, not bots and not the PR author's own replies.
-- `ci_passed_first_run` reads the first PR commit that has CI results: the earliest attempt of each check run and commit status. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `checks: read` and `statuses: read` permissions the workflow declares.
+- `ci_passed_first_run` reads the first push CI ran on: the head commit of the PR's earliest `pull_request` workflow run, then the earliest attempt of each check run and commit status on it. A push of several commits runs CI on its head only, so this finds the first result however many commits the PR opened with. Without GitHub Actions runs, it reads the first of the PR's oldest 20 commits that has CI results. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `actions: read`, `checks: read` and `statuses: read` permissions the workflow declares.
 
 #### Best effort
 
@@ -103,5 +116,6 @@ Re-run `amplitude-ai coding-agents init`. It replaces an untouched earlier versi
 - Revert and deploy failure rate by setup: `Commit Reverted` / `Commit Merged` and `Deploy Failed` / (`Deploy Succeeded` + `Deploy Failed`), grouped by `agent_setup_version`. Did the `AGENTS.md` change help?
 - Review load: average `changes_requested_count` and the share of `ci_passed_first_run` true on `Pull Request Merged`, split by `agent_authored`.
 - Agent share of merged code: `Commit Merged` grouped by `agent_authored`.
+- Merged code by agent, hook or not: `Commit Merged` grouped by `attributed_agent`, split by `agent_attribution`. The `session_trailer` share is how much of it can be joined to sessions.
 - Produced Commit versus Task Completed: does the Signal agree with the evaluator?
 - Cost per merged commit by model; tool failure rate by tool; sessions per user per week; subagent share of cost.

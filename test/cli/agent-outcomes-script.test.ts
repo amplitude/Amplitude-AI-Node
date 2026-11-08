@@ -40,8 +40,10 @@ type World = {
   checkRuns?: Record<string, Array<{ id: number; name: string; conclusion: string | null; app?: { id: number } }>>;
   statuses?: Record<string, Array<{ id: number; context: string; state: string }>>;
   deployments?: Array<{ id: number; sha: string; created_at: string; state: string }>;
+  workflowRuns?: WorkflowRun[];
   failing?: Set<string>;
 };
+type WorkflowRun = { id: number; head_sha: string; created_at: string; pull_requests: Array<{ number: number }> };
 
 const tree = (n: string) => `tree-${n}`;
 const commit = (sha: string, parent: string | null, opts: { message?: string; email?: string; tree?: string } = {}) => ({
@@ -128,6 +130,14 @@ function fakeGitHub(world: World) {
         return { data: world.checkRuns?.[ref] ?? [] };
       },
     },
+    actions: {
+      listWorkflowRunsForRepo: async ({ branch, event }: { branch: string; event: string }) => {
+        record('actions.listWorkflowRunsForRepo');
+        expect([branch, event]).toEqual(['feature', 'pull_request']);
+        const runs = [...(world.workflowRuns ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
+        return { data: runs };
+      },
+    },
   };
   type Fn = (params: Record<string, unknown>) => Promise<{ data: unknown }>;
   const paginate = Object.assign(async (fn: Fn, params: Record<string, unknown>) => (await fn(params)).data, {
@@ -177,8 +187,9 @@ const prPayload = (overrides: Record<string, unknown> = {}) => ({
     merged: true,
     body: '',
     merge_commit_sha: 'merge7',
+    created_at: '2026-11-01T00:00:00Z',
     base: { ref: 'main', sha: 'base' },
-    head: { repo: { fork: false, full_name: 'acme/app' } },
+    head: { ref: 'feature', repo: { fork: false, full_name: 'acme/app' } },
     user: { login: 'dev' },
     ...overrides,
   },
@@ -323,6 +334,59 @@ describe('agent-outcomes.yml script', () => {
     expect(status.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
   });
 
+  it('judges first-run CI on the head of the first push CI ran on, ignoring other PRs on the branch', async () => {
+    const world = linearWorld();
+    world.checkRuns = {
+      c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }],
+      c3: [{ id: 5, name: 'build', conclusion: 'success', app: { id: 1 } }],
+    };
+    world.workflowRuns = [
+      { id: 1, head_sha: 'c1', created_at: '2026-10-01T00:00:00Z', pull_requests: [{ number: 3 }] },
+      { id: 2, head_sha: 'c1', created_at: '2026-11-01T00:05:00Z', pull_requests: [{ number: 9 }] },
+      { id: 3, head_sha: 'c3', created_at: '2026-11-01T00:10:00Z', pull_requests: [{ number: 7 }] },
+      { id: 4, head_sha: 'c2', created_at: '2026-11-02T00:00:00Z', pull_requests: [{ number: 7 }] },
+    ];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+    expect(r.calls.filter((c) => c === 'checks.listForRef')).toHaveLength(1);
+  });
+
+  it('falls back to the oldest commits when workflow runs cannot be read', async () => {
+    const world = linearWorld();
+    world.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
+    world.failing = new Set(['actions.listWorkflowRunsForRepo']);
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+    expect(r.log.warning.join('\n')).toContain('workflow runs unavailable');
+  });
+
+  it('attributes commits by session trailer, agent author, then agent co-author', async () => {
+    const world = linearWorld();
+    world.commits.cur = commit('cur', 'c3', {
+      message: 'fix: thing\n\nCo-authored-by: Someone <someone@example.com>\nCo-authored-by: Cursor <CursorAgent@cursor.com>\n',
+    });
+    world.commits.cop = commit('cop', 'cur', { email: '198982749+Copilot@users.noreply.github.com' });
+    world.commits.dep = commit('dep', 'cop', { email: '49699333+dependabot[bot]@users.noreply.github.com' });
+    world.commits.fake = commit('fake', 'dep', { message: 'x\n\nCo-authored-by: Cursor <cursor@example.com>\n' });
+    world.commits.both = commit('both', 'fake', {
+      message: `${agentMessage('s9', 'codex')}Co-Authored-By: Claude <noreply@anthropic.com>\n`,
+    });
+    world.prCommits = ['c3', 'cur', 'cop', 'dep', 'fake', 'both'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    const by = Object.fromEntries(r.byType('Commit Merged').map((e) => [e.event_properties.commit_sha, e.event_properties]));
+    expect(by.cur).toMatchObject({ agent_attribution: 'co_author', attributed_agent: 'cursor', agent_authored: false, agent_name: null });
+    expect(by.cop).toMatchObject({ agent_attribution: 'agent_author', attributed_agent: 'copilot', agent_authored: false });
+    expect(by.both).toMatchObject({ agent_attribution: 'session_trailer', attributed_agent: 'codex', agent_authored: true });
+    for (const sha of ['c3', 'dep', 'fake']) {
+      expect(by[sha], sha).toMatchObject({ agent_attribution: 'none', attributed_agent: null });
+    }
+    expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({
+      agent_commit_count: 1,
+      attributed_commit_count: 3,
+      attributed_agents: ['cursor', 'copilot', 'codex'],
+    });
+  });
+
   it('isolates a failed enrichment: the property is omitted and events still send', async () => {
     const world = linearWorld();
     world.failing = new Set(['pulls.listReviews', 'git.getTree']);
@@ -365,6 +429,14 @@ describe('agent-outcomes.yml script', () => {
 
     const same = await run(linearWorld(), { event: 'pull_request', env: { AMPLITUDE_API_KEY: '' }, payload: prPayload() });
     expect(same.log.failed).toEqual(['AMPLITUDE_API_KEY secret is not set']);
+
+    const forkedRepo = await run(linearWorld(), {
+      event: 'pull_request',
+      env: { AMPLITUDE_API_KEY: '' },
+      payload: prPayload({ head: { ref: 'feature', repo: { fork: true, full_name: 'acme/app' } } }),
+    });
+    expect(forkedRepo.log.failed).toEqual(['AMPLITUDE_API_KEY secret is not set']);
+    expect(forkedRepo.log.notice).toEqual([]);
   });
 
   it('takes the last trailer of a squash commit that carries several', async () => {

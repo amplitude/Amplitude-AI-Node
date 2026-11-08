@@ -23,6 +23,7 @@ permissions:
   deployments: read
   checks: read
   statuses: read
+  actions: read
 
 jobs:
   outcomes:
@@ -49,7 +50,7 @@ jobs:
             const apiKey = process.env.AMPLITUDE_API_KEY;
             if (!apiKey && !dryRun) {
               const head = context.payload.pull_request?.head?.repo;
-              if (context.eventName === 'pull_request' && (!head || head.fork || head.full_name !== repoName)) {
+              if (context.eventName === 'pull_request' && (!head || head.full_name !== repoName)) {
                 core.notice('Pull request from a fork: repository secrets are not available to this run, so no outcome events were sent.');
                 return;
               }
@@ -71,6 +72,37 @@ jobs:
               if (userIdSource === 'login') return c.author?.login || null;
               return c.commit?.author?.email || null;
             };
+            // Coding agents that sign the commits they write, by commit email. GitHub
+            // noreply emails carry a fixed account ID, so a changed display name still matches.
+            const AGENT_EMAILS = {
+              'cursoragent@cursor.com': 'cursor',
+              '206951365+cursor[bot]@users.noreply.github.com': 'cursor',
+              'noreply@anthropic.com': 'claude-code',
+              '209825114+claude[bot]@users.noreply.github.com': 'claude-code',
+              '198982749+copilot@users.noreply.github.com': 'copilot',
+              '223556219+copilot@users.noreply.github.com': 'copilot',
+              '158243242+devin-ai-integration[bot]@users.noreply.github.com': 'devin',
+              '243557089+warp-factories[bot]@users.noreply.github.com': 'warp',
+            };
+            const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
+            // How the commit is known to be an agent's: our session trailer, the agent as
+            // commit author, or the agent's Co-authored-by line.
+            const attribution = (c) => {
+              const message = c.commit.message;
+              const author = agentForEmail(c.commit?.author?.email);
+              let coAuthor = null;
+              for (const m of message.matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)) {
+                coAuthor = agentForEmail(m[1]);
+                if (coAuthor) break;
+              }
+              const named = trailer(message, 'Agent-Name');
+              if (trailer(message, 'Agent-Session-Id')) {
+                return { agent_attribution: 'session_trailer', attributed_agent: named || author || coAuthor };
+              }
+              if (author) return { agent_attribution: 'agent_author', attributed_agent: author };
+              if (coAuthor) return { agent_attribution: 'co_author', attributed_agent: coAuthor };
+              return { agent_attribution: 'none', attributed_agent: null };
+            };
             const baseProps = (c) => {
               const sessionId = trailer(c.commit.message, 'Agent-Session-Id');
               return {
@@ -78,6 +110,7 @@ jobs:
                 agent_session_id: sessionId,
                 agent_name: trailer(c.commit.message, 'Agent-Name'),
                 agent_authored: Boolean(sessionId),
+                ...attribution(c),
                 repo: repoName,
               };
             };
@@ -103,9 +136,12 @@ jobs:
             let apiCalls = 0;
             const enrichment = {};
             class BudgetExhausted extends Error {}
-            const call = (fn) => {
+            const spend = () => {
               if (apiCalls >= API_BUDGET) throw new BudgetExhausted(`API budget of ${API_BUDGET} calls used up`);
               apiCalls++;
+            };
+            const call = (fn) => {
+              spend();
               return fn();
             };
             const enrich = async (name, fn) => {
@@ -163,32 +199,69 @@ jobs:
 
             const PASSED = new Set(['success', 'neutral', 'skipped']);
             const FAILED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
+            // The head SHA of the PR's first pull_request workflow run, which is the
+            // first push CI ran on. A push of many commits runs CI on its head only, so
+            // the PR's oldest commits can have none. Runs list newest first; undefined
+            // when the PR has no Actions runs or the run history is too long to page.
+            const firstRunSha = async (pr) => {
+              const opened = new Date(pr.created_at);
+              const pages = github.paginate.iterator(github.rest.actions.listWorkflowRunsForRepo, {
+                owner, repo, branch: pr.head.ref, event: 'pull_request', per_page: 100,
+              });
+              let first = null;
+              for (let page = 0; page < 5; page++) {
+                spend();
+                const { value, done } = await pages.next();
+                if (done) return first?.head_sha;
+                for (const run of value.data) {
+                  if (new Date(run.created_at) < opened) continue;
+                  if (!(run.pull_requests || []).some((p) => p.number === pr.number)) continue;
+                  if (!first || new Date(run.created_at) < new Date(first.created_at)) first = run;
+                }
+                if (value.data.length < 100 || value.data.some((run) => new Date(run.created_at) < opened)) {
+                  return first?.head_sha;
+                }
+              }
+              return undefined;
+            };
+            const ciResults = async (sha) => {
+              const runs = await call(() => github.paginate(github.rest.checks.listForRef, {
+                owner, repo, ref: sha, filter: 'all', per_page: 100,
+              }));
+              const statuses = await call(() => github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                owner, repo, ref: sha, per_page: 100,
+              }));
+              const earliest = (items, key, counts) => {
+                const first = new Map();
+                for (const item of items) {
+                  if (!counts(item)) continue;
+                  const k = key(item);
+                  if (!first.has(k) || item.id < first.get(k).id) first.set(k, item);
+                }
+                return [...first.values()];
+              };
+              return [
+                ...earliest(runs, (r) => `${r.app?.id ?? ''}:${r.name}`,
+                  (r) => PASSED.has(r.conclusion) || FAILED.has(r.conclusion)).map((r) => PASSED.has(r.conclusion)),
+                ...earliest(statuses, (s) => s.context,
+                  (s) => ['success', 'failure', 'error'].includes(s.state)).map((s) => s.state === 'success'),
+              ];
+            };
             // The first CI result on the PR: the earliest attempt of each check and
-            // status on the first commit that has any. Cancelled and unfinished runs
-            // do not count. Undefined when the PR has no CI.
-            const ciPassedFirstRun = (commits) => enrich('ci_passed_first_run', async () => {
-              for (const c of commits.slice(0, 20)) {
-                const runs = await call(() => github.paginate(github.rest.checks.listForRef, {
-                  owner, repo, ref: c.sha, filter: 'all', per_page: 100,
-                }));
-                const statuses = await call(() => github.paginate(github.rest.repos.listCommitStatusesForRef, {
-                  owner, repo, ref: c.sha, per_page: 100,
-                }));
-                const earliest = (items, key, counts) => {
-                  const first = new Map();
-                  for (const item of items) {
-                    if (!counts(item)) continue;
-                    const k = key(item);
-                    if (!first.has(k) || item.id < first.get(k).id) first.set(k, item);
-                  }
-                  return [...first.values()];
-                };
-                const results = [
-                  ...earliest(runs, (r) => `${r.app?.id ?? ''}:${r.name}`,
-                    (r) => PASSED.has(r.conclusion) || FAILED.has(r.conclusion)).map((r) => PASSED.has(r.conclusion)),
-                  ...earliest(statuses, (s) => s.context,
-                    (s) => ['success', 'failure', 'error'].includes(s.state)).map((s) => s.state === 'success'),
-                ];
+            // status on the first push CI ran on. Without Actions runs, the first of
+            // the PR's oldest 20 commits that has results. Cancelled and unfinished
+            // runs do not count. Undefined when the PR has no CI.
+            const ciPassedFirstRun = (pr, commits) => enrich('ci_passed_first_run', async () => {
+              let runSha;
+              try {
+                runSha = await firstRunSha(pr);
+              } catch (e) {
+                if (e instanceof BudgetExhausted) throw e;
+                core.warning(`ci_passed_first_run: workflow runs unavailable (${e.message}); using the PR's oldest commits`);
+              }
+              const shas = runSha ? [runSha] : commits.slice(0, 20).map((c) => c.sha);
+              for (const sha of shas) {
+                const results = await ciResults(sha);
                 if (results.length) return results.every(Boolean);
               }
               return undefined;
@@ -233,6 +306,7 @@ jobs:
               }
 
               const agentCommits = commits.filter((c) => trailer(c.commit.message, 'Agent-Session-Id'));
+              const attributed = commits.map(attribution).filter((a) => a.agent_attribution !== 'none');
               const distinct = (key) =>
                 [...new Set(agentCommits.map((c) => trailer(c.commit.message, key)).filter(Boolean))].slice(0, 50);
               const reviews = await enrich('reviews', async () => {
@@ -255,9 +329,11 @@ jobs:
                   agent_authored: agentCommits.length > 0,
                   agent_names: distinct('Agent-Name'),
                   agent_session_ids: distinct('Agent-Session-Id'),
+                  attributed_commit_count: attributed.length,
+                  attributed_agents: [...new Set(attributed.map((a) => a.attributed_agent).filter(Boolean))],
                   review_count: reviews?.length,
                   changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
-                  ci_passed_first_run: await ciPassedFirstRun(commits),
+                  ci_passed_first_run: await ciPassedFirstRun(pr, commits),
                   agent_setup_version: setupVersions.get(commits[0].sha),
                 }, pr.number);
               }

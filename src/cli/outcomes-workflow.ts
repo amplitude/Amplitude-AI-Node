@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
  * sha256 of the shipped `agent-outcomes.yml`. The Python SDK ships the same
  * bytes and pins the same hash, so CI in both repos fails if the copies drift.
  */
-export const OUTCOMES_WORKFLOW_SHA256 = 'e83f421698b935b6de1c58c3212dd9e654a08cf75585825dd8531fe2859ea262';
+export const OUTCOMES_WORKFLOW_SHA256 = 'f0a36e22c8a4d0dfdbe421f02dff5b889e304835cc42900f88a2845b3e312d69';
 
 /** Earlier shipped versions. `init` replaces an untouched copy of one without `--force`. */
 export const PREVIOUS_OUTCOMES_WORKFLOW_SHA256: readonly string[] = [
