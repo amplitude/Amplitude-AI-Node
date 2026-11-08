@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "git config --local --get core.hooksPath >/dev/null 2>&1 || git config --local core.hooksPath .githooks 2>/dev/null || true"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ],
+    "stop": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "npx --yes -p @amplitude/ai amplitude-ai hook cursor"
+      }
+    ]
+  }
+}

@@ -1,0 +1,259 @@
+{
+  "base_time": 1794000000000,
+  "spools": {
+    "00000000-0000-4000-8000-00000000c0a1": [
+      {
+        "e": "beforeSubmitPrompt",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000000000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "prompt": "Commit the fix"
+      },
+      {
+        "e": "postToolUse",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000001000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "tool": "Shell",
+        "ok": true,
+        "id": "toolu_shell_ok",
+        "ms": 413,
+        "sha": "0123456",
+        "input": {
+          "command": "git commit -m 'Fix bug'",
+          "cwd": "/repo"
+        },
+        "output": "[main 0123456] Fix bug\n 1 file changed, 1 insertion(+)\n"
+      },
+      {
+        "e": "postToolUseFailure",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000002000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "tool": "Shell",
+        "ok": false,
+        "id": "toolu_shell_fail",
+        "ms": 1530,
+        "failure": "error",
+        "input": {
+          "command": "npm test",
+          "cwd": "/repo"
+        },
+        "err": "Command failed with exit code 1"
+      },
+      {
+        "e": "postToolUse",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000003000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "tool": "Read",
+        "ok": true,
+        "id": "toolu_read",
+        "ms": 3,
+        "input": {
+          "path": "/repo/README.md"
+        },
+        "output": "{\"content\": \"# Repo\\n\"}"
+      },
+      {
+        "e": "postToolUse",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000004000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "tool": "Task",
+        "ok": true,
+        "id": "toolu_task",
+        "ms": 5200,
+        "input": {
+          "subagent_type": "explore",
+          "description": "Find tests"
+        },
+        "output": "{\"status\": \"completed\"}"
+      },
+      {
+        "e": "subagentStop",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000006000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "child": "00000000-0000-4000-8000-00000000c0a2",
+        "type": "explore"
+      },
+      {
+        "e": "afterAgentResponse",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000007000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "text": "Committed the fix; tests still fail."
+      },
+      {
+        "e": "stop",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000008000,
+        "g": "00000000-0000-4000-8000-0000000000a1",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "reason": "completed"
+      },
+      {
+        "e": "sessionEnd",
+        "c": "00000000-0000-4000-8000-00000000c0a1",
+        "t": 1794000009000,
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "reason": "user_closed"
+      }
+    ],
+    "00000000-0000-4000-8000-00000000c0a2": [
+      {
+        "e": "postToolUse",
+        "c": "00000000-0000-4000-8000-00000000c0a2",
+        "t": 1794000005000,
+        "g": "00000000-0000-4000-8000-0000000000a2",
+        "m": "claude-4.5-sonnet",
+        "root": "/repo",
+        "email": "dev@example.com",
+        "tool": "Read",
+        "ok": true,
+        "id": "toolu_child_read",
+        "ms": 2,
+        "parentTool": "toolu_task",
+        "input": {
+          "path": "/repo/test/a.test.ts"
+        },
+        "output": "{\"content\": \"test()\\n\"}"
+      },
+      {
+        "e": "subagentLink",
+        "c": "00000000-0000-4000-8000-00000000c0a2",
+        "t": 1794000006000,
+        "type": "explore",
+        "parent": "00000000-0000-4000-8000-00000000c0a1"
+      }
+    ]
+  },
+  "calls": {
+    "00000000-0000-4000-8000-00000000c0a1": [
+      {
+        "kind": "user",
+        "insert_id": "619790bc-241e-5a32-bd9c-c10e1911a577",
+        "time": 1794000000000,
+        "agent_id": "cursor",
+        "trace_id": "00000000-0000-4000-8000-0000000000a1",
+        "tool_name": null,
+        "success": null,
+        "latency_ms": 0,
+        "event_properties": {}
+      },
+      {
+        "kind": "tool",
+        "insert_id": "cbf765e8-67f9-51c2-878d-cb33cc72ce66",
+        "time": 1794000001000,
+        "agent_id": "cursor",
+        "trace_id": "00000000-0000-4000-8000-0000000000a1",
+        "tool_name": "Shell",
+        "success": true,
+        "latency_ms": 413,
+        "event_properties": {
+          "commit_sha": "0123456"
+        }
+      },
+      {
+        "kind": "tool",
+        "insert_id": "65fae5d6-dce9-5713-ab4a-80b98d177dc8",
+        "time": 1794000002000,
+        "agent_id": "cursor",
+        "trace_id": "00000000-0000-4000-8000-0000000000a1",
+        "tool_name": "Shell",
+        "success": false,
+        "latency_ms": 1530,
+        "event_properties": {
+          "cursor_failure_type": "error"
+        }
+      },
+      {
+        "kind": "tool",
+        "insert_id": "f3a81419-0177-5292-8bf5-92bdd1c63218",
+        "time": 1794000003000,
+        "agent_id": "cursor",
+        "trace_id": "00000000-0000-4000-8000-0000000000a1",
+        "tool_name": "Read",
+        "success": true,
+        "latency_ms": 3,
+        "event_properties": {}
+      },
+      {
+        "kind": "tool",
+        "insert_id": "d04f7f3c-6902-52bc-bd7b-d7ddcbedc7ba",
+        "time": 1794000004000,
+        "agent_id": "cursor",
+        "trace_id": "00000000-0000-4000-8000-0000000000a1",
+        "tool_name": "Task",
+        "success": true,
+        "latency_ms": 5200,
+        "event_properties": {}
+      },
+      {
+        "kind": "ai",
+        "insert_id": "b2cc1776-ceb6-5cfa-8b1f-d9128b1fefd6",
+        "time": 1794000007000,
+        "agent_id": "cursor",
+        "trace_id": "00000000-0000-4000-8000-0000000000a1",
+        "tool_name": null,
+        "success": null,
+        "latency_ms": 0,
+        "event_properties": {
+          "cursor_turn_duration_ms": 7000
+        }
+      },
+      {
+        "kind": "session_end",
+        "insert_id": "a5cdc448-2d2b-5098-9890-b89fcdb3dbdd",
+        "time": 1794000009000,
+        "agent_id": "cursor",
+        "trace_id": null,
+        "tool_name": null,
+        "success": null,
+        "latency_ms": 0,
+        "event_properties": {}
+      }
+    ],
+    "00000000-0000-4000-8000-00000000c0a2": [
+      {
+        "kind": "tool",
+        "insert_id": "a8cfe843-9487-56f1-ae43-966473d1ab27",
+        "time": 1794000005000,
+        "agent_id": "cursor/explore",
+        "trace_id": "00000000-0000-4000-8000-0000000000a2",
+        "tool_name": "Read",
+        "success": true,
+        "latency_ms": 2,
+        "event_properties": {
+          "cursor_parent_conversation_id": "00000000-0000-4000-8000-00000000c0a1"
+        }
+      }
+    ]
+  }
+}

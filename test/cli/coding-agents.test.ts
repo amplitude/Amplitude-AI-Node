@@ -5,15 +5,25 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CODEX_STOP_COMMAND,
+  CURSOR_HOOK_COMMAND,
+  CURSOR_HOOK_EVENTS,
+  copilotShellFunction,
   ensurePrepareScript,
   runCodingAgentsDoctor,
   runCodingAgentsInit,
 } from '../../src/cli/coding-agents.js';
 import { runDoctor } from '../../src/cli/doctor.js';
+import {
+  OUTCOMES_WORKFLOW_SHA256,
+  outcomesWorkflowState,
+  sha256Hex,
+} from '../../src/cli/outcomes-workflow.js';
 import { parseLocalEnv } from '../../src/cli/hook-codex.js';
 
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
+const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
+const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
 
@@ -41,9 +51,21 @@ const readJson = (rel: string) => JSON.parse(readFileSync(join(repo, rel), 'utf8
 
 describe('coding-agents templates', () => {
   it.skipIf(!existsSync(SHARED))('match the shared AA-152843 artifacts byte for byte', () => {
-    for (const name of ['prepare-commit-msg', 'agent-outcomes.yml', 'claude-settings.json', 'codex-hooks.json']) {
+    for (const name of ['prepare-commit-msg', 'claude-settings.json', 'codex-hooks.json', 'cursor-hooks.json']) {
       expect(template(name), name).toBe(readFileSync(join(SHARED, name), 'utf8'));
     }
+  });
+
+  it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
+    expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
+    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v2');
+  });
+
+  it('lists the v1 workflow as a previous version', () => {
+    expect(outcomesWorkflowState(readFileSync(V1_WORKFLOW))).toBe('outdated');
+    expect(outcomesWorkflowState(template('agent-outcomes.yml'))).toBe('current');
+    expect(outcomesWorkflowState(`${template('agent-outcomes.yml')}# mine\n`)).toBe('customized');
+    expect(outcomesWorkflowState(null)).toBe('missing');
   });
 });
 
@@ -225,6 +247,13 @@ describe('coding-agents init', () => {
     expect(init({ harnesses: ['goose'] }).region).toBe('us');
   });
 
+  it('keeps the EU region from the committed Gemini CLI endpoint on a fresh clone', () => {
+    init({ harnesses: ['gemini'], region: 'eu' });
+    rmSync(join(repo, '.amplitude-ai'), { recursive: true });
+    expect(init({ harnesses: ['gemini'] }).region).toBe('eu');
+    expect(readJson('.gemini/settings.json').telemetry.otlpEndpoint).toContain('api.eu.amplitude.com');
+  });
+
   it('prints a goose env block with a key placeholder only', () => {
     const result = init({ harnesses: ['goose'], apiKey: SECRET });
     const goose = result.instructions.find((l) => l.startsWith('goose'))!;
@@ -243,6 +272,239 @@ describe('coding-agents init', () => {
     expect(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8')).toBe(
       '# mine\nOTHER=1\nAMPLITUDE_SERVER_ZONE=EU\nAMPLITUDE_AI_CONTENT_MODE=full\n',
     );
+  });
+
+  it('upgrades an untouched v1 outcomes workflow without --force', () => {
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, WORKFLOW), readFileSync(V1_WORKFLOW));
+    const result = init({ harnesses: ['goose'] });
+    const change = result.changes.find((c) => c.path === WORKFLOW)!;
+    expect(change.action).toBe('update');
+    expect(change.detail).toContain('upgraded from an earlier shipped version');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
+    expect(result.warnings.join('\n')).not.toContain(WORKFLOW);
+  });
+
+  it('treats a CRLF checkout of a shipped workflow as untouched', () => {
+    const crlf = (text: string) => text.replace(/\n/g, '\r\n');
+    expect(outcomesWorkflowState(crlf(template('agent-outcomes.yml')))).toBe('current');
+    expect(outcomesWorkflowState(crlf(readFileSync(V1_WORKFLOW, 'utf8')))).toBe('outdated');
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, WORKFLOW), crlf(template('agent-outcomes.yml')));
+    expect(init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('unchanged');
+    writeFileSync(join(repo, WORKFLOW), crlf(readFileSync(V1_WORKFLOW, 'utf8')));
+    expect(init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('update');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
+  });
+
+  it('leaves a customized outcomes workflow alone without --force', () => {
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    const custom = `${readFileSync(V1_WORKFLOW, 'utf8')}# local edit\n`;
+    writeFileSync(join(repo, WORKFLOW), custom);
+    const result = init({ harnesses: ['goose'] });
+    expect(result.changes.find((c) => c.path === WORKFLOW)!.action).toBe('conflict');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(custom);
+    expect(init({ harnesses: ['goose'], force: true }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('update');
+  });
+
+  it('merges Gemini CLI telemetry into .gemini/settings.json and keeps the key in local.env', () => {
+    mkdirSync(join(repo, '.gemini'), { recursive: true });
+    writeFileSync(
+      join(repo, '.gemini/settings.json'),
+      JSON.stringify({ model: { name: 'gemini-2.5-pro' }, telemetry: { useCollector: false } }),
+    );
+    const result = init({ harnesses: ['gemini'], apiKey: SECRET });
+    expect(result.ok).toBe(true);
+    expect(readJson('.gemini/settings.json')).toEqual({
+      model: { name: 'gemini-2.5-pro' },
+      telemetry: {
+        useCollector: false,
+        enabled: true,
+        target: 'local',
+        otlpEndpoint: 'https://api.amplitude.com/otlp',
+        otlpProtocol: 'http',
+        logPrompts: true,
+      },
+    });
+    expect(readFileSync(join(repo, '.gemini/settings.json'), 'utf8')).not.toContain(SECRET);
+    const local = parseLocalEnv(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8'));
+    expect(local.GEMINI_TELEMETRY_OTLP_HEADERS).toBe(`Authorization=Bearer%20${SECRET}`);
+    expect(local.OTEL_RESOURCE_ATTRIBUTES).toBe('enduser.id=dev@example.com');
+    expect(statSync(join(repo, '.amplitude-ai/local.env')).mode & 0o777).toBe(0o600);
+    expect(git('check-ignore', '.amplitude-ai/local.env')).toBe('.amplitude-ai/local.env');
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(result.instructions.join('\n')).toContain('set -a; . ./.amplitude-ai/local.env; set +a');
+
+    const again = init({ harnesses: ['gemini'], apiKey: SECRET });
+    expect(again.changes.filter((c) => c.action !== 'unchanged')).toEqual([]);
+  });
+
+  it('applies metadata privacy and the EU host to Gemini CLI, and prints the header export without a key', () => {
+    const result = init({ harnesses: ['gemini'], privacy: 'metadata', region: 'eu' });
+    expect(readJson('.gemini/settings.json').telemetry).toMatchObject({
+      otlpEndpoint: 'https://api.eu.amplitude.com/otlp',
+      logPrompts: false,
+    });
+    expect(result.instructions.join('\n')).toContain(
+      'export GEMINI_TELEMETRY_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>"',
+    );
+  });
+
+  it('leaves Gemini CLI telemetry pointed elsewhere alone without --force', () => {
+    mkdirSync(join(repo, '.gemini'), { recursive: true });
+    const theirs = { telemetry: { enabled: true, otlpEndpoint: 'http://localhost:4317' } };
+    writeFileSync(join(repo, '.gemini/settings.json'), JSON.stringify(theirs));
+    const result = init({ harnesses: ['gemini'] });
+    expect(result.ok).toBe(false);
+    expect(result.changes.find((c) => c.path === '.gemini/settings.json')!.action).toBe('conflict');
+    expect(readJson('.gemini/settings.json')).toEqual(theirs);
+    init({ harnesses: ['gemini'], force: true });
+    expect(readJson('.gemini/settings.json').telemetry.otlpEndpoint).toBe('https://api.amplitude.com/otlp');
+  });
+
+  it('prints the Copilot CLI and VS Code settings with a key placeholder and writes no Copilot file', () => {
+    const result = init({ harnesses: ['copilot'], apiKey: SECRET, region: 'eu' });
+    const text = result.instructions.join('\n');
+    expect(text).toContain('copilot() {');
+    expect(text).not.toMatch(/^\s*export OTEL_/m);
+    expect(text).toContain('OTEL_EXPORTER_OTLP_ENDPOINT=https://api.eu.amplitude.com/otlp');
+    expect(text).toContain('OTEL_RESOURCE_ATTRIBUTES="enduser.id=dev@example.com"');
+    expect(text).toContain('OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
+    expect(text).toContain('"github.copilot.chat.otel.otlpEndpoint": "https://api.eu.amplitude.com/otlp"');
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(result.changes.some((c) => c.path.includes('copilot') || c.path === '.amplitude-ai/local.env')).toBe(false);
+    expect(init({ harnesses: ['copilot'], privacy: 'metadata' }).instructions.join('\n')).not.toContain(
+      'CAPTURE_MESSAGE_CONTENT',
+    );
+  });
+
+  it('scopes the Copilot variables to one copilot run and reads the key from local.env', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'aa-copilot-bin-'));
+    try {
+      writeFileSync(join(bin, 'copilot'), '#!/bin/sh\nenv | grep -E "^(COPILOT|OTEL)_" | sort\n', { mode: 0o755 });
+      mkdirSync(join(repo, '.amplitude-ai'), { recursive: true });
+      writeFileSync(join(repo, '.amplitude-ai/local.env'), `AMPLITUDE_AI_API_KEY=${SECRET}\n`);
+      const fn = copilotShellFunction('https://api.amplitude.com/otlp', 'dev@example.com', 'full').join('\n');
+      const run = spawnSync('bash', ['-c', `${fn}\ncopilot --version; echo "after:\${OTEL_EXPORTER_OTLP_ENDPOINT:-unset}"`], {
+        cwd: repo,
+        env: { PATH: `${bin}:${process.env.PATH}`, HOME: repo },
+        encoding: 'utf8',
+      });
+      expect(run.stdout).toContain('COPILOT_OTEL_ENABLED=true');
+      expect(run.stdout).toContain(`OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20${SECRET}`);
+      expect(run.stdout).toContain('OTEL_RESOURCE_ATTRIBUTES=enduser.id=dev@example.com');
+      expect(run.stdout).toContain('after:unset');
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it('adds Cursor, Gemini CLI and Copilot to the default harnesses only when the repo uses them', () => {
+    expect(init({ dryRun: true }).harnesses).toEqual(['claude-code', 'codex', 'goose']);
+    writeFileSync(join(repo, '.cursorrules'), '# rules\n');
+    writeFileSync(join(repo, 'GEMINI.md'), '# notes\n');
+    mkdirSync(join(repo, '.github'), { recursive: true });
+    writeFileSync(join(repo, '.github/copilot-instructions.md'), '# notes\n');
+    expect(init({ dryRun: true }).harnesses).toEqual(['claude-code', 'codex', 'goose', 'cursor', 'gemini', 'copilot']);
+  });
+
+  it('merges the Cursor hooks into .cursor/hooks.json, keeps user hooks, and keeps the key in local.env', () => {
+    mkdirSync(join(repo, '.cursor'), { recursive: true });
+    const mine = { command: './scripts/audit.sh' };
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [mine] } }));
+    const result = init({ harnesses: ['cursor'], apiKey: SECRET, region: 'eu', privacy: 'metadata' });
+    expect(result.ok).toBe(true);
+    const hooks = readJson('.cursor/hooks.json').hooks;
+    expect(hooks.stop).toEqual([mine, { command: CURSOR_HOOK_COMMAND }]);
+    for (const event of CURSOR_HOOK_EVENTS) expect(hooks[event], event).toContainEqual({ command: CURSOR_HOOK_COMMAND });
+    expect(readFileSync(join(repo, '.cursor/hooks.json'), 'utf8')).not.toContain(SECRET);
+    const local = parseLocalEnv(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8'));
+    expect(local).toMatchObject({
+      AMPLITUDE_AI_API_KEY: SECRET,
+      AMPLITUDE_SERVER_ZONE: 'EU',
+      AMPLITUDE_AI_CONTENT_MODE: 'metadata_only',
+    });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(result.warnings.join('\n')).toContain('npx');
+    expect(init({ harnesses: ['cursor'], apiKey: SECRET, region: 'eu', privacy: 'metadata' }).changes.filter((c) => c.action !== 'unchanged')).toEqual([]);
+  });
+
+  it('points the Cursor hooks at node_modules/.bin when the repo depends on @amplitude/ai', () => {
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ devDependencies: { '@amplitude/ai': '^0.28.0' } }));
+    const result = init({ harnesses: ['cursor'], platform: 'linux' });
+    expect(readJson('.cursor/hooks.json').hooks.postToolUse).toEqual([
+      { command: 'node_modules/.bin/amplitude-ai hook cursor' },
+    ]);
+    expect(result.warnings.join('\n')).not.toContain('npx');
+    // Re-running with the npx launcher does not add a second forwarder.
+    rmSync(join(repo, 'package.json'));
+    init({ harnesses: ['cursor'], platform: 'linux' });
+    expect(readJson('.cursor/hooks.json').hooks.postToolUse).toEqual([
+      { command: 'node_modules/.bin/amplitude-ai hook cursor' },
+    ]);
+  });
+
+  it('keeps npx when @amplitude/ai is installed but not declared, or on Windows', () => {
+    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules/.bin/amplitude-ai'), '#!/bin/sh\n');
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ dependencies: { other: '1.0.0' } }));
+    init({ harnesses: ['cursor'], platform: 'linux' });
+    expect(readJson('.cursor/hooks.json').hooks.stop).toEqual([{ command: CURSOR_HOOK_COMMAND }]);
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ dependencies: { '@amplitude/ai': '^0.28.0' } }));
+    const windows = init({ harnesses: ['cursor'], platform: 'win32' });
+    expect(readJson('.cursor/hooks.json').hooks.stop).toEqual([{ command: CURSOR_HOOK_COMMAND }]);
+    expect(windows.warnings.join('\n')).toContain('On Windows the hooks stay on npx');
+  });
+
+  it("counts the Python SDK's Windows venv launcher as the forwarder", () => {
+    mkdirSync(join(repo, '.cursor'), { recursive: true });
+    const windows = { command: '.venv\\Scripts\\amplitude-ai.exe hook cursor' };
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [windows] } }));
+    init({ harnesses: ['cursor'] });
+    expect(readJson('.cursor/hooks.json').hooks.stop).toEqual([windows]);
+  });
+
+  it('switches the npx and PATH launchers to node_modules/.bin once it exists, and keeps a custom one', () => {
+    init({ harnesses: ['cursor'] });
+    const hooks = readJson('.cursor/hooks.json');
+    hooks.hooks.stop = [{ command: 'amplitude-ai hook cursor', timeout: 30 }];
+    hooks.hooks.sessionEnd = [{ command: '/opt/bin/amplitude-ai hook cursor' }];
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify(hooks));
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ devDependencies: { '@amplitude/ai': '^0.28.0' } }));
+    init({ harnesses: ['cursor'], platform: 'darwin' });
+    const after = readJson('.cursor/hooks.json').hooks;
+    expect(after.postToolUse).toEqual([{ command: 'node_modules/.bin/amplitude-ai hook cursor' }]);
+    expect(after.stop).toEqual([{ command: 'node_modules/.bin/amplitude-ai hook cursor', timeout: 30 }]);
+    expect(after.sessionEnd).toEqual([{ command: '/opt/bin/amplitude-ai hook cursor' }]);
+  });
+
+  it('leaves an invalid .cursor/hooks.json untouched', () => {
+    mkdirSync(join(repo, '.cursor'), { recursive: true });
+    writeFileSync(join(repo, '.cursor/hooks.json'), '{ nope');
+    const result = init({ harnesses: ['cursor'] });
+    expect(readFileSync(join(repo, '.cursor/hooks.json'), 'utf8')).toBe('{ nope');
+    expect(result.warnings.join('\n')).toContain('.cursor/hooks.json is not valid JSON');
+  });
+
+  it.each([
+    [{ CLAUDE_CODE_SESSION_ID: 's1' }, ['Agent-Session-Id: s1', 'Agent-Name: claude-code']],
+    [{ CODEX_THREAD_ID: 't1' }, ['Agent-Session-Id: t1', 'Agent-Name: codex']],
+    [{ AGENT_SESSION_ID: 'g1' }, ['Agent-Session-Id: g1', 'Agent-Name: goose']],
+    [{ CURSOR_AGENT: '1', CURSOR_CONVERSATION_ID: 'c1' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
+    [{ GEMINI_CLI: '1' }, ['Agent-Name: gemini-cli']],
+    [{}, []],
+  ])('the commit hook stamps %o', (env, trailers) => {
+    const msg = join(repo, 'MSG');
+    writeFileSync(msg, 'feat: x\n');
+    const r = spawnSync('sh', [join(TEMPLATES, 'prepare-commit-msg'), msg], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: home, ...env },
+    });
+    expect(r.status).toBe(0);
+    const text = readFileSync(msg, 'utf8');
+    expect(text.trim().split('\n').slice(2)).toEqual(trailers);
+    expect(text).not.toContain('Agent-Session-Id: \n');
   });
 
   it('chains onto an existing prepare script', () => {
@@ -270,6 +532,74 @@ describe('coding-agents doctor', () => {
     const after = runCodingAgentsDoctor(repo, { env: {}, home });
     expect(after.ok).toBe(true);
     expect(JSON.stringify(after)).not.toContain(SECRET);
+  });
+
+  it.each([
+    ['current', null, true, false],
+    ['outdated', 'v1', true, true],
+    ['customized', 'custom', true, false],
+    ['missing', 'missing', false, true],
+  ] as const)('reports a %s outcomes workflow', (state, setup, ok, hasFix) => {
+    init({ harnesses: ['goose'] });
+    if (setup === 'v1') writeFileSync(join(repo, WORKFLOW), readFileSync(V1_WORKFLOW));
+    if (setup === 'custom') writeFileSync(join(repo, WORKFLOW), '# mine\n');
+    if (setup === 'missing') rmSync(join(repo, WORKFLOW));
+    const check = runCodingAgentsDoctor(repo, { env: {}, home }).checks.find(
+      (c) => c.name === 'coding_agents.outcomes_workflow',
+    )!;
+    expect(check.detail.startsWith(state)).toBe(true);
+    expect(check.ok).toBe(ok);
+    expect(Boolean(check.fix)).toBe(hasFix);
+  });
+
+  it('checks the Cursor hooks, the hook command, the key and the spool', () => {
+    init({ harnesses: ['cursor'] });
+    const byName = () => Object.fromEntries(runCodingAgentsDoctor(repo, { env: {}, home }).checks.map((c) => [c.name, c]));
+    expect(byName()['coding_agents.cursor_hooks']!.ok).toBe(true);
+    expect(byName()['coding_agents.cursor_hook_command']!.detail).toMatch(/^npx /);
+    expect(byName()['coding_agents.cursor_api_key']!.ok).toBe(false);
+    expect(byName()['coding_agents.cursor_spool']).toMatchObject({ ok: true, detail: 'no conversations waiting to send' });
+    mkdirSync(join(home, '.amplitude-ai/cursor'), { recursive: true });
+    writeFileSync(join(home, '.amplitude-ai/cursor/c1.ndjson'), '{}\n');
+    expect(byName()['coding_agents.cursor_spool']!.detail).toBe('1 conversation(s) waiting for stop or sessionEnd');
+    writeFileSync(join(home, '.amplitude-ai/cursor/c1.1700000000000.flushing'), '{}\n');
+    writeFileSync(join(home, '.amplitude-ai/cursor/c2.1700000000000.flushing'), '{}\n');
+    expect(byName()['coding_agents.cursor_spool']!.detail).toBe('2 conversation(s) waiting for stop or sessionEnd');
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [{ command: CURSOR_HOOK_COMMAND }] } }));
+    const hooks = byName()['coding_agents.cursor_hooks']!;
+    expect(hooks.ok).toBe(false);
+    expect(hooks.detail).toContain('beforeSubmitPrompt');
+    init({ harnesses: ['cursor'], apiKey: SECRET });
+    expect(byName()['coding_agents.cursor_api_key']!.ok).toBe(true);
+  });
+
+  it('checks the Gemini CLI export and its header', () => {
+    init({ harnesses: ['gemini'] });
+    const byName = (env: NodeJS.ProcessEnv) =>
+      Object.fromEntries(runCodingAgentsDoctor(repo, { env, home }).checks.map((c) => [c.name, c]));
+    expect(byName({})['coding_agents.gemini_otlp']!.ok).toBe(true);
+    expect(byName({})['coding_agents.gemini_api_key']!.ok).toBe(false);
+    expect(byName({ GEMINI_TELEMETRY_OTLP_HEADERS: 'Authorization=Bearer%20k' })['coding_agents.gemini_api_key']!.ok).toBe(
+      true,
+    );
+    init({ harnesses: ['gemini'], apiKey: SECRET });
+    expect(byName({})['coding_agents.gemini_api_key']!.ok).toBe(true);
+    writeFileSync(join(repo, '.gemini/settings.json'), JSON.stringify({ telemetry: { enabled: false } }));
+    expect(byName({})['coding_agents.gemini_otlp']).toMatchObject({ ok: false });
+  });
+
+  it('checks the Copilot environment only where Copilot telemetry is turned on', () => {
+    init({ harnesses: ['goose'] });
+    const check = (env: NodeJS.ProcessEnv) =>
+      runCodingAgentsDoctor(repo, { env, home }).checks.find((c) => c.name === 'coding_agents.copilot_otlp');
+    expect(check({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' })).toBeUndefined();
+    mkdirSync(join(repo, '.github'), { recursive: true });
+    writeFileSync(join(repo, '.github/copilot-instructions.md'), '# notes\n');
+    expect(check({})).toMatchObject({ ok: true, detail: expect.stringContaining('copilot() function') });
+    expect(check({ COPILOT_OTEL_ENABLED: 'true', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' })!.ok).toBe(false);
+    const on = { COPILOT_OTEL_ENABLED: 'true', OTEL_EXPORTER_OTLP_ENDPOINT: 'https://api.amplitude.com/otlp' };
+    expect(check(on)!.ok).toBe(false);
+    expect(check({ ...on, OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer%20k' })!.ok).toBe(true);
   });
 
   it('is added to amplitude-ai doctor only once init has run', () => {

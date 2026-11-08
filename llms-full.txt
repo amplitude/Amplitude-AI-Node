@@ -438,7 +438,7 @@ with code examples for every step. Read this for guided instrumentation.
 - `amplitude-ai mcp` — Start the MCP server for AI coding agents
 - `amplitude-ai doctor [--json] [--no-mock-check]` — Validate environment and event pipeline
 - `amplitude-ai status [--json]` — Show SDK version, installed providers, and env config
-- `amplitude-ai coding-agents init [--harness claude-code|codex|goose] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]` — Wire coding-agent sessions and commit outcomes into a repo
+- `amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]` — Wire coding-agent sessions and commit outcomes into a repo
 - `amplitude-ai coding-agents doctor [--dir PATH] [--json]` — Check that setup
 - `amplitude-ai hook codex [--dry-run]` — Codex `Stop` hook: forward the finished turn (reads hook JSON on stdin, always exits 0)
 - `amplitude-ai --help` / `amplitude-ai --version`

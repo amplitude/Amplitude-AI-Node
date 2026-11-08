@@ -1,6 +1,7 @@
 /**
- * `amplitude-ai coding-agents init|doctor`: wire Claude Code, Codex and goose
- * sessions into Amplitude and stamp agent commits for code outcomes.
+ * `amplitude-ai coding-agents init|doctor`: wire Claude Code, Codex, goose,
+ * Cursor, Gemini CLI and GitHub Copilot sessions into Amplitude and stamp agent
+ * commits for code outcomes.
  *
  * Committed files never contain secrets. The API key goes only to the
  * gitignored `.claude/settings.local.json` and `.amplitude-ai/local.env`
@@ -21,10 +22,27 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOCAL_ENV_PATH, codexHookDir, findLocalEnv, parseLocalEnv } from './hook-codex.js';
+import { codexHookDir } from './hook-codex.js';
+import { cursorSpoolDir, pendingConversations } from './hook-cursor.js';
+import { LOCAL_ENV_PATH, findLocalEnv, parseLocalEnv } from './local-env.js';
+import {
+  type OutcomesWorkflowState,
+  PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
+  outcomesWorkflowState,
+  lfSha256Hex,
+} from './outcomes-workflow.js';
 
-export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose';
-export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
+export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose' | 'cursor' | 'gemini' | 'copilot';
+export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = [
+  'claude-code',
+  'codex',
+  'goose',
+  'cursor',
+  'gemini',
+  'copilot',
+];
+/** Set up when no `--harness` is given. Cursor, Gemini CLI and Copilot join when the repo already has their files. */
+const DEFAULT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
 
 export const HOOKS_PATH = '.githooks';
 export const PREPARE_COMMIT_MSG_PATH = '.githooks/prepare-commit-msg';
@@ -32,6 +50,8 @@ export const OUTCOMES_WORKFLOW_PATH = '.github/workflows/agent-outcomes.yml';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const CLAUDE_LOCAL_SETTINGS_PATH = '.claude/settings.local.json';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
+export const GEMINI_SETTINGS_PATH = '.gemini/settings.json';
+export const CURSOR_HOOKS_PATH = '.cursor/hooks.json';
 export const HOOKS_PATH_COMMAND = `git config core.hooksPath ${HOOKS_PATH}`;
 export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
 /**
@@ -41,9 +61,45 @@ export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
 export const CODEX_STOP_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook codex';
 /** Any Stop command ending in this (Node `npx` form, Python CLI, `uv run`, ...) is the same forwarder. */
 const PYTHON_CODEX_STOP_COMMAND = 'amplitude-ai hook codex';
+/** The Cursor hook command in `cursor-hooks.json`; any command ending in `amplitude-ai hook cursor` is the same forwarder. */
+export const CURSOR_HOOK_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook cursor';
+const CURSOR_HOOK_SUFFIX = 'amplitude-ai hook cursor';
+/** Project hooks run from the repo root, so this skips npx's startup on every hook when the repo depends on @amplitude/ai. */
+const CURSOR_LOCAL_BIN = 'node_modules/.bin/amplitude-ai';
+
+/**
+ * The committed hooks call the local bin only when `package.json` declares `@amplitude/ai`, so every
+ * teammate's install has it. On Windows the bin is a shell script Cursor's shell can't run.
+ */
+export function cursorUsesLocalBin(cwd: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === 'win32') return false;
+  const pkg = readJsonFile(join(cwd, 'package.json'));
+  if (!pkg.ok || pkg.value === null) return false;
+  const declared = (field: string) => {
+    const deps = pkg.value?.[field];
+    return typeof deps === 'object' && deps !== null && '@amplitude/ai' in deps;
+  };
+  return declared('dependencies') || declared('devDependencies');
+}
+/** The events `cursor-hooks.json` forwards; doctor expects every one. */
+export const CURSOR_HOOK_EVENTS = [
+  'beforeSubmitPrompt',
+  'afterAgentResponse',
+  'postToolUse',
+  'postToolUseFailure',
+  'subagentStop',
+  'stop',
+  'sessionEnd',
+] as const;
 
 const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_TOOL_DETAILS'];
 const GOOSE_TRACES_PATH = '/otlp/v1/traces';
+/** OTLP base URL path: Gemini CLI and Copilot append `/v1/traces`, `/v1/logs` and `/v1/metrics` themselves. */
+const OTLP_BASE_PATH = '/otlp';
+/** Repo files that mean the harness is in use, so `init` without `--harness` sets it up. */
+const GEMINI_MARKERS = ['.gemini', 'GEMINI.md'];
+const COPILOT_MARKERS = ['.github/copilot-instructions.md', '.github/hooks'];
+const CURSOR_MARKERS = ['.cursor', '.cursorrules'];
 
 export type CodingAgentsPrivacy = 'full' | 'metadata';
 export type CodingAgentsRegion = 'us' | 'eu';
@@ -63,6 +119,8 @@ export type CodingAgentsInitOptions = {
   env?: NodeJS.ProcessEnv;
   templatesDir?: string;
   git?: GitRunner;
+  /** Defaults to `process.platform`; `win32` keeps the Cursor hooks on npx. */
+  platform?: NodeJS.Platform;
 };
 
 export type CodingAgentsChange = {
@@ -134,6 +192,41 @@ export function claudeSettingsEnv(
   return env;
 }
 
+/** The `telemetry` block init merges into `.gemini/settings.json`. Gemini CLI reads its header from the environment. */
+export function geminiTelemetrySettings(privacy: CodingAgentsPrivacy, region: CodingAgentsRegion): JsonObject {
+  return {
+    enabled: true,
+    target: 'local',
+    otlpEndpoint: `https://${amplitudeHost(region)}${OTLP_BASE_PATH}`,
+    otlpProtocol: 'http',
+    logPrompts: privacy === 'full',
+  };
+}
+
+/** The Copilot CLI wrapper `init` prints: telemetry variables scoped to one `copilot` run. */
+export function copilotShellFunction(endpoint: string, enduser: string, privacy: CodingAgentsPrivacy): string[] {
+  return [
+    'copilot() {',
+    `  local key="\${AMPLITUDE_AI_API_KEY:-$(sed -n 's/^AMPLITUDE_AI_API_KEY=//p' "$(git rev-parse --show-toplevel 2>/dev/null)/${LOCAL_ENV_PATH}" 2>/dev/null)}"`,
+    '  COPILOT_OTEL_ENABLED=true \\',
+    `  OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint} \\`,
+    '  OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$key" \\',
+    `  OTEL_RESOURCE_ATTRIBUTES="enduser.id=${enduser}" \\`,
+    ...(privacy === 'full' ? ['  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \\'] : []),
+    '  command copilot "$@"',
+    '}',
+  ];
+}
+
+/** `init` with no `--harness`: the defaults, plus Cursor, Gemini CLI and Copilot when the repo already uses them. */
+export function defaultCodingAgentHarnesses(cwd: string): CodingAgentHarness[] {
+  const out = [...DEFAULT_HARNESSES];
+  if (CURSOR_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('cursor');
+  if (GEMINI_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('gemini');
+  if (COPILOT_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('copilot');
+  return out;
+}
+
 function readJsonFile(path: string): { ok: true; value: JsonObject | null } | { ok: false; error: string } {
   if (!existsSync(path)) return { ok: true, value: null };
   try {
@@ -173,6 +266,47 @@ function mergeHooks(target: JsonObject, templateHooks: JsonObject): string[] {
   }
   target.hooks = hooks;
   return added;
+}
+
+/** Commands in Cursor's flat hook entries (`[{ "command": ... }]`). */
+function cursorHookCommands(entries: unknown): string[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter(isObject).flatMap((e) => (typeof e.command === 'string' ? [e.command] : []));
+}
+
+const isCursorForwarder = (command: string) => /amplitude-ai(?:\.exe)? hook cursor$/.test(command.trim());
+
+/** Launchers init writes when no local binary exists; a later init with one replaces them. */
+const CURSOR_FALLBACK_COMMANDS = [CURSOR_HOOK_COMMAND, CURSOR_HOOK_SUFFIX];
+
+/**
+ * Adds each template hook whose command is not already present; any launcher of the forwarder counts as present.
+ * A fallback launcher is switched to the template's local binary, and any other launcher is kept.
+ */
+function mergeCursorHooks(target: JsonObject, templateHooks: JsonObject): void {
+  const hooks = isObject(target.hooks) ? target.hooks : {};
+  for (const [event, entries] of Object.entries(templateHooks)) {
+    if (!Array.isArray(entries)) continue;
+    const preferred = cursorHookCommands(entries).find(isCursorForwarder);
+    const existing = (Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : []).map((e) =>
+      preferred &&
+      !CURSOR_FALLBACK_COMMANDS.includes(preferred) &&
+      isObject(e) &&
+      typeof e.command === 'string' &&
+      CURSOR_FALLBACK_COMMANDS.includes(e.command.trim())
+        ? { ...e, command: preferred }
+        : e,
+    );
+    const present = cursorHookCommands(existing);
+    const missing = entries.filter((entry) =>
+      cursorHookCommands([entry]).some(
+        (c) => !present.includes(c) && !(isCursorForwarder(c) && present.some(isCursorForwarder)),
+      ),
+    );
+    if (missing.length > 0 || Array.isArray(hooks[event])) hooks[event] = [...existing, ...missing];
+  }
+  if (target.version === undefined) target.version = 1;
+  target.hooks = hooks;
 }
 
 function stringify(value: unknown): string {
@@ -243,7 +377,7 @@ class Writer {
 
 const isRegion = (v: string | undefined): v is CodingAgentsRegion => v === 'us' || v === 'eu';
 
-/** The region a previous `init` set up, from `.amplitude-ai/local.env` or the Claude Code endpoint. */
+/** The region a previous `init` set up, from `.amplitude-ai/local.env` or the Claude Code or Gemini CLI endpoint. */
 export function existingCodingAgentsRegion(cwd: string): CodingAgentsRegion | null {
   const localEnvPath = join(cwd, LOCAL_ENV_PATH);
   if (existsSync(localEnvPath)) {
@@ -257,7 +391,9 @@ export function existingCodingAgentsRegion(cwd: string): CodingAgentsRegion | nu
   }
   const settings = readJsonFile(join(cwd, CLAUDE_SETTINGS_PATH));
   const env = settings.ok && settings.value && isObject(settings.value.env) ? settings.value.env : {};
-  for (const value of Object.values(env)) {
+  const gemini = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
+  const telemetry = gemini.ok && gemini.value && isObject(gemini.value.telemetry) ? gemini.value.telemetry : {};
+  for (const value of [...Object.values(env), telemetry.otlpEndpoint]) {
     if (typeof value !== 'string') continue;
     if (value.includes(`//${amplitudeHost('eu')}/`)) return 'eu';
     if (value.includes(`//${amplitudeHost('us')}/`)) return 'us';
@@ -286,9 +422,19 @@ function writeTemplateFile(
   force: boolean,
   warnings: string[],
   detail: string,
+  previousHashes: readonly string[] = [],
 ): void {
   const path = join(cwd, rel);
-  if (existsSync(path) && readFileSync(path, 'utf8') !== content && !force) {
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  if (existing !== null && existing !== content && mode === undefined && existing.replace(/\r\n/g, '\n') === content) {
+    writer.changes.push({ path: rel, action: 'unchanged', detail: 'matches the template apart from CRLF line endings' });
+    return;
+  }
+  if (existing !== null && existing !== content && previousHashes.includes(lfSha256Hex(existing))) {
+    writer.write(rel, content, `${detail} (upgraded from an earlier shipped version)`, mode);
+    return;
+  }
+  if (existing !== null && existing !== content && !force) {
     writer.conflict(rel, 'exists with different content (re-run with --force to replace)');
     warnings.push(`${rel} already exists and differs from the template; left as is. Use --force to replace it.`);
     return;
@@ -299,7 +445,7 @@ function writeTemplateFile(
 export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAgentsInitResult {
   const cwd = resolve(options.cwd);
   const env = options.env ?? process.env;
-  const harnesses = options.harnesses?.length ? [...new Set(options.harnesses)] : [...CODING_AGENT_HARNESSES];
+  const harnesses = options.harnesses?.length ? [...new Set(options.harnesses)] : defaultCodingAgentHarnesses(cwd);
   const privacy = options.privacy ?? 'full';
   const envRegion = (env.AMPLITUDE_REGION ?? '').toLowerCase();
   const region = options.region ?? (isRegion(envRegion) ? envRegion : (existingCodingAgentsRegion(cwd) ?? 'us'));
@@ -333,7 +479,8 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     undefined,
     force,
     warnings,
-    'sends Commit Merged / Commit Reverted / Deploy Succeeded',
+    'sends Commit Merged / Commit Reverted / Pull Request Merged / Deploy Succeeded / Deploy Failed',
+    PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
   );
 
   let hooksPathOk = true;
@@ -382,6 +529,12 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       }
     }
   }
+
+  const localEnvPath = join(cwd, LOCAL_ENV_PATH);
+  const existingLocalEnvText = existsSync(localEnvPath) ? readFileSync(localEnvPath, 'utf8') : '';
+  const existingLocalEnv = parseLocalEnv(existingLocalEnvText);
+  const localEnvUpdates: Record<string, string> = {};
+  const localEnvUses: string[] = [];
 
   if (harnesses.includes('claude-code')) {
     const template = JSON.parse(readCodingAgentsTemplate('claude-settings.json', templatesDir)) as JsonObject;
@@ -442,26 +595,56 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       writer.write(CODEX_HOOKS_PATH, stringify(merged), 'Stop hook forwards the rollout transcript (no secrets)');
     }
 
-    const localEnvPath = join(cwd, LOCAL_ENV_PATH);
-    const existingText = existsSync(localEnvPath) ? readFileSync(localEnvPath, 'utf8') : '';
-    const updates: Record<string, string> = {
+    Object.assign(localEnvUpdates, {
       AMPLITUDE_SERVER_ZONE: region === 'eu' ? 'EU' : 'US',
       AMPLITUDE_AI_CONTENT_MODE: privacy === 'metadata' ? 'metadata_only' : 'full',
       ...(options.apiKey ? { AMPLITUDE_AI_API_KEY: options.apiKey } : {}),
-    };
-    writer.write(
-      LOCAL_ENV_PATH,
-      mergeEnvFile(existingText, updates),
-      options.apiKey ? 'API key, server zone, content mode for hook codex (gitignored)' : 'server zone and content mode for hook codex (gitignored)',
-      0o600,
-    );
-    ensureGitignored(writer, cwd, LOCAL_ENV_PATH);
-    if (!options.apiKey && !parseLocalEnv(existingText).AMPLITUDE_AI_API_KEY && !parseLocalEnv(existingText).AMPLITUDE_API_KEY) {
+    });
+    localEnvUses.push('hook codex');
+    if (!options.apiKey && !existingLocalEnv.AMPLITUDE_AI_API_KEY && !existingLocalEnv.AMPLITUDE_API_KEY) {
       instructions.push(
         `Codex: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}, or export AMPLITUDE_AI_API_KEY in the shell that starts codex.`,
       );
     }
     instructions.push('Codex: open /hooks in Codex and trust the new project hooks.');
+  }
+
+  if (harnesses.includes('cursor')) {
+    const platform = options.platform ?? process.platform;
+    const local = cursorUsesLocalBin(cwd, platform);
+    const command = local ? `${CURSOR_LOCAL_BIN} hook cursor` : CURSOR_HOOK_COMMAND;
+    const templateText = readCodingAgentsTemplate('cursor-hooks.json', templatesDir).split(CURSOR_HOOK_COMMAND).join(command);
+    const hooksFile = readJsonFile(join(cwd, CURSOR_HOOKS_PATH));
+    const detail = 'agent hooks spool events and send them when the agent stops (no secrets)';
+    if (!hooksFile.ok) {
+      writer.skip(CURSOR_HOOKS_PATH, `invalid JSON: ${hooksFile.error}`);
+      warnings.push(`${CURSOR_HOOKS_PATH} is not valid JSON; fix it and re-run.`);
+    } else if (hooksFile.value === null) {
+      writer.write(CURSOR_HOOKS_PATH, templateText, detail);
+    } else {
+      const merged: JsonObject = hooksFile.value;
+      mergeCursorHooks(merged, (JSON.parse(templateText) as JsonObject).hooks as JsonObject);
+      writer.write(CURSOR_HOOKS_PATH, stringify(merged), detail);
+    }
+    Object.assign(localEnvUpdates, {
+      AMPLITUDE_SERVER_ZONE: region === 'eu' ? 'EU' : 'US',
+      AMPLITUDE_AI_CONTENT_MODE: privacy === 'metadata' ? 'metadata_only' : 'full',
+      ...(options.apiKey ? { AMPLITUDE_AI_API_KEY: options.apiKey } : {}),
+    });
+    localEnvUses.push('hook cursor');
+    if (!local) {
+      warnings.push(
+        platform === 'win32'
+          ? 'Cursor runs the hook through npx on every prompt and tool call, which takes about a second each. On Windows the hooks stay on npx.'
+          : 'Cursor runs the hook through npx on every prompt and tool call, which takes about a second each. Add @amplitude/ai to devDependencies and re-run init to call node_modules/.bin/amplitude-ai directly.',
+      );
+    }
+    if (!options.apiKey && !existingLocalEnv.AMPLITUDE_AI_API_KEY && !existingLocalEnv.AMPLITUDE_API_KEY) {
+      instructions.push(`Cursor: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}.`);
+    }
+    instructions.push(
+      `Cursor: commit ${CURSOR_HOOKS_PATH}; Cursor runs project hooks in trusted workspaces and reloads the file on save.`,
+    );
   }
 
   if (harnesses.includes('goose')) {
@@ -473,6 +656,71 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     ];
     if (privacy === 'full') lines.push('export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
     instructions.push(`goose: add to the shell profile that starts goose:\n  ${lines.join('\n  ')}`);
+  }
+
+  if (harnesses.includes('gemini')) {
+    const settings = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
+    if (!settings.ok) {
+      writer.skip(GEMINI_SETTINGS_PATH, `invalid JSON: ${settings.error}`);
+      warnings.push(`${GEMINI_SETTINGS_PATH} is not valid JSON; fix it and re-run.`);
+    } else {
+      const merged: JsonObject = settings.value ?? {};
+      const telemetry = isObject(merged.telemetry) ? merged.telemetry : {};
+      const endpoint = typeof telemetry.otlpEndpoint === 'string' ? telemetry.otlpEndpoint : '';
+      const elsewhere = (endpoint && !endpoint.includes('amplitude.com')) || telemetry.target === 'gcp';
+      if (elsewhere && !force) {
+        writer.conflict(GEMINI_SETTINGS_PATH, `telemetry already goes to ${endpoint || 'Google Cloud'}`);
+        warnings.push(
+          `${GEMINI_SETTINGS_PATH} already sends Gemini CLI telemetry to ${endpoint || 'Google Cloud'}. Gemini CLI has one OTLP destination; re-run with --force to point it at Amplitude.`,
+        );
+      } else {
+        merged.telemetry = { ...telemetry, ...geminiTelemetrySettings(privacy, region) };
+        writer.write(GEMINI_SETTINGS_PATH, stringify(merged), 'OpenTelemetry export to Amplitude (no secrets)');
+        if (typeof telemetry.outfile === 'string' && telemetry.outfile) {
+          warnings.push(`${GEMINI_SETTINGS_PATH} sets telemetry.outfile, which Gemini CLI uses instead of OTLP; remove it.`);
+        }
+      }
+    }
+
+    const header = options.apiKey ? `Authorization=Bearer%20${encodeURIComponent(options.apiKey)}` : undefined;
+    if (header) localEnvUpdates.GEMINI_TELEMETRY_OTLP_HEADERS = header;
+    if (userId) localEnvUpdates.OTEL_RESOURCE_ATTRIBUTES = `enduser.id=${encodeResourceValue(userId)}`;
+    localEnvUses.push('Gemini CLI');
+    const hasHeader = Boolean(header || existingLocalEnv.GEMINI_TELEMETRY_OTLP_HEADERS);
+    instructions.push(
+      hasHeader
+        ? `Gemini CLI: start gemini from a shell that loads the header: set -a; . ./${LOCAL_ENV_PATH}; set +a`
+        : `Gemini CLI: export GEMINI_TELEMETRY_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>" in the shell that starts gemini (or re-run with --api-key-stdin to keep it in ${LOCAL_ENV_PATH}).`,
+      'Gemini CLI: trust this folder when gemini asks; it ignores .gemini/settings.json in untrusted folders.',
+    );
+  }
+
+  if (harnesses.includes('copilot')) {
+    const endpoint = `https://${amplitudeHost(region)}${OTLP_BASE_PATH}`;
+    const enduser = userId ? encodeResourceValue(userId) : '<your email>';
+    instructions.push(
+      `Copilot CLI: add this function to your shell profile (bash or zsh). The OTEL_* variables reach only copilot and the processes it starts, not every OpenTelemetry app in your shell; the key comes from AMPLITUDE_AI_API_KEY or the repo's ${LOCAL_ENV_PATH}:\n  ${copilotShellFunction(endpoint, enduser, privacy).join('\n  ')}`,
+    );
+    const vscode: JsonObject = {
+      'github.copilot.chat.otel.enabled': true,
+      'github.copilot.chat.otel.otlpEndpoint': endpoint,
+      'github.copilot.chat.otel.headers': { Authorization: 'Bearer <AMPLITUDE_AI_API_KEY>' },
+      'github.copilot.chat.otel.resourceAttributes': { 'enduser.id': userId || '<your email>' },
+      ...(privacy === 'full' && { 'github.copilot.chat.otel.captureContent': true }),
+    };
+    instructions.push(
+      `Copilot in VS Code: add to your user settings.json (not the workspace; it holds the key):\n  ${JSON.stringify(vscode, null, 2).split('\n').join('\n  ')}`,
+    );
+  }
+
+  if (localEnvUses.length > 0) {
+    writer.write(
+      LOCAL_ENV_PATH,
+      mergeEnvFile(existingLocalEnvText, localEnvUpdates),
+      `${options.apiKey ? 'API key and settings' : 'settings'} for ${localEnvUses.join(' and ')} (gitignored)`,
+      0o600,
+    );
+    ensureGitignored(writer, cwd, LOCAL_ENV_PATH);
   }
 
   if (!userId) {
@@ -502,7 +750,7 @@ function newestMtime(dir: string): number | null {
 
 /** True when `coding-agents init` has written anything into this repo. */
 export function hasCodingAgentsSetup(cwd: string): boolean {
-  return [PREPARE_COMMIT_MSG_PATH, OUTCOMES_WORKFLOW_PATH, CODEX_HOOKS_PATH, LOCAL_ENV_PATH].some((p) =>
+  return [PREPARE_COMMIT_MSG_PATH, OUTCOMES_WORKFLOW_PATH, CODEX_HOOKS_PATH, CURSOR_HOOKS_PATH, LOCAL_ENV_PATH].some((p) =>
     existsSync(join(cwd, p)),
   );
 }
@@ -545,12 +793,19 @@ export function runCodingAgentsDoctor(
     ...(hooksPath !== HOOKS_PATH && { fix: HOOKS_PATH_COMMAND }),
   });
 
-  const workflow = existsSync(join(cwd, OUTCOMES_WORKFLOW_PATH));
+  const workflowPath = join(cwd, OUTCOMES_WORKFLOW_PATH);
+  const workflow = outcomesWorkflowState(existsSync(workflowPath) ? readFileSync(workflowPath) : null);
+  const workflowDetail: Record<OutcomesWorkflowState, string> = {
+    missing: 'missing',
+    current: 'current (needs the AMPLITUDE_API_KEY repository secret)',
+    outdated: 'outdated: an earlier shipped version; re-run init to upgrade it',
+    customized: 'customized: differs from every shipped version, so init leaves it alone (--force replaces it)',
+  };
   checks.push({
     name: 'coding_agents.outcomes_workflow',
-    ok: workflow,
-    detail: workflow ? 'present (needs the AMPLITUDE_API_KEY repository secret)' : 'missing',
-    ...(!workflow && { fix: fixInit }),
+    ok: workflow !== 'missing',
+    detail: workflowDetail[workflow],
+    ...((workflow === 'missing' || workflow === 'outdated') && { fix: fixInit }),
   });
 
   const claude = readJsonFile(join(cwd, CLAUDE_SETTINGS_PATH));
@@ -607,6 +862,104 @@ export function runCodingAgentsDoctor(
     });
   }
 
+  const cursorHooks = readJsonFile(join(cwd, CURSOR_HOOKS_PATH));
+  if ((cursorHooks.ok && cursorHooks.value) || CURSOR_MARKERS.some((p) => existsSync(join(cwd, p)))) {
+    const hooks = cursorHooks.ok && cursorHooks.value && isObject(cursorHooks.value.hooks) ? cursorHooks.value.hooks : {};
+    const missing = CURSOR_HOOK_EVENTS.filter((e) => !cursorHookCommands(hooks[e]).some(isCursorForwarder));
+    checks.push({
+      name: 'coding_agents.cursor_hooks',
+      ok: missing.length === 0,
+      detail: !cursorHooks.ok
+        ? `${CURSOR_HOOKS_PATH} is not valid JSON`
+        : missing.length === 0
+          ? `${CURSOR_HOOKS_PATH} forwards every agent event`
+          : `${CURSOR_HOOKS_PATH} does not forward ${missing.join(', ')}`,
+      ...(missing.length > 0 && { fix: `${fixInit} --harness cursor` }),
+    });
+    const command = CURSOR_HOOK_EVENTS.flatMap((e) => cursorHookCommands(hooks[e])).find(isCursorForwarder);
+    if (command) {
+      const program = command.trim().split(/\s+/)[0] ?? '';
+      const resolves = program.includes('/')
+        ? existsSync(resolve(cwd, program))
+        : spawnSync('sh', ['-c', `command -v ${program}`], { stdio: 'ignore', timeout: 5000 }).status === 0;
+      checks.push({
+        name: 'coding_agents.cursor_hook_command',
+        ok: resolves,
+        detail: resolves ? `${program} resolves` : `${program} is not installed`,
+        ...(!resolves && { fix: program.startsWith('node_modules/') ? 'npm install' : `install ${program}` }),
+      });
+    }
+    const localEnvFile = findLocalEnv(cwd);
+    const localEnv = localEnvFile ? parseLocalEnv(readFileSync(localEnvFile, 'utf8')) : {};
+    const hasKey = Boolean(
+      env.AMPLITUDE_AI_API_KEY || env.AMPLITUDE_API_KEY || localEnv.AMPLITUDE_AI_API_KEY || localEnv.AMPLITUDE_API_KEY,
+    );
+    checks.push({
+      name: 'coding_agents.cursor_api_key',
+      ok: hasKey,
+      detail: hasKey ? 'present' : 'missing',
+      ...(!hasKey && { fix: `${fixInit} --harness cursor --api-key-stdin` }),
+    });
+    const spoolDir = cursorSpoolDir(env, home);
+    const pending = pendingConversations(spoolDir).length;
+    checks.push({
+      name: 'coding_agents.cursor_spool',
+      ok: true,
+      detail: pending === 0 ? 'no conversations waiting to send' : `${pending} conversation(s) waiting for stop or sessionEnd`,
+    });
+  }
+
+  const bearer = /authorization=bearer(?:%20|\s)+\S+/i;
+  const gemini = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
+  const geminiTelemetry = gemini.ok && gemini.value && isObject(gemini.value.telemetry) ? gemini.value.telemetry : null;
+  if (geminiTelemetry || GEMINI_MARKERS.some((p) => existsSync(join(cwd, p)))) {
+    const endpoint = String(geminiTelemetry?.otlpEndpoint ?? env.GEMINI_TELEMETRY_OTLP_ENDPOINT ?? '');
+    const exporting =
+      geminiTelemetry?.enabled === true && endpoint.includes('amplitude.com') && geminiTelemetry.otlpProtocol === 'http';
+    checks.push({
+      name: 'coding_agents.gemini_otlp',
+      ok: exporting,
+      detail: exporting
+        ? `telemetry exports to ${endpoint}`
+        : !gemini.ok
+          ? `${GEMINI_SETTINGS_PATH} is not valid JSON`
+          : `${GEMINI_SETTINGS_PATH} does not export telemetry to Amplitude over http`,
+      ...(!exporting && { fix: `${fixInit} --harness gemini` }),
+    });
+    if (exporting) {
+      const localEnvFile = findLocalEnv(cwd);
+      const localEnv = localEnvFile ? parseLocalEnv(readFileSync(localEnvFile, 'utf8')) : {};
+      const headers = [env.GEMINI_TELEMETRY_OTLP_HEADERS, env.OTEL_EXPORTER_OTLP_HEADERS, localEnv.GEMINI_TELEMETRY_OTLP_HEADERS];
+      const hasHeader = headers.some((h) => bearer.test(h ?? ''));
+      checks.push({
+        name: 'coding_agents.gemini_api_key',
+        ok: hasHeader,
+        detail: hasHeader ? 'GEMINI_TELEMETRY_OTLP_HEADERS set' : 'API key header missing',
+        ...(!hasHeader && { fix: `${fixInit} --harness gemini --api-key-stdin` }),
+      });
+    }
+  }
+
+  // Copilot is configured by environment only, so this reads the shell doctor runs in.
+  const copilotEnabled = (env.COPILOT_OTEL_ENABLED ?? '').toLowerCase() === 'true';
+  if (copilotEnabled || COPILOT_MARKERS.some((p) => existsSync(join(cwd, p)))) {
+    const endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '';
+    const exporting = copilotEnabled && endpoint.includes('amplitude.com');
+    const ok = exporting && bearer.test(env.OTEL_EXPORTER_OTLP_HEADERS ?? '');
+    checks.push({
+      name: 'coding_agents.copilot_otlp',
+      ok: ok || !copilotEnabled,
+      detail: ok
+        ? `this shell exports Copilot CLI telemetry to ${endpoint}`
+        : !copilotEnabled
+          ? 'COPILOT_OTEL_ENABLED is not exported in this shell; the copilot() function from init sets it for each run'
+          : !exporting
+            ? 'OTEL_EXPORTER_OTLP_ENDPOINT in this shell is not Amplitude'
+            : 'OTEL_EXPORTER_OTLP_HEADERS has no API key',
+      ...(!ok && { fix: `${fixInit} --harness copilot --dry-run, then add the printed copilot() function to your shell profile` }),
+    });
+  }
+
   return { ok: checks.every((c) => c.ok), checks };
 }
 
@@ -630,7 +983,7 @@ async function readStdin(): Promise<string> {
 }
 
 const USAGE = `Usage:
-  amplitude-ai coding-agents init [--harness claude-code|codex|goose] [--dry-run]
+  amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--dry-run]
                                   [--privacy full|metadata] [--region us|eu]
                                   [--api-key-stdin | --api-key-env NAME] [--force] [--dir PATH] [--json]
   amplitude-ai coding-agents doctor [--dir PATH] [--json]
