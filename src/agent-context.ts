@@ -140,8 +140,10 @@ export type ContextPolicyOptions = {
   /** The kid used to sign. Defaults to the only key when exactly one is configured. */
   activeKid?: string | null;
   /**
-   * Adopt unsigned HTTP context (`x-amplitude-*` headers) as today. Default
-   * `true` during the deprecation window; the next major defaults to `false`.
+   * Adopt unsigned HTTP context (`x-amplitude-*` headers) as today. Defaults
+   * to `true` only when no signing keys are configured, so a receiver with keys
+   * can't be bypassed by leaving out the signature; the next major defaults
+   * to `false`.
    */
   acceptUnsignedHttp?: boolean;
   /** `{ version: salt }` for pairwise IDs; the highest version mints. Salts are at least 32 bytes. */
@@ -189,7 +191,7 @@ export class ContextPolicy {
       throw new ConfigurationError(`Agent context activeKid "${String(activeKid).slice(0, 64)}" is not a configured key.`);
     }
     this.activeKid = activeKid;
-    this.acceptUnsignedHttp = options.acceptUnsignedHttp ?? true;
+    this.acceptUnsignedHttp = options.acceptUnsignedHttp ?? this.#keys.size === 0;
     this.kids = Object.freeze([...this.#keys.keys()]);
 
     this.#salts = new Map();

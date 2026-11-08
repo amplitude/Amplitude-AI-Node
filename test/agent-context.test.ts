@@ -81,8 +81,23 @@ describe('ContextPolicy', () => {
     expect(p.kids).toEqual(['k1', 'k2']);
     expect(p.activeKid).toBe('k2');
     expect(p.pairwiseVersions).toEqual([1]);
-    expect(p.acceptUnsignedHttp).toBe(true);
+    expect(p.acceptUnsignedHttp).toBe(false);
     expect(ContextPolicy.fromEnv({}).canSign).toBe(false);
+    expect(ContextPolicy.fromEnv({}).acceptUnsignedHttp).toBe(true);
+  });
+
+  it('untrusts a stripped signature once keys are configured', () => {
+    const keyed = new ContextPolicy({ signingKeys: { k1: K1 } });
+    expect(keyed.acceptUnsignedHttp).toBe(false);
+    expect(new ContextPolicy({ signingKeys: { k1: K1 }, acceptUnsignedHttp: true }).acceptUnsignedHttp).toBe(true);
+    const forged = extractContext(
+      { 'x-amplitude-session-id': 'victim-session', 'x-amplitude-user-id': 'victim' },
+      { policy: keyed },
+    );
+    expect(forged.verifyResult).toBe('unsigned');
+    expect(forged.sessionId).toBeUndefined();
+    expect(forged.userId).toBeUndefined();
+    expect(forged.peerSessionId).toBe('victim-session');
   });
 
   it('never puts a secret in an error, JSON or inspect output', () => {
@@ -201,8 +216,8 @@ describe('warnings', () => {
   });
 
   it('warns once that unsigned HTTP adoption is deprecated', () => {
-    extractContext({ 'x-amplitude-session-id': 's1' }, { policy });
-    extractContext({ 'x-amplitude-session-id': 's2' }, { policy });
+    extractContext({ 'x-amplitude-session-id': 's1' }, { policy: new ContextPolicy() });
+    extractContext({ 'x-amplitude-session-id': 's2' }, { policy: new ContextPolicy() });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toMatch(/deprecated/);
   });
@@ -247,7 +262,7 @@ describe('HTTP propagation', () => {
       'x-amplitude-parent-agent-id': 'old-root',
       'x-amplitude-user-id': 'u-old',
     };
-    expect(extractContext(legacy, { policy })).toEqual({
+    expect(extractContext(legacy, { policy: new ContextPolicy() })).toEqual({
       verifyResult: 'unsigned',
       sessionId: 'sess-old',
       userId: 'u-old',
@@ -271,7 +286,7 @@ describe('HTTP propagation', () => {
   });
 
   it('reads the first value of a repeated header', () => {
-    expect(extractContext({ 'x-amplitude-session-id': ['a', 'b'] }, { policy }).sessionId).toBe('a');
+    expect(extractContext({ 'x-amplitude-session-id': ['a', 'b'] }, { policy: new ContextPolicy() }).sessionId).toBe('a');
   });
 });
 

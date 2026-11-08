@@ -103,7 +103,7 @@ export type ContextExtractOptions = {
 
 /** Options for {@link extractContext}. */
 export type HttpContextExtractOptions = ContextExtractOptions & {
-  /** Override the policy's `acceptUnsignedHttp` (default `true` until the next major). */
+  /** Override the policy's `acceptUnsignedHttp` (default `true` only without signing keys). */
   acceptUnsignedHttp?: boolean;
 };
 
