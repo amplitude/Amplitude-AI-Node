@@ -48,9 +48,18 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
   {
     id: 'express-middleware',
     title: 'Express middleware propagation',
-    whenToUse: 'Server app needs per-request context propagation.',
+    whenToUse:
+      'Server app needs per-request context propagation. userIdResolver must return the authenticated user, never a ' +
+      'request header or body field. acceptContext: true links calls from other agent services: a signed context ' +
+      '(AMPLITUDE_AI_CONTEXT_KEYS on both sides) joins the caller session; anything else is recorded as a peer.',
     snippet:
-      'import { createAmplitudeAIMiddleware } from "@amplitude/ai";\napp.use(createAmplitudeAIMiddleware());',
+      'import { createAmplitudeAIMiddleware } from "@amplitude/ai";\n' +
+      'app.use(createAmplitudeAIMiddleware({\n' +
+      '  amplitudeAI: ai,\n' +
+      '  userIdResolver: (req) => req.user?.id ?? null, // from your auth middleware\n' +
+      '  agentId: "support-api",\n' +
+      '  acceptContext: true,\n' +
+      '}));',
   },
   {
     id: 'multi-agent-runas',
@@ -112,15 +121,27 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
   },
   {
     id: 'agent-protocol-propagation',
-    title: 'Agents in other processes: A2A metadata and ACP _meta',
+    title: 'Agents in other processes: A2A metadata, ACP _meta and signed agent context',
     whenToUse:
-      'One agent calls another over A2A or the Agent Client Protocol. Carries the session, parent agent and user ' +
-      'so the remote agent nests under the caller. Only extract from agents you operate.',
+      'One agent calls another over A2A or the Agent Client Protocol, including agents run by another company. ' +
+      'Pass the extracted context to session({ context }); never spread or copy its fields into session options. ' +
+      'A context signed with a shared key (AMPLITUDE_AI_CONTEXT_KEYS) joins the caller session; any other context ' +
+      'starts a new session linked by [Agent] Peer Agent ID. The end-user ID is not sent unless identity is ' +
+      '"pairwise" or "raw" with a key. Return your own context in the response so the caller can link the call.',
     snippet:
-      'import { injectA2aMetadata, extractA2aMetadata, injectAcpMeta, extractAcpMeta } from "@amplitude/ai";\n' +
-      '// caller, inside session.run(): message.metadata = injectA2aMetadata(message.metadata);\n' +
-      '// ACP request: params._meta = injectAcpMeta(params._meta);\n' +
-      '// receiver: const { sessionId, parentAgentId, userId, traceId } = extractA2aMetadata(message.metadata);',
+      'import { injectA2aMetadata, extractA2aMetadata, injectA2aResponseMetadata, peerProperties } from "@amplitude/ai";\n' +
+      '// caller, inside session.run():\n' +
+      'message.metadata = injectA2aMetadata(message.metadata);\n' +
+      'const reply = await client.sendMessage({ message });\n' +
+      's.trackToolCall("call_seller", latencyMs, true, { peer: extractA2aMetadata(reply.metadata) });\n' +
+      '// receiver:\n' +
+      'const session = agent.session({ context: extractA2aMetadata(message.metadata) });\n' +
+      'await session.run(async () => {\n' +
+      '  /* handle the task */\n' +
+      '  return { ...result, metadata: injectA2aResponseMetadata(result.metadata) };\n' +
+      '});\n' +
+      '// ACP: injectAcpMeta / extractAcpMeta / injectAcpResultMeta on params._meta and result._meta.\n' +
+      '// Business events: amplitude.track("Checkout Completed", { orderId, ...contextProperties() });',
   },
 ];
 

@@ -224,10 +224,10 @@ import { injectContext, extractContext } from '@amplitude/ai';
 // Sender (inside session.run):
 const headers = injectContext();
 await queue.send({ payload, headers });
-// Receiver:
-const ctx = extractContext(message.headers);
-const session = agent.session({ ...ctx });
+// Receiver: pass the context; never copy its fields into session options.
+const session = agent.session({ context: extractContext(message.headers) });
 ```
+Signed context (`AMPLITUDE_AI_CONTEXT_KEYS` on both sides) joins the sender's session; anything else is linked with `[Agent] Peer Agent ID`. See "Agents in other processes" below.
 
 ### createAmplitudeAIMiddleware(opts)
 Express/Fastify/Hono middleware for automatic session tracking.
@@ -313,7 +313,8 @@ const askRecipeAgent = tool(async (args: { query: string }) => {
 }, { name: 'ask_recipe_agent' });
 
 export async function POST(req: Request) {
-  const { messages, userId } = await req.json();
+  const { messages } = await req.json();
+  const userId = await getAuthenticatedUserId(req); // from your auth, never the request body
   const browserSessionId = req.headers.get('x-amplitude-session-id');
   const deviceId = req.headers.get('x-amplitude-device-id');
 
@@ -337,10 +338,31 @@ const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
   userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
+  acceptContext: true, // optional: link calls from other agent services (signed context joins their session)
 }));
 ```
 
-### 6. Testing with MockAmplitudeAI
+### 6. Agents in other processes (A2A, ACP, HTTP)
+```typescript
+import {
+  extractA2aMetadata, injectA2aMetadata, injectA2aResponseMetadata, contextProperties,
+} from '@amplitude/ai';
+
+// Caller, inside session.run(): send context; the user ID stays out unless identity is set.
+message.metadata = injectA2aMetadata(message.metadata);
+const reply = await client.sendMessage({ message });
+s.trackToolCall('call_seller', latencyMs, true, { peer: extractA2aMetadata(reply.metadata) });
+
+// Receiver: pass the extracted context; never copy its fields into session options.
+const session = agent.session({ context: extractA2aMetadata(message.metadata) });
+await session.run(async () => ({ ...result, metadata: injectA2aResponseMetadata(result.metadata) }));
+
+// Business events join the agent session in charts:
+amplitude.track('Checkout Completed', { orderId, ...contextProperties() });
+```
+Signed context (`AMPLITUDE_AI_CONTEXT_KEYS` on both sides) is trusted: the receiver joins the caller's session, user, parent agent and trace. Unsigned or failed context is untrusted: the receiver starts its own session and trace and records `[Agent] Peer Agent ID`, `[Agent] Peer Session ID` and `[Agent] Peer Trace ID`. Every event also carries `[Agent] Context Trust`, `[Agent] Context Verify Result`, `[Agent] Actor Type` and `[Agent] Identity Type`. ACP uses `injectAcpMeta` / `extractAcpMeta` / `injectAcpResultMeta`; HTTP uses `injectContext` / `extractContext` / `injectResponseHeaders`. A browser that can't hold a key gets a context minted by its backend with `mintContext({ sessionId, userId })`.
+
+### 7. Testing with MockAmplitudeAI
 ```typescript
 import { AIConfig, tool } from '@amplitude/ai';
 import { MockAmplitudeAI } from '@amplitude/ai/testing';

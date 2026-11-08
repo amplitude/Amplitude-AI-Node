@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.29.0 (unreleased)
+
+### Added
+- **Signed agent context (v1).** Agents that call each other over A2A, the Agent Client Protocol or HTTP, including agents another company runs, can sign the context they send with HMAC-SHA256. Configure keys with `AMPLITUDE_AI_CONTEXT_KEYS` (a JSON object of key ID to secret, each at least 32 bytes) and optionally `AMPLITUDE_AI_CONTEXT_ACTIVE_KID`, or pass `contextPolicy: new ContextPolicy({ signingKeys })` in `AIConfig`. Signatures carry a key ID, issue time and expiry (default 300 seconds), so keys can rotate. The wire format, signing input and golden test vectors are shared with the Python SDK. Spec: https://amplitude.com/docs/amplitude-ai/agent-analytics/agent-context-v1.
+- **`session({ context })`.** Pass the result of `extractA2aMetadata`, `extractAcpMeta` or `extractContext`. A context whose signature verifies is trusted: the session adopts the caller's session, user, parent agent and trace ID. Any other context is untrusted: the session keeps its own session and trace and records the caller as `[Agent] Peer Agent ID`, `[Agent] Peer Session ID` and `[Agent] Peer Trace ID`. Explicit `sessionId` and `userId` options win.
+- **Seven event properties**, on every `[Agent]` event of a session started with a context: `[Agent] Peer Agent ID`, `[Agent] Peer Session ID`, `[Agent] Peer Trace ID`, `[Agent] Context Trust` (`trusted`, `untrusted` or `none`), `[Agent] Context Verify Result` (`ok`, `unsigned`, `unsupported_alg`, `bad_signature`, `unknown_kid`, `expired`, `not_yet_valid` or `malformed`), `[Agent] Actor Type` (`agent` or `human`; A2A is always `agent`, ACP and HTTP use the signed actor type, else `human`) and `[Agent] Identity Type`. Matching `amplitude.*` OTel span attributes are emitted and mapped back. The agent event catalog lists them.
+- **Identity modes.** A2A and ACP send no user ID by default. `identity: 'pairwise'` with a `recipient` sends a stable per-recipient pseudonym (salts in `AMPLITUDE_AI_PAIRWISE_SALTS`); `identity: 'raw'` sends the user ID and requires a signing key.
+- **Responses.** `injectA2aResponseMetadata`, `injectAcpResultMeta` and `injectResponseHeaders` return the receiver's context. `peerProperties(extracted)` and `trackToolCall(..., { peer })` attach it to that one call, so parallel calls to several peers never cross-attribute.
+- **`contextProperties()`** returns `[Agent] Session ID`, `[Agent] Trace ID`, `[Agent] Agent ID` and, when set, the peer IDs, to spread into business events tracked with the Amplitude SDK (for example a checkout). `{}` outside a session; never includes the user ID. `contextProperties({ context })` builds them from a propagated context.
+- **`mintContext({ sessionId, userId })`** lets a backend mint a signed context for a browser or mobile client that can't hold a key.
+- **`createAmplitudeAIMiddleware({ acceptContext: true })`** applies the same trust rules to inbound HTTP headers. It never adopts unsigned headers. Off by default.
+
+### Changed
+- **A2A extension URI.** `a2aAgentExtension()` and `declareA2aExtension()` now declare `https://amplitude.com/docs/amplitude-ai/agent-analytics/agent-context-v1`, the public spec page. The earlier `https://amplitude.com/a2a/extensions/agent-context/v1` from the unreleased 0.28.0 entry is no longer used.
+- **A2A and ACP receivers.** `extractA2aMetadata` and `extractAcpMeta` return the caller's IDs only for a verified context; otherwise they return `peerAgentId`, `peerSessionId` and `peerTraceId`. Every result also has `verifyResult`, `actorType` and `identityType`. Oversized or invalid IDs return `{ verifyResult: 'malformed' }`.
+- **`[Agent] Message Source`** is unchanged: `agent` only inside a trusted delegation, so an untrusted request still counts as a user turn.
+- **Coding-agent guidance.** `amplitude-ai.md`, the MCP patterns, `scan_project`, `instrument_file`, `AGENTS.md` and `llms-full.txt` route cross-process agents to `session({ context })`. Generated route handlers no longer read `userId` or `sessionId` from the request body.
+
+### Deprecated
+- **Unsigned HTTP context.** `extractContext` still adopts unsigned `x-amplitude-*` headers in this release, logging a one-time deprecation warning and recording `[Agent] Context Verify Result = unsigned`. Pass `acceptUnsignedHttp: false` to opt out now. The next major release (1.0.0) treats unsigned HTTP context as untrusted, like A2A.
+
 ## 0.28.0
 
 ### Added

@@ -1,5 +1,11 @@
 # Releasing @amplitude/ai
 
+> **Release gate (agent context v1):** do not publish any version >= 0.27.0
+> until both SDK pull requests for AA-152844 (this repo and the Python SDK)
+> have merged. The two SDKs share the signed agent context wire format and its
+> golden vectors, so they must ship together. Remove this note once both are
+> merged.
+
 ## Publishing setup
 
 `@amplitude/ai` is published only by `.github/workflows/publish.yml` through npm
