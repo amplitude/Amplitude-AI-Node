@@ -23,7 +23,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { codexHookDir } from './hook-codex.js';
-import { cursorSpoolDir } from './hook-cursor.js';
+import { cursorSpoolDir, pendingConversations } from './hook-cursor.js';
 import { LOCAL_ENV_PATH, findLocalEnv, parseLocalEnv } from './local-env.js';
 import {
   type OutcomesWorkflowState,
@@ -244,19 +244,34 @@ function cursorHookCommands(entries: unknown): string[] {
 
 const isCursorForwarder = (command: string) => command.trim().endsWith(CURSOR_HOOK_SUFFIX);
 
-/** Adds each template hook whose command is not already present; any launcher of the forwarder counts as present. */
+/** Launchers init writes when no local binary exists; a later init with one replaces them. */
+const CURSOR_FALLBACK_COMMANDS = [CURSOR_HOOK_COMMAND, CURSOR_HOOK_SUFFIX];
+
+/**
+ * Adds each template hook whose command is not already present; any launcher of the forwarder counts as present.
+ * A fallback launcher is switched to the template's local binary, and any other launcher is kept.
+ */
 function mergeCursorHooks(target: JsonObject, templateHooks: JsonObject): void {
   const hooks = isObject(target.hooks) ? target.hooks : {};
   for (const [event, entries] of Object.entries(templateHooks)) {
     if (!Array.isArray(entries)) continue;
-    const existing = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
+    const preferred = cursorHookCommands(entries).find(isCursorForwarder);
+    const existing = (Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : []).map((e) =>
+      preferred &&
+      !CURSOR_FALLBACK_COMMANDS.includes(preferred) &&
+      isObject(e) &&
+      typeof e.command === 'string' &&
+      CURSOR_FALLBACK_COMMANDS.includes(e.command.trim())
+        ? { ...e, command: preferred }
+        : e,
+    );
     const present = cursorHookCommands(existing);
     const missing = entries.filter((entry) =>
       cursorHookCommands([entry]).some(
         (c) => !present.includes(c) && !(isCursorForwarder(c) && present.some(isCursorForwarder)),
       ),
     );
-    if (missing.length > 0) hooks[event] = [...existing, ...missing];
+    if (missing.length > 0 || Array.isArray(hooks[event])) hooks[event] = [...existing, ...missing];
   }
   if (target.version === undefined) target.version = 1;
   target.hooks = hooks;
@@ -854,7 +869,7 @@ export function runCodingAgentsDoctor(
       ...(!hasKey && { fix: `${fixInit} --harness cursor --api-key-stdin` }),
     });
     const spoolDir = cursorSpoolDir(env, home);
-    const pending = existsSync(spoolDir) ? readdirSync(spoolDir).filter((f) => f.endsWith('.ndjson')).length : 0;
+    const pending = pendingConversations(spoolDir).length;
     checks.push({
       name: 'coding_agents.cursor_spool',
       ok: true,

@@ -10,8 +10,8 @@ This page covers the Cursor editor and CLI agent. For agents you build on the Cu
 
 ```sh
 npm install --save-dev @amplitude/ai
-npx amplitude-ai coding-agents init --harness cursor --dry-run
-printf %s "$AMPLITUDE_AI_API_KEY" | npx amplitude-ai coding-agents init --harness cursor --api-key-stdin
+npx -y -p @amplitude/ai amplitude-ai coding-agents init --harness cursor --dry-run
+printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --harness cursor --api-key-stdin
 ```
 
 `init` with no `--harness` includes Cursor when the repo has `.cursor/` or `.cursorrules`. It merges these hooks into `.cursor/hooks.json` (committed; no secret) and keeps any hooks already there:
@@ -64,7 +64,7 @@ Cursor's agent shells export `CURSOR_CONVERSATION_ID` (the hook input's `convers
 
 ## Verify
 
-1. `npx amplitude-ai coding-agents doctor`: `cursor_hooks`, `cursor_hook_command` and `cursor_api_key` pass. `cursor_spool` lists conversations waiting to send.
+1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: `cursor_hooks`, `cursor_hook_command` and `cursor_api_key` pass. `cursor_spool` lists conversations waiting to send.
 2. Preview the events without sending: `AMPLITUDE_AI_HOOK_DRY_RUN=1` in `.amplitude-ai/local.env`, then ask the agent something; on `stop` the hook writes the events to Cursor's hook output channel instead of posting them.
 3. Run one agent conversation that commits. Check the `Agent-Session-Id` and `Agent-Name: cursor` trailers.
 4. In Amplitude, the session appears under your email with its prompts, replies and tool calls.

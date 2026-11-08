@@ -382,11 +382,19 @@ async function flushSpool(ctx: FlushContext, name: string): Promise<void> {
   }
 }
 
+const SPOOL_FILE = /^(.+?)\.(?:\d+\.flushing|ndjson)$/;
+
+/** Conversations with a spool or an unsent batch in `dir`. */
+export function pendingConversations(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return [...new Set(readdirSync(dir).flatMap((f) => SPOOL_FILE.exec(f)?.[1] ?? []))];
+}
+
 function staleSpools(dir: string, now: number, except: string): string[] {
   if (!existsSync(dir)) return [];
   const names = new Set<string>();
   for (const f of readdirSync(dir)) {
-    const match = /^(.+?)\.(?:\d+\.flushing|ndjson)$/.exec(f);
+    const match = SPOOL_FILE.exec(f);
     if (!match?.[1] || match[1] === except) continue;
     try {
       if (now - statSync(join(dir, f)).mtimeMs >= CURSOR_STALE_SPOOL_MS) names.add(match[1]);

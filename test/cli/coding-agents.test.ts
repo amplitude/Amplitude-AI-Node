@@ -410,7 +410,24 @@ describe('coding-agents init', () => {
     // Re-running with the npx launcher does not add a second forwarder.
     rmSync(join(repo, 'node_modules'), { recursive: true });
     init({ harnesses: ['cursor'] });
-    expect(readJson('.cursor/hooks.json').hooks.postToolUse).toHaveLength(1);
+    expect(readJson('.cursor/hooks.json').hooks.postToolUse).toEqual([
+      { command: 'node_modules/.bin/amplitude-ai hook cursor' },
+    ]);
+  });
+
+  it('switches the npx and PATH launchers to node_modules/.bin once it exists, and keeps a custom one', () => {
+    init({ harnesses: ['cursor'] });
+    const hooks = readJson('.cursor/hooks.json');
+    hooks.hooks.stop = [{ command: 'amplitude-ai hook cursor', timeout: 30 }];
+    hooks.hooks.sessionEnd = [{ command: '/opt/bin/amplitude-ai hook cursor' }];
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify(hooks));
+    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules/.bin/amplitude-ai'), '#!/bin/sh\n');
+    init({ harnesses: ['cursor'] });
+    const after = readJson('.cursor/hooks.json').hooks;
+    expect(after.postToolUse).toEqual([{ command: 'node_modules/.bin/amplitude-ai hook cursor' }]);
+    expect(after.stop).toEqual([{ command: 'node_modules/.bin/amplitude-ai hook cursor', timeout: 30 }]);
+    expect(after.sessionEnd).toEqual([{ command: '/opt/bin/amplitude-ai hook cursor' }]);
   });
 
   it('leaves an invalid .cursor/hooks.json untouched', () => {
@@ -497,6 +514,9 @@ describe('coding-agents doctor', () => {
     mkdirSync(join(home, '.amplitude-ai/cursor'), { recursive: true });
     writeFileSync(join(home, '.amplitude-ai/cursor/c1.ndjson'), '{}\n');
     expect(byName()['coding_agents.cursor_spool']!.detail).toBe('1 conversation(s) waiting for stop or sessionEnd');
+    writeFileSync(join(home, '.amplitude-ai/cursor/c1.1700000000000.flushing'), '{}\n');
+    writeFileSync(join(home, '.amplitude-ai/cursor/c2.1700000000000.flushing'), '{}\n');
+    expect(byName()['coding_agents.cursor_spool']!.detail).toBe('2 conversation(s) waiting for stop or sessionEnd');
     writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [{ command: CURSOR_HOOK_COMMAND }] } }));
     const hooks = byName()['coding_agents.cursor_hooks']!;
     expect(hooks.ok).toBe(false);
