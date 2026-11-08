@@ -1,6 +1,7 @@
 /**
- * `amplitude-ai coding-agents init|doctor`: wire Claude Code, Codex and goose
- * sessions into Amplitude and stamp agent commits for code outcomes.
+ * `amplitude-ai coding-agents init|doctor`: wire Claude Code, Codex, goose,
+ * Cursor, Gemini CLI and GitHub Copilot sessions into Amplitude and stamp agent
+ * commits for code outcomes.
  *
  * Committed files never contain secrets. The API key goes only to the
  * gitignored `.claude/settings.local.json` and `.amplitude-ai/local.env`
@@ -21,7 +22,9 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOCAL_ENV_PATH, codexHookDir, findLocalEnv, parseLocalEnv } from './hook-codex.js';
+import { codexHookDir } from './hook-codex.js';
+import { cursorSpoolDir } from './hook-cursor.js';
+import { LOCAL_ENV_PATH, findLocalEnv, parseLocalEnv } from './local-env.js';
 import {
   type OutcomesWorkflowState,
   PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
@@ -29,9 +32,16 @@ import {
   lfSha256Hex,
 } from './outcomes-workflow.js';
 
-export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose' | 'gemini' | 'copilot';
-export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose', 'gemini', 'copilot'];
-/** Set up when no `--harness` is given. Gemini CLI and Copilot join when the repo already has their files. */
+export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose' | 'cursor' | 'gemini' | 'copilot';
+export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = [
+  'claude-code',
+  'codex',
+  'goose',
+  'cursor',
+  'gemini',
+  'copilot',
+];
+/** Set up when no `--harness` is given. Cursor, Gemini CLI and Copilot join when the repo already has their files. */
 const DEFAULT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
 
 export const HOOKS_PATH = '.githooks';
@@ -41,6 +51,7 @@ export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const CLAUDE_LOCAL_SETTINGS_PATH = '.claude/settings.local.json';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
 export const GEMINI_SETTINGS_PATH = '.gemini/settings.json';
+export const CURSOR_HOOKS_PATH = '.cursor/hooks.json';
 export const HOOKS_PATH_COMMAND = `git config core.hooksPath ${HOOKS_PATH}`;
 export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
 /**
@@ -50,6 +61,21 @@ export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
 export const CODEX_STOP_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook codex';
 /** Any Stop command ending in this (Node `npx` form, Python CLI, `uv run`, ...) is the same forwarder. */
 const PYTHON_CODEX_STOP_COMMAND = 'amplitude-ai hook codex';
+/** The Cursor hook command in `cursor-hooks.json`; any command ending in `amplitude-ai hook cursor` is the same forwarder. */
+export const CURSOR_HOOK_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook cursor';
+const CURSOR_HOOK_SUFFIX = 'amplitude-ai hook cursor';
+/** Project hooks run from the repo root, so this skips npx's startup on every hook when the repo depends on @amplitude/ai. */
+const CURSOR_LOCAL_BIN = 'node_modules/.bin/amplitude-ai';
+/** The events `cursor-hooks.json` forwards; doctor expects every one. */
+export const CURSOR_HOOK_EVENTS = [
+  'beforeSubmitPrompt',
+  'afterAgentResponse',
+  'postToolUse',
+  'postToolUseFailure',
+  'subagentStop',
+  'stop',
+  'sessionEnd',
+] as const;
 
 const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_TOOL_DETAILS'];
 const GOOSE_TRACES_PATH = '/otlp/v1/traces';
@@ -58,6 +84,7 @@ const OTLP_BASE_PATH = '/otlp';
 /** Repo files that mean the harness is in use, so `init` without `--harness` sets it up. */
 const GEMINI_MARKERS = ['.gemini', 'GEMINI.md'];
 const COPILOT_MARKERS = ['.github/copilot-instructions.md', '.github/hooks'];
+const CURSOR_MARKERS = ['.cursor', '.cursorrules'];
 
 export type CodingAgentsPrivacy = 'full' | 'metadata';
 export type CodingAgentsRegion = 'us' | 'eu';
@@ -159,9 +186,10 @@ export function geminiTelemetrySettings(privacy: CodingAgentsPrivacy, region: Co
   };
 }
 
-/** `init` with no `--harness`: the defaults, plus Gemini CLI and Copilot when the repo already uses them. */
+/** `init` with no `--harness`: the defaults, plus Cursor, Gemini CLI and Copilot when the repo already uses them. */
 export function defaultCodingAgentHarnesses(cwd: string): CodingAgentHarness[] {
   const out = [...DEFAULT_HARNESSES];
+  if (CURSOR_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('cursor');
   if (GEMINI_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('gemini');
   if (COPILOT_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('copilot');
   return out;
@@ -206,6 +234,32 @@ function mergeHooks(target: JsonObject, templateHooks: JsonObject): string[] {
   }
   target.hooks = hooks;
   return added;
+}
+
+/** Commands in Cursor's flat hook entries (`[{ "command": ... }]`). */
+function cursorHookCommands(entries: unknown): string[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter(isObject).flatMap((e) => (typeof e.command === 'string' ? [e.command] : []));
+}
+
+const isCursorForwarder = (command: string) => command.trim().endsWith(CURSOR_HOOK_SUFFIX);
+
+/** Adds each template hook whose command is not already present; any launcher of the forwarder counts as present. */
+function mergeCursorHooks(target: JsonObject, templateHooks: JsonObject): void {
+  const hooks = isObject(target.hooks) ? target.hooks : {};
+  for (const [event, entries] of Object.entries(templateHooks)) {
+    if (!Array.isArray(entries)) continue;
+    const existing = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
+    const present = cursorHookCommands(existing);
+    const missing = entries.filter((entry) =>
+      cursorHookCommands([entry]).some(
+        (c) => !present.includes(c) && !(isCursorForwarder(c) && present.some(isCursorForwarder)),
+      ),
+    );
+    if (missing.length > 0) hooks[event] = [...existing, ...missing];
+  }
+  if (target.version === undefined) target.version = 1;
+  target.hooks = hooks;
 }
 
 function stringify(value: unknown): string {
@@ -506,6 +560,41 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     instructions.push('Codex: open /hooks in Codex and trust the new project hooks.');
   }
 
+  if (harnesses.includes('cursor')) {
+    const local = existsSync(join(cwd, CURSOR_LOCAL_BIN));
+    const command = local ? `${CURSOR_LOCAL_BIN} hook cursor` : CURSOR_HOOK_COMMAND;
+    const templateText = readCodingAgentsTemplate('cursor-hooks.json', templatesDir).split(CURSOR_HOOK_COMMAND).join(command);
+    const hooksFile = readJsonFile(join(cwd, CURSOR_HOOKS_PATH));
+    const detail = 'agent hooks spool events and send them when the agent stops (no secrets)';
+    if (!hooksFile.ok) {
+      writer.skip(CURSOR_HOOKS_PATH, `invalid JSON: ${hooksFile.error}`);
+      warnings.push(`${CURSOR_HOOKS_PATH} is not valid JSON; fix it and re-run.`);
+    } else if (hooksFile.value === null) {
+      writer.write(CURSOR_HOOKS_PATH, templateText, detail);
+    } else {
+      const merged: JsonObject = hooksFile.value;
+      mergeCursorHooks(merged, (JSON.parse(templateText) as JsonObject).hooks as JsonObject);
+      writer.write(CURSOR_HOOKS_PATH, stringify(merged), detail);
+    }
+    Object.assign(localEnvUpdates, {
+      AMPLITUDE_SERVER_ZONE: region === 'eu' ? 'EU' : 'US',
+      AMPLITUDE_AI_CONTENT_MODE: privacy === 'metadata' ? 'metadata_only' : 'full',
+      ...(options.apiKey ? { AMPLITUDE_AI_API_KEY: options.apiKey } : {}),
+    });
+    localEnvUses.push('hook cursor');
+    if (!local) {
+      warnings.push(
+        'Cursor runs the hook through npx on every prompt and tool call, which takes about a second each. Add @amplitude/ai as a dev dependency and re-run init to call node_modules/.bin/amplitude-ai directly.',
+      );
+    }
+    if (!options.apiKey && !existingLocalEnv.AMPLITUDE_AI_API_KEY && !existingLocalEnv.AMPLITUDE_API_KEY) {
+      instructions.push(`Cursor: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}.`);
+    }
+    instructions.push(
+      `Cursor: commit ${CURSOR_HOOKS_PATH}; Cursor runs project hooks in trusted workspaces and reloads the file on save.`,
+    );
+  }
+
   if (harnesses.includes('goose')) {
     const lines = [
       `export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://${amplitudeHost(region)}${GOOSE_TRACES_PATH}`,
@@ -614,7 +703,7 @@ function newestMtime(dir: string): number | null {
 
 /** True when `coding-agents init` has written anything into this repo. */
 export function hasCodingAgentsSetup(cwd: string): boolean {
-  return [PREPARE_COMMIT_MSG_PATH, OUTCOMES_WORKFLOW_PATH, CODEX_HOOKS_PATH, LOCAL_ENV_PATH].some((p) =>
+  return [PREPARE_COMMIT_MSG_PATH, OUTCOMES_WORKFLOW_PATH, CODEX_HOOKS_PATH, CURSOR_HOOKS_PATH, LOCAL_ENV_PATH].some((p) =>
     existsSync(join(cwd, p)),
   );
 }
@@ -726,6 +815,53 @@ export function runCodingAgentsDoctor(
     });
   }
 
+  const cursorHooks = readJsonFile(join(cwd, CURSOR_HOOKS_PATH));
+  if ((cursorHooks.ok && cursorHooks.value) || CURSOR_MARKERS.some((p) => existsSync(join(cwd, p)))) {
+    const hooks = cursorHooks.ok && cursorHooks.value && isObject(cursorHooks.value.hooks) ? cursorHooks.value.hooks : {};
+    const missing = CURSOR_HOOK_EVENTS.filter((e) => !cursorHookCommands(hooks[e]).some(isCursorForwarder));
+    checks.push({
+      name: 'coding_agents.cursor_hooks',
+      ok: missing.length === 0,
+      detail: !cursorHooks.ok
+        ? `${CURSOR_HOOKS_PATH} is not valid JSON`
+        : missing.length === 0
+          ? `${CURSOR_HOOKS_PATH} forwards every agent event`
+          : `${CURSOR_HOOKS_PATH} does not forward ${missing.join(', ')}`,
+      ...(missing.length > 0 && { fix: `${fixInit} --harness cursor` }),
+    });
+    const command = CURSOR_HOOK_EVENTS.flatMap((e) => cursorHookCommands(hooks[e])).find(isCursorForwarder);
+    if (command) {
+      const program = command.trim().split(/\s+/)[0] ?? '';
+      const resolves = program.includes('/')
+        ? existsSync(resolve(cwd, program))
+        : spawnSync('sh', ['-c', `command -v ${program}`], { stdio: 'ignore', timeout: 5000 }).status === 0;
+      checks.push({
+        name: 'coding_agents.cursor_hook_command',
+        ok: resolves,
+        detail: resolves ? `${program} resolves` : `${program} is not installed`,
+        ...(!resolves && { fix: program.startsWith('node_modules/') ? 'npm install' : `install ${program}` }),
+      });
+    }
+    const localEnvFile = findLocalEnv(cwd);
+    const localEnv = localEnvFile ? parseLocalEnv(readFileSync(localEnvFile, 'utf8')) : {};
+    const hasKey = Boolean(
+      env.AMPLITUDE_AI_API_KEY || env.AMPLITUDE_API_KEY || localEnv.AMPLITUDE_AI_API_KEY || localEnv.AMPLITUDE_API_KEY,
+    );
+    checks.push({
+      name: 'coding_agents.cursor_api_key',
+      ok: hasKey,
+      detail: hasKey ? 'present' : 'missing',
+      ...(!hasKey && { fix: `${fixInit} --harness cursor --api-key-stdin` }),
+    });
+    const spoolDir = cursorSpoolDir(env, home);
+    const pending = existsSync(spoolDir) ? readdirSync(spoolDir).filter((f) => f.endsWith('.ndjson')).length : 0;
+    checks.push({
+      name: 'coding_agents.cursor_spool',
+      ok: true,
+      detail: pending === 0 ? 'no conversations waiting to send' : `${pending} conversation(s) waiting for stop or sessionEnd`,
+    });
+  }
+
   const bearer = /authorization=bearer(?:%20|\s)+\S+/i;
   const gemini = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
   const geminiTelemetry = gemini.ok && gemini.value && isObject(gemini.value.telemetry) ? gemini.value.telemetry : null;
@@ -800,7 +936,7 @@ async function readStdin(): Promise<string> {
 }
 
 const USAGE = `Usage:
-  amplitude-ai coding-agents init [--harness claude-code|codex|goose|gemini|copilot] [--dry-run]
+  amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--dry-run]
                                   [--privacy full|metadata] [--region us|eu]
                                   [--api-key-stdin | --api-key-env NAME] [--force] [--dir PATH] [--json]
   amplitude-ai coding-agents doctor [--dir PATH] [--json]

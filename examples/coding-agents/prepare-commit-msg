@@ -13,6 +13,8 @@ elif [ -n "$CODEX_THREAD_ID" ]; then
   id="$CODEX_THREAD_ID"; name="codex"
 elif [ -n "$AGENT_SESSION_ID" ]; then
   id="$AGENT_SESSION_ID"; name="goose"
+elif [ -n "$CURSOR_CONVERSATION_ID" ]; then
+  id="$CURSOR_CONVERSATION_ID"; name="cursor"
 elif [ "$GEMINI_CLI" = "1" ]; then
   # Gemini CLI marks its shells but gives them no session ID.
   git interpret-trailers --in-place --if-exists addIfDifferent --trailer "Agent-Name: gemini-cli" "$1"

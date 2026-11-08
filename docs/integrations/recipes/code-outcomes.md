@@ -2,7 +2,7 @@
 
 **Which agent sessions produced commits, which commits merged, which got reverted, which shipped, and which agent setup did best.** Two tiers, each claiming only what it can prove.
 
-Works with [Claude Code](../claude-code.md), [Codex](../codex.md), [goose](../goose.md) and [Buzz](../buzz.md) goose workers. `amplitude-ai coding-agents init` installs everything below; this page explains it.
+Works with [Claude Code](../claude-code.md), [Codex](../codex.md), [goose](../goose.md), [Cursor](../cursor.md), [Gemini CLI](../gemini-cli.md), [GitHub Copilot](../copilot.md) and [Buzz](../buzz.md) goose workers. `amplitude-ai coding-agents init` installs everything below; this page explains it.
 
 ## Tier 1: in-session outcomes (no extra setup)
 
@@ -39,7 +39,7 @@ Tool input is only present when the content gate is on (Claude Code `OTEL_LOG_TO
 
 ```text
 Agent-Session-Id: <session id>
-Agent-Name: claude-code | codex | goose
+Agent-Name: claude-code | codex | goose | cursor | gemini-cli
 ```
 
 | Harness | Session ID in the shell | Equals |
@@ -47,10 +47,12 @@ Agent-Name: claude-code | codex | goose
 | Claude Code | `CLAUDE_CODE_SESSION_ID` | `session.id` on its telemetry |
 | Codex | `CODEX_THREAD_ID` | the rollout `session_meta` thread ID the forwarder sends |
 | goose | `AGENT_SESSION_ID` | `session.id` on its spans |
+| Cursor | `CURSOR_CONVERSATION_ID` | the hook input's `conversation_id` the forwarder sends |
+| Gemini CLI | none (`GEMINI_CLI=1`) | no session: `Agent-Name: gemini-cli` only |
 
 Human commits (none of those set) are untouched. `prepare-commit-msg` runs even with `--no-verify`; merge and squash messages are skipped.
 
-**No per-clone step.** The hook lives in committed `.githooks/`. `core.hooksPath` is set by a committed `SessionStart` hook in `.claude/settings.json` and `.codex/hooks.json`, and Node repos also get a `prepare` script. goose has no lifecycle hooks; `coding-agents doctor` checks `core.hooksPath`.
+**No per-clone step.** The hook lives in committed `.githooks/`. `core.hooksPath` is set by a committed `SessionStart` hook in `.claude/settings.json`, `.codex/hooks.json` and `.cursor/hooks.json`, and Node repos also get a `prepare` script. goose has no lifecycle hooks; `coding-agents doctor` checks `core.hooksPath`.
 
 Commits made through the GitHub API or MCP tools carry no trailer. They join by `commit_sha` from the Tool Call that created them. Buzz goose workers join the same way.
 
@@ -110,7 +112,7 @@ Re-run `amplitude-ai coding-agents init`. It replaces an untouched earlier versi
 
 ## The join
 
-`[Agent] Session ID` equals `agent_session_id`, with `commit_sha` as the second key. Exact for Claude Code, Codex (CLI and SDK), goose, and Buzz goose workers.
+`[Agent] Session ID` equals `agent_session_id`, with `commit_sha` as the second key. Exact for Claude Code, Codex (CLI and SDK), goose, Cursor, and Buzz goose workers.
 
 ## Chart recipes
 

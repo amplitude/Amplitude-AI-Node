@@ -252,11 +252,15 @@ describe('docs/integrations contract', () => {
       };
     };
     const { harnesses, recipes, templates } = manifest.coding_agents;
-    expect(harnesses.map((h) => h.id)).toEqual(['claude-code', 'codex', 'goose', 'gemini-cli', 'copilot', 'buzz']);
+    expect(harnesses.map((h) => h.id)).toEqual(['claude-code', 'codex', 'goose', 'cursor', 'gemini-cli', 'copilot', 'buzz']);
     for (const harness of harnesses) {
       expect(harness.url.endsWith(`/docs/integrations/${harness.id}.md`)).toBe(true);
       expect(harness.pinned_version).not.toBe('');
-      expect(readPage(`${harness.id}.md`)).toContain('Last verified: pending live capture');
+      expect(readPage(`${harness.id}.md`)).toContain(
+        harness.last_verified === 'pending_live_capture'
+          ? 'Last verified: pending live capture'
+          : `Last verified: ${harness.last_verified} against`,
+      );
     }
     const repoRaw = 'https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/';
     for (const url of [...harnesses.map((h) => h.raw_url), ...recipes.map((r) => r.raw_url), ...templates.map((t) => t.raw_url)]) {

@@ -30,8 +30,9 @@ CLI commands:
   mcp            Start the MCP server (optional, for advanced tooling)
   doctor         Validate environment, deps, and event pipeline
   status         Show SDK version, installed providers, and env config
-  coding-agents  Set up Claude Code, Codex, and goose sessions and commit outcomes (init, doctor)
+  coding-agents  Set up Claude Code, Codex, goose, Cursor, Gemini CLI and Copilot sessions and commit outcomes (init, doctor)
   hook codex     Codex Stop hook: forward the session transcript to Amplitude
+  hook cursor    Cursor agent hooks: spool events, send them when the agent stops
   --print-guide  Print the full amplitude-ai.md instrumentation guide to stdout
 `
   );

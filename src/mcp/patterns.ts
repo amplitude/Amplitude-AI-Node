@@ -82,14 +82,14 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
   },
   {
     id: 'coding-agents',
-    title: 'Coding agents (Claude Code, Codex, goose, Gemini CLI, Copilot): sessions plus commit outcomes',
+    title: 'Coding agents (Claude Code, Codex, goose, Cursor, Gemini CLI, Copilot): sessions plus commit outcomes',
     whenToUse:
-      'Engineers use Claude Code, Codex, goose, Gemini CLI or GitHub Copilot in this repo (scan_project coding_agents). Sends their sessions ' +
+      'Engineers use Claude Code, Codex, goose, Cursor, Gemini CLI or GitHub Copilot in this repo (scan_project coding_agents). Sends their sessions ' +
       'to Amplitude and stamps agent commits so merges, reverts and deploys join back to the session. ' +
       'The API key goes only to gitignored files; never put it on the command line or in a committed file.',
     snippet:
       '# Writes .githooks/prepare-commit-msg, .github/workflows/agent-outcomes.yml, .claude/settings.json,\n' +
-      '# .codex/hooks.json, .gemini/settings.json and sets core.hooksPath. Preview first:\n' +
+      '# .codex/hooks.json, .cursor/hooks.json, .gemini/settings.json and sets core.hooksPath. Preview first:\n' +
       'npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\n' +
       'printf %s "$AMPLITUDE_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --api-key-stdin --privacy full\n' +
       'npx -y -p @amplitude/ai amplitude-ai coding-agents doctor\n' +

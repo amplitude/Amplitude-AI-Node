@@ -26,6 +26,7 @@ describe('scan_project coding_agents', () => {
       has_claude_dir: false,
       has_codex_dir: false,
       has_goose_config: false,
+      has_cursor_config: false,
       has_gemini_config: false,
       has_copilot_config: false,
       has_claude_md: false,
@@ -42,6 +43,7 @@ describe('scan_project coding_agents', () => {
     write('CLAUDE.md', '# notes');
     write('.codex/config.toml', '');
     write('.goosehints', 'hints');
+    write('.cursor/rules/style.mdc', '# rules');
     write('GEMINI.md', '# gemini');
     write('.github/copilot-instructions.md', '# copilot');
     write('AGENTS.md', '# agents');
@@ -50,7 +52,8 @@ describe('scan_project coding_agents', () => {
     write('.husky/prepare-commit-msg', '#!/bin/sh\nnpx commitizen\n');
     const result = scanProject(root);
     expect(result.coding_agents).toMatchObject({
-      harnesses: ['claude-code', 'codex', 'goose', 'gemini', 'copilot'],
+      harnesses: ['claude-code', 'codex', 'goose', 'cursor', 'gemini', 'copilot'],
+      has_cursor_config: true,
       has_gemini_config: true,
       has_copilot_config: true,
       agent_sdks: ['@openai/codex-sdk'],

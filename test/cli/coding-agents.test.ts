@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CODEX_STOP_COMMAND,
+  CURSOR_HOOK_COMMAND,
+  CURSOR_HOOK_EVENTS,
   ensurePrepareScript,
   runCodingAgentsDoctor,
   runCodingAgentsInit,
@@ -48,7 +50,7 @@ const readJson = (rel: string) => JSON.parse(readFileSync(join(repo, rel), 'utf8
 
 describe('coding-agents templates', () => {
   it.skipIf(!existsSync(SHARED))('match the shared AA-152843 artifacts byte for byte', () => {
-    for (const name of ['prepare-commit-msg', 'claude-settings.json', 'codex-hooks.json']) {
+    for (const name of ['prepare-commit-msg', 'claude-settings.json', 'codex-hooks.json', 'cursor-hooks.json']) {
       expect(template(name), name).toBe(readFileSync(join(SHARED, name), 'utf8'));
     }
   });
@@ -367,18 +369,63 @@ describe('coding-agents init', () => {
     );
   });
 
-  it('adds Gemini CLI and Copilot to the default harnesses only when the repo uses them', () => {
+  it('adds Cursor, Gemini CLI and Copilot to the default harnesses only when the repo uses them', () => {
     expect(init({ dryRun: true }).harnesses).toEqual(['claude-code', 'codex', 'goose']);
+    writeFileSync(join(repo, '.cursorrules'), '# rules\n');
     writeFileSync(join(repo, 'GEMINI.md'), '# notes\n');
     mkdirSync(join(repo, '.github'), { recursive: true });
     writeFileSync(join(repo, '.github/copilot-instructions.md'), '# notes\n');
-    expect(init({ dryRun: true }).harnesses).toEqual(['claude-code', 'codex', 'goose', 'gemini', 'copilot']);
+    expect(init({ dryRun: true }).harnesses).toEqual(['claude-code', 'codex', 'goose', 'cursor', 'gemini', 'copilot']);
+  });
+
+  it('merges the Cursor hooks into .cursor/hooks.json, keeps user hooks, and keeps the key in local.env', () => {
+    mkdirSync(join(repo, '.cursor'), { recursive: true });
+    const mine = { command: './scripts/audit.sh' };
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [mine] } }));
+    const result = init({ harnesses: ['cursor'], apiKey: SECRET, region: 'eu', privacy: 'metadata' });
+    expect(result.ok).toBe(true);
+    const hooks = readJson('.cursor/hooks.json').hooks;
+    expect(hooks.stop).toEqual([mine, { command: CURSOR_HOOK_COMMAND }]);
+    for (const event of CURSOR_HOOK_EVENTS) expect(hooks[event], event).toContainEqual({ command: CURSOR_HOOK_COMMAND });
+    expect(readFileSync(join(repo, '.cursor/hooks.json'), 'utf8')).not.toContain(SECRET);
+    const local = parseLocalEnv(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8'));
+    expect(local).toMatchObject({
+      AMPLITUDE_AI_API_KEY: SECRET,
+      AMPLITUDE_SERVER_ZONE: 'EU',
+      AMPLITUDE_AI_CONTENT_MODE: 'metadata_only',
+    });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(result.warnings.join('\n')).toContain('npx');
+    expect(init({ harnesses: ['cursor'], apiKey: SECRET, region: 'eu', privacy: 'metadata' }).changes.filter((c) => c.action !== 'unchanged')).toEqual([]);
+  });
+
+  it('points the Cursor hooks at node_modules/.bin when the repo depends on @amplitude/ai', () => {
+    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules/.bin/amplitude-ai'), '#!/bin/sh\n');
+    const result = init({ harnesses: ['cursor'] });
+    expect(readJson('.cursor/hooks.json').hooks.postToolUse).toEqual([
+      { command: 'node_modules/.bin/amplitude-ai hook cursor' },
+    ]);
+    expect(result.warnings.join('\n')).not.toContain('npx');
+    // Re-running with the npx launcher does not add a second forwarder.
+    rmSync(join(repo, 'node_modules'), { recursive: true });
+    init({ harnesses: ['cursor'] });
+    expect(readJson('.cursor/hooks.json').hooks.postToolUse).toHaveLength(1);
+  });
+
+  it('leaves an invalid .cursor/hooks.json untouched', () => {
+    mkdirSync(join(repo, '.cursor'), { recursive: true });
+    writeFileSync(join(repo, '.cursor/hooks.json'), '{ nope');
+    const result = init({ harnesses: ['cursor'] });
+    expect(readFileSync(join(repo, '.cursor/hooks.json'), 'utf8')).toBe('{ nope');
+    expect(result.warnings.join('\n')).toContain('.cursor/hooks.json is not valid JSON');
   });
 
   it.each([
     [{ CLAUDE_CODE_SESSION_ID: 's1' }, ['Agent-Session-Id: s1', 'Agent-Name: claude-code']],
     [{ CODEX_THREAD_ID: 't1' }, ['Agent-Session-Id: t1', 'Agent-Name: codex']],
     [{ AGENT_SESSION_ID: 'g1' }, ['Agent-Session-Id: g1', 'Agent-Name: goose']],
+    [{ CURSOR_AGENT: '1', CURSOR_CONVERSATION_ID: 'c1' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
     [{ GEMINI_CLI: '1' }, ['Agent-Name: gemini-cli']],
     [{}, []],
   ])('the commit hook stamps %o', (env, trailers) => {
@@ -438,6 +485,24 @@ describe('coding-agents doctor', () => {
     expect(check.detail.startsWith(state)).toBe(true);
     expect(check.ok).toBe(ok);
     expect(Boolean(check.fix)).toBe(hasFix);
+  });
+
+  it('checks the Cursor hooks, the hook command, the key and the spool', () => {
+    init({ harnesses: ['cursor'] });
+    const byName = () => Object.fromEntries(runCodingAgentsDoctor(repo, { env: {}, home }).checks.map((c) => [c.name, c]));
+    expect(byName()['coding_agents.cursor_hooks']!.ok).toBe(true);
+    expect(byName()['coding_agents.cursor_hook_command']!.detail).toMatch(/^npx /);
+    expect(byName()['coding_agents.cursor_api_key']!.ok).toBe(false);
+    expect(byName()['coding_agents.cursor_spool']).toMatchObject({ ok: true, detail: 'no conversations waiting to send' });
+    mkdirSync(join(home, '.amplitude-ai/cursor'), { recursive: true });
+    writeFileSync(join(home, '.amplitude-ai/cursor/c1.ndjson'), '{}\n');
+    expect(byName()['coding_agents.cursor_spool']!.detail).toBe('1 conversation(s) waiting for stop or sessionEnd');
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [{ command: CURSOR_HOOK_COMMAND }] } }));
+    const hooks = byName()['coding_agents.cursor_hooks']!;
+    expect(hooks.ok).toBe(false);
+    expect(hooks.detail).toContain('beforeSubmitPrompt');
+    init({ harnesses: ['cursor'], apiKey: SECRET });
+    expect(byName()['coding_agents.cursor_api_key']!.ok).toBe(true);
   });
 
   it('checks the Gemini CLI export and its header', () => {
