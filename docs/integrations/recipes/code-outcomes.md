@@ -1,6 +1,6 @@
 # Code outcomes: join coding-agent sessions to what happened to the code
 
-**Which agent sessions produced commits, which commits merged, which got reverted, and which shipped.** Two tiers, each claiming only what it can prove.
+**Which agent sessions produced commits, which commits merged, which got reverted, which shipped, and which agent setup did best.** Two tiers, each claiming only what it can prove.
 
 Works with [Claude Code](../claude-code.md), [Codex](../codex.md), [goose](../goose.md) and [Buzz](../buzz.md) goose workers. `amplitude-ai coding-agents init` installs everything below; this page explains it.
 
@@ -62,13 +62,35 @@ Commits made through the GitHub API or MCP tools carry no trailer. They join by 
 |---|---|---|
 | `pull_request` closed and merged | `Commit Merged`, one per commit in the PR (attributed or not) | `commit_sha`, `merge_commit_sha`, `pr_number`, `base_branch`, `agent_session_id`, `agent_name`, `agent_authored`, `repo` |
 | A merged PR containing `This reverts commit <sha>` | `Commit Reverted` for the original commit | `commit_sha`, `revert_pr_number`, `revert_merge_commit_sha`, plus the original's trailers |
-| `deployment_status` success | `Deploy Succeeded` for each commit since the previous successful deployment | `commit_sha`, `deployment_sha`, plus trailers |
+| `pull_request` closed and merged | `Pull Request Merged`, one per PR (attributed or not) | `pr_number`, `merge_commit_sha`, `base_branch`, `commit_count`, `agent_commit_count`, `unattributed_commit_count`, `agent_authored`, `agent_names`, `agent_session_ids`, `review_count`, `changes_requested_count`, `ci_passed_first_run`, `agent_setup_version`, `repo` |
+| `deployment_status` success | `Deploy Succeeded` for each commit since the previous successful deployment | `commit_sha`, `deployment_sha`, `environment`, plus trailers |
+| `deployment_status` failure or error | `Deploy Failed` for the same range | `commit_sha`, `deployment_sha`, `environment`, `deployment_state`, plus trailers |
 
-- **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`).
+Every event also carries `outcomes_workflow_version` (currently `2`), and every commit-level event carries `agent_setup_version`.
+
+- **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`). `Pull Request Merged` goes to the author of the PR's first agent commit, or of its first commit when no agent committed.
 - **Unattributed commits** get `Commit Merged` with an empty `agent_session_id`, which gives the agent share of merged code.
 - **Dry run:** set the repository variable `AMPLITUDE_OUTCOMES_DRY_RUN=true` and the job prints events instead of sending.
 - **EU:** set the repository variable `AMPLITUDE_REGION=eu`.
-- Insert IDs are `<event>:<repo>:<sha>`, so a re-run never double-counts.
+- Insert IDs are `<event>:<repo>:<sha>` (`<event>:<repo>:<sha>:<deployment id>` for deploys, `Pull Request Merged:<repo>:<pr number>` for PRs), so a re-run never double-counts.
+- **Fork PRs** have no access to repository secrets. Their merge runs end with a notice instead of failing.
+
+#### Agent setup version
+
+`agent_setup_version` is the first 12 hex characters of a SHA-256 over the root-level agent setup entries in the tree the commit was written on (its parent): `AGENTS.md`, `CLAUDE.md`, `.claude`, `.codex`, `.cursor` and `.goosehints` by default. Any change to those files gives a new value, so outcomes can be compared across setups. It is `null` when none of them exist. To choose the entries, set the repository variable `AMPLITUDE_AGENT_SETUP_PATHS` to comma-separated root-level names (at most 20; names containing `/` are ignored).
+
+#### Reviews and first-run CI
+
+- `review_count` and `changes_requested_count` count human reviews: `APPROVED`, `CHANGES_REQUESTED` and `COMMENTED`, not bots and not the PR author's own replies.
+- `ci_passed_first_run` reads the first PR commit that has CI results: the earliest attempt of each check run and commit status. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `checks: read` and `statuses: read` permissions the workflow declares.
+
+#### Best effort
+
+Setup version, reviews and first-run CI are enrichments. Each one is isolated and together they make at most 300 GitHub API calls per run. When one fails or the budget runs out, its property is omitted and the events are still sent; the job log prints an `enrichments:` line with each one's status.
+
+#### Upgrading
+
+Re-run `amplitude-ai coding-agents init`. It replaces an untouched earlier version of the workflow without `--force`; a workflow you edited is reported as a conflict and kept. `coding-agents doctor` reports the workflow as `current`, `outdated` or `customized`.
 
 ## The join
 
@@ -78,6 +100,8 @@ Commits made through the GitHub API or MCP tools carry no trailer. They join by 
 
 - Commit-to-merge funnel: sessions with a Tool Call where `commit_sha` is set, then `Commit Merged` with `agent_authored` true, then `Deploy Succeeded`; hold `[Agent] Session ID` = `agent_session_id`.
 - Revert rate by agent: `Commit Reverted` / `Commit Merged`, grouped by `agent_name`.
+- Revert and deploy failure rate by setup: `Commit Reverted` / `Commit Merged` and `Deploy Failed` / (`Deploy Succeeded` + `Deploy Failed`), grouped by `agent_setup_version`. Did the `AGENTS.md` change help?
+- Review load: average `changes_requested_count` and the share of `ci_passed_first_run` true on `Pull Request Merged`, split by `agent_authored`.
 - Agent share of merged code: `Commit Merged` grouped by `agent_authored`.
 - Produced Commit versus Task Completed: does the Signal agree with the evaluator?
 - Cost per merged commit by model; tool failure rate by tool; sessions per user per week; subagent share of cost.

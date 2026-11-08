@@ -765,7 +765,7 @@ Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: 
 
 ## Coding agents
 
-Send the sessions of the coding agents your engineers run, and the commits they make, to Agent Analytics. `amplitude-ai coding-agents init` sets up the repo, and `amplitude-ai coding-agents doctor` checks it. The commit hook and the outcomes workflow join each session to `Commit Merged`, `Commit Reverted` and `Deploy Succeeded`.
+Send the sessions of the coding agents your engineers run, and the commits they make, to Agent Analytics. `amplitude-ai coding-agents init` sets up the repo, and `amplitude-ai coding-agents doctor` checks it. The commit hook and the outcomes workflow join each session to `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed`, each stamped with the `agent_setup_version` it was written with.
 
 | Harness | Path | Guide |
 | --- | --- | --- |
