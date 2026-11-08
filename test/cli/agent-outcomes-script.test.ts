@@ -141,9 +141,12 @@ function fakeGitHub(world: World) {
   };
   type Fn = (params: Record<string, unknown>) => Promise<{ data: unknown }>;
   const paginate = Object.assign(async (fn: Fn, params: Record<string, unknown>) => (await fn(params)).data, {
-    iterator: async function* (fn: Fn, params: Record<string, unknown>) {
-      yield await fn(params);
-    },
+    // Octokit's iterator is an async iterable only; it has no next() of its own.
+    iterator: (fn: Fn, params: Record<string, unknown>) => ({
+      [Symbol.asyncIterator]: async function* () {
+        yield await fn(params);
+      },
+    }),
   });
   return { github: { rest, paginate }, calls };
 }

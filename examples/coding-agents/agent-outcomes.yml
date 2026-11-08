@@ -207,7 +207,7 @@ jobs:
               const opened = new Date(pr.created_at);
               const pages = github.paginate.iterator(github.rest.actions.listWorkflowRunsForRepo, {
                 owner, repo, branch: pr.head.ref, event: 'pull_request', per_page: 100,
-              });
+              })[Symbol.asyncIterator]();
               let first = null;
               for (let page = 0; page < 5; page++) {
                 spend();
