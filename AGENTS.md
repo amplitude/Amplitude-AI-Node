@@ -66,7 +66,7 @@ Codex auto-reads this `AGENTS.md` file for context.
 - Agent runs on a hosted platform (Sierra, Decagon, Fin, Agentforce, Vapi, Retell AI, ElevenLabs Agents, Bland AI): no SDK; forward conversations over HTTP by following `docs/integrations/<platform>.md`.
 - Voice agent you run yourself: add `voiceTurnProperties({ direction, ... })` as `eventProperties` on each turn, add `sttMs` / `llmTtftMs` / `ttsTtfbMs` stage latency and `turnStartOffsetMs` / `turnEndOffsetMs` call offsets when the stack reports them, use `attach` from `@amplitude/ai/integrations/livekit` for LiveKit Agents, `PipecatVoiceTracker` for Pipecat, `RealtimeTurnMapper` for the OpenAI Realtime API, and `NovaSonicTurnMapper` for Amazon Nova Sonic, and put `recordingAttachment(url)` on the last turn (a link only; Amplitude never fetches it). Never put a raw phone number in `userId` or `deviceId`; `deviceId` is the customer's choice, a hash is allowed, and no algorithm is required. See Step 3l in `amplitude-ai.md`.
 - Agent built on the Cursor Agent SDK: the runtime owns the model loop, so there is nothing to wrap; forward live sessions from a hook by following `docs/integrations/cursor-agent-sdk.md`.
-- Developers use Claude Code, Codex, or goose and you want those sessions and their commits in Agent Analytics: run `amplitude-ai coding-agents init`, then `amplitude-ai coding-agents doctor`, and follow `docs/integrations/<harness>.md` (claude-code, codex, goose). The key is `AMPLITUDE_AI_API_KEY`, falling back to `AMPLITUDE_API_KEY`; the outcomes workflow reads the `AMPLITUDE_API_KEY` repository secret. Join sessions to commits with `docs/integrations/recipes/code-outcomes.md`.
+- Developers use Claude Code, Codex, goose, Cursor, Gemini CLI or GitHub Copilot and you want those sessions and their commits in Agent Analytics: run `amplitude-ai coding-agents init`, then `amplitude-ai coding-agents doctor`, and follow `docs/integrations/<harness>.md` (claude-code, codex, goose, cursor, gemini-cli, copilot). The key is `AMPLITUDE_AI_API_KEY`, falling back to `AMPLITUDE_API_KEY`; the outcomes workflow reads the `AMPLITUDE_API_KEY` repository secret. Join sessions to commits with `docs/integrations/recipes/code-outcomes.md`.
 - Agent built on the Claude Agent SDK or the Codex SDK in your own app: use `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk` or `CodexSDKTracker` from `@amplitude/ai/integrations/codex-sdk` inside `ai.agent(...).session(...).run(...)` (Path 1 of `docs/integrations/claude-code.md` and `docs/integrations/codex.md`).
 - Agents talk in Buzz (block/buzz): read the relay archive and forward with `docs/integrations/buzz.md`.
 - Agents call each other over A2A or ACP: carry session, parent agent, user, and trace with `injectA2aMetadata` / `extractA2aMetadata` or `injectAcpMeta` / `extractAcpMeta` so child sessions link to the parent.
@@ -132,7 +132,7 @@ Prompt:
 - `amplitude-ai mcp` — Start the MCP server for AI coding agents
 - `amplitude-ai doctor [--json]` — Validate environment, deps, and event pipeline
 - `amplitude-ai status [--json]` — Show SDK version, installed providers, and env config
-- `amplitude-ai coding-agents init [--harness claude-code|codex|goose] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]` — Wire coding-agent sessions and commit outcomes into a repo
+- `amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]` — Wire coding-agent sessions and commit outcomes into a repo
 - `amplitude-ai coding-agents doctor [--dir PATH] [--json]` — Check that setup
 - `amplitude-ai hook codex [--dry-run]` — Codex `Stop` hook: forward the finished turn (reads hook JSON on stdin, always exits 0)
 
@@ -176,6 +176,9 @@ Fetch the public guide for the job. These URLs track `main`.
 - `docs/integrations/claude-code.md` — Claude Code sessions and commit outcomes
 - `docs/integrations/codex.md` — Codex sessions and commit outcomes
 - `docs/integrations/goose.md` — goose sessions and commit outcomes
+- `docs/integrations/cursor.md` — Cursor sessions and commit outcomes
+- `docs/integrations/gemini-cli.md` — Gemini CLI sessions and commit outcomes
+- `docs/integrations/copilot.md` — GitHub Copilot sessions and commit outcomes
 - `docs/integrations/buzz.md` — Buzz conversations from the relay archive (no SDK)
 - `docs/integrations/recipes/code-outcomes.md` — Join coding-agent sessions to commits, PRs, and CI
 - `docs/integrations/routers.md` — Inference routers and AI gateways: SDK wrap, router-exported OTLP spans, or HTTP API

@@ -41,10 +41,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import * as zlib from 'node:zlib';
 import { decompress as fzstdDecompress } from 'fzstd';
 import { AmplitudeAI } from '../client.js';
+import { LOCAL_ENV_PATH, type LocalEnv, findLocalEnv, parseLocalEnv, withLocalEnv } from './local-env.js';
 import { AIConfig, type ContentMode } from '../config.js';
 import type { AmplitudeEvent } from '../types.js';
 import {
@@ -71,8 +72,6 @@ export type CodexHookInput = {
   hook_event_name?: string;
 };
 
-/** Repo-relative path of the gitignored env file `coding-agents init` writes. */
-export const LOCAL_ENV_PATH = '.amplitude-ai/local.env';
 
 type Cursor = {
   version: typeof CURSOR_VERSION;
@@ -82,7 +81,8 @@ type Cursor = {
   state: CodexRolloutState;
 };
 
-export type CodexHookEnv = Record<string, string | undefined>;
+export type CodexHookEnv = LocalEnv;
+export { LOCAL_ENV_PATH, findLocalEnv, parseLocalEnv, withLocalEnv };
 
 export type CodexHookOptions = {
   env?: CodexHookEnv;
@@ -117,51 +117,7 @@ export function codexHookDir(env: CodexHookEnv, home = homedir()): string {
   return join(env.AMPLITUDE_AI_HOME || join(home, '.amplitude-ai'), 'codex');
 }
 
-/** Parses `KEY=value` lines (optional `export `, optional quotes). */
-export function parseLocalEnv(text: string): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#') || !line.includes('=')) continue;
-    const eq = line.indexOf('=');
-    const key = line.slice(0, eq).trim().replace(/^export\s+/, '').trim();
-    let value = line.slice(eq + 1).trim();
-    if (value.length >= 2 && value[0] === value[value.length - 1] && (value[0] === '"' || value[0] === "'")) {
-      value = value.slice(1, -1);
-    }
-    if (key) values[key] = value;
-  }
-  return values;
-}
-
-/** The nearest `.amplitude-ai/local.env` from `cwd` up to the repo root. */
-export function findLocalEnv(cwd: string | undefined): string | null {
-  if (!cwd) return null;
-  let dir = resolve(cwd);
-  for (;;) {
-    const candidate = join(dir, LOCAL_ENV_PATH);
-    if (existsSync(candidate)) return candidate;
-    if (existsSync(join(dir, '.git'))) return null;
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-function withLocalEnv(env: CodexHookEnv, cwd: string | undefined, stderr: (t: string) => void): CodexHookEnv {
-  const path = findLocalEnv(cwd);
-  if (!path) return env;
-  try {
-    const merged: CodexHookEnv = { ...parseLocalEnv(readFileSync(path, 'utf8')) };
-    for (const [k, v] of Object.entries(env)) if (v) merged[k] = v;
-    return merged;
-  } catch (err) {
-    stderr(`amplitude-ai hook codex: could not read ${LOCAL_ENV_PATH}: ${err instanceof Error ? err.name : 'error'}\n`);
-    return env;
-  }
-}
-
-function defaultGitEmail(cwd: string | undefined): string | null {
+export function defaultGitEmail(cwd: string | undefined): string | null {
   try {
     const out = execFileSync('git', ['config', 'user.email'], {
       cwd: cwd && existsSync(cwd) ? cwd : undefined,
@@ -333,22 +289,32 @@ export function readNewLines(
   return { lines: records.map((r) => r.text), records, offset: start + lastNewline + 1, reset };
 }
 
-function contentModeFrom(value: string | undefined, stderr: (t: string) => void): ContentMode {
+export function contentModeFrom(value: string | undefined, stderr: (t: string) => void, label = 'codex'): ContentMode {
   const v = (value ?? '').trim().toLowerCase();
   if (!v || v === 'full') return 'full';
   if (v === 'metadata' || v === 'metadata_only') return 'metadata_only';
   if (v === 'customer_enriched') return 'customer_enriched';
-  stderr(`amplitude-ai hook codex: unknown AMPLITUDE_AI_CONTENT_MODE "${v}"; using metadata_only\n`);
+  stderr(`amplitude-ai hook ${label}: unknown AMPLITUDE_AI_CONTENT_MODE "${v}"; using metadata_only\n`);
   return 'metadata_only';
 }
 
-function endpointFor(region: string | undefined): string {
+export function endpointFor(region: string | undefined): string {
   return (region ?? '').toLowerCase() === 'eu'
     ? 'https://api.eu.amplitude.com/2/httpapi'
     : 'https://api2.amplitude.com/2/httpapi';
 }
 
-async function postBatch(
+/** A response the HTTP API will give again for the same events (any 4xx except 429). */
+export class HttpApiRejected extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`Amplitude HTTP API returned ${status}${body ? `: ${body}` : ''}`);
+  }
+}
+
+export async function postBatch(
   fetchImpl: typeof fetch,
   endpoint: string,
   apiKey: string,
@@ -367,13 +333,17 @@ async function postBatch(
       });
       status = response.status;
       if (response.ok) return;
-    } catch {
+      if (status >= 400 && status < 500 && status !== 429) {
+        const body = await response.text().catch(() => '');
+        throw new HttpApiRejected(status, body.slice(0, 200));
+      }
+    } catch (err) {
+      if (err instanceof HttpApiRejected) throw err;
       status = 0;
     } finally {
       clearTimeout(timer);
     }
-    const retryable = status === 0 || status === 429 || status >= 500;
-    if (!retryable || attempt >= 2) throw new Error(`Amplitude HTTP API returned ${status || 'a network error'}`);
+    if (attempt >= 2) throw new Error(`Amplitude HTTP API returned ${status || 'a network error'}`);
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
   }
 }

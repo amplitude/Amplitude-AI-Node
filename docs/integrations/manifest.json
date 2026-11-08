@@ -192,6 +192,40 @@
         "last_verified": "pending_live_capture"
       },
       {
+        "id": "cursor",
+        "name": "Cursor",
+        "category": "coding_agent",
+        "pinned_version": "3.24.18",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/cursor.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/cursor.md",
+        "paths": ["hook_spool"],
+        "extraction_methods": ["hook"],
+        "ingestion_paths": ["http_v2"],
+        "last_verified": "2026-11-07"
+      },
+      {
+        "id": "gemini-cli",
+        "name": "Gemini CLI",
+        "category": "coding_agent",
+        "pinned_version": "google-gemini/gemini-cli@62bab5b2",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/gemini-cli.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/gemini-cli.md",
+        "paths": ["otlp_logs"],
+        "ingestion_paths": ["otlp"],
+        "last_verified": "pending_live_capture"
+      },
+      {
+        "id": "copilot",
+        "name": "GitHub Copilot",
+        "category": "coding_agent",
+        "pinned_version": "copilot-cli@1.0.4",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/copilot.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/copilot.md",
+        "paths": ["otlp_traces"],
+        "ingestion_paths": ["otlp"],
+        "last_verified": "pending_live_capture"
+      },
+      {
         "id": "buzz",
         "name": "Buzz",
         "category": "coding_agent",
@@ -227,6 +261,10 @@
       {
         "id": "codex-hooks",
         "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/examples/coding-agents/codex-hooks.json"
+      },
+      {
+        "id": "cursor-hooks",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/examples/coding-agents/cursor-hooks.json"
       }
     ],
     "cli": "npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run"

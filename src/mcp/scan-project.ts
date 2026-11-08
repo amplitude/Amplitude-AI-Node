@@ -12,19 +12,26 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, basename, dirname, isAbsolute, parse, resolve, sep } from 'node:path';
+import { type OutcomesWorkflowState, outcomesWorkflowState } from '../cli/outcomes-workflow.js';
 import { EXPERIMENT_DEPS, type FlagCallSite, flagCallSites } from './experiment-deps.js';
 import { analyzeFileInstrumentation, redactSecrets } from './validate-file.js';
 
 const MAX_FLAG_READS = 50; // flag_call_sites entries reported per scan
 
 export interface CodingAgentsScan {
-  /** Harnesses with project config here: `claude-code`, `codex`, `goose`. */
+  /** Harnesses with project config here: `claude-code`, `codex`, `goose`, `cursor`, `gemini`, `copilot`. */
   harnesses: string[];
   /** Agent SDK dependencies the app is built on. */
   agent_sdks: string[];
   has_claude_dir: boolean;
   has_codex_dir: boolean;
   has_goose_config: boolean;
+  /** `.cursor/` or `.cursorrules` (Cursor). */
+  has_cursor_config: boolean;
+  /** `.gemini/` or `GEMINI.md` (Gemini CLI). */
+  has_gemini_config: boolean;
+  /** `.github/copilot-instructions.md` or `.github/hooks/` (GitHub Copilot). */
+  has_copilot_config: boolean;
   has_claude_md: boolean;
   has_agents_md: boolean;
   has_github_workflows: boolean;
@@ -32,9 +39,12 @@ export interface CodingAgentsScan {
   existing_prepare_commit_msg: string | null;
   /** True when `amplitude-ai coding-agents init` has already run. */
   has_amplitude_setup: boolean;
+  /** `.github/workflows/agent-outcomes.yml` compared with the shipped template. */
+  outcomes_workflow: OutcomesWorkflowState;
 }
 
 const CODING_AGENT_SDK_DEPS = ['@openai/codex-sdk', '@anthropic-ai/claude-agent-sdk'];
+const OUTCOMES_WORKFLOW = '.github/workflows/agent-outcomes.yml';
 
 function readGitHooksPath(rootPath: string): string | null {
   const config = readRegularFileCapped(join(rootPath, '.git', 'config'), 256 * 1024);
@@ -47,12 +57,18 @@ export function scanCodingAgents(rootPath: string, allDeps: Set<string>): Coding
   const hasClaudeDir = has('.claude');
   const hasCodexDir = has('.codex');
   const hasGooseConfig = has('.goosehints') || has('.goose');
+  const hasCursorConfig = has('.cursor') || has('.cursorrules');
+  const hasGeminiConfig = has('.gemini') || has('GEMINI.md');
+  const hasCopilotConfig = has('.github/copilot-instructions.md') || has('.github/hooks');
   const hasClaudeMd = has('CLAUDE.md');
   const hasAgentsMd = has('AGENTS.md');
   const harnesses: string[] = [];
   if (hasClaudeDir || hasClaudeMd) harnesses.push('claude-code');
   if (hasCodexDir) harnesses.push('codex');
   if (hasGooseConfig) harnesses.push('goose');
+  if (hasCursorConfig) harnesses.push('cursor');
+  if (hasGeminiConfig) harnesses.push('gemini');
+  if (hasCopilotConfig) harnesses.push('copilot');
 
   const hooksPath = readGitHooksPath(rootPath);
   const hookCandidates = [
@@ -63,6 +79,9 @@ export function scanCodingAgents(rootPath: string, allDeps: Set<string>): Coding
   ];
   const existingHook = hookCandidates.find((rel) => has(rel)) ?? null;
   const hookText = existingHook ? readRegularFileCapped(join(rootPath, existingHook), 64 * 1024) : null;
+  const workflowText = has(OUTCOMES_WORKFLOW)
+    ? readRegularFileCapped(join(rootPath, OUTCOMES_WORKFLOW), 256 * 1024)
+    : null;
 
   return {
     harnesses,
@@ -70,12 +89,19 @@ export function scanCodingAgents(rootPath: string, allDeps: Set<string>): Coding
     has_claude_dir: hasClaudeDir,
     has_codex_dir: hasCodexDir,
     has_goose_config: hasGooseConfig,
+    has_cursor_config: hasCursorConfig,
+    has_gemini_config: hasGeminiConfig,
+    has_copilot_config: hasCopilotConfig,
     has_claude_md: hasClaudeMd,
     has_agents_md: hasAgentsMd,
     has_github_workflows: has('.github/workflows'),
     existing_prepare_commit_msg: existingHook,
-    has_amplitude_setup:
-      has('.github/workflows/agent-outcomes.yml') || Boolean(hookText?.includes('Agent-Session-Id')),
+    has_amplitude_setup: has(OUTCOMES_WORKFLOW) || Boolean(hookText?.includes('Agent-Session-Id')),
+    outcomes_workflow: has(OUTCOMES_WORKFLOW)
+      ? workflowText === null
+        ? 'customized'
+        : outcomesWorkflowState(workflowText)
+      : 'missing',
   };
 }
 
@@ -773,6 +799,11 @@ export function scanProject(requestedRoot: string): ScanResult {
       : '';
     recommendations.push(
       `Coding agents configured (${codingAgents.harnesses.join(', ')}): run \`npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\`, then without --dry-run, to send their sessions and stamp agent commits for merge, revert and deploy outcomes.${merge} See "Coding agents" in amplitude-ai.md.`,
+    );
+  }
+  if (codingAgents.outcomes_workflow === 'outdated') {
+    recommendations.push(
+      '.github/workflows/agent-outcomes.yml is an earlier shipped version: re-run `npx -y -p @amplitude/ai amplitude-ai coding-agents init` to upgrade it (adds Pull Request Merged, Deploy Failed and agent_setup_version).',
     );
   }
 

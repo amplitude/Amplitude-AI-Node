@@ -18,7 +18,7 @@ Auto-instrument a JS/TS AI app with `@amplitude/ai` in 5 phases: **Detect → Di
 8. Determine whether the server delivers a browser UI. Ask: does any route or static handler send HTML to a browser? Evidence: an `index.html` anywhere in the project, a static file directory (`public/`, `static/`, `dist/`), HTML template files, or any response with `Content-Type: text/html`. Framework-specific deps (`react`, `vue`, `svelte`) are one signal but not the only one. If yes, flag `Frontend: yes` — a browser client is generating or persisting `sessionId`
 9. Check for Vercel AI SDK: `@ai-sdk/*` in deps
 10. Check for edge runtime: `runtime = 'edge'` in route files
-11. Check for coding agents: `.claude/` or `CLAUDE.md` (Claude Code), `.codex/` (Codex), `.goosehints` or `.goose/` (goose), and `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` in deps. `scan_project` reports these as `coding_agents`. If found, flag `Coding agents: [list]` and do Step 3m
+11. Check for coding agents: `.claude/` or `CLAUDE.md` (Claude Code), `.codex/` (Codex), `.goosehints` or `.goose/` (goose), `.cursor/` or `.cursorrules` (Cursor), `.gemini/` or `GEMINI.md` (Gemini CLI), `.github/copilot-instructions.md` or `.github/hooks/` (GitHub Copilot), and `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` in deps. `scan_project` reports these as `coding_agents`. If found, flag `Coding agents: [list]` and do Step 3m
 
 **Output to the developer:**
 
@@ -885,20 +885,20 @@ Skip this step unless Phase 1 found coding agents. There are two different jobs;
 
 **Agents you ship, built on an agent SDK.** If the app runs `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` for its own users, instrument it like any other agent: `ClaudeAgentSDKTracker` from `@amplitude/ai/integrations/claude-agent-sdk` (see "Claude Agent SDK" below) or `CodexSDKTracker` from `@amplitude/ai/integrations/codex-sdk` (see "Codex SDK" below), inside `ai.agent(...).session(...)`. These sessions belong to the app's end users.
 
-**Coding agents your engineers run on this repo.** Claude Code, Codex and goose sessions, and the commits they make, can go to Agent Analytics so you can see which sessions ship code that merges, gets reverted or deploys. This does not touch application code:
+**Coding agents your engineers run on this repo.** Claude Code, Codex, goose, Cursor, Gemini CLI and GitHub Copilot sessions, and the commits they make, can go to Agent Analytics so you can see which sessions ship code that merges, gets reverted or deploys. This does not touch application code:
 
 1. Preview, then write the setup. `--dry-run` prints every file it would write and changes nothing:
    ```bash
    npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run
    printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --api-key-stdin
    ```
-   Pass `--harness claude-code|codex|goose` (repeatable) to limit it, `--privacy metadata` to send no prompt or response text, `--region eu` for EU projects (re-running without it keeps the region already set up), and `--api-key-env NAME` when the key is in another variable. The key is read as `AMPLITUDE_AI_API_KEY`, falling back to `AMPLITUDE_API_KEY`. Never put it on the command line or in a committed file: init writes it only to gitignored files (`.claude/settings.local.json`, `.amplitude-ai/local.env`).
+   Pass `--harness claude-code|codex|goose|cursor|gemini|copilot` (repeatable) to limit it (with no `--harness`, Cursor, Gemini CLI and Copilot are included only when the repo has their files), `--privacy metadata` to send no prompt or response text, `--region eu` for EU projects (re-running without it keeps the region already set up), and `--api-key-env NAME` when the key is in another variable. The key is read as `AMPLITUDE_AI_API_KEY`, falling back to `AMPLITUDE_API_KEY`. Never put it on the command line or in a committed file: init writes it only to gitignored files (`.claude/settings.local.json`, `.amplitude-ai/local.env`).
 2. Init writes:
    - `.githooks/prepare-commit-msg` and `git config core.hooksPath .githooks` (plus a `package.json` `prepare` script that sets it on install), which add `Agent-Session-Id` and `Agent-Name` trailers to commits an agent makes. Human commits are untouched. If the repo already has a hook manager (husky, another `core.hooksPath`), init leaves it alone, reports a `conflict` and exits 1; add the trailer lines to the existing hook instead.
-   - `.github/workflows/agent-outcomes.yml`, which sends `Commit Merged`, `Commit Reverted` and `Deploy Succeeded` with `agent_session_id`. Tell the developer to add the `AMPLITUDE_API_KEY` repository secret; the workflow does nothing without it.
-   - Claude Code: OpenTelemetry settings in `.claude/settings.json`. Codex: a `Stop` hook in `.codex/hooks.json` running `amplitude-ai hook codex`, which each developer approves once with `/hooks`. goose: the environment block to export, printed rather than written.
+   - `.github/workflows/agent-outcomes.yml`, which sends `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed` with `agent_session_id` and `agent_setup_version`. Tell the developer to add the `AMPLITUDE_API_KEY` repository secret; the workflow does nothing without it.
+   - Claude Code: OpenTelemetry settings in `.claude/settings.json`. Codex: a `Stop` hook in `.codex/hooks.json` running `amplitude-ai hook codex`, which each developer approves once with `/hooks`. goose: the environment block to export, printed rather than written. Cursor: agent hooks in `.cursor/hooks.json` running `amplitude-ai hook cursor`, which spools each event locally and sends the conversation when the agent stops; add `@amplitude/ai` as a dev dependency first so the hooks skip `npx`. Gemini CLI: a `telemetry` block in `.gemini/settings.json`, with the key header in `.amplitude-ai/local.env`; the developer starts `gemini` from a shell that loads it and trusts the folder. Copilot: a `copilot()` shell function for the CLI (it scopes the OpenTelemetry variables to Copilot runs) and the VS Code user settings, printed rather than written.
 3. Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor` and fix every failure it reports.
-4. Point the developer at `docs/integrations/claude-code.md`, `codex.md` and `goose.md` for the content gates and verification, and at `docs/integrations/recipes/code-outcomes.md` for the commit evaluators and the session-to-commit join.
+4. Point the developer at `docs/integrations/claude-code.md`, `codex.md`, `goose.md`, `cursor.md`, `gemini-cli.md` and `copilot.md` for the content gates and verification, and at `docs/integrations/recipes/code-outcomes.md` for the commit evaluators and the session-to-commit join.
 
 **Agents calling agents.** If agents call each other over A2A or ACP, carry the session across the call so child sessions link to the parent: `injectA2aMetadata(metadata)` / `extractA2aMetadata(metadata)` or `injectAcpMeta(meta)` / `extractAcpMeta(meta)` from `@amplitude/ai`. The wire format matches the Python SDK, so a Node agent and a Python agent can call each other. An A2A server can advertise this with `declareA2aExtension(agentCard)`, which adds the optional (`required: false`) extension `https://amplitude.com/a2a/extensions/agent-context/v1` to `capabilities.extensions`.
 
@@ -1008,7 +1008,7 @@ All doctor failures are mandatory to resolve before proceeding. **Exception:** i
 
 ### Step 4c-2: Check coding agents (Step 3m only)
 
-Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor --json` and confirm every check passes. For Codex, pipe a recorded hook input to `amplitude-ai hook codex --dry-run` to see the events without sending them. Make one commit from an agent session and confirm `git log -1` shows the `Agent-Session-Id` trailer.
+Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor --json` and confirm every check passes. For Codex, pipe a recorded hook input to `amplitude-ai hook codex --dry-run` to see the events without sending them. For Cursor, set `AMPLITUDE_AI_HOOK_DRY_RUN=1` in `.amplitude-ai/local.env` and the hook writes the events to Cursor's hook output instead of sending them; commits from a Cursor agent carry `Agent-Session-Id` and `Agent-Name: cursor`. Make one commit from an agent session and confirm `git log -1` shows the `Agent-Session-Id` trailer. Gemini CLI commits carry only `Agent-Name: gemini-cli` (its shells have no session ID), and Copilot adds no trailer.
 
 ### Step 4d: Run project checks
 
