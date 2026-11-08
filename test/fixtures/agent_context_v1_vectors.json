@@ -415,6 +415,25 @@
       }
     },
     {
+      "name": "a2a/trailing_newline_id",
+      "transport": "a2a",
+      "wire": {
+        "com.amplitude/context": {
+          "session_id": "sess-buyer-1\n",
+          "parent_agent_id": "buyer-agent",
+          "user_id": "user-42",
+          "identity_type": "account",
+          "actor_type": "agent",
+          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        }
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "malformed"
+      }
+    },
+    {
       "name": "a2a/empty",
       "transport": "a2a",
       "wire": {},
@@ -730,6 +749,23 @@
       }
     },
     {
+      "name": "acp/trailing_newline_id",
+      "transport": "acp",
+      "wire": {
+        "com.amplitude/session-id": "sess-buyer-1\n",
+        "com.amplitude/parent-agent-id": "buyer-agent",
+        "com.amplitude/user-id": "user-42",
+        "com.amplitude/identity-type": "account",
+        "com.amplitude/actor-type": "agent",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "malformed"
+      }
+    },
+    {
       "name": "acp/empty",
       "transport": "acp",
       "wire": {},
@@ -1019,6 +1055,23 @@
       "transport": "http",
       "wire": {
         "x-amplitude-session-id": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+        "x-amplitude-agent-id": "buyer-agent",
+        "x-amplitude-user-id": "user-42",
+        "x-amplitude-identity-type": "account",
+        "x-amplitude-actor-type": "agent",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "malformed"
+      }
+    },
+    {
+      "name": "http/trailing_newline_id",
+      "transport": "http",
+      "wire": {
+        "x-amplitude-session-id": "sess-buyer-1\n",
         "x-amplitude-agent-id": "buyer-agent",
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
