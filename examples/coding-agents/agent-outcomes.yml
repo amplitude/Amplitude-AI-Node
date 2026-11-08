@@ -9,7 +9,8 @@
 #   - Optional variable AMPLITUDE_USER_ID_SOURCE: "email" (default, commit author email)
 #     or "login" (GitHub login). Use the value your agent sessions use as user ID.
 #   - Optional variable AMPLITUDE_AGENT_SETUP_PATHS: comma-separated root-level files or
-#     folders that make up the agent setup (default AGENTS.md,CLAUDE.md,.claude,.codex,.cursor,.goosehints).
+#     folders that make up the agent setup (default AGENTS.md,CLAUDE.md,GEMINI.md,.claude,.codex,
+#     .cursor,.cursorrules,.gemini,.goosehints,.mcp.json). Changing it changes every later version.
 name: Agent outcomes (Amplitude)
 
 on:
@@ -116,13 +117,13 @@ jobs:
             };
 
             const events = [];
-            const pushEvent = (eventType, userId, props, insertKey) => {
+            const pushEvent = (eventType, userId, props, insertKey, time = Date.now()) => {
               if (!userId) return;
               events.push({
                 event_type: eventType,
                 user_id: userId,
                 insert_id: `${eventType}:${repoName}:${insertKey}`,
-                time: Date.now(),
+                time,
                 event_properties: { ...props, outcomes_workflow_version: WORKFLOW_VERSION },
               });
             };
@@ -144,6 +145,24 @@ jobs:
               spend();
               return fn();
             };
+            // Iterates a paginated list, one budget call per page requested.
+            const pagesOf = async function* (method, params) {
+              const pages = github.paginate.iterator(method, { ...params, per_page: 100 })[Symbol.asyncIterator]();
+              for (;;) {
+                spend();
+                const { value, done } = await pages.next();
+                if (done) {
+                  apiCalls--;
+                  return;
+                }
+                yield value.data;
+              }
+            };
+            const listAll = async (method, params) => {
+              const items = [];
+              for await (const page of pagesOf(method, params)) items.push(...page);
+              return items;
+            };
             const enrich = async (name, fn) => {
               try {
                 const value = await fn();
@@ -157,7 +176,10 @@ jobs:
               }
             };
 
-            const DEFAULT_SETUP_PATHS = ['AGENTS.md', 'CLAUDE.md', '.claude', '.codex', '.cursor', '.goosehints'];
+            const DEFAULT_SETUP_PATHS = [
+              'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.claude', '.codex', '.cursor', '.cursorrules', '.gemini',
+              '.goosehints', '.mcp.json',
+            ];
             const setupPaths = (() => {
               const raw = (process.env.AMPLITUDE_AGENT_SETUP_PATHS || '').trim();
               if (!raw) return DEFAULT_SETUP_PATHS;
@@ -201,40 +223,39 @@ jobs:
             const FAILED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
             // The head SHA of the PR's first pull_request workflow run, which is the
             // first push CI ran on. A push of many commits runs CI on its head only, so
-            // the PR's oldest commits can have none. Runs list newest first; undefined
-            // when the PR has no Actions runs or the run history is too long to page.
-            // This workflow's own pull_request runs are not CI and are skipped.
+            // the PR's oldest commits can have none. GitHub empties a run's
+            // pull_requests once the PR closes, so runs match by the PR's commit SHAs
+            // between open and merge; after a force-push, the earliest surviving push
+            // counts. This workflow's own runs are not CI. Undefined when no run
+            // matches or the run history is too long to page.
             const selfWorkflow = (process.env.GITHUB_WORKFLOW_REF || '')
               .replace(/^[^/]+\/[^/]+\//, '').replace(/@.*$/, '');
-            const firstRunSha = async (pr) => {
+            const firstRunSha = async (pr, commits) => {
+              const prShas = new Set(commits.map((c) => c.sha));
               const opened = new Date(pr.created_at);
-              const pages = github.paginate.iterator(github.rest.actions.listWorkflowRunsForRepo, {
-                owner, repo, branch: pr.head.ref, event: 'pull_request', per_page: 100,
-              })[Symbol.asyncIterator]();
+              const merged = pr.merged_at ? new Date(pr.merged_at) : new Date();
               let first = null;
-              for (let page = 0; page < 5; page++) {
-                spend();
-                const { value, done } = await pages.next();
-                if (done) return first?.head_sha;
-                for (const run of value.data) {
-                  if (new Date(run.created_at) < opened) continue;
+              let page = 0;
+              for await (const runs of pagesOf(github.rest.actions.listWorkflowRunsForRepo, {
+                owner, repo, branch: pr.head.ref, event: 'pull_request',
+                created: `${opened.toISOString()}..${merged.toISOString()}`,
+              })) {
+                for (const run of runs) {
+                  const created = new Date(run.created_at);
+                  if (created < opened || created >= merged) continue;
                   if (run.id === context.runId || (selfWorkflow && run.path === selfWorkflow)) continue;
-                  if (!(run.pull_requests || []).some((p) => p.number === pr.number)) continue;
-                  if (!first || new Date(run.created_at) < new Date(first.created_at)) first = run;
+                  const ours = prShas.has(run.head_sha)
+                    || (run.pull_requests || []).some((p) => p.number === pr.number);
+                  if (ours && (!first || created < new Date(first.created_at))) first = run;
                 }
-                if (value.data.length < 100 || value.data.some((run) => new Date(run.created_at) < opened)) {
-                  return first?.head_sha;
-                }
+                if (runs.length < 100) return first?.head_sha;
+                if (++page >= 5) return undefined;
               }
-              return undefined;
+              return first?.head_sha;
             };
             const ciResults = async (sha) => {
-              const runs = await call(() => github.paginate(github.rest.checks.listForRef, {
-                owner, repo, ref: sha, filter: 'all', per_page: 100,
-              }));
-              const statuses = await call(() => github.paginate(github.rest.repos.listCommitStatusesForRef, {
-                owner, repo, ref: sha, per_page: 100,
-              }));
+              const runs = await listAll(github.rest.checks.listForRef, { owner, repo, ref: sha, filter: 'all' });
+              const statuses = await listAll(github.rest.repos.listCommitStatusesForRef, { owner, repo, ref: sha });
               const earliest = (items, key, counts) => {
                 const first = new Map();
                 for (const item of items) {
@@ -258,7 +279,7 @@ jobs:
             const ciPassedFirstRun = (pr, commits) => enrich('ci_passed_first_run', async () => {
               let runSha;
               try {
-                runSha = await firstRunSha(pr);
+                runSha = await firstRunSha(pr, commits);
               } catch (e) {
                 if (e instanceof BudgetExhausted) throw e;
                 core.warning(`ci_passed_first_run: workflow runs unavailable (${e.message}); using the PR's oldest commits`);
@@ -283,6 +304,16 @@ jobs:
                 let m;
                 while ((m = revertRe.exec(text)) !== null) reverted.add(m[1].toLowerCase());
               }
+              // The PR-level enrichments are cheap, so they run before the per-commit
+              // setup lookups that can use up the budget on a long PR.
+              const reviews = await enrich('reviews', async () => {
+                const all = await listAll(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number });
+                // A reply in a review thread is an empty COMMENTED review; it is not a review.
+                return all.filter((r) => (['APPROVED', 'CHANGES_REQUESTED'].includes(r.state)
+                  || (r.state === 'COMMENTED' && (r.body || '').trim()))
+                  && r.user?.type !== 'Bot' && r.user?.login !== pr.user?.login);
+              });
+              const ciPassed = await ciPassedFirstRun(pr, commits);
               const setupVersions = new Map();
               for (const c of commits) setupVersions.set(c.sha, await setupVersionFor(c));
               for (const c of commits) {
@@ -313,33 +344,28 @@ jobs:
               const attributed = commits.map(attribution).filter((a) => a.agent_attribution !== 'none');
               const distinct = (key) =>
                 [...new Set(agentCommits.map((c) => trailer(c.commit.message, key)).filter(Boolean))].slice(0, 50);
-              const reviews = await enrich('reviews', async () => {
-                const all = await call(() => github.paginate(github.rest.pulls.listReviews, {
-                  owner, repo, pull_number: pr.number, per_page: 100,
-                }));
-                return all.filter((r) => ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'].includes(r.state)
-                  && r.user?.type !== 'Bot' && r.user?.login !== pr.user?.login);
-              });
               const prUser = agentCommits[0] || commits[0];
               if (prUser) {
-                pushEvent('Pull Request Merged', userIdFor(prUser), {
+                const prUserId = userIdFor(prUser) || (userIdSource === 'login' ? pr.user?.login : null);
+                pushEvent('Pull Request Merged', prUserId, {
                   repo: repoName,
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
                   merge_commit_sha: pr.merge_commit_sha,
-                  commit_count: commits.length,
+                  commit_count: pr.commits ?? commits.length,
                   agent_commit_count: agentCommits.length,
                   unattributed_commit_count: commits.length - attributed.length,
                   agent_authored: agentCommits.length > 0,
+                  agent_attributed: attributed.length > 0,
                   agent_names: distinct('Agent-Name'),
                   agent_session_ids: distinct('Agent-Session-Id'),
                   attributed_commit_count: attributed.length,
                   attributed_agents: [...new Set(attributed.map((a) => a.attributed_agent).filter(Boolean))],
                   review_count: reviews?.length,
                   changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
-                  ci_passed_first_run: await ciPassedFirstRun(pr, commits),
+                  ci_passed_first_run: ciPassed,
                   agent_setup_version: setupVersions.get(commits[0].sha),
-                }, pr.number);
+                }, pr.number, pr.merged_at ? Date.parse(pr.merged_at) : Date.now());
               }
             } else {
               const deployment = context.payload.deployment;

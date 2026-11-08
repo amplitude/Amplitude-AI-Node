@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 
 /**
  * sha256 of the shipped `agent-outcomes.yml`. The Python SDK ships the same
- * bytes and pins the same hash, so CI in both repos fails if the copies drift.
+ * bytes and pins its own copy of this hash; keep the two equal.
  */
-export const OUTCOMES_WORKFLOW_SHA256 = '58f1b83351d9f8f15d20aae00c51d1af6ccdc8b8e31aa776ed5a3836ec9a925f';
+export const OUTCOMES_WORKFLOW_SHA256 = 'bb1df2ac3a40c478ef2185967d89bb8f40a6f1d03dfc91e43ac1790dab43ebf0';
 
 /** Earlier shipped versions. `init` replaces an untouched copy of one without `--force`. */
 export const PREVIOUS_OUTCOMES_WORKFLOW_SHA256: readonly string[] = [
@@ -19,9 +19,13 @@ export type OutcomesWorkflowState = 'missing' | 'current' | 'outdated' | 'custom
 
 export const sha256Hex = (content: string | Buffer): string => createHash('sha256').update(content).digest('hex');
 
+/** sha256 with CRLF read as LF, so a Windows checkout of an untouched copy still matches. */
+export const lfSha256Hex = (content: string | Buffer): string =>
+  sha256Hex(content.toString().replace(/\r\n/g, '\n'));
+
 export function outcomesWorkflowState(content: string | Buffer | null): OutcomesWorkflowState {
   if (content === null) return 'missing';
-  const hash = sha256Hex(content);
+  const hash = lfSha256Hex(content);
   if (hash === OUTCOMES_WORKFLOW_SHA256) return 'current';
   return PREVIOUS_OUTCOMES_WORKFLOW_SHA256.includes(hash) ? 'outdated' : 'customized';
 }

@@ -26,7 +26,7 @@ import {
   type OutcomesWorkflowState,
   PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
   outcomesWorkflowState,
-  sha256Hex,
+  lfSha256Hex,
 } from './outcomes-workflow.js';
 
 export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose';
@@ -296,7 +296,11 @@ function writeTemplateFile(
 ): void {
   const path = join(cwd, rel);
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
-  if (existing !== null && existing !== content && previousHashes.includes(sha256Hex(existing))) {
+  if (existing !== null && existing !== content && mode === undefined && existing.replace(/\r\n/g, '\n') === content) {
+    writer.changes.push({ path: rel, action: 'unchanged', detail: 'matches the template apart from CRLF line endings' });
+    return;
+  }
+  if (existing !== null && existing !== content && previousHashes.includes(lfSha256Hex(existing))) {
     writer.write(rel, content, `${detail} (upgraded from an earlier shipped version)`, mode);
     return;
   }

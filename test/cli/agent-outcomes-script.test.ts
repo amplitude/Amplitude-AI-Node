@@ -36,7 +36,7 @@ type World = {
   commits: Record<string, Commit>;
   trees: Record<string, TreeEntry[]>;
   prCommits?: string[];
-  reviews?: Array<{ state: string; user: { login: string; type: string } }>;
+  reviews?: Array<{ state: string; body?: string; user: { login: string; type: string } }>;
   checkRuns?: Record<string, Array<{ id: number; name: string; conclusion: string | null; app?: { id: number } }>>;
   statuses?: Record<string, Array<{ id: number; context: string; state: string }>>;
   deployments?: Array<{ id: number; sha: string; created_at: string; state: string }>;
@@ -138,9 +138,10 @@ function fakeGitHub(world: World) {
       },
     },
     actions: {
-      listWorkflowRunsForRepo: async ({ branch, event }: { branch: string; event: string }) => {
+      listWorkflowRunsForRepo: async ({ branch, event, created }: { branch: string; event: string; created: string }) => {
         record('actions.listWorkflowRunsForRepo');
         expect([branch, event]).toEqual(['feature', 'pull_request']);
+        expect(created).toBe('2026-11-01T00:00:00.000Z..2026-11-03T00:00:00.000Z');
         const runs = [...(world.workflowRuns ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
         return { data: runs };
       },
@@ -151,7 +152,10 @@ function fakeGitHub(world: World) {
     // Octokit's iterator is an async iterable only; it has no next() of its own.
     iterator: (fn: Fn, params: Record<string, unknown>) => ({
       [Symbol.asyncIterator]: async function* () {
-        yield await fn(params);
+        const { data } = await fn(params);
+        const items = data as unknown[];
+        const size = Number(params.per_page ?? 30);
+        for (let i = 0; i === 0 || i < items.length; i += size) yield { data: items.slice(i, i + size) };
       },
     }),
   });
@@ -194,7 +198,13 @@ async function run(world: World, options: RunOptions) {
   return { events, log, calls, byType: (t: string) => events.filter((e) => e.event_type === t) };
 }
 
-type Event = { event_type: string; user_id: string; insert_id: string; event_properties: Record<string, unknown> };
+type Event = {
+  event_type: string;
+  user_id: string;
+  insert_id: string;
+  time: number;
+  event_properties: Record<string, unknown>;
+};
 
 const prPayload = (overrides: Record<string, unknown> = {}) => ({
   pull_request: {
@@ -203,6 +213,7 @@ const prPayload = (overrides: Record<string, unknown> = {}) => ({
     body: '',
     merge_commit_sha: 'merge7',
     created_at: '2026-11-01T00:00:00Z',
+    merged_at: '2026-11-03T00:00:00Z',
     base: { ref: 'main', sha: 'base' },
     head: { ref: 'feature', repo: { fork: false, full_name: 'acme/app' } },
     user: { login: 'dev' },
@@ -287,6 +298,8 @@ describe('agent-outcomes.yml script', () => {
       { state: 'CHANGES_REQUESTED', user: { login: 'bob', type: 'User' } },
       { state: 'COMMENTED', user: { login: 'cursor', type: 'Bot' } },
       { state: 'COMMENTED', user: { login: 'dev', type: 'User' } },
+      { state: 'COMMENTED', body: '', user: { login: 'erin', type: 'User' } },
+      { state: 'COMMENTED', body: 'nit: rename this', user: { login: 'frank', type: 'User' } },
       { state: 'PENDING', user: { login: 'carol', type: 'User' } },
       { state: 'DISMISSED', user: { login: 'dan', type: 'User' } },
     ];
@@ -306,12 +319,14 @@ describe('agent-outcomes.yml script', () => {
       agent_authored: true,
       agent_names: ['claude-code', 'codex'],
       agent_session_ids: ['s1', 's2'],
-      review_count: 2,
+      agent_attributed: true,
+      review_count: 3,
       changes_requested_count: 1,
       agent_setup_version: setupHash(['AGENTS.md:blob-a']),
       outcomes_workflow_version: 2,
     });
     expect(pr!.event_properties).not.toHaveProperty('ci_passed_first_run');
+    expect(pr!.time).toBe(Date.parse('2026-11-03T00:00:00Z'));
   });
 
   it('sends Pull Request Merged for a human-only PR, as the first commit author', async () => {
@@ -320,7 +335,12 @@ describe('agent-outcomes.yml script', () => {
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
     const pr = r.byType('Pull Request Merged')[0]!;
     expect(pr.user_id).toBe('human@example.com');
-    expect(pr.event_properties).toMatchObject({ agent_authored: false, agent_commit_count: 0, agent_names: [] });
+    expect(pr.event_properties).toMatchObject({
+      agent_authored: false,
+      agent_attributed: false,
+      agent_commit_count: 0,
+      agent_names: [],
+    });
   });
 
   it('judges first-run CI by the earliest attempt on the first commit with results', async () => {
@@ -357,13 +377,49 @@ describe('agent-outcomes.yml script', () => {
     };
     world.workflowRuns = [
       { id: 1, head_sha: 'c1', created_at: '2026-10-01T00:00:00Z', pull_requests: [{ number: 3 }] },
-      { id: 2, head_sha: 'c1', created_at: '2026-11-01T00:05:00Z', pull_requests: [{ number: 9 }] },
+      { id: 2, head_sha: 'x9', created_at: '2026-11-01T00:05:00Z', pull_requests: [{ number: 9 }] },
       { id: 3, head_sha: 'c3', created_at: '2026-11-01T00:10:00Z', pull_requests: [{ number: 7 }] },
       { id: 4, head_sha: 'c2', created_at: '2026-11-02T00:00:00Z', pull_requests: [{ number: 7 }] },
     ];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
     expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
     expect(r.calls.filter((c) => c === 'checks.listForRef')).toHaveLength(1);
+  });
+
+  it('matches runs by the PR commits after merge, when GitHub has emptied pull_requests', async () => {
+    const world = linearWorld();
+    world.checkRuns = {
+      c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }],
+      c3: [{ id: 5, name: 'build', conclusion: 'success', app: { id: 1 } }],
+    };
+    world.workflowRuns = [
+      { id: 2, head_sha: 'x9', created_at: '2026-11-01T00:05:00Z', pull_requests: [] },
+      { id: 3, head_sha: 'c3', created_at: '2026-11-01T00:10:00Z', pull_requests: [] },
+      { id: 4, head_sha: 'c2', created_at: '2026-11-02T00:00:00Z', pull_requests: [] },
+      { id: 5, head_sha: 'c1', created_at: '2026-11-03T00:00:00Z', pull_requests: [] },
+    ];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+    expect(r.calls.filter((c) => c === 'checks.listForRef')).toHaveLength(1);
+  });
+
+  it('pages workflow runs up to five pages, then falls back to the oldest commits', async () => {
+    const world = linearWorld();
+    world.checkRuns = {
+      c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }],
+      c3: [{ id: 5, name: 'build', conclusion: 'success', app: { id: 1 } }],
+    };
+    const at = (i: number) => new Date(Date.parse('2026-11-01T01:00:00Z') + i * 1000).toISOString();
+    const noise = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: 100 + i, head_sha: 'x9', created_at: at(i + 1), pull_requests: [] }));
+    world.workflowRuns = [{ id: 3, head_sha: 'c3', created_at: at(0), pull_requests: [] }, ...noise(150)];
+    // The matching run is the oldest of 151, so it is on page 2.
+    const found = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(found.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+
+    world.workflowRuns = [{ id: 3, head_sha: 'c3', created_at: at(0), pull_requests: [] }, ...noise(500)];
+    const capped = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(capped.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
   });
 
   it('does not count this workflow\'s own runs as the first CI run', async () => {
@@ -376,6 +432,7 @@ describe('agent-outcomes.yml script', () => {
     world.workflowRuns = [
       { id: 7001, head_sha: 'c3', created_at: '2026-11-01T00:10:00Z', pull_requests: [{ number: 7 }], path: self },
       { id: RUN_ID, head_sha: 'c3', created_at: '2026-11-02T00:00:00Z', pull_requests: [{ number: 7 }] },
+      { id: 7003, head_sha: 'c3', created_at: '2026-11-03T00:00:00Z', pull_requests: [] },
     ];
     const r = await run(world, {
       event: 'pull_request',
@@ -433,7 +490,7 @@ describe('agent-outcomes.yml script', () => {
     expect(pr.event_properties).not.toHaveProperty('review_count');
     expect(pr.event_properties).not.toHaveProperty('agent_setup_version');
     expect(r.log.warning.filter((w) => w.startsWith('agent_setup_version omitted'))).toHaveLength(1);
-    expect(r.log.info.join('\n')).toContain('enrichments: agent_setup_version=error, reviews=error');
+    expect(r.log.info.join('\n')).toMatch(/enrichments: reviews=error, ci_passed_first_run=ok, agent_setup_version=error;/);
   });
 
   it('stops enriching at 300 API calls and still sends every event', async () => {
@@ -451,6 +508,29 @@ describe('agent-outcomes.yml script', () => {
     expect(r.byType('Pull Request Merged')).toHaveLength(1);
     expect(r.log.info.join('\n')).toContain('agent_setup_version=budget');
     expect(r.log.info.join('\n')).toContain('300/300 API calls');
+    expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({ review_count: 0 });
+    expect(r.log.info.join('\n')).toContain('ci_passed_first_run=ok');
+  });
+
+  it('counts every PR commit past the 250 the API lists', async () => {
+    const r = await run(linearWorld(), { event: 'pull_request', payload: prPayload({ commits: 300 }) });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({
+      commit_count: 300,
+      attributed_commit_count: 2,
+      unattributed_commit_count: 1,
+    });
+  });
+
+  it('sends Pull Request Merged as the PR author when the commit has no GitHub login', async () => {
+    const world = linearWorld();
+    for (const c of Object.values(world.commits)) c.author = null;
+    const r = await run(world, {
+      event: 'pull_request',
+      payload: prPayload(),
+      env: { AMPLITUDE_USER_ID_SOURCE: 'login' },
+    });
+    expect(r.byType('Commit Merged')).toEqual([]);
+    expect(r.byType('Pull Request Merged')[0]!.user_id).toBe('dev');
   });
 
   it('exits cleanly for a fork PR without the secret, and fails for a same-repo PR', async () => {
@@ -522,7 +602,7 @@ describe('agent-outcomes.yml script', () => {
     });
     expect(r.events).toEqual([]);
     expect(r.log.info[0]).toBe('4 outcome events (3 agent-authored)');
-    expect(r.log.info[1]).toMatch(/^enrichments: agent_setup_version=ok, reviews=ok, ci_passed_first_run=ok; \d+\/300 API calls$/);
+    expect(r.log.info[1]).toMatch(/^enrichments: reviews=ok, ci_passed_first_run=ok, agent_setup_version=ok; \d+\/300 API calls$/);
     expect(JSON.parse(r.log.info[2]!)).toHaveLength(4);
   });
 });

@@ -271,6 +271,18 @@ describe('coding-agents init', () => {
     expect(result.warnings.join('\n')).not.toContain(WORKFLOW);
   });
 
+  it('treats a CRLF checkout of a shipped workflow as untouched', () => {
+    const crlf = (text: string) => text.replace(/\n/g, '\r\n');
+    expect(outcomesWorkflowState(crlf(template('agent-outcomes.yml')))).toBe('current');
+    expect(outcomesWorkflowState(crlf(readFileSync(V1_WORKFLOW, 'utf8')))).toBe('outdated');
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, WORKFLOW), crlf(template('agent-outcomes.yml')));
+    expect(init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('unchanged');
+    writeFileSync(join(repo, WORKFLOW), crlf(readFileSync(V1_WORKFLOW, 'utf8')));
+    expect(init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('update');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
+  });
+
   it('leaves a customized outcomes workflow alone without --force', () => {
     mkdirSync(join(repo, '.github/workflows'), { recursive: true });
     const custom = `${readFileSync(V1_WORKFLOW, 'utf8')}# local edit\n`;
