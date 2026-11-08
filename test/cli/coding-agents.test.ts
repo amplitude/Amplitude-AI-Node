@@ -246,6 +246,13 @@ describe('coding-agents init', () => {
     expect(init({ harnesses: ['goose'] }).region).toBe('us');
   });
 
+  it('keeps the EU region from the committed Gemini CLI endpoint on a fresh clone', () => {
+    init({ harnesses: ['gemini'], region: 'eu' });
+    rmSync(join(repo, '.amplitude-ai'), { recursive: true });
+    expect(init({ harnesses: ['gemini'] }).region).toBe('eu');
+    expect(readJson('.gemini/settings.json').telemetry.otlpEndpoint).toContain('api.eu.amplitude.com');
+  });
+
   it('prints a goose env block with a key placeholder only', () => {
     const result = init({ harnesses: ['goose'], apiKey: SECRET });
     const goose = result.instructions.find((l) => l.startsWith('goose'))!;

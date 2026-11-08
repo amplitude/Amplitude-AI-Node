@@ -345,7 +345,7 @@ class Writer {
 
 const isRegion = (v: string | undefined): v is CodingAgentsRegion => v === 'us' || v === 'eu';
 
-/** The region a previous `init` set up, from `.amplitude-ai/local.env` or the Claude Code endpoint. */
+/** The region a previous `init` set up, from `.amplitude-ai/local.env` or the Claude Code or Gemini CLI endpoint. */
 export function existingCodingAgentsRegion(cwd: string): CodingAgentsRegion | null {
   const localEnvPath = join(cwd, LOCAL_ENV_PATH);
   if (existsSync(localEnvPath)) {
@@ -359,7 +359,9 @@ export function existingCodingAgentsRegion(cwd: string): CodingAgentsRegion | nu
   }
   const settings = readJsonFile(join(cwd, CLAUDE_SETTINGS_PATH));
   const env = settings.ok && settings.value && isObject(settings.value.env) ? settings.value.env : {};
-  for (const value of Object.values(env)) {
+  const gemini = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
+  const telemetry = gemini.ok && gemini.value && isObject(gemini.value.telemetry) ? gemini.value.telemetry : {};
+  for (const value of [...Object.values(env), telemetry.otlpEndpoint]) {
     if (typeof value !== 'string') continue;
     if (value.includes(`//${amplitudeHost('eu')}/`)) return 'eu';
     if (value.includes(`//${amplitudeHost('us')}/`)) return 'us';
