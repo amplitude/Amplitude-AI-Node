@@ -19,13 +19,17 @@ import { analyzeFileInstrumentation, redactSecrets } from './validate-file.js';
 const MAX_FLAG_READS = 50; // flag_call_sites entries reported per scan
 
 export interface CodingAgentsScan {
-  /** Harnesses with project config here: `claude-code`, `codex`, `goose`. */
+  /** Harnesses with project config here: `claude-code`, `codex`, `goose`, `gemini`, `copilot`. */
   harnesses: string[];
   /** Agent SDK dependencies the app is built on. */
   agent_sdks: string[];
   has_claude_dir: boolean;
   has_codex_dir: boolean;
   has_goose_config: boolean;
+  /** `.gemini/` or `GEMINI.md` (Gemini CLI). */
+  has_gemini_config: boolean;
+  /** `.github/copilot-instructions.md` or `.github/hooks/` (GitHub Copilot). */
+  has_copilot_config: boolean;
   has_claude_md: boolean;
   has_agents_md: boolean;
   has_github_workflows: boolean;
@@ -51,12 +55,16 @@ export function scanCodingAgents(rootPath: string, allDeps: Set<string>): Coding
   const hasClaudeDir = has('.claude');
   const hasCodexDir = has('.codex');
   const hasGooseConfig = has('.goosehints') || has('.goose');
+  const hasGeminiConfig = has('.gemini') || has('GEMINI.md');
+  const hasCopilotConfig = has('.github/copilot-instructions.md') || has('.github/hooks');
   const hasClaudeMd = has('CLAUDE.md');
   const hasAgentsMd = has('AGENTS.md');
   const harnesses: string[] = [];
   if (hasClaudeDir || hasClaudeMd) harnesses.push('claude-code');
   if (hasCodexDir) harnesses.push('codex');
   if (hasGooseConfig) harnesses.push('goose');
+  if (hasGeminiConfig) harnesses.push('gemini');
+  if (hasCopilotConfig) harnesses.push('copilot');
 
   const hooksPath = readGitHooksPath(rootPath);
   const hookCandidates = [
@@ -77,6 +85,8 @@ export function scanCodingAgents(rootPath: string, allDeps: Set<string>): Coding
     has_claude_dir: hasClaudeDir,
     has_codex_dir: hasCodexDir,
     has_goose_config: hasGooseConfig,
+    has_gemini_config: hasGeminiConfig,
+    has_copilot_config: hasCopilotConfig,
     has_claude_md: hasClaudeMd,
     has_agents_md: hasAgentsMd,
     has_github_workflows: has('.github/workflows'),

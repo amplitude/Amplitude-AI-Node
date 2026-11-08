@@ -252,7 +252,7 @@ describe('docs/integrations contract', () => {
       };
     };
     const { harnesses, recipes, templates } = manifest.coding_agents;
-    expect(harnesses.map((h) => h.id)).toEqual(['claude-code', 'codex', 'goose', 'buzz']);
+    expect(harnesses.map((h) => h.id)).toEqual(['claude-code', 'codex', 'goose', 'gemini-cli', 'copilot', 'buzz']);
     for (const harness of harnesses) {
       expect(harness.url.endsWith(`/docs/integrations/${harness.id}.md`)).toBe(true);
       expect(harness.pinned_version).not.toBe('');

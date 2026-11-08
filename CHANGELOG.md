@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.29.0
+
+### Added
+- **Gemini CLI harness.** `coding-agents init --harness gemini` merges a `telemetry` block (`enabled`, `target: "local"`, `otlpEndpoint` `https://api.amplitude.com/otlp` or the EU host, `otlpProtocol: "http"`, and `logPrompts` set by `--privacy`) into `.gemini/settings.json`, keeping the rest of the file. The key goes to the gitignored `.amplitude-ai/local.env` as `GEMINI_TELEMETRY_OTLP_HEADERS`, next to `OTEL_RESOURCE_ATTRIBUTES=enduser.id=…`; init prints how to start `gemini` with it and reminds you that Gemini CLI ignores workspace settings in untrusted folders. Telemetry already pointed at another collector or Google Cloud is a `conflict` unless `--force`. `doctor` checks the export and the header. Guide: `docs/integrations/gemini-cli.md`. Sessions need the Gemini CLI profile in Amplitude's OTLP receiver.
+- **GitHub Copilot harness.** `coding-agents init --harness copilot` prints the Copilot CLI environment block (`COPILOT_OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, a key placeholder, `enduser.id`, and `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` unless `--privacy metadata`) and the matching `github.copilot.chat.otel.*` VS Code user settings. It writes no Copilot file. `doctor` checks the shell it runs in once `COPILOT_OTEL_ENABLED` is set. Guide: `docs/integrations/copilot.md`.
+- **Default harnesses.** `init` with no `--harness` adds Gemini CLI when the repo has `.gemini/` or `GEMINI.md`, and Copilot when it has `.github/copilot-instructions.md` or `.github/hooks/`. `scan_project` reports both (`has_gemini_config`, `has_copilot_config`).
+- **Gemini CLI commits.** The commit hook stamps `Agent-Name: gemini-cli` when `GEMINI_CLI=1`. Gemini CLI gives its shells no session ID, so there is no `Agent-Session-Id`.
+
+### Changed
+- **Outcomes workflow v3.** A commit with an `Agent-Name` trailer but no session is attributed as `agent_attribution: name_trailer` with that agent, so Gemini CLI commits count toward `attributed_commit_count`, `attributed_agents` and `agent_attributed`. `agent_name` now comes only from commits with a session trailer, matching `agent_authored`. Events carry `outcomes_workflow_version: 3`. `init` upgrades an untouched v2 copy, and an untouched earlier `prepare-commit-msg`, without `--force`. The Python SDK ships the same bytes.
+
 ## 0.28.0
 
 ### Added

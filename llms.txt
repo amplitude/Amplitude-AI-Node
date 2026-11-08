@@ -1,7 +1,7 @@
 <!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
-version=0.28.0
+version=0.29.0
 
 [routing]
 instrument-node=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md
@@ -52,6 +52,8 @@ warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/do
 claude-code=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/claude-code.md
 codex=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/codex.md
 goose=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/goose.md
+gemini-cli=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/gemini-cli.md
+copilot=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/copilot.md
 buzz=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/buzz.md
 code-outcomes=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/recipes/code-outcomes.md
 routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md
