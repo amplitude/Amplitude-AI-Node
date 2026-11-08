@@ -25,7 +25,6 @@ import { LOCAL_ENV_PATH, codexHookDir, findLocalEnv, parseLocalEnv } from './hoo
 import {
   type OutcomesWorkflowState,
   PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
-  PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   outcomesWorkflowState,
   lfSha256Hex,
 } from './outcomes-workflow.js';
@@ -368,7 +367,6 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     force,
     warnings,
     'adds Agent-Session-Id / Agent-Name trailers to agent commits',
-    PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   );
   writeTemplateFile(
     writer,

@@ -12,7 +12,6 @@ import {
 import { runDoctor } from '../../src/cli/doctor.js';
 import {
   OUTCOMES_WORKFLOW_SHA256,
-  PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   outcomesWorkflowState,
   sha256Hex,
 } from '../../src/cli/outcomes-workflow.js';
@@ -21,8 +20,6 @@ import { parseLocalEnv } from '../../src/cli/hook-codex.js';
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
 const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
-const V2_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2.yml');
-const V1_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-v1');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
@@ -58,13 +55,11 @@ describe('coding-agents templates', () => {
 
   it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
     expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
-    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v3');
+    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v2');
   });
 
-  it('lists the v1 and v2 workflows as previous versions', () => {
+  it('lists the v1 workflow as a previous version', () => {
     expect(outcomesWorkflowState(readFileSync(V1_WORKFLOW))).toBe('outdated');
-    expect(outcomesWorkflowState(readFileSync(V2_WORKFLOW))).toBe('outdated');
-    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toContain(sha256Hex(readFileSync(V1_HOOK)));
     expect(outcomesWorkflowState(template('agent-outcomes.yml'))).toBe('current');
     expect(outcomesWorkflowState(`${template('agent-outcomes.yml')}# mine\n`)).toBe('customized');
     expect(outcomesWorkflowState(null)).toBe('missing');
@@ -300,19 +295,6 @@ describe('coding-agents init', () => {
     expect(result.changes.find((c) => c.path === WORKFLOW)!.action).toBe('conflict');
     expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(custom);
     expect(init({ harnesses: ['goose'], force: true }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('update');
-  });
-
-  it('upgrades an untouched v2 outcomes workflow and an earlier hook without --force', () => {
-    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
-    mkdirSync(join(repo, '.githooks'), { recursive: true });
-    writeFileSync(join(repo, WORKFLOW), readFileSync(V2_WORKFLOW));
-    writeFileSync(join(repo, '.githooks/prepare-commit-msg'), readFileSync(V1_HOOK), { mode: 0o755 });
-    const result = init({ harnesses: ['goose'] });
-    expect(result.ok).toBe(true);
-    for (const path of [WORKFLOW, '.githooks/prepare-commit-msg']) {
-      expect(result.changes.find((c) => c.path === path)!.action, path).toBe('update');
-    }
-    expect(readFileSync(join(repo, '.githooks/prepare-commit-msg'), 'utf8')).toBe(template('prepare-commit-msg'));
   });
 
   it('merges Gemini CLI telemetry into .gemini/settings.json and keeps the key in local.env', () => {

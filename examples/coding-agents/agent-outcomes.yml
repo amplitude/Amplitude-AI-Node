@@ -1,4 +1,4 @@
-# agent-outcomes v3
+# agent-outcomes v2
 # Amplitude Agent Analytics: send code outcomes (merged, reverted, deployed)
 # for commits made by coding agents. Installed by `amplitude-ai coding-agents init`.
 #
@@ -44,7 +44,7 @@ jobs:
         with:
           script: |
             const crypto = require('crypto');
-            const WORKFLOW_VERSION = 3;
+            const WORKFLOW_VERSION = 2;
             const { owner, repo } = context.repo;
             const repoName = `${owner}/${repo}`;
             const dryRun = process.env.AMPLITUDE_OUTCOMES_DRY_RUN === 'true';

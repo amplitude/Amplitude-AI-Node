@@ -253,7 +253,7 @@ describe('agent-outcomes.yml script', () => {
       expect(match.event_type).toBe(e.event_type);
       expect(match.user_id).toBe(e.user_id);
       expect(match.event_properties).toMatchObject(e.event_properties);
-      expect(match.event_properties.outcomes_workflow_version).toBe(3);
+      expect(match.event_properties.outcomes_workflow_version).toBe(2);
     }
   });
 
@@ -323,7 +323,7 @@ describe('agent-outcomes.yml script', () => {
       review_count: 3,
       changes_requested_count: 1,
       agent_setup_version: setupHash(['AGENTS.md:blob-a']),
-      outcomes_workflow_version: 3,
+      outcomes_workflow_version: 2,
     });
     expect(pr!.event_properties).not.toHaveProperty('ci_passed_first_run');
     expect(pr!.time).toBe(Date.parse('2026-11-03T00:00:00Z'));

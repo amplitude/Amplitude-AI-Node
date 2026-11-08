@@ -66,7 +66,7 @@ Commits made through the GitHub API or MCP tools carry no trailer. They join by 
 | `deployment_status` success | `Deploy Succeeded` for each commit since the previous successful deployment | `commit_sha`, `deployment_sha`, `environment`, plus trailers |
 | `deployment_status` failure or error | `Deploy Failed` for the same range | `commit_sha`, `deployment_sha`, `environment`, `deployment_state`, plus trailers |
 
-Every event also carries `outcomes_workflow_version` (currently `3`), and every commit-level event carries `agent_setup_version`.
+Every event also carries `outcomes_workflow_version` (currently `2`), and every commit-level event carries `agent_setup_version`.
 
 - **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`). `Pull Request Merged` goes to the author of the PR's first agent commit, or of its first commit when no agent committed; with `login`, it falls back to the PR author when that commit has no GitHub account. Its time is the merge time.
 - **Unattributed commits** get `Commit Merged` with an empty `agent_session_id`, which gives the agent share of merged code.
