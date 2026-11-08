@@ -201,7 +201,8 @@ export function checkAgentEvents(rows, options = {}) {
     if (props.$llm_message !== undefined && typeof textOf(props) !== 'string') {
       error(event, '$llm_message must be an object {"text": "..."}; a plain string is ignored');
     }
-    if (REPLY_TYPES.includes(event.eventType) && !metadataOnly && !textOf(props)?.trim()) {
+    const failedModelCall = event.eventType === '[Agent] AI Response' && props['[Agent] Is Error'] === true;
+    if (REPLY_TYPES.includes(event.eventType) && !metadataOnly && !failedModelCall && !textOf(props)?.trim()) {
       error(
         event,
         event.eventType === '[Agent] AI Response'

@@ -230,3 +230,179 @@ export function extractContext(
 
   return result;
 }
+
+// ----------------------------------------------------------------------
+// Agent-to-agent protocols (A2A `Message.metadata`, ACP `_meta`)
+// ----------------------------------------------------------------------
+
+/** The one namespaced key written into an A2A `Message.metadata`. */
+export const A2A_METADATA_KEY = 'com.amplitude/context';
+export const ACP_SESSION_ID_KEY = 'com.amplitude/session-id';
+export const ACP_PARENT_AGENT_ID_KEY = 'com.amplitude/parent-agent-id';
+export const ACP_USER_ID_KEY = 'com.amplitude/user-id';
+/** ACP reserves `traceparent` in `_meta` for W3C Trace Context. */
+export const ACP_TRACEPARENT_KEY = 'traceparent';
+
+export type AgentProtocolOptions = {
+  /**
+   * Also send the end-user ID. Default `true`; only for agents you operate,
+   * the same rule as {@link injectContext}.
+   */
+  includeIdentity?: boolean;
+};
+
+/** Context read back by {@link extractA2aMetadata} / {@link extractAcpMeta}. */
+export type AgentProtocolContext = {
+  sessionId?: string;
+  parentAgentId?: string;
+  userId?: string;
+  traceId?: string;
+};
+
+/**
+ * The active context as seen by the receiving agent: the sender's agent ID
+ * becomes the receiver's parent agent ID. Keys are the shared wire names.
+ */
+function _outboundAgentContext(includeIdentity: boolean): Record<string, string> {
+  const headers = injectContext();
+  const fields: Array<[string, string | undefined]> = [
+    ['session_id', headers['x-amplitude-session-id']],
+    ['parent_agent_id', headers['x-amplitude-agent-id']],
+    ['user_id', includeIdentity ? headers['x-amplitude-user-id'] : undefined],
+    ['traceparent', headers.traceparent],
+  ];
+  const result: Record<string, string> = {};
+  for (const [key, value] of fields) if (value) result[key] = value;
+  return result;
+}
+
+function _inboundAgentContext(
+  sessionId: unknown,
+  parentAgentId: unknown,
+  userId: unknown,
+  traceparent: unknown,
+): AgentProtocolContext {
+  const result: AgentProtocolContext = {};
+  const traceId = typeof traceparent === 'string' ? parseTraceparent(traceparent) : null;
+  if (traceId) result.traceId = traceId;
+  const fields: Array<[keyof AgentProtocolContext, unknown]> = [
+    ['sessionId', sessionId],
+    ['parentAgentId', parentAgentId],
+    ['userId', userId],
+  ];
+  for (const [key, value] of fields) {
+    const valid = typeof value === 'string' ? _safeHeaderId(value) : null;
+    if (valid) result[key] = valid;
+  }
+  return result;
+}
+
+/**
+ * Add the active session context to an A2A `Message.metadata` object under
+ * one namespaced key, {@link A2A_METADATA_KEY}, holding `session_id`,
+ * `parent_agent_id` (this agent), `traceparent` and, unless
+ * `includeIdentity` is false, `user_id`. Returns a new object; without an
+ * active session the copy is returned unchanged.
+ *
+ * ```ts
+ * const message: Message = { ...msg, metadata: injectA2aMetadata(msg.metadata) };
+ * ```
+ */
+export function injectA2aMetadata(
+  metadata?: Record<string, unknown> | null,
+  options: AgentProtocolOptions = {},
+): Record<string, unknown> {
+  const result: Record<string, unknown> = metadata ? { ...metadata } : {};
+  const context = _outboundAgentContext(options.includeIdentity ?? true);
+  if (Object.keys(context).length > 0) result[A2A_METADATA_KEY] = context;
+  return result;
+}
+
+/**
+ * Read the context written by {@link injectA2aMetadata} from an A2A
+ * `Message.metadata`. As with {@link extractContext}, only trust metadata
+ * from agents you operate.
+ */
+export function extractA2aMetadata(metadata: unknown): AgentProtocolContext {
+  if (!_isPlainObject(metadata)) return {};
+  const context = metadata[A2A_METADATA_KEY];
+  if (!_isPlainObject(context)) return {};
+  return _inboundAgentContext(context.session_id, context.parent_agent_id, context.user_id, context.traceparent);
+}
+
+export const A2A_EXTENSION_URI = 'https://amplitude.com/a2a/extensions/agent-context/v1';
+export const A2A_EXTENSION_DESCRIPTION =
+  "Amplitude agent context: session, parent agent, user and trace ids in Message.metadata['com.amplitude/context'].";
+
+/** Structurally an A2A `AgentExtension` (`@a2a-js/sdk`). */
+export type A2aAgentExtension = {
+  uri: string;
+  description: string;
+  required: boolean;
+  params: Record<string, unknown> | undefined;
+};
+
+/**
+ * The `AgentExtension` entry that declares Amplitude agent context.
+ * Optional (`required: false`): clients that don't send the metadata still
+ * work.
+ */
+export function a2aAgentExtension(): A2aAgentExtension {
+  return { uri: A2A_EXTENSION_URI, description: A2A_EXTENSION_DESCRIPTION, required: false, params: undefined };
+}
+
+/**
+ * Add {@link a2aAgentExtension} to an AgentCard's `capabilities.extensions`.
+ * Returns a new card; the input is not mutated. Adding it twice is a no-op.
+ *
+ * ```ts
+ * const card: AgentCard = declareA2aExtension({ ...card, capabilities: { streaming: true, extensions: [] } });
+ * ```
+ */
+export function declareA2aExtension<T extends { capabilities?: { extensions?: unknown } | undefined }>(
+  agentCard: T,
+): T & { capabilities: NonNullable<T['capabilities']> & { extensions: A2aAgentExtension[] } } {
+  const capabilities = { ...(agentCard.capabilities ?? {}) } as Record<string, unknown>;
+  const existing = Array.isArray(capabilities.extensions) ? capabilities.extensions : [];
+  const extensions = existing.filter(_isPlainObject) as A2aAgentExtension[];
+  if (!extensions.some((e) => e.uri === A2A_EXTENSION_URI)) extensions.push(a2aAgentExtension());
+  return { ...agentCard, capabilities: { ...capabilities, extensions } } as T & {
+    capabilities: NonNullable<T['capabilities']> & { extensions: A2aAgentExtension[] };
+  };
+}
+
+/**
+ * Add the active session context to an ACP `_meta` object:
+ * `com.amplitude/session-id`, `com.amplitude/parent-agent-id` (this agent),
+ * `com.amplitude/user-id` (unless `includeIdentity` is false) and the
+ * ACP-reserved W3C `traceparent`. Returns a new object.
+ */
+export function injectAcpMeta(
+  meta?: Record<string, unknown> | null,
+  options: AgentProtocolOptions = {},
+): Record<string, unknown> {
+  const result: Record<string, unknown> = meta ? { ...meta } : {};
+  const context = _outboundAgentContext(options.includeIdentity ?? true);
+  const keys: Array<[string, string]> = [
+    ['session_id', ACP_SESSION_ID_KEY],
+    ['parent_agent_id', ACP_PARENT_AGENT_ID_KEY],
+    ['user_id', ACP_USER_ID_KEY],
+    ['traceparent', ACP_TRACEPARENT_KEY],
+  ];
+  for (const [field, key] of keys) {
+    const value = context[field];
+    if (value) result[key] = value;
+  }
+  return result;
+}
+
+/** Read the context written by {@link injectAcpMeta} from an ACP `_meta` object. */
+export function extractAcpMeta(meta: unknown): AgentProtocolContext {
+  if (!_isPlainObject(meta)) return {};
+  return _inboundAgentContext(
+    meta[ACP_SESSION_ID_KEY],
+    meta[ACP_PARENT_AGENT_ID_KEY],
+    meta[ACP_USER_ID_KEY],
+    meta[ACP_TRACEPARENT_KEY],
+  );
+}

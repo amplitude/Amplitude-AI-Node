@@ -34,6 +34,7 @@ Every query has the same two stages. Stage 1 is the only part that depends on yo
 | OpenTelemetry GenAI spans stored in a table | [otel-genai.md](./otel-genai.md) | Replay to the OTLP endpoint |
 | OpenInference spans (for example, exported from Arize Phoenix) | [openinference.md](./openinference.md) | Replay to the OTLP endpoint |
 | MLflow traces | [mlflow-tracing.md](./mlflow-tracing.md) | Replay to the OTLP endpoint |
+| Google ADK's BigQuery Agent Analytics `agent_events` table | [adk-bigquery-agent-analytics.md](./adk-bigquery-agent-analytics.md) | SQL import (BigQuery) |
 | Something else | [Bring your own format](#bring-your-own-format) | SQL import |
 
 Span formats don't need SQL: Amplitude's [OTLP endpoint](https://amplitude.com/docs/amplitude-ai/agent-analytics/setup#send-opentelemetry-traces-directly) already understands them. Their pages cover moving stored spans from a table to that endpoint.
@@ -181,6 +182,8 @@ Stage 1 produces one row per message, tool call, or span, with these columns:
 | `experiment_key` | string | No | Experiment or feature flag key the row ran under, such as `planner`. With `experiment_variant`, becomes `[Agent] Experiments`, `[Agent] Experiment Key`, `[Agent] Experiment Variant` and `[Agent] Experiment Unit` (`agent_session`). Trimmed, 1 to 256 characters, no `:`; an invalid pair is dropped. |
 | `experiment_variant` | string | No | Variant of `experiment_key` the row ran under, such as `treatment`. Trimmed, 1 to 256 characters. |
 | `updated_at` | timestamp (UTC) | No | When the source row last changed. A session settles `settle_hours` after the later of this and its last `event_time`. Set it when `event_time` is derived rather than recorded. |
+| `is_error` | boolean | No | Assistant rows: the model call failed. Becomes `[Agent] Is Error`; `NULL` means no error. |
+| `error_message` | string | No | Assistant rows with `is_error`: the error text. Becomes `[Agent] Error Message`, which is content: not sent when `include_content` is FALSE. |
 <!-- warehouse-sql:canonical-columns:end -->
 
 ### What Stage 2 does
@@ -268,7 +271,7 @@ SELECT
   device_id,
   time,
   insert_id,
-  from_json(event_properties, '`[Agent] Session ID` STRING, `[Agent] Agent ID` STRING, `[Agent] Runtime` STRING, `[Agent] SDK Version` STRING, `[Agent] Ingestion Path` STRING, `[Agent] Source` STRING, `[Agent] Content Mode` STRING, `[Agent] Context` STRING, `[Agent] Experiments` ARRAY<STRING>, `[Agent] Experiment Key` STRING, `[Agent] Experiment Variant` STRING, `[Agent] Experiment Unit` STRING, `[Agent] Trace ID` STRING, `[Agent] Turn ID` BIGINT, `[Agent] Message ID` STRING, `[Agent] Invocation ID` STRING, `[Agent] Component Type` STRING, `[Agent] Tool Name` STRING, `[Agent] Tool Success` BOOLEAN, `[Agent] Is Error` BOOLEAN, `[Agent] Latency Ms` DOUBLE, `[Agent] Parent Message ID` STRING, `[Agent] Tool Input` STRING, `[Agent] Tool Output` STRING, `[Agent] Model Name` STRING, `[Agent] Provider` STRING, `[Agent] Input Tokens` BIGINT, `[Agent] Output Tokens` BIGINT, `[Agent] Cost USD` DOUBLE, `[Agent] Span ID` STRING, `[Agent] Span Name` STRING, `[Agent] Input State` STRING, `[Agent] Output State` STRING, `$llm_message` STRUCT<text: STRING>') AS event_properties
+  from_json(event_properties, '`[Agent] Session ID` STRING, `[Agent] Agent ID` STRING, `[Agent] Runtime` STRING, `[Agent] SDK Version` STRING, `[Agent] Ingestion Path` STRING, `[Agent] Source` STRING, `[Agent] Content Mode` STRING, `[Agent] Context` STRING, `[Agent] Experiments` ARRAY<STRING>, `[Agent] Experiment Key` STRING, `[Agent] Experiment Variant` STRING, `[Agent] Experiment Unit` STRING, `[Agent] Trace ID` STRING, `[Agent] Turn ID` BIGINT, `[Agent] Message ID` STRING, `[Agent] Invocation ID` STRING, `[Agent] Component Type` STRING, `[Agent] Tool Name` STRING, `[Agent] Tool Success` BOOLEAN, `[Agent] Is Error` BOOLEAN, `[Agent] Error Message` STRING, `[Agent] Latency Ms` DOUBLE, `[Agent] Parent Message ID` STRING, `[Agent] Tool Input` STRING, `[Agent] Tool Output` STRING, `[Agent] Model Name` STRING, `[Agent] Provider` STRING, `[Agent] Input Tokens` BIGINT, `[Agent] Output Tokens` BIGINT, `[Agent] Cost USD` DOUBLE, `[Agent] Span ID` STRING, `[Agent] Span Name` STRING, `[Agent] Input State` STRING, `[Agent] Output State` STRING, `$llm_message` STRUCT<text: STRING>') AS event_properties
 FROM amplitude_agent_events
 ```
 <!-- warehouse-sql:databricks:import:end -->

@@ -113,7 +113,9 @@ canonical AS (
     CAST(NULL AS STRING) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    updated_at
+    updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
@@ -146,7 +148,9 @@ canonical AS (
     CAST(NULL AS STRING) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    c.updated_at
+    c.updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM tool_calls c
   LEFT JOIN tool_results r
     ON r.conversation_id = c.conversation_id
@@ -244,7 +248,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -377,7 +382,9 @@ canonical AS (
     CAST(NULL AS STRING) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    updated_at
+    updated_at,
+    CAST(NULL AS BOOL) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
@@ -410,7 +417,9 @@ canonical AS (
     CAST(NULL AS STRING) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    c.updated_at
+    c.updated_at,
+    CAST(NULL AS BOOL) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM tool_calls c
   LEFT JOIN tool_results r
     ON r.conversation_id = c.conversation_id
@@ -508,7 +517,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,
@@ -639,7 +649,9 @@ canonical AS (
     CAST(NULL AS STRING) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    updated_at
+    updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM messages
   WHERE message_role IN ('user', 'assistant') AND message_text IS NOT NULL AND message_text <> ''
   UNION ALL
@@ -672,7 +684,9 @@ canonical AS (
     CAST(NULL AS STRING) AS context,
     CAST(NULL AS STRING) AS experiment_key,
     CAST(NULL AS STRING) AS experiment_variant,
-    c.updated_at
+    c.updated_at,
+    CAST(NULL AS BOOLEAN) AS is_error,
+    CAST(NULL AS STRING) AS error_message
   FROM tool_calls c
   LEFT JOIN tool_results r
     ON r.conversation_id = c.conversation_id
@@ -770,7 +784,8 @@ SELECT
     '[Agent] Component Type', CASE role WHEN 'user' THEN 'user_input' WHEN 'tool' THEN 'tool' WHEN 'assistant' THEN 'llm' END,
     '[Agent] Tool Name', CASE WHEN role = 'tool' THEN tool_name END,
     '[Agent] Tool Success', CASE WHEN role = 'tool' THEN COALESCE(tool_success, TRUE) END,
-    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role IN ('assistant', 'span') THEN FALSE END,
+    '[Agent] Is Error', CASE WHEN role = 'tool' THEN NOT COALESCE(tool_success, TRUE) WHEN role = 'assistant' THEN COALESCE(is_error, FALSE) WHEN role = 'span' THEN FALSE END,
+    '[Agent] Error Message', CASE WHEN role = 'assistant' AND is_error AND include_content THEN error_message END,
     '[Agent] Latency Ms', CASE WHEN role IN ('tool', 'assistant', 'span') THEN latency_ms END,
     '[Agent] Parent Message ID', CASE WHEN role = 'tool' THEN session_id || ':' || parent_message_id END,
     '[Agent] Tool Input', CASE WHEN role = 'tool' AND include_content THEN tool_input END,

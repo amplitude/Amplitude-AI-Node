@@ -1,0 +1,170 @@
+# Amplitude Agent Analytics: send code outcomes (merged, reverted, deployed)
+# for commits made by coding agents. Installed by `amplitude-ai coding-agents init`.
+#
+# Setup:
+#   - Repository secret AMPLITUDE_API_KEY: the Amplitude project API key.
+#   - Optional variable AMPLITUDE_REGION: "eu" for the EU data center (default US).
+#   - Optional variable AMPLITUDE_OUTCOMES_DRY_RUN: "true" prints events instead of sending.
+#   - Optional variable AMPLITUDE_USER_ID_SOURCE: "email" (default, commit author email)
+#     or "login" (GitHub login). Use the value your agent sessions use as user ID.
+name: Agent outcomes (Amplitude)
+
+on:
+  pull_request:
+    types: [closed]
+  deployment_status:
+
+permissions:
+  contents: read
+  pull-requests: read
+  deployments: read
+
+jobs:
+  outcomes:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          AMPLITUDE_API_KEY: ${{ secrets.AMPLITUDE_API_KEY }}
+          AMPLITUDE_REGION: ${{ vars.AMPLITUDE_REGION }}
+          AMPLITUDE_OUTCOMES_DRY_RUN: ${{ vars.AMPLITUDE_OUTCOMES_DRY_RUN }}
+          AMPLITUDE_USER_ID_SOURCE: ${{ vars.AMPLITUDE_USER_ID_SOURCE }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const repoName = `${owner}/${repo}`;
+            const dryRun = process.env.AMPLITUDE_OUTCOMES_DRY_RUN === 'true';
+            const apiKey = process.env.AMPLITUDE_API_KEY;
+            if (!apiKey && !dryRun) {
+              core.setFailed('AMPLITUDE_API_KEY secret is not set');
+              return;
+            }
+            const endpoint = (process.env.AMPLITUDE_REGION || '').toLowerCase() === 'eu'
+              ? 'https://api.eu.amplitude.com/2/httpapi'
+              : 'https://api2.amplitude.com/2/httpapi';
+            const userIdSource = (process.env.AMPLITUDE_USER_ID_SOURCE || 'email').toLowerCase();
+
+            const trailer = (message, key) => {
+              const re = new RegExp(`^${key}:\\s*(\\S+)\\s*$`, 'gim');
+              let match, value = null;
+              while ((match = re.exec(message)) !== null) value = match[1];
+              return value;
+            };
+            const userIdFor = (c) => {
+              if (userIdSource === 'login') return c.author?.login || null;
+              return c.commit?.author?.email || null;
+            };
+            const baseProps = (c) => {
+              const sessionId = trailer(c.commit.message, 'Agent-Session-Id');
+              return {
+                commit_sha: c.sha,
+                agent_session_id: sessionId,
+                agent_name: trailer(c.commit.message, 'Agent-Name'),
+                agent_authored: Boolean(sessionId),
+                repo: repoName,
+              };
+            };
+
+            const events = [];
+            const push = (eventType, c, extra, insertKey) => {
+              const userId = userIdFor(c);
+              if (!userId) return;
+              events.push({
+                event_type: eventType,
+                user_id: userId,
+                insert_id: `${eventType}:${repoName}:${insertKey}`,
+                time: Date.now(),
+                event_properties: { ...baseProps(c), ...extra },
+              });
+            };
+
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner, repo, pull_number: pr.number, per_page: 100,
+              });
+              const reverted = new Set();
+              const revertRe = /This reverts commit ([0-9a-f]{7,40})/gi;
+              for (const text of [pr.body || '', ...commits.map((c) => c.commit.message)]) {
+                let m;
+                while ((m = revertRe.exec(text)) !== null) reverted.add(m[1].toLowerCase());
+              }
+              for (const c of commits) {
+                push('Commit Merged', c, {
+                  merge_commit_sha: pr.merge_commit_sha,
+                  pr_number: pr.number,
+                  base_branch: pr.base.ref,
+                }, c.sha);
+              }
+              for (const sha of reverted) {
+                let original;
+                try {
+                  original = (await github.rest.repos.getCommit({ owner, repo, ref: sha })).data;
+                } catch (e) {
+                  core.warning(`Reverted commit ${sha} not found: ${e.message}`);
+                  continue;
+                }
+                push('Commit Reverted', original, {
+                  revert_pr_number: pr.number,
+                  revert_merge_commit_sha: pr.merge_commit_sha,
+                }, `${original.sha}:${pr.number}`);
+              }
+            } else {
+              const deployment = context.payload.deployment;
+              const environment = deployment.environment;
+              let previousSha = null;
+              let pagesRead = 0;
+              search: for await (const page of github.paginate.iterator(github.rest.repos.listDeployments, {
+                owner, repo, environment, per_page: 100,
+              })) {
+                for (const d of page.data) {
+                  if (d.id === deployment.id || new Date(d.created_at) >= new Date(deployment.created_at)) continue;
+                  const statuses = await github.rest.repos.listDeploymentStatuses({
+                    owner, repo, deployment_id: d.id, per_page: 10,
+                  });
+                  if (statuses.data.some((s) => s.state === 'success')) { previousSha = d.sha; break search; }
+                }
+                if (++pagesRead >= 5) break;
+              }
+              let commits;
+              if (previousSha) {
+                commits = [];
+                for (let page = 1; ; page++) {
+                  const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${previousSha}...${deployment.sha}`, per_page: 100, page,
+                  });
+                  commits.push(...cmp.data.commits);
+                  if (cmp.data.commits.length < 100 || commits.length >= cmp.data.total_commits) break;
+                }
+              } else {
+                commits = [(await github.rest.repos.getCommit({ owner, repo, ref: deployment.sha })).data];
+              }
+              for (const c of commits) {
+                push('Deploy Succeeded', c, {
+                  deployment_sha: deployment.sha,
+                  environment,
+                }, `${c.sha}:${deployment.id}`);
+              }
+            }
+
+            const agentEvents = events.filter((e) => e.event_properties.agent_authored).length;
+            core.info(`${events.length} outcome events (${agentEvents} agent-authored)`);
+            if (events.length === 0) return;
+            if (dryRun) {
+              core.info(JSON.stringify(events, null, 2));
+              return;
+            }
+            for (let i = 0; i < events.length; i += 500) {
+              const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: apiKey, events: events.slice(i, i + 500) }),
+              });
+              if (!res.ok) {
+                core.setFailed(`Amplitude HTTP API returned ${res.status}: ${await res.text()}`);
+                return;
+              }
+            }

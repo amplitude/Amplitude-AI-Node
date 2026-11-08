@@ -1,7 +1,7 @@
 <!-- GENERATED FILE: do not edit manually. Update scripts/generate-agent-docs.mjs instead. -->
 # llms.txt
 package=@amplitude/ai
-version=0.27.0
+version=0.28.0
 
 [routing]
 instrument-node=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/amplitude-ai.md
@@ -49,6 +49,11 @@ langfuse=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs
 langsmith=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md
 braintrust=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md
 warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md
+claude-code=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/claude-code.md
+codex=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/codex.md
+goose=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/goose.md
+buzz=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/buzz.md
+code-outcomes=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/recipes/code-outcomes.md
 routers=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md
 strands=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md
 google-adk=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/google-adk.md
