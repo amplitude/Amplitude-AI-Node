@@ -43,7 +43,14 @@ type World = {
   workflowRuns?: WorkflowRun[];
   failing?: Set<string>;
 };
-type WorkflowRun = { id: number; head_sha: string; created_at: string; pull_requests: Array<{ number: number }> };
+type WorkflowRun = {
+  id: number;
+  head_sha: string;
+  created_at: string;
+  pull_requests: Array<{ number: number }>;
+  path?: string;
+};
+const RUN_ID = 4242;
 
 const tree = (n: string) => `tree-${n}`;
 const commit = (sha: string, parent: string | null, opts: { message?: string; email?: string; tree?: string } = {}) => ({
@@ -172,7 +179,12 @@ async function run(world: World, options: RunOptions) {
     sent.push(JSON.parse(init.body));
     return { ok: true, status: 200, text: async () => '' };
   };
-  const context = { eventName: options.event, payload: options.payload, repo: { owner: 'acme', repo: 'app' } };
+  const context = {
+    eventName: options.event,
+    payload: options.payload,
+    repo: { owner: 'acme', repo: 'app' },
+    runId: RUN_ID,
+  };
   const env = { AMPLITUDE_API_KEY: 'test-key', ...options.env };
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const body = extractScript(options.script ?? V2);
@@ -354,6 +366,25 @@ describe('agent-outcomes.yml script', () => {
     expect(r.calls.filter((c) => c === 'checks.listForRef')).toHaveLength(1);
   });
 
+  it('does not count this workflow\'s own runs as the first CI run', async () => {
+    const world = linearWorld();
+    world.checkRuns = {
+      c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }],
+      c3: [{ id: 5, name: 'build', conclusion: 'success', app: { id: 1 } }],
+    };
+    const self = '.github/workflows/agent-outcomes.yml';
+    world.workflowRuns = [
+      { id: 7001, head_sha: 'c3', created_at: '2026-11-01T00:10:00Z', pull_requests: [{ number: 7 }], path: self },
+      { id: RUN_ID, head_sha: 'c3', created_at: '2026-11-02T00:00:00Z', pull_requests: [{ number: 7 }] },
+    ];
+    const r = await run(world, {
+      event: 'pull_request',
+      payload: prPayload(),
+      env: { GITHUB_WORKFLOW_REF: `acme/app/${self}@refs/pull/7/merge` },
+    });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+  });
+
   it('falls back to the oldest commits when workflow runs cannot be read', async () => {
     const world = linearWorld();
     world.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
@@ -384,8 +415,10 @@ describe('agent-outcomes.yml script', () => {
       expect(by[sha], sha).toMatchObject({ agent_attribution: 'none', attributed_agent: null });
     }
     expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({
+      commit_count: 6,
       agent_commit_count: 1,
       attributed_commit_count: 3,
+      unattributed_commit_count: 3,
       attributed_agents: ['cursor', 'copilot', 'codex'],
     });
   });

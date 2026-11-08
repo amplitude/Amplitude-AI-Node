@@ -203,6 +203,9 @@ jobs:
             // first push CI ran on. A push of many commits runs CI on its head only, so
             // the PR's oldest commits can have none. Runs list newest first; undefined
             // when the PR has no Actions runs or the run history is too long to page.
+            // This workflow's own pull_request runs are not CI and are skipped.
+            const selfWorkflow = (process.env.GITHUB_WORKFLOW_REF || '')
+              .replace(/^[^/]+\/[^/]+\//, '').replace(/@.*$/, '');
             const firstRunSha = async (pr) => {
               const opened = new Date(pr.created_at);
               const pages = github.paginate.iterator(github.rest.actions.listWorkflowRunsForRepo, {
@@ -215,6 +218,7 @@ jobs:
                 if (done) return first?.head_sha;
                 for (const run of value.data) {
                   if (new Date(run.created_at) < opened) continue;
+                  if (run.id === context.runId || (selfWorkflow && run.path === selfWorkflow)) continue;
                   if (!(run.pull_requests || []).some((p) => p.number === pr.number)) continue;
                   if (!first || new Date(run.created_at) < new Date(first.created_at)) first = run;
                 }
@@ -325,7 +329,7 @@ jobs:
                   merge_commit_sha: pr.merge_commit_sha,
                   commit_count: commits.length,
                   agent_commit_count: agentCommits.length,
-                  unattributed_commit_count: commits.length - agentCommits.length,
+                  unattributed_commit_count: commits.length - attributed.length,
                   agent_authored: agentCommits.length > 0,
                   agent_names: distinct('Agent-Name'),
                   agent_session_ids: distinct('Agent-Session-Id'),

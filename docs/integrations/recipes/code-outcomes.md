@@ -94,8 +94,9 @@ Agents are matched by email, not display name: Cursor (`cursoragent@cursor.com`,
 
 #### Reviews and first-run CI
 
+- `unattributed_commit_count` is `commit_count` minus `attributed_commit_count`. `agent_commit_count` counts session trailers only, so commits found by author or co-author are attributed but not in it.
 - `review_count` and `changes_requested_count` count human reviews: `APPROVED`, `CHANGES_REQUESTED` and `COMMENTED`, not bots and not the PR author's own replies.
-- `ci_passed_first_run` reads the first push CI ran on: the head commit of the PR's earliest `pull_request` workflow run, then the earliest attempt of each check run and commit status on it. A push of several commits runs CI on its head only, so this finds the first result however many commits the PR opened with. Without GitHub Actions runs, it reads the first of the PR's oldest 20 commits that has CI results. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `actions: read`, `checks: read` and `statuses: read` permissions the workflow declares.
+- `ci_passed_first_run` reads the first push CI ran on: the head commit of the PR's earliest `pull_request` workflow run other than the outcomes workflow's own, then the earliest attempt of each check run and commit status on it. A push of several commits runs CI on its head only, so this finds the first result however many commits the PR opened with. Without GitHub Actions runs, it reads the first of the PR's oldest 20 commits that has CI results. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `actions: read`, `checks: read` and `statuses: read` permissions the workflow declares.
 
 #### Best effort
 
