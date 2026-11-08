@@ -22,6 +22,12 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOCAL_ENV_PATH, codexHookDir, findLocalEnv, parseLocalEnv } from './hook-codex.js';
+import {
+  type OutcomesWorkflowState,
+  PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
+  outcomesWorkflowState,
+  sha256Hex,
+} from './outcomes-workflow.js';
 
 export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose';
 export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
@@ -286,9 +292,15 @@ function writeTemplateFile(
   force: boolean,
   warnings: string[],
   detail: string,
+  previousHashes: readonly string[] = [],
 ): void {
   const path = join(cwd, rel);
-  if (existsSync(path) && readFileSync(path, 'utf8') !== content && !force) {
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  if (existing !== null && existing !== content && previousHashes.includes(sha256Hex(existing))) {
+    writer.write(rel, content, `${detail} (upgraded from an earlier shipped version)`, mode);
+    return;
+  }
+  if (existing !== null && existing !== content && !force) {
     writer.conflict(rel, 'exists with different content (re-run with --force to replace)');
     warnings.push(`${rel} already exists and differs from the template; left as is. Use --force to replace it.`);
     return;
@@ -333,7 +345,8 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     undefined,
     force,
     warnings,
-    'sends Commit Merged / Commit Reverted / Deploy Succeeded',
+    'sends Commit Merged / Commit Reverted / Pull Request Merged / Deploy Succeeded / Deploy Failed',
+    PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
   );
 
   let hooksPathOk = true;
@@ -545,12 +558,19 @@ export function runCodingAgentsDoctor(
     ...(hooksPath !== HOOKS_PATH && { fix: HOOKS_PATH_COMMAND }),
   });
 
-  const workflow = existsSync(join(cwd, OUTCOMES_WORKFLOW_PATH));
+  const workflowPath = join(cwd, OUTCOMES_WORKFLOW_PATH);
+  const workflow = outcomesWorkflowState(existsSync(workflowPath) ? readFileSync(workflowPath) : null);
+  const workflowDetail: Record<OutcomesWorkflowState, string> = {
+    missing: 'missing',
+    current: 'current (needs the AMPLITUDE_API_KEY repository secret)',
+    outdated: 'outdated: an earlier shipped version; re-run init to upgrade it',
+    customized: 'customized: differs from every shipped version, so init leaves it alone (--force replaces it)',
+  };
   checks.push({
     name: 'coding_agents.outcomes_workflow',
-    ok: workflow,
-    detail: workflow ? 'present (needs the AMPLITUDE_API_KEY repository secret)' : 'missing',
-    ...(!workflow && { fix: fixInit }),
+    ok: workflow !== 'missing',
+    detail: workflowDetail[workflow],
+    ...((workflow === 'missing' || workflow === 'outdated') && { fix: fixInit }),
   });
 
   const claude = readJsonFile(join(cwd, CLAUDE_SETTINGS_PATH));

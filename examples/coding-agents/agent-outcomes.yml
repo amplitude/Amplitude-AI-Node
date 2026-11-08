@@ -1,3 +1,4 @@
+# agent-outcomes v2
 # Amplitude Agent Analytics: send code outcomes (merged, reverted, deployed)
 # for commits made by coding agents. Installed by `amplitude-ai coding-agents init`.
 #
@@ -7,6 +8,8 @@
 #   - Optional variable AMPLITUDE_OUTCOMES_DRY_RUN: "true" prints events instead of sending.
 #   - Optional variable AMPLITUDE_USER_ID_SOURCE: "email" (default, commit author email)
 #     or "login" (GitHub login). Use the value your agent sessions use as user ID.
+#   - Optional variable AMPLITUDE_AGENT_SETUP_PATHS: comma-separated root-level files or
+#     folders that make up the agent setup (default AGENTS.md,CLAUDE.md,.claude,.codex,.cursor,.goosehints).
 name: Agent outcomes (Amplitude)
 
 on:
@@ -18,12 +21,15 @@ permissions:
   contents: read
   pull-requests: read
   deployments: read
+  checks: read
+  statuses: read
 
 jobs:
   outcomes:
     if: >-
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
-      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success')
+      (github.event_name == 'deployment_status' &&
+        contains(fromJSON('["success","failure","error"]'), github.event.deployment_status.state))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
@@ -32,13 +38,21 @@ jobs:
           AMPLITUDE_REGION: ${{ vars.AMPLITUDE_REGION }}
           AMPLITUDE_OUTCOMES_DRY_RUN: ${{ vars.AMPLITUDE_OUTCOMES_DRY_RUN }}
           AMPLITUDE_USER_ID_SOURCE: ${{ vars.AMPLITUDE_USER_ID_SOURCE }}
+          AMPLITUDE_AGENT_SETUP_PATHS: ${{ vars.AMPLITUDE_AGENT_SETUP_PATHS }}
         with:
           script: |
+            const crypto = require('crypto');
+            const WORKFLOW_VERSION = 2;
             const { owner, repo } = context.repo;
             const repoName = `${owner}/${repo}`;
             const dryRun = process.env.AMPLITUDE_OUTCOMES_DRY_RUN === 'true';
             const apiKey = process.env.AMPLITUDE_API_KEY;
             if (!apiKey && !dryRun) {
+              const head = context.payload.pull_request?.head?.repo;
+              if (context.eventName === 'pull_request' && (!head || head.fork || head.full_name !== repoName)) {
+                core.notice('Pull request from a fork: repository secrets are not available to this run, so no outcome events were sent.');
+                return;
+              }
               core.setFailed('AMPLITUDE_API_KEY secret is not set');
               return;
             }
@@ -69,34 +83,137 @@ jobs:
             };
 
             const events = [];
-            const push = (eventType, c, extra, insertKey) => {
-              const userId = userIdFor(c);
+            const pushEvent = (eventType, userId, props, insertKey) => {
               if (!userId) return;
               events.push({
                 event_type: eventType,
                 user_id: userId,
                 insert_id: `${eventType}:${repoName}:${insertKey}`,
                 time: Date.now(),
-                event_properties: { ...baseProps(c), ...extra },
+                event_properties: { ...props, outcomes_workflow_version: WORKFLOW_VERSION },
               });
             };
+            const push = (eventType, c, extra, insertKey) =>
+              pushEvent(eventType, userIdFor(c), { ...baseProps(c), ...extra }, insertKey);
+
+            // Enrichments are best effort: each one is isolated, and together they
+            // make at most API_BUDGET GitHub API calls. A failed enrichment omits
+            // its property; the outcome events are still sent.
+            const API_BUDGET = 300;
+            let apiCalls = 0;
+            const enrichment = {};
+            class BudgetExhausted extends Error {}
+            const call = (fn) => {
+              if (apiCalls >= API_BUDGET) throw new BudgetExhausted(`API budget of ${API_BUDGET} calls used up`);
+              apiCalls++;
+              return fn();
+            };
+            const enrich = async (name, fn) => {
+              try {
+                const value = await fn();
+                if (!enrichment[name]) enrichment[name] = 'ok';
+                return value;
+              } catch (e) {
+                const status = e instanceof BudgetExhausted ? 'budget' : 'error';
+                if (enrichment[name] !== status) core.warning(`${name} omitted: ${e.message}`);
+                enrichment[name] = status;
+                return undefined;
+              }
+            };
+
+            const DEFAULT_SETUP_PATHS = ['AGENTS.md', 'CLAUDE.md', '.claude', '.codex', '.cursor', '.goosehints'];
+            const setupPaths = (() => {
+              const raw = (process.env.AMPLITUDE_AGENT_SETUP_PATHS || '').trim();
+              if (!raw) return DEFAULT_SETUP_PATHS;
+              const names = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))];
+              const valid = names.filter((n) => !/[\\/]/.test(n) && n !== '.' && n !== '..');
+              if (valid.length !== names.length) core.warning('AMPLITUDE_AGENT_SETUP_PATHS: ignored names that are not root-level entries');
+              if (valid.length > 20) core.warning('AMPLITUDE_AGENT_SETUP_PATHS: using the first 20 names');
+              return valid.slice(0, 20);
+            })();
+            const treeOf = new Map();
+            const remember = (c) => {
+              if (c?.sha && c.commit?.tree?.sha) treeOf.set(c.sha, c.commit.tree.sha);
+            };
+            const treeForCommit = async (sha) => {
+              if (!treeOf.has(sha)) {
+                const { data } = await call(() => github.rest.git.getCommit({ owner, repo, commit_sha: sha }));
+                treeOf.set(sha, data.tree.sha);
+              }
+              return treeOf.get(sha);
+            };
+            const setupByTree = new Map();
+            const setupVersionForTree = async (treeSha) => {
+              if (!setupByTree.has(treeSha)) {
+                const { data } = await call(() => github.rest.git.getTree({ owner, repo, tree_sha: treeSha }));
+                const wanted = new Set(setupPaths);
+                const lines = data.tree.filter((e) => wanted.has(e.path)).map((e) => `${e.path}:${e.sha}`).sort();
+                setupByTree.set(treeSha, lines.length
+                  ? crypto.createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 12)
+                  : null);
+              }
+              return setupByTree.get(treeSha);
+            };
+            // The setup a commit was written with: the setup files in its parent's tree.
+            const setupVersionFor = (c) => enrich('agent_setup_version', async () => {
+              const parent = c.parents?.[0]?.sha;
+              if (!parent) return null;
+              return setupVersionForTree(await treeForCommit(parent));
+            });
+
+            const PASSED = new Set(['success', 'neutral', 'skipped']);
+            const FAILED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
+            // The first CI result on the PR: the earliest attempt of each check and
+            // status on the first commit that has any. Cancelled and unfinished runs
+            // do not count. Undefined when the PR has no CI.
+            const ciPassedFirstRun = (commits) => enrich('ci_passed_first_run', async () => {
+              for (const c of commits.slice(0, 20)) {
+                const runs = await call(() => github.paginate(github.rest.checks.listForRef, {
+                  owner, repo, ref: c.sha, filter: 'all', per_page: 100,
+                }));
+                const statuses = await call(() => github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                  owner, repo, ref: c.sha, per_page: 100,
+                }));
+                const earliest = (items, key, counts) => {
+                  const first = new Map();
+                  for (const item of items) {
+                    if (!counts(item)) continue;
+                    const k = key(item);
+                    if (!first.has(k) || item.id < first.get(k).id) first.set(k, item);
+                  }
+                  return [...first.values()];
+                };
+                const results = [
+                  ...earliest(runs, (r) => `${r.app?.id ?? ''}:${r.name}`,
+                    (r) => PASSED.has(r.conclusion) || FAILED.has(r.conclusion)).map((r) => PASSED.has(r.conclusion)),
+                  ...earliest(statuses, (s) => s.context,
+                    (s) => ['success', 'failure', 'error'].includes(s.state)).map((s) => s.state === 'success'),
+                ];
+                if (results.length) return results.every(Boolean);
+              }
+              return undefined;
+            });
 
             if (context.eventName === 'pull_request') {
               const pr = context.payload.pull_request;
               const commits = await github.paginate(github.rest.pulls.listCommits, {
                 owner, repo, pull_number: pr.number, per_page: 100,
               });
+              commits.forEach(remember);
               const reverted = new Set();
               const revertRe = /This reverts commit ([0-9a-f]{7,40})/gi;
               for (const text of [pr.body || '', ...commits.map((c) => c.commit.message)]) {
                 let m;
                 while ((m = revertRe.exec(text)) !== null) reverted.add(m[1].toLowerCase());
               }
+              const setupVersions = new Map();
+              for (const c of commits) setupVersions.set(c.sha, await setupVersionFor(c));
               for (const c of commits) {
                 push('Commit Merged', c, {
                   merge_commit_sha: pr.merge_commit_sha,
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
+                  agent_setup_version: setupVersions.get(c.sha),
                 }, c.sha);
               }
               for (const sha of reverted) {
@@ -107,13 +224,46 @@ jobs:
                   core.warning(`Reverted commit ${sha} not found: ${e.message}`);
                   continue;
                 }
+                remember(original);
                 push('Commit Reverted', original, {
                   revert_pr_number: pr.number,
                   revert_merge_commit_sha: pr.merge_commit_sha,
+                  agent_setup_version: await setupVersionFor(original),
                 }, `${original.sha}:${pr.number}`);
+              }
+
+              const agentCommits = commits.filter((c) => trailer(c.commit.message, 'Agent-Session-Id'));
+              const distinct = (key) =>
+                [...new Set(agentCommits.map((c) => trailer(c.commit.message, key)).filter(Boolean))].slice(0, 50);
+              const reviews = await enrich('reviews', async () => {
+                const all = await call(() => github.paginate(github.rest.pulls.listReviews, {
+                  owner, repo, pull_number: pr.number, per_page: 100,
+                }));
+                return all.filter((r) => ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'].includes(r.state)
+                  && r.user?.type !== 'Bot' && r.user?.login !== pr.user?.login);
+              });
+              const prUser = agentCommits[0] || commits[0];
+              if (prUser) {
+                pushEvent('Pull Request Merged', userIdFor(prUser), {
+                  repo: repoName,
+                  pr_number: pr.number,
+                  base_branch: pr.base.ref,
+                  merge_commit_sha: pr.merge_commit_sha,
+                  commit_count: commits.length,
+                  agent_commit_count: agentCommits.length,
+                  unattributed_commit_count: commits.length - agentCommits.length,
+                  agent_authored: agentCommits.length > 0,
+                  agent_names: distinct('Agent-Name'),
+                  agent_session_ids: distinct('Agent-Session-Id'),
+                  review_count: reviews?.length,
+                  changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
+                  ci_passed_first_run: await ciPassedFirstRun(commits),
+                  agent_setup_version: setupVersions.get(commits[0].sha),
+                }, pr.number);
               }
             } else {
               const deployment = context.payload.deployment;
+              const state = context.payload.deployment_status.state;
               const environment = deployment.environment;
               let previousSha = null;
               let pagesRead = 0;
@@ -142,16 +292,22 @@ jobs:
               } else {
                 commits = [(await github.rest.repos.getCommit({ owner, repo, ref: deployment.sha })).data];
               }
+              commits.forEach(remember);
+              const succeeded = state === 'success';
               for (const c of commits) {
-                push('Deploy Succeeded', c, {
+                push(succeeded ? 'Deploy Succeeded' : 'Deploy Failed', c, {
                   deployment_sha: deployment.sha,
                   environment,
+                  ...(succeeded ? {} : { deployment_state: state }),
+                  agent_setup_version: await setupVersionFor(c),
                 }, `${c.sha}:${deployment.id}`);
               }
             }
 
             const agentEvents = events.filter((e) => e.event_properties.agent_authored).length;
             core.info(`${events.length} outcome events (${agentEvents} agent-authored)`);
+            const enrichments = Object.entries(enrichment).map(([k, v]) => `${k}=${v}`).join(', ') || 'none';
+            core.info(`enrichments: ${enrichments}; ${apiCalls}/${API_BUDGET} API calls`);
             if (events.length === 0) return;
             if (dryRun) {
               core.info(JSON.stringify(events, null, 2));

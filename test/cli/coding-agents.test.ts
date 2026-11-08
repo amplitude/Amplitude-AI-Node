@@ -10,10 +10,13 @@ import {
   runCodingAgentsInit,
 } from '../../src/cli/coding-agents.js';
 import { runDoctor } from '../../src/cli/doctor.js';
+import { OUTCOMES_WORKFLOW_SHA256, outcomesWorkflowState, sha256Hex } from '../../src/cli/outcomes-workflow.js';
 import { parseLocalEnv } from '../../src/cli/hook-codex.js';
 
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
+const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
+const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
 
@@ -41,9 +44,21 @@ const readJson = (rel: string) => JSON.parse(readFileSync(join(repo, rel), 'utf8
 
 describe('coding-agents templates', () => {
   it.skipIf(!existsSync(SHARED))('match the shared AA-152843 artifacts byte for byte', () => {
-    for (const name of ['prepare-commit-msg', 'agent-outcomes.yml', 'claude-settings.json', 'codex-hooks.json']) {
+    for (const name of ['prepare-commit-msg', 'claude-settings.json', 'codex-hooks.json']) {
       expect(template(name), name).toBe(readFileSync(join(SHARED, name), 'utf8'));
     }
+  });
+
+  it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
+    expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
+    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v2');
+  });
+
+  it('lists the v1 workflow as a previous version', () => {
+    expect(outcomesWorkflowState(readFileSync(V1_WORKFLOW))).toBe('outdated');
+    expect(outcomesWorkflowState(template('agent-outcomes.yml'))).toBe('current');
+    expect(outcomesWorkflowState(`${template('agent-outcomes.yml')}# mine\n`)).toBe('customized');
+    expect(outcomesWorkflowState(null)).toBe('missing');
   });
 });
 
@@ -245,6 +260,27 @@ describe('coding-agents init', () => {
     );
   });
 
+  it('upgrades an untouched v1 outcomes workflow without --force', () => {
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, WORKFLOW), readFileSync(V1_WORKFLOW));
+    const result = init({ harnesses: ['goose'] });
+    const change = result.changes.find((c) => c.path === WORKFLOW)!;
+    expect(change.action).toBe('update');
+    expect(change.detail).toContain('upgraded from an earlier shipped version');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
+    expect(result.warnings.join('\n')).not.toContain(WORKFLOW);
+  });
+
+  it('leaves a customized outcomes workflow alone without --force', () => {
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    const custom = `${readFileSync(V1_WORKFLOW, 'utf8')}# local edit\n`;
+    writeFileSync(join(repo, WORKFLOW), custom);
+    const result = init({ harnesses: ['goose'] });
+    expect(result.changes.find((c) => c.path === WORKFLOW)!.action).toBe('conflict');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(custom);
+    expect(init({ harnesses: ['goose'], force: true }).changes.find((c) => c.path === WORKFLOW)!.action).toBe('update');
+  });
+
   it('chains onto an existing prepare script', () => {
     expect(ensurePrepareScript('husky')).toBe('husky && (git config core.hooksPath .githooks || true)');
     expect(ensurePrepareScript('git config core.hooksPath .githooks || true')).toBe(
@@ -270,6 +306,24 @@ describe('coding-agents doctor', () => {
     const after = runCodingAgentsDoctor(repo, { env: {}, home });
     expect(after.ok).toBe(true);
     expect(JSON.stringify(after)).not.toContain(SECRET);
+  });
+
+  it.each([
+    ['current', null, true, false],
+    ['outdated', 'v1', true, true],
+    ['customized', 'custom', true, false],
+    ['missing', 'missing', false, true],
+  ] as const)('reports a %s outcomes workflow', (state, setup, ok, hasFix) => {
+    init({ harnesses: ['goose'] });
+    if (setup === 'v1') writeFileSync(join(repo, WORKFLOW), readFileSync(V1_WORKFLOW));
+    if (setup === 'custom') writeFileSync(join(repo, WORKFLOW), '# mine\n');
+    if (setup === 'missing') rmSync(join(repo, WORKFLOW));
+    const check = runCodingAgentsDoctor(repo, { env: {}, home }).checks.find(
+      (c) => c.name === 'coding_agents.outcomes_workflow',
+    )!;
+    expect(check.detail.startsWith(state)).toBe(true);
+    expect(check.ok).toBe(ok);
+    expect(Boolean(check.fix)).toBe(hasFix);
   });
 
   it('is added to amplitude-ai doctor only once init has run', () => {
