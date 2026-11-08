@@ -463,6 +463,46 @@ export function extractAcpMeta(meta: unknown, options: ContextExtractOptions = {
   return extractAgentContext('acp', meta, options);
 }
 
+/** Options for the response `inject*` helpers. Responses never carry `actorType`. */
+export type ContextResponseOptions = Pick<ContextInjectOptions, 'identity' | 'recipient' | 'policy' | 'ttl'>;
+
+function _responseOptions(options: ContextResponseOptions): ContextInjectOptions {
+  return { identity: options.identity, recipient: options.recipient, policy: options.policy, ttl: options.ttl };
+}
+
+/**
+ * Add this agent's session context to the `metadata` of the A2A Message or
+ * Task it returns, so the caller can link the call to this session with
+ * {@link peerProperties}. Same envelope and signing as
+ * {@link injectA2aMetadata}; identity defaults to `'none'`.
+ */
+export function injectA2aResponseMetadata(
+  metadata?: Record<string, unknown> | null,
+  options: ContextResponseOptions = {},
+): Record<string, unknown> {
+  return _injectInto('a2a', metadata, _responseOptions(options));
+}
+
+/** Add this agent's session context to an ACP result's `_meta`. See {@link injectA2aResponseMetadata}. */
+export function injectAcpResultMeta(
+  meta?: Record<string, unknown> | null,
+  options: ContextResponseOptions = {},
+): Record<string, unknown> {
+  return _injectInto('acp', meta, _responseOptions(options));
+}
+
+/**
+ * Add this agent's session context to HTTP response headers. Unlike
+ * {@link injectContext}, identity defaults to `'none'` and the legacy
+ * parent-agent header is not sent.
+ */
+export function injectResponseHeaders(
+  headers?: Record<string, string> | null,
+  options: ContextResponseOptions = {},
+): Record<string, string> {
+  return _injectInto('http', headers, _responseOptions(options)) as Record<string, string>;
+}
+
 export type MintContextOptions = {
   sessionId: string;
   userId?: string | null;

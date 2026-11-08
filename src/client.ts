@@ -1,3 +1,5 @@
+import type { AgentContext } from './agent-context.js';
+import { peerProperties } from './agent-context-properties.js';
 import { BoundAgent, type AgentOptions } from './bound-agent.js';
 import { AIConfig, normalizeFlushTimeoutMs } from './config.js';
 import type { MessageLabel, SessionEnrichments } from './core/enrichments.js';
@@ -847,9 +849,17 @@ export class AmplitudeAI {
     groups?: Record<string, unknown> | null;
     browserSessionId?: string | number | null;
     privacyConfig?: PrivacyConfig | null;
+    /**
+     * The context a peer agent returned for this call (`extractA2aMetadata`,
+     * `extractAcpMeta` or `extractContext` on its response). Adds that peer's
+     * `[Agent] Peer Agent ID`, `Peer Session ID` and `Context Verify Result`
+     * to this event only; this session and user never change.
+     */
+    peer?: AgentContext | null;
   }): string {
     const sessionId = opts.sessionId ?? getActiveContext()?.sessionId;
     const effectiveTurnId = opts.turnId ?? (sessionId ? this._nextTurnId(sessionId) : undefined);
+    const peer = opts.peer != null ? peerProperties(opts.peer) : null;
     return trackToolCall({
       amplitude: this._amplitude,
       userId: opts.userId,
@@ -875,7 +885,7 @@ export class AmplitudeAI {
       env: opts.env,
       errorMessage: opts.errorMessage,
       errorType: opts.errorType,
-      eventProperties: opts.eventProperties,
+      eventProperties: peer != null ? { ...peer, ...opts.eventProperties } : opts.eventProperties,
       groups: opts.groups,
       privacyConfig: opts.privacyConfig ?? this._privacyConfig,
       browserSessionId: opts.browserSessionId,

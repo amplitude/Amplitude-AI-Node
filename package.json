@@ -29,6 +29,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./agent-context": "./dist/agent-context.js",
+    "./agent-context-properties": "./dist/agent-context-properties.js",
     "./bound-agent": "./dist/bound-agent.js",
     "./cli/coding-agents": "./dist/cli/coding-agents.js",
     "./cli/doctor": "./dist/cli/doctor.js",
