@@ -2,7 +2,7 @@
 
 **Gemini CLI exports OpenTelemetry logs for every prompt, model response and tool call. Point them at Amplitude and each Gemini CLI session becomes an Agent Analytics session.**
 
-Last verified: pending live capture. Pinned to Gemini CLI `google-gemini/gemini-cli@62bab5b2` (after v0.67.0). This is an Amplitude-authored guide; Gemini CLI is a Google project, and Google does not endorse it. Corrections are welcome as a pull request.
+Last verified: pending live capture. Pinned to Gemini CLI `google-gemini/gemini-cli@62bab5b2` (after v0.67.0). Needs Gemini CLI v0.65.0 or later, the first release that reads `GEMINI_TELEMETRY_OTLP_HEADERS` (google-gemini/gemini-cli#29641); older versions send no key and every export gets a 401. This is an Amplitude-authored guide; Gemini CLI is a Google project, and Google does not endorse it. Corrections are welcome as a pull request.
 
 **Provenance.** Settings and export behavior come from Gemini CLI source: `packages/core/src/telemetry/sdk.ts` (with `otlpProtocol: "http"` it posts `/v1/traces`, `/v1/logs` and `/v1/metrics` under `otlpEndpoint`, all with the same headers), `telemetry/config.ts` (`GEMINI_TELEMETRY_OTLP_HEADERS` takes `key=value` pairs, URL-decoded, or a JSON object), `config/settings.ts` (workspace settings and `.gemini/.env` load only in trusted folders) and `services/shellExecutionService.ts` (shell commands get `GEMINI_CLI=1`, but no session ID). Not yet checked against a live capture.
 
@@ -64,7 +64,7 @@ Responses with an internal `utility_*` role (routing, summarizing) are not count
 
 - **Receiver deploy.** The events above need the Gemini CLI profile in Amplitude's OTLP receiver ([nova#36768](https://github.com/amplitude/nova/pull/36768)). Until it is deployed, Gemini CLI sessions don't appear.
 - **No session on commits.** Gemini CLI gives its shell commands `GEMINI_CLI=1` but no session ID, so the commit hook stamps `Agent-Name: gemini-cli` without `Agent-Session-Id`. The outcomes workflow counts those commits as agent work (`agent_attribution: name_trailer`, `attributed_agent: gemini-cli`), but they can't be joined to a session.
-- **Metrics.** Gemini CLI also posts metrics to `/otlp/v1/metrics`, which Amplitude doesn't accept. The CLI drops the failed exports silently.
+- **Metrics.** Gemini CLI also posts metrics to `/otlp/v1/metrics` every 10 seconds. Amplitude accepts and discards them.
 
 ## Verify
 

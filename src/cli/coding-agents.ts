@@ -66,6 +66,21 @@ export const CURSOR_HOOK_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook
 const CURSOR_HOOK_SUFFIX = 'amplitude-ai hook cursor';
 /** Project hooks run from the repo root, so this skips npx's startup on every hook when the repo depends on @amplitude/ai. */
 const CURSOR_LOCAL_BIN = 'node_modules/.bin/amplitude-ai';
+
+/**
+ * The committed hooks call the local bin only when `package.json` declares `@amplitude/ai`, so every
+ * teammate's install has it. On Windows the bin is a shell script Cursor's shell can't run.
+ */
+export function cursorUsesLocalBin(cwd: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === 'win32') return false;
+  const pkg = readJsonFile(join(cwd, 'package.json'));
+  if (!pkg.ok || pkg.value === null) return false;
+  const declared = (field: string) => {
+    const deps = pkg.value?.[field];
+    return typeof deps === 'object' && deps !== null && '@amplitude/ai' in deps;
+  };
+  return declared('dependencies') || declared('devDependencies');
+}
 /** The events `cursor-hooks.json` forwards; doctor expects every one. */
 export const CURSOR_HOOK_EVENTS = [
   'beforeSubmitPrompt',
@@ -104,6 +119,8 @@ export type CodingAgentsInitOptions = {
   env?: NodeJS.ProcessEnv;
   templatesDir?: string;
   git?: GitRunner;
+  /** Defaults to `process.platform`; `win32` keeps the Cursor hooks on npx. */
+  platform?: NodeJS.Platform;
 };
 
 export type CodingAgentsChange = {
@@ -184,6 +201,21 @@ export function geminiTelemetrySettings(privacy: CodingAgentsPrivacy, region: Co
     otlpProtocol: 'http',
     logPrompts: privacy === 'full',
   };
+}
+
+/** The Copilot CLI wrapper `init` prints: telemetry variables scoped to one `copilot` run. */
+export function copilotShellFunction(endpoint: string, enduser: string, privacy: CodingAgentsPrivacy): string[] {
+  return [
+    'copilot() {',
+    `  local key="\${AMPLITUDE_AI_API_KEY:-$(sed -n 's/^AMPLITUDE_AI_API_KEY=//p' "$(git rev-parse --show-toplevel 2>/dev/null)/${LOCAL_ENV_PATH}" 2>/dev/null)}"`,
+    '  COPILOT_OTEL_ENABLED=true \\',
+    `  OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint} \\`,
+    '  OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$key" \\',
+    `  OTEL_RESOURCE_ATTRIBUTES="enduser.id=${enduser}" \\`,
+    ...(privacy === 'full' ? ['  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \\'] : []),
+    '  command copilot "$@"',
+    '}',
+  ];
 }
 
 /** `init` with no `--harness`: the defaults, plus Cursor, Gemini CLI and Copilot when the repo already uses them. */
@@ -578,7 +610,8 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
   }
 
   if (harnesses.includes('cursor')) {
-    const local = existsSync(join(cwd, CURSOR_LOCAL_BIN));
+    const platform = options.platform ?? process.platform;
+    const local = cursorUsesLocalBin(cwd, platform);
     const command = local ? `${CURSOR_LOCAL_BIN} hook cursor` : CURSOR_HOOK_COMMAND;
     const templateText = readCodingAgentsTemplate('cursor-hooks.json', templatesDir).split(CURSOR_HOOK_COMMAND).join(command);
     const hooksFile = readJsonFile(join(cwd, CURSOR_HOOKS_PATH));
@@ -601,7 +634,9 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     localEnvUses.push('hook cursor');
     if (!local) {
       warnings.push(
-        'Cursor runs the hook through npx on every prompt and tool call, which takes about a second each. Add @amplitude/ai as a dev dependency and re-run init to call node_modules/.bin/amplitude-ai directly.',
+        platform === 'win32'
+          ? 'Cursor runs the hook through npx on every prompt and tool call, which takes about a second each. On Windows the hooks stay on npx.'
+          : 'Cursor runs the hook through npx on every prompt and tool call, which takes about a second each. Add @amplitude/ai to devDependencies and re-run init to call node_modules/.bin/amplitude-ai directly.',
       );
     }
     if (!options.apiKey && !existingLocalEnv.AMPLITUDE_AI_API_KEY && !existingLocalEnv.AMPLITUDE_API_KEY) {
@@ -663,14 +698,9 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
   if (harnesses.includes('copilot')) {
     const endpoint = `https://${amplitudeHost(region)}${OTLP_BASE_PATH}`;
     const enduser = userId ? encodeResourceValue(userId) : '<your email>';
-    const cli = [
-      'export COPILOT_OTEL_ENABLED=true',
-      `export OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}`,
-      'export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>"',
-      `export OTEL_RESOURCE_ATTRIBUTES="enduser.id=${enduser}"`,
-    ];
-    if (privacy === 'full') cli.push('export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
-    instructions.push(`Copilot CLI: add to the shell profile that starts copilot:\n  ${cli.join('\n  ')}`);
+    instructions.push(
+      `Copilot CLI: add this function to your shell profile (bash or zsh). The OTEL_* variables reach only copilot and the processes it starts, not every OpenTelemetry app in your shell; the key comes from AMPLITUDE_AI_API_KEY or the repo's ${LOCAL_ENV_PATH}:\n  ${copilotShellFunction(endpoint, enduser, privacy).join('\n  ')}`,
+    );
     const vscode: JsonObject = {
       'github.copilot.chat.otel.enabled': true,
       'github.copilot.chat.otel.otlpEndpoint': endpoint,
@@ -922,11 +952,11 @@ export function runCodingAgentsDoctor(
       detail: ok
         ? `this shell exports Copilot CLI telemetry to ${endpoint}`
         : !copilotEnabled
-          ? 'COPILOT_OTEL_ENABLED is not set in this shell (Copilot CLI sends nothing from it)'
+          ? 'COPILOT_OTEL_ENABLED is not exported in this shell; the copilot() function from init sets it for each run'
           : !exporting
             ? 'OTEL_EXPORTER_OTLP_ENDPOINT in this shell is not Amplitude'
             : 'OTEL_EXPORTER_OTLP_HEADERS has no API key',
-      ...(!ok && { fix: `${fixInit} --harness copilot --dry-run, then export the printed block` }),
+      ...(!ok && { fix: `${fixInit} --harness copilot --dry-run, then add the printed copilot() function to your shell profile` }),
     });
   }
 

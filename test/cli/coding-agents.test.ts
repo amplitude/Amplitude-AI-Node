@@ -7,6 +7,7 @@ import {
   CODEX_STOP_COMMAND,
   CURSOR_HOOK_COMMAND,
   CURSOR_HOOK_EVENTS,
+  copilotShellFunction,
   ensurePrepareScript,
   runCodingAgentsDoctor,
   runCodingAgentsInit,
@@ -364,16 +365,38 @@ describe('coding-agents init', () => {
   it('prints the Copilot CLI and VS Code settings with a key placeholder and writes no Copilot file', () => {
     const result = init({ harnesses: ['copilot'], apiKey: SECRET, region: 'eu' });
     const text = result.instructions.join('\n');
-    expect(text).toContain('export COPILOT_OTEL_ENABLED=true');
-    expect(text).toContain('export OTEL_EXPORTER_OTLP_ENDPOINT=https://api.eu.amplitude.com/otlp');
-    expect(text).toContain('export OTEL_RESOURCE_ATTRIBUTES="enduser.id=dev@example.com"');
-    expect(text).toContain('export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
+    expect(text).toContain('copilot() {');
+    expect(text).not.toMatch(/^\s*export OTEL_/m);
+    expect(text).toContain('OTEL_EXPORTER_OTLP_ENDPOINT=https://api.eu.amplitude.com/otlp');
+    expect(text).toContain('OTEL_RESOURCE_ATTRIBUTES="enduser.id=dev@example.com"');
+    expect(text).toContain('OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
     expect(text).toContain('"github.copilot.chat.otel.otlpEndpoint": "https://api.eu.amplitude.com/otlp"');
     expect(JSON.stringify(result)).not.toContain(SECRET);
     expect(result.changes.some((c) => c.path.includes('copilot') || c.path === '.amplitude-ai/local.env')).toBe(false);
     expect(init({ harnesses: ['copilot'], privacy: 'metadata' }).instructions.join('\n')).not.toContain(
       'CAPTURE_MESSAGE_CONTENT',
     );
+  });
+
+  it('scopes the Copilot variables to one copilot run and reads the key from local.env', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'aa-copilot-bin-'));
+    try {
+      writeFileSync(join(bin, 'copilot'), '#!/bin/sh\nenv | grep -E "^(COPILOT|OTEL)_" | sort\n', { mode: 0o755 });
+      mkdirSync(join(repo, '.amplitude-ai'), { recursive: true });
+      writeFileSync(join(repo, '.amplitude-ai/local.env'), `AMPLITUDE_AI_API_KEY=${SECRET}\n`);
+      const fn = copilotShellFunction('https://api.amplitude.com/otlp', 'dev@example.com', 'full').join('\n');
+      const run = spawnSync('bash', ['-c', `${fn}\ncopilot --version; echo "after:\${OTEL_EXPORTER_OTLP_ENDPOINT:-unset}"`], {
+        cwd: repo,
+        env: { PATH: `${bin}:${process.env.PATH}`, HOME: repo },
+        encoding: 'utf8',
+      });
+      expect(run.stdout).toContain('COPILOT_OTEL_ENABLED=true');
+      expect(run.stdout).toContain(`OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20${SECRET}`);
+      expect(run.stdout).toContain('OTEL_RESOURCE_ATTRIBUTES=enduser.id=dev@example.com');
+      expect(run.stdout).toContain('after:unset');
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 
   it('adds Cursor, Gemini CLI and Copilot to the default harnesses only when the repo uses them', () => {
@@ -407,19 +430,30 @@ describe('coding-agents init', () => {
   });
 
   it('points the Cursor hooks at node_modules/.bin when the repo depends on @amplitude/ai', () => {
-    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true });
-    writeFileSync(join(repo, 'node_modules/.bin/amplitude-ai'), '#!/bin/sh\n');
-    const result = init({ harnesses: ['cursor'] });
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ devDependencies: { '@amplitude/ai': '^0.28.0' } }));
+    const result = init({ harnesses: ['cursor'], platform: 'linux' });
     expect(readJson('.cursor/hooks.json').hooks.postToolUse).toEqual([
       { command: 'node_modules/.bin/amplitude-ai hook cursor' },
     ]);
     expect(result.warnings.join('\n')).not.toContain('npx');
     // Re-running with the npx launcher does not add a second forwarder.
-    rmSync(join(repo, 'node_modules'), { recursive: true });
-    init({ harnesses: ['cursor'] });
+    rmSync(join(repo, 'package.json'));
+    init({ harnesses: ['cursor'], platform: 'linux' });
     expect(readJson('.cursor/hooks.json').hooks.postToolUse).toEqual([
       { command: 'node_modules/.bin/amplitude-ai hook cursor' },
     ]);
+  });
+
+  it('keeps npx when @amplitude/ai is installed but not declared, or on Windows', () => {
+    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules/.bin/amplitude-ai'), '#!/bin/sh\n');
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ dependencies: { other: '1.0.0' } }));
+    init({ harnesses: ['cursor'], platform: 'linux' });
+    expect(readJson('.cursor/hooks.json').hooks.stop).toEqual([{ command: CURSOR_HOOK_COMMAND }]);
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ dependencies: { '@amplitude/ai': '^0.28.0' } }));
+    const windows = init({ harnesses: ['cursor'], platform: 'win32' });
+    expect(readJson('.cursor/hooks.json').hooks.stop).toEqual([{ command: CURSOR_HOOK_COMMAND }]);
+    expect(windows.warnings.join('\n')).toContain('On Windows the hooks stay on npx');
   });
 
   it("counts the Python SDK's Windows venv launcher as the forwarder", () => {
@@ -436,9 +470,8 @@ describe('coding-agents init', () => {
     hooks.hooks.stop = [{ command: 'amplitude-ai hook cursor', timeout: 30 }];
     hooks.hooks.sessionEnd = [{ command: '/opt/bin/amplitude-ai hook cursor' }];
     writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify(hooks));
-    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true });
-    writeFileSync(join(repo, 'node_modules/.bin/amplitude-ai'), '#!/bin/sh\n');
-    init({ harnesses: ['cursor'] });
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ devDependencies: { '@amplitude/ai': '^0.28.0' } }));
+    init({ harnesses: ['cursor'], platform: 'darwin' });
     const after = readJson('.cursor/hooks.json').hooks;
     expect(after.postToolUse).toEqual([{ command: 'node_modules/.bin/amplitude-ai hook cursor' }]);
     expect(after.stop).toEqual([{ command: 'node_modules/.bin/amplitude-ai hook cursor', timeout: 30 }]);
@@ -562,7 +595,7 @@ describe('coding-agents doctor', () => {
     expect(check({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' })).toBeUndefined();
     mkdirSync(join(repo, '.github'), { recursive: true });
     writeFileSync(join(repo, '.github/copilot-instructions.md'), '# notes\n');
-    expect(check({})).toMatchObject({ ok: true, detail: expect.stringContaining('not set') });
+    expect(check({})).toMatchObject({ ok: true, detail: expect.stringContaining('copilot() function') });
     expect(check({ COPILOT_OTEL_ENABLED: 'true', OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' })!.ok).toBe(false);
     const on = { COPILOT_OTEL_ENABLED: 'true', OTEL_EXPORTER_OTLP_ENDPOINT: 'https://api.amplitude.com/otlp' };
     expect(check(on)!.ok).toBe(false);

@@ -304,6 +304,16 @@ export function endpointFor(region: string | undefined): string {
     : 'https://api2.amplitude.com/2/httpapi';
 }
 
+/** A response the HTTP API will give again for the same events (any 4xx except 429). */
+export class HttpApiRejected extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`Amplitude HTTP API returned ${status}${body ? `: ${body}` : ''}`);
+  }
+}
+
 export async function postBatch(
   fetchImpl: typeof fetch,
   endpoint: string,
@@ -323,13 +333,17 @@ export async function postBatch(
       });
       status = response.status;
       if (response.ok) return;
-    } catch {
+      if (status >= 400 && status < 500 && status !== 429) {
+        const body = await response.text().catch(() => '');
+        throw new HttpApiRejected(status, body.slice(0, 200));
+      }
+    } catch (err) {
+      if (err instanceof HttpApiRejected) throw err;
       status = 0;
     } finally {
       clearTimeout(timer);
     }
-    const retryable = status === 0 || status === 429 || status >= 500;
-    if (!retryable || attempt >= 2) throw new Error(`Amplitude HTTP API returned ${status || 'a network error'}`);
+    if (attempt >= 2) throw new Error(`Amplitude HTTP API returned ${status || 'a network error'}`);
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
   }
 }

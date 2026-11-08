@@ -17,15 +17,21 @@ npx -y -p @amplitude/ai amplitude-ai coding-agents init --harness copilot
 
 `init` with no `--harness` includes Copilot when the repo has `.github/copilot-instructions.md` or `.github/hooks/`.
 
-**Copilot CLI:** add to the shell profile that starts `copilot`:
+**Copilot CLI:** add this function to your shell profile (bash or zsh). `init` prints it with your email filled in:
 
 ```sh
-export COPILOT_OTEL_ENABLED=true
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://api.amplitude.com/otlp
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>"
-export OTEL_RESOURCE_ATTRIBUTES="enduser.id=<your git email>"
-export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+copilot() {
+  local key="${AMPLITUDE_AI_API_KEY:-$(sed -n 's/^AMPLITUDE_AI_API_KEY=//p' "$(git rev-parse --show-toplevel 2>/dev/null)/.amplitude-ai/local.env" 2>/dev/null)}"
+  COPILOT_OTEL_ENABLED=true \
+  OTEL_EXPORTER_OTLP_ENDPOINT=https://api.amplitude.com/otlp \
+  OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$key" \
+  OTEL_RESOURCE_ATTRIBUTES="enduser.id=<your git email>" \
+  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
+  command copilot "$@"
+}
 ```
+
+These are the standard OpenTelemetry variables, so exporting them from the profile would send every OpenTelemetry-instrumented process in your shell (local services, test runs, other CLIs) to Amplitude. The function sets them for one `copilot` run only; processes Copilot itself starts still inherit them. The key is read at run time from `AMPLITUDE_AI_API_KEY`, else from the repo's gitignored `.amplitude-ai/local.env`, so it never sits in a dotfile.
 
 **Copilot Chat in VS Code:** add to your user `settings.json`, not the workspace one, because it holds the key:
 
@@ -63,12 +69,12 @@ export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
 
 - **No session on commits.** Copilot gives its shell commands no session ID, so the commit hook adds nothing. Where Copilot signs a commit (its noreply address as author or in `Co-authored-by`), the outcomes workflow attributes it as `agent_author` or `co_author` with `attributed_agent: copilot`. They can't be joined to a session.
 - **Copilot coding agent.** It runs in GitHub's sandbox, where your environment doesn't reach, so it sends no sessions; its commits are attributed by author.
-- **Metrics.** Copilot also posts metrics to `/otlp/v1/metrics`, which Amplitude doesn't accept.
+- **Metrics.** Copilot also posts metrics to `/otlp/v1/metrics`. Amplitude accepts and discards them.
 - **Policy.** Enterprise policy can block telemetry or content capture.
 
 ## Verify
 
-1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor` from the shell that starts `copilot`: `copilot_otlp` passes. VS Code settings can't be read by `doctor`.
+1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: `copilot_otlp` reads only exported variables, so with the function it reports them as not exported, which is expected. `type copilot` shows the function is loaded. VS Code settings can't be read by `doctor`.
 2. Run one Copilot session in this repo.
 3. In Amplitude, the session appears under your email with its model calls and tool calls.
 

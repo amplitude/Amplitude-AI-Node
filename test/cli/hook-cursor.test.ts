@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CURSOR_MAX_BATCH_AGE_MS,
   type CursorSpoolRecord,
   cursorSpoolRecord,
   mapCursorSpool,
@@ -104,7 +105,7 @@ describe('cursor spool mapping', () => {
         trace_id: c.opts.traceId ?? null,
         tool_name: c.kind === 'tool' ? c.toolName : null,
         success: c.kind === 'tool' ? c.success : null,
-        latency_ms: c.kind === 'tool' || c.kind === 'ai' ? c.latencyMs : 0,
+        latency_ms: c.kind === 'tool' ? c.latencyMs : 0,
         event_properties: c.opts.eventProperties ?? {},
       }));
       expect(calls, conversation).toEqual(vectors.calls[conversation]);
@@ -199,17 +200,20 @@ describe('runCursorHook', () => {
     expect(readdirSync(spoolDir()).filter((f) => !f.endsWith('.lock'))).toEqual([]);
   });
 
-  it('keeps the spool for the next stop when the send fails', async () => {
-    const failing = vi.fn(async () => new Response('nope', { status: 400 })) as unknown as typeof fetch;
+  it('keeps the spool for the next stop when the send fails', { timeout: 20_000 }, async () => {
+    const failing = vi.fn(async () => new Response('busy', { status: 503 })) as unknown as typeof fetch;
     await replay({ AMPLITUDE_AI_API_KEY: SECRET }, failing);
     expect(readdirSync(spoolDir()).some((f) => f.endsWith('.flushing'))).toBe(true);
     const { bodies, fetchImpl } = mockFetch();
-    await runCursorHook({ ...inputs[8]! }, { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), fetchImpl, gitEmail: () => null, stderr: () => undefined });
+    await runCursorHook(
+      { ...inputs[8]! },
+      { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), now: () => vectors.base_time + 60_000, fetchImpl, gitEmail: () => null, stderr: () => undefined },
+    );
     expect(bodies.flatMap((b) => b.events).filter((e) => e.event_type === '[Agent] User Message')).toHaveLength(1);
   });
 
-  it('keeps every failed batch when two flushes land in the same millisecond', async () => {
-    const failing = vi.fn(async () => new Response('nope', { status: 400 })) as unknown as typeof fetch;
+  it('keeps every failed batch when two flushes land in the same millisecond', { timeout: 20_000 }, async () => {
+    const failing = vi.fn(async () => new Response('busy', { status: 503 })) as unknown as typeof fetch;
     const opts = { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), now: () => 1, gitEmail: () => null, stderr: () => undefined };
     await runCursorHook(inputs[0]!, opts);
     await runCursorHook(inputs[8]!, { ...opts, fetchImpl: failing });
@@ -219,6 +223,67 @@ describe('runCursorHook', () => {
     const { bodies, fetchImpl } = mockFetch();
     await runCursorHook(inputs[8]!, { ...opts, fetchImpl });
     expect(bodies.flatMap((b) => b.events).map((e) => e.event_type)).toEqual(['[Agent] User Message', '[Agent] AI Response']);
+  });
+
+  it('drops a batch the HTTP API rejects, logs why, and does not send it again', async () => {
+    const stderr: string[] = [];
+    const rejecting = vi.fn(async () => new Response('{"error":"Invalid field values"}', { status: 400 }));
+    const opts = { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), gitEmail: () => null, stderr: (t: string) => stderr.push(t) };
+    await runCursorHook(inputs[0]!, opts);
+    await runCursorHook(inputs[8]!, { ...opts, fetchImpl: rejecting as unknown as typeof fetch });
+    expect(rejecting).toHaveBeenCalledTimes(1);
+    expect(stderr.join('')).toContain('returned 400: {"error":"Invalid field values"}');
+    expect(readdirSync(spoolDir()).filter((f) => !f.endsWith('.lock'))).toEqual([]);
+    const { bodies, fetchImpl } = mockFetch();
+    await runCursorHook(inputs[8]!, { ...opts, fetchImpl });
+    expect(bodies).toEqual([]);
+  });
+
+  it('drops a batch left unsent for 24 hours without sending it', async () => {
+    mkdirSync(spoolDir(), { recursive: true });
+    writeFileSync(join(spoolDir(), `${PARENT}.1000.flushing`), `${JSON.stringify(cursorSpoolRecord(inputs[0]!, true, 1000, '/repo'))}\n`);
+    const { bodies, fetchImpl } = mockFetch();
+    const stderr: string[] = [];
+    await runCursorHook(inputs[8]!, {
+      env: env({ AMPLITUDE_AI_API_KEY: SECRET }),
+      now: () => 1000 + CURSOR_MAX_BATCH_AGE_MS,
+      fetchImpl,
+      gitEmail: () => null,
+      stderr: (t) => stderr.push(t),
+    });
+    expect(bodies.flatMap((b) => b.events).map((e) => e.event_type)).not.toContain('[Agent] User Message');
+    expect(stderr.join('')).toContain('unsent for 24 hours');
+    expect(existsSync(join(spoolDir(), `${PARENT}.1000.flushing`))).toBe(false);
+  });
+
+  it('keeps the spool on a dry run so a real send can follow', async () => {
+    const stdout: string[] = [];
+    const opts = { env: env({ AMPLITUDE_AI_HOOK_DRY_RUN: '1' }), gitEmail: () => null, stderr: () => undefined };
+    await runCursorHook(inputs[0]!, opts);
+    await runCursorHook(inputs[8]!, { ...opts, stdout: (t: string) => stdout.push(t) });
+    expect(stdout.join('')).toContain('[Agent] User Message');
+    const { bodies, fetchImpl } = mockFetch();
+    await runCursorHook(inputs[8]!, { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), fetchImpl, gitEmail: () => null, stderr: () => undefined });
+    expect(bodies.flatMap((b) => b.events).map((e) => e.event_type)).toContain('[Agent] User Message');
+  });
+
+  it("waits for the parent's subagentStop when a subagent's own stop comes first", async () => {
+    const { bodies, fetchImpl } = mockFetch();
+    const opts = { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), fetchImpl, gitEmail: () => null, stderr: () => undefined };
+    await runCursorHook(inputs[5]!, opts);
+    await runCursorHook({ ...inputs[8]!, conversation_id: CHILD, generation_id: inputs[5]!.generation_id }, opts);
+    expect(bodies).toEqual([]);
+    await runCursorHook(inputs[6]!, opts);
+    const child = bodies.flatMap((b) => b.events).filter((e) => e.event_properties?.['[Agent] Session ID'] === CHILD);
+    expect(child.map((e) => e.event_properties?.['[Agent] Agent ID'])).toEqual(['cursor/explore']);
+  });
+
+  it('reports the turn duration on AI Response, not as model latency', async () => {
+    const { bodies, fetchImpl } = mockFetch();
+    await replay({ AMPLITUDE_AI_API_KEY: SECRET }, fetchImpl);
+    const response = bodies.flatMap((b) => b.events).find((e) => e.event_type === '[Agent] AI Response')!;
+    expect(response.event_properties).not.toHaveProperty('[Agent] Latency Ms');
+    expect(response.event_properties?.cursor_turn_duration_ms).toBe(7000);
   });
 
   it('sends spools idle for 10 minutes when another conversation stops', async () => {

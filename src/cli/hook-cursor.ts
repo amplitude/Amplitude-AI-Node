@@ -52,6 +52,8 @@ export const CURSOR_AGENT_ID = 'cursor';
 export const CURSOR_PROVIDER = 'cursor';
 /** A spool untouched this long belongs to a conversation that will not reach `stop`. */
 export const CURSOR_STALE_SPOOL_MS = 10 * 60 * 1000;
+/** Unsent batches older than this are dropped without another send. */
+export const CURSOR_MAX_BATCH_AGE_MS = 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 500;
 const FLUSH_EVENTS = new Set(['stop', 'sessionEnd']);
 
@@ -199,7 +201,7 @@ function appendRecord(dir: string, conversation: string, record: CursorSpoolReco
 /** A `[Agent]` tracking call built from spool records. */
 export type CursorTrackCall =
   | { kind: 'user'; insertId: string; time: number; content: string; opts: Record<string, unknown> }
-  | { kind: 'ai'; insertId: string; time: number; content: string; model: string; latencyMs: number; opts: Record<string, unknown> }
+  | { kind: 'ai'; insertId: string; time: number; content: string; model: string; opts: Record<string, unknown> }
   | {
       kind: 'tool';
       insertId: string;
@@ -239,16 +241,16 @@ export function mapCursorSpool(records: CursorSpoolRecord[]): CursorTrackCall[] 
     } else if (r.e === 'afterAgentResponse') {
       const insertId = once('ai', String(r.t));
       if (!insertId) continue;
+      // Cursor reports no model latency; the time since the prompt covers the whole turn, tools included.
       const started = r.g ? promptAt.get(r.g) : undefined;
-      calls.push({
-        kind: 'ai',
-        insertId,
-        time: r.t,
-        content: r.text ?? '',
-        model: r.m ?? 'unknown',
-        latencyMs: started != null ? Math.max(0, r.t - started) : 0,
-        opts: { ...opts, messageId: insertId },
-      });
+      const aiOpts: Record<string, unknown> = { ...opts, messageId: insertId };
+      if (started != null) {
+        aiOpts.eventProperties = {
+          ...(opts.eventProperties as Record<string, unknown> | undefined),
+          cursor_turn_duration_ms: Math.max(0, r.t - started),
+        };
+      }
+      calls.push({ kind: 'ai', insertId, time: r.t, content: r.text ?? '', model: r.m ?? 'unknown', opts: aiOpts });
     } else if (r.e === 'postToolUse' || r.e === 'postToolUseFailure') {
       const insertId = once('tool', r.id ?? String(r.t));
       if (!insertId) continue;
@@ -298,12 +300,17 @@ export async function buildCursorEvents(
   calls: CursorTrackCall[],
   options: { userId: string; contentMode: import('../config.js').ContentMode },
 ): Promise<import('../types.js').AmplitudeEvent[]> {
-  const [{ AmplitudeAI }, { AIConfig }] = await Promise.all([import('../client.js'), import('../config.js')]);
+  const [{ AmplitudeAI }, { AIConfig }, { EVENT_AI_RESPONSE, PROP_LATENCY_MS }] = await Promise.all([
+    import('../client.js'),
+    import('../config.js'),
+    import('../core/constants.js'),
+  ]);
   const events: import('../types.js').AmplitudeEvent[] = [];
   let pending: { insertId: string; time: number } | null = null;
   const ai = new AmplitudeAI({
     amplitude: {
       track: (event: import('../types.js').AmplitudeEvent) => {
+        if (event.event_type === EVENT_AI_RESPONSE && event.event_properties) delete event.event_properties[PROP_LATENCY_MS];
         events.push({ ...event, ...(pending ? { insert_id: pending.insertId, time: pending.time } : {}) });
       },
       flush: () => undefined,
@@ -315,7 +322,7 @@ export async function buildCursorEvents(
     const common = { ...call.opts, userId: options.userId } as unknown as Record<string, unknown> & { sessionId: string };
     if (call.kind === 'user') ai.trackUserMessage({ ...common, content: call.content });
     else if (call.kind === 'ai') {
-      ai.trackAiMessage({ ...common, content: call.content, model: call.model, provider: CURSOR_PROVIDER, latencyMs: call.latencyMs });
+      ai.trackAiMessage({ ...common, content: call.content, model: call.model, provider: CURSOR_PROVIDER, latencyMs: 0 });
     } else if (call.kind === 'tool') {
       ai.trackToolCall({ ...common, toolName: call.toolName, latencyMs: call.latencyMs, success: call.success });
     } else ai.trackSessionEnd(common);
@@ -332,7 +339,9 @@ type FlushContext = {
 };
 
 async function flushSpool(ctx: FlushContext, name: string): Promise<void> {
-  const { acquireLock, contentModeFrom, defaultGitEmail, endpointFor, postBatch } = await import('./hook-codex.js');
+  const { acquireLock, contentModeFrom, defaultGitEmail, endpointFor, HttpApiRejected, postBatch } = await import(
+    './hook-codex.js'
+  );
   const spool = join(ctx.dir, `${name}.ndjson`);
   const release = await acquireLock(join(ctx.dir, `${name}.lock`), 2000);
   if (!release) return;
@@ -342,11 +351,18 @@ async function flushSpool(ctx: FlushContext, name: string): Promise<void> {
       while (existsSync(join(ctx.dir, `${name}.${stamp}.flushing`))) stamp += 1;
       renameSync(spool, join(ctx.dir, `${name}.${stamp}.flushing`));
     }
-    const batches = readdirSync(ctx.dir)
-      .filter((f) => f.startsWith(`${name}.`) && f.endsWith('.flushing'))
-      .sort()
-      .map((f) => join(ctx.dir, f));
+    const now = (ctx.options.now ?? Date.now)();
+    const batches: string[] = [];
+    for (const f of readdirSync(ctx.dir).sort()) {
+      const stamp = f.startsWith(`${name}.`) ? /^(\d+)\.flushing$/.exec(f.slice(name.length + 1))?.[1] : undefined;
+      if (stamp === undefined) continue;
+      if (now - Number(stamp) >= CURSOR_MAX_BATCH_AGE_MS) {
+        ctx.stderr(`amplitude-ai hook cursor: dropped ${f}, unsent for 24 hours.\n`);
+        unlinkSync(join(ctx.dir, f));
+      } else batches.push(join(ctx.dir, f));
+    }
     if (batches.length === 0) return;
+    const sizes = batches.map((b) => statSync(b).size);
     const records = batches.flatMap(readSpool);
     const root = records.find((r) => r.root)?.root;
     const env = withLocalEnv(ctx.env, root, ctx.stderr, 'cursor');
@@ -368,13 +384,22 @@ async function flushSpool(ctx: FlushContext, name: string): Promise<void> {
     if (dryRun) {
       const stdout = ctx.options.stdout ?? ((t: string) => process.stdout.write(t));
       for (const event of events) stdout(`${JSON.stringify(event)}\n`);
-    } else {
-      const region = env.AMPLITUDE_SERVER_ZONE || env.AMPLITUDE_REGION;
+      ctx.result.reason = 'dry_run';
+      return;
+    }
+    const region = env.AMPLITUDE_SERVER_ZONE || env.AMPLITUDE_REGION;
+    try {
       for (let i = 0; i < events.length; i += BATCH_SIZE) {
         await postBatch(ctx.options.fetchImpl ?? fetch, endpointFor(region), apiKey, events.slice(i, i + BATCH_SIZE));
       }
+    } catch (err) {
+      if (err instanceof HttpApiRejected) return drop('rejected', err.message);
+      throw err;
     }
-    for (const b of batches) unlinkSync(b);
+    // A hook that opened a batch before the rename may have appended to it after the read; keep it for the next flush.
+    batches.forEach((b, i) => {
+      if (statSync(b).size === sizes[i]) unlinkSync(b);
+    });
     ctx.result.sent += events.length;
     ctx.result.flushed += 1;
   } finally {
@@ -405,6 +430,16 @@ function staleSpools(dir: string, now: number, except: string): string[] {
   return [...names];
 }
 
+/**
+ * A `stop` for a spool with no user prompt and no subagent link is a subagent whose parent's
+ * `subagentStop` has not arrived yet; its spool waits for that link, or for the idle sweep.
+ */
+function awaitsSubagentLink(dir: string, name: string): boolean {
+  if (!existsSync(join(dir, `${name}.ndjson`))) return false;
+  const files = readdirSync(dir).filter((f) => f === `${name}.ndjson` || (f.startsWith(`${name}.`) && f.endsWith('.flushing')));
+  return !files.some((f) => readSpool(join(dir, f)).some((r) => r.e === 'beforeSubmitPrompt' || r.e === 'subagentLink'));
+}
+
 /** Runs the hook for one parsed input. Never throws. */
 export async function runCursorHook(input: CursorHookInput, options: CursorHookOptions = {}): Promise<CursorHookResult> {
   const stderr = options.stderr ?? ((t: string) => process.stderr.write(t));
@@ -429,7 +464,7 @@ export async function runCursorHook(input: CursorHookInput, options: CursorHookO
       await flushSpool(ctx, safeName(record.child));
     }
     if (FLUSH_EVENTS.has(record.e)) {
-      await flushSpool(ctx, safeName(record.c));
+      if (record.e !== 'stop' || !awaitsSubagentLink(dir, safeName(record.c))) await flushSpool(ctx, safeName(record.c));
       for (const name of staleSpools(dir, now, safeName(record.c))) await flushSpool(ctx, name);
     }
   } catch (err) {
