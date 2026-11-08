@@ -25,12 +25,15 @@ import { LOCAL_ENV_PATH, codexHookDir, findLocalEnv, parseLocalEnv } from './hoo
 import {
   type OutcomesWorkflowState,
   PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
+  PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   outcomesWorkflowState,
   lfSha256Hex,
 } from './outcomes-workflow.js';
 
-export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose';
-export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
+export type CodingAgentHarness = 'claude-code' | 'codex' | 'goose' | 'gemini' | 'copilot';
+export const CODING_AGENT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose', 'gemini', 'copilot'];
+/** Set up when no `--harness` is given. Gemini CLI and Copilot join when the repo already has their files. */
+const DEFAULT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex', 'goose'];
 
 export const HOOKS_PATH = '.githooks';
 export const PREPARE_COMMIT_MSG_PATH = '.githooks/prepare-commit-msg';
@@ -38,6 +41,7 @@ export const OUTCOMES_WORKFLOW_PATH = '.github/workflows/agent-outcomes.yml';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const CLAUDE_LOCAL_SETTINGS_PATH = '.claude/settings.local.json';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
+export const GEMINI_SETTINGS_PATH = '.gemini/settings.json';
 export const HOOKS_PATH_COMMAND = `git config core.hooksPath ${HOOKS_PATH}`;
 export const PREPARE_SCRIPT = `${HOOKS_PATH_COMMAND} || true`;
 /**
@@ -50,6 +54,11 @@ const PYTHON_CODEX_STOP_COMMAND = 'amplitude-ai hook codex';
 
 const PRIVACY_ONLY_CLAUDE_ENV = ['OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_TOOL_DETAILS'];
 const GOOSE_TRACES_PATH = '/otlp/v1/traces';
+/** OTLP base URL path: Gemini CLI and Copilot append `/v1/traces`, `/v1/logs` and `/v1/metrics` themselves. */
+const OTLP_BASE_PATH = '/otlp';
+/** Repo files that mean the harness is in use, so `init` without `--harness` sets it up. */
+const GEMINI_MARKERS = ['.gemini', 'GEMINI.md'];
+const COPILOT_MARKERS = ['.github/copilot-instructions.md', '.github/hooks'];
 
 export type CodingAgentsPrivacy = 'full' | 'metadata';
 export type CodingAgentsRegion = 'us' | 'eu';
@@ -138,6 +147,25 @@ export function claudeSettingsEnv(
     env[k] = v.replace('api.amplitude.com', amplitudeHost(region));
   }
   return env;
+}
+
+/** The `telemetry` block init merges into `.gemini/settings.json`. Gemini CLI reads its header from the environment. */
+export function geminiTelemetrySettings(privacy: CodingAgentsPrivacy, region: CodingAgentsRegion): JsonObject {
+  return {
+    enabled: true,
+    target: 'local',
+    otlpEndpoint: `https://${amplitudeHost(region)}${OTLP_BASE_PATH}`,
+    otlpProtocol: 'http',
+    logPrompts: privacy === 'full',
+  };
+}
+
+/** `init` with no `--harness`: the defaults, plus Gemini CLI and Copilot when the repo already uses them. */
+export function defaultCodingAgentHarnesses(cwd: string): CodingAgentHarness[] {
+  const out = [...DEFAULT_HARNESSES];
+  if (GEMINI_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('gemini');
+  if (COPILOT_MARKERS.some((p) => existsSync(join(cwd, p)))) out.push('copilot');
+  return out;
 }
 
 function readJsonFile(path: string): { ok: true; value: JsonObject | null } | { ok: false; error: string } {
@@ -315,7 +343,7 @@ function writeTemplateFile(
 export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAgentsInitResult {
   const cwd = resolve(options.cwd);
   const env = options.env ?? process.env;
-  const harnesses = options.harnesses?.length ? [...new Set(options.harnesses)] : [...CODING_AGENT_HARNESSES];
+  const harnesses = options.harnesses?.length ? [...new Set(options.harnesses)] : defaultCodingAgentHarnesses(cwd);
   const privacy = options.privacy ?? 'full';
   const envRegion = (env.AMPLITUDE_REGION ?? '').toLowerCase();
   const region = options.region ?? (isRegion(envRegion) ? envRegion : (existingCodingAgentsRegion(cwd) ?? 'us'));
@@ -340,6 +368,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     force,
     warnings,
     'adds Agent-Session-Id / Agent-Name trailers to agent commits',
+    PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   );
   writeTemplateFile(
     writer,
@@ -400,6 +429,12 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     }
   }
 
+  const localEnvPath = join(cwd, LOCAL_ENV_PATH);
+  const existingLocalEnvText = existsSync(localEnvPath) ? readFileSync(localEnvPath, 'utf8') : '';
+  const existingLocalEnv = parseLocalEnv(existingLocalEnvText);
+  const localEnvUpdates: Record<string, string> = {};
+  const localEnvUses: string[] = [];
+
   if (harnesses.includes('claude-code')) {
     const template = JSON.parse(readCodingAgentsTemplate('claude-settings.json', templatesDir)) as JsonObject;
     const settings = readJsonFile(join(cwd, CLAUDE_SETTINGS_PATH));
@@ -459,21 +494,13 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       writer.write(CODEX_HOOKS_PATH, stringify(merged), 'Stop hook forwards the rollout transcript (no secrets)');
     }
 
-    const localEnvPath = join(cwd, LOCAL_ENV_PATH);
-    const existingText = existsSync(localEnvPath) ? readFileSync(localEnvPath, 'utf8') : '';
-    const updates: Record<string, string> = {
+    Object.assign(localEnvUpdates, {
       AMPLITUDE_SERVER_ZONE: region === 'eu' ? 'EU' : 'US',
       AMPLITUDE_AI_CONTENT_MODE: privacy === 'metadata' ? 'metadata_only' : 'full',
       ...(options.apiKey ? { AMPLITUDE_AI_API_KEY: options.apiKey } : {}),
-    };
-    writer.write(
-      LOCAL_ENV_PATH,
-      mergeEnvFile(existingText, updates),
-      options.apiKey ? 'API key, server zone, content mode for hook codex (gitignored)' : 'server zone and content mode for hook codex (gitignored)',
-      0o600,
-    );
-    ensureGitignored(writer, cwd, LOCAL_ENV_PATH);
-    if (!options.apiKey && !parseLocalEnv(existingText).AMPLITUDE_AI_API_KEY && !parseLocalEnv(existingText).AMPLITUDE_API_KEY) {
+    });
+    localEnvUses.push('hook codex');
+    if (!options.apiKey && !existingLocalEnv.AMPLITUDE_AI_API_KEY && !existingLocalEnv.AMPLITUDE_API_KEY) {
       instructions.push(
         `Codex: re-run with --api-key-stdin to put the key in ${LOCAL_ENV_PATH}, or export AMPLITUDE_AI_API_KEY in the shell that starts codex.`,
       );
@@ -490,6 +517,76 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     ];
     if (privacy === 'full') lines.push('export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
     instructions.push(`goose: add to the shell profile that starts goose:\n  ${lines.join('\n  ')}`);
+  }
+
+  if (harnesses.includes('gemini')) {
+    const settings = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
+    if (!settings.ok) {
+      writer.skip(GEMINI_SETTINGS_PATH, `invalid JSON: ${settings.error}`);
+      warnings.push(`${GEMINI_SETTINGS_PATH} is not valid JSON; fix it and re-run.`);
+    } else {
+      const merged: JsonObject = settings.value ?? {};
+      const telemetry = isObject(merged.telemetry) ? merged.telemetry : {};
+      const endpoint = typeof telemetry.otlpEndpoint === 'string' ? telemetry.otlpEndpoint : '';
+      const elsewhere = (endpoint && !endpoint.includes('amplitude.com')) || telemetry.target === 'gcp';
+      if (elsewhere && !force) {
+        writer.conflict(GEMINI_SETTINGS_PATH, `telemetry already goes to ${endpoint || 'Google Cloud'}`);
+        warnings.push(
+          `${GEMINI_SETTINGS_PATH} already sends Gemini CLI telemetry to ${endpoint || 'Google Cloud'}. Gemini CLI has one OTLP destination; re-run with --force to point it at Amplitude.`,
+        );
+      } else {
+        merged.telemetry = { ...telemetry, ...geminiTelemetrySettings(privacy, region) };
+        writer.write(GEMINI_SETTINGS_PATH, stringify(merged), 'OpenTelemetry export to Amplitude (no secrets)');
+        if (typeof telemetry.outfile === 'string' && telemetry.outfile) {
+          warnings.push(`${GEMINI_SETTINGS_PATH} sets telemetry.outfile, which Gemini CLI uses instead of OTLP; remove it.`);
+        }
+      }
+    }
+
+    const header = options.apiKey ? `Authorization=Bearer%20${encodeURIComponent(options.apiKey)}` : undefined;
+    if (header) localEnvUpdates.GEMINI_TELEMETRY_OTLP_HEADERS = header;
+    if (userId) localEnvUpdates.OTEL_RESOURCE_ATTRIBUTES = `enduser.id=${encodeResourceValue(userId)}`;
+    localEnvUses.push('Gemini CLI');
+    const hasHeader = Boolean(header || existingLocalEnv.GEMINI_TELEMETRY_OTLP_HEADERS);
+    instructions.push(
+      hasHeader
+        ? `Gemini CLI: start gemini from a shell that loads the header: set -a; . ./${LOCAL_ENV_PATH}; set +a`
+        : `Gemini CLI: export GEMINI_TELEMETRY_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>" in the shell that starts gemini (or re-run with --api-key-stdin to keep it in ${LOCAL_ENV_PATH}).`,
+      'Gemini CLI: trust this folder when gemini asks; it ignores .gemini/settings.json in untrusted folders.',
+    );
+  }
+
+  if (harnesses.includes('copilot')) {
+    const endpoint = `https://${amplitudeHost(region)}${OTLP_BASE_PATH}`;
+    const enduser = userId ? encodeResourceValue(userId) : '<your email>';
+    const cli = [
+      'export COPILOT_OTEL_ENABLED=true',
+      `export OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}`,
+      'export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>"',
+      `export OTEL_RESOURCE_ATTRIBUTES="enduser.id=${enduser}"`,
+    ];
+    if (privacy === 'full') cli.push('export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true');
+    instructions.push(`Copilot CLI: add to the shell profile that starts copilot:\n  ${cli.join('\n  ')}`);
+    const vscode: JsonObject = {
+      'github.copilot.chat.otel.enabled': true,
+      'github.copilot.chat.otel.otlpEndpoint': endpoint,
+      'github.copilot.chat.otel.headers': { Authorization: 'Bearer <AMPLITUDE_AI_API_KEY>' },
+      'github.copilot.chat.otel.resourceAttributes': { 'enduser.id': userId || '<your email>' },
+      ...(privacy === 'full' && { 'github.copilot.chat.otel.captureContent': true }),
+    };
+    instructions.push(
+      `Copilot in VS Code: add to your user settings.json (not the workspace; it holds the key):\n  ${JSON.stringify(vscode, null, 2).split('\n').join('\n  ')}`,
+    );
+  }
+
+  if (localEnvUses.length > 0) {
+    writer.write(
+      LOCAL_ENV_PATH,
+      mergeEnvFile(existingLocalEnvText, localEnvUpdates),
+      `${options.apiKey ? 'API key and settings' : 'settings'} for ${localEnvUses.join(' and ')} (gitignored)`,
+      0o600,
+    );
+    ensureGitignored(writer, cwd, LOCAL_ENV_PATH);
   }
 
   if (!userId) {
@@ -631,6 +728,57 @@ export function runCodingAgentsDoctor(
     });
   }
 
+  const bearer = /authorization=bearer(?:%20|\s)+\S+/i;
+  const gemini = readJsonFile(join(cwd, GEMINI_SETTINGS_PATH));
+  const geminiTelemetry = gemini.ok && gemini.value && isObject(gemini.value.telemetry) ? gemini.value.telemetry : null;
+  if (geminiTelemetry || GEMINI_MARKERS.some((p) => existsSync(join(cwd, p)))) {
+    const endpoint = String(geminiTelemetry?.otlpEndpoint ?? env.GEMINI_TELEMETRY_OTLP_ENDPOINT ?? '');
+    const exporting =
+      geminiTelemetry?.enabled === true && endpoint.includes('amplitude.com') && geminiTelemetry.otlpProtocol === 'http';
+    checks.push({
+      name: 'coding_agents.gemini_otlp',
+      ok: exporting,
+      detail: exporting
+        ? `telemetry exports to ${endpoint}`
+        : !gemini.ok
+          ? `${GEMINI_SETTINGS_PATH} is not valid JSON`
+          : `${GEMINI_SETTINGS_PATH} does not export telemetry to Amplitude over http`,
+      ...(!exporting && { fix: `${fixInit} --harness gemini` }),
+    });
+    if (exporting) {
+      const localEnvFile = findLocalEnv(cwd);
+      const localEnv = localEnvFile ? parseLocalEnv(readFileSync(localEnvFile, 'utf8')) : {};
+      const headers = [env.GEMINI_TELEMETRY_OTLP_HEADERS, env.OTEL_EXPORTER_OTLP_HEADERS, localEnv.GEMINI_TELEMETRY_OTLP_HEADERS];
+      const hasHeader = headers.some((h) => bearer.test(h ?? ''));
+      checks.push({
+        name: 'coding_agents.gemini_api_key',
+        ok: hasHeader,
+        detail: hasHeader ? 'GEMINI_TELEMETRY_OTLP_HEADERS set' : 'API key header missing',
+        ...(!hasHeader && { fix: `${fixInit} --harness gemini --api-key-stdin` }),
+      });
+    }
+  }
+
+  // Copilot is configured by environment only, so this reads the shell doctor runs in.
+  const copilotEnabled = (env.COPILOT_OTEL_ENABLED ?? '').toLowerCase() === 'true';
+  if (copilotEnabled || COPILOT_MARKERS.some((p) => existsSync(join(cwd, p)))) {
+    const endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '';
+    const exporting = copilotEnabled && endpoint.includes('amplitude.com');
+    const ok = exporting && bearer.test(env.OTEL_EXPORTER_OTLP_HEADERS ?? '');
+    checks.push({
+      name: 'coding_agents.copilot_otlp',
+      ok: ok || !copilotEnabled,
+      detail: ok
+        ? `this shell exports Copilot CLI telemetry to ${endpoint}`
+        : !copilotEnabled
+          ? 'COPILOT_OTEL_ENABLED is not set in this shell (Copilot CLI sends nothing from it)'
+          : !exporting
+            ? 'OTEL_EXPORTER_OTLP_ENDPOINT in this shell is not Amplitude'
+            : 'OTEL_EXPORTER_OTLP_HEADERS has no API key',
+      ...(!ok && { fix: `${fixInit} --harness copilot --dry-run, then export the printed block` }),
+    });
+  }
+
   return { ok: checks.every((c) => c.ok), checks };
 }
 
@@ -654,7 +802,7 @@ async function readStdin(): Promise<string> {
 }
 
 const USAGE = `Usage:
-  amplitude-ai coding-agents init [--harness claude-code|codex|goose] [--dry-run]
+  amplitude-ai coding-agents init [--harness claude-code|codex|goose|gemini|copilot] [--dry-run]
                                   [--privacy full|metadata] [--region us|eu]
                                   [--api-key-stdin | --api-key-env NAME] [--force] [--dir PATH] [--json]
   amplitude-ai coding-agents doctor [--dir PATH] [--json]

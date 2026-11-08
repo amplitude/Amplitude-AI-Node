@@ -192,6 +192,28 @@
         "last_verified": "pending_live_capture"
       },
       {
+        "id": "gemini-cli",
+        "name": "Gemini CLI",
+        "category": "coding_agent",
+        "pinned_version": "google-gemini/gemini-cli@62bab5b2",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/gemini-cli.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/gemini-cli.md",
+        "paths": ["otlp_logs"],
+        "ingestion_paths": ["otlp"],
+        "last_verified": "pending_live_capture"
+      },
+      {
+        "id": "copilot",
+        "name": "GitHub Copilot",
+        "category": "coding_agent",
+        "pinned_version": "copilot-cli@1.0.4",
+        "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/copilot.md",
+        "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/copilot.md",
+        "paths": ["otlp_traces"],
+        "ingestion_paths": ["otlp"],
+        "last_verified": "pending_live_capture"
+      },
+      {
         "id": "buzz",
         "name": "Buzz",
         "category": "coding_agent",

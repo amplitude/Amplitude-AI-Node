@@ -66,7 +66,7 @@ Commits made through the GitHub API or MCP tools carry no trailer. They join by 
 | `deployment_status` success | `Deploy Succeeded` for each commit since the previous successful deployment | `commit_sha`, `deployment_sha`, `environment`, plus trailers |
 | `deployment_status` failure or error | `Deploy Failed` for the same range | `commit_sha`, `deployment_sha`, `environment`, `deployment_state`, plus trailers |
 
-Every event also carries `outcomes_workflow_version` (currently `2`), and every commit-level event carries `agent_setup_version`.
+Every event also carries `outcomes_workflow_version` (currently `3`), and every commit-level event carries `agent_setup_version`.
 
 - **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`). `Pull Request Merged` goes to the author of the PR's first agent commit, or of its first commit when no agent committed; with `login`, it falls back to the PR author when that commit has no GitHub account. Its time is the merge time.
 - **Unattributed commits** get `Commit Merged` with an empty `agent_session_id`, which gives the agent share of merged code.
@@ -84,6 +84,7 @@ Many coding agents sign the commits they write, so an agent commit is recognized
 | `session_trailer` | The commit carries `Agent-Session-Id` from the commit hook | `Agent-Name` |
 | `agent_author` | The commit author is a coding agent | The agent |
 | `co_author` | A `Co-authored-by` line names a coding agent | The agent |
+| `name_trailer` | The commit hook stamped `Agent-Name` without a session, as for Gemini CLI, whose shells carry no session ID | `Agent-Name` |
 | `none` | No agent signal | `null` |
 
 Agents are matched by email, not display name: Cursor (`cursoragent@cursor.com`, `cursor[bot]`), Claude Code (`noreply@anthropic.com`, `claude[bot]`), GitHub Copilot (the coding agent and IDE co-author accounts), Devin and Warp. `Pull Request Merged` adds `attributed_commit_count`, `attributed_agents` and `agent_attributed` (any attributed commit). Only `session_trailer` links a commit to its session (`agent_session_id`); the others say which agent wrote it, not in which session. People can delete the line and some agents let users turn it off, so read the counts as a minimum. `agent_authored` and `agent_name` keep their meaning: they come from the session trailer only, so they mean "joinable to a session". Compare agent and human PRs with `agent_attributed`.

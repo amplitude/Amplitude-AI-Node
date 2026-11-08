@@ -1,4 +1,4 @@
-# agent-outcomes v2
+# agent-outcomes v3
 # Amplitude Agent Analytics: send code outcomes (merged, reverted, deployed)
 # for commits made by coding agents. Installed by `amplitude-ai coding-agents init`.
 #
@@ -44,7 +44,7 @@ jobs:
         with:
           script: |
             const crypto = require('crypto');
-            const WORKFLOW_VERSION = 2;
+            const WORKFLOW_VERSION = 3;
             const { owner, repo } = context.repo;
             const repoName = `${owner}/${repo}`;
             const dryRun = process.env.AMPLITUDE_OUTCOMES_DRY_RUN === 'true';
@@ -102,6 +102,8 @@ jobs:
               }
               if (author) return { agent_attribution: 'agent_author', attributed_agent: author };
               if (coAuthor) return { agent_attribution: 'co_author', attributed_agent: coAuthor };
+              // Agents whose shells carry no session ID (Gemini CLI) stamp only their name.
+              if (named) return { agent_attribution: 'name_trailer', attributed_agent: named };
               return { agent_attribution: 'none', attributed_agent: null };
             };
             const baseProps = (c) => {
@@ -109,7 +111,7 @@ jobs:
               return {
                 commit_sha: c.sha,
                 agent_session_id: sessionId,
-                agent_name: trailer(c.commit.message, 'Agent-Name'),
+                agent_name: sessionId ? trailer(c.commit.message, 'Agent-Name') : null,
                 agent_authored: Boolean(sessionId),
                 ...attribution(c),
                 repo: repoName,

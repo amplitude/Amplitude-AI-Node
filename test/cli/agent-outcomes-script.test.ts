@@ -253,7 +253,7 @@ describe('agent-outcomes.yml script', () => {
       expect(match.event_type).toBe(e.event_type);
       expect(match.user_id).toBe(e.user_id);
       expect(match.event_properties).toMatchObject(e.event_properties);
-      expect(match.event_properties.outcomes_workflow_version).toBe(2);
+      expect(match.event_properties.outcomes_workflow_version).toBe(3);
     }
   });
 
@@ -323,7 +323,7 @@ describe('agent-outcomes.yml script', () => {
       review_count: 3,
       changes_requested_count: 1,
       agent_setup_version: setupHash(['AGENTS.md:blob-a']),
-      outcomes_workflow_version: 2,
+      outcomes_workflow_version: 3,
     });
     expect(pr!.event_properties).not.toHaveProperty('ci_passed_first_run');
     expect(pr!.time).toBe(Date.parse('2026-11-03T00:00:00Z'));
@@ -462,21 +462,30 @@ describe('agent-outcomes.yml script', () => {
     world.commits.both = commit('both', 'fake', {
       message: `${agentMessage('s9', 'codex')}Co-Authored-By: Claude <noreply@anthropic.com>\n`,
     });
-    world.prCommits = ['c3', 'cur', 'cop', 'dep', 'fake', 'both'];
+    world.commits.gem = commit('gem', 'both', { message: 'feat: y\n\nAgent-Name: gemini-cli\n' });
+    world.prCommits = ['c3', 'cur', 'cop', 'dep', 'fake', 'both', 'gem'];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
     const by = Object.fromEntries(r.byType('Commit Merged').map((e) => [e.event_properties.commit_sha, e.event_properties]));
     expect(by.cur).toMatchObject({ agent_attribution: 'co_author', attributed_agent: 'cursor', agent_authored: false, agent_name: null });
+    expect(by.gem).toMatchObject({
+      agent_attribution: 'name_trailer',
+      attributed_agent: 'gemini-cli',
+      agent_authored: false,
+      agent_name: null,
+      agent_session_id: null,
+    });
     expect(by.cop).toMatchObject({ agent_attribution: 'agent_author', attributed_agent: 'copilot', agent_authored: false });
     expect(by.both).toMatchObject({ agent_attribution: 'session_trailer', attributed_agent: 'codex', agent_authored: true });
     for (const sha of ['c3', 'dep', 'fake']) {
       expect(by[sha], sha).toMatchObject({ agent_attribution: 'none', attributed_agent: null });
     }
     expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({
-      commit_count: 6,
+      commit_count: 7,
       agent_commit_count: 1,
-      attributed_commit_count: 3,
+      attributed_commit_count: 4,
       unattributed_commit_count: 3,
-      attributed_agents: ['cursor', 'copilot', 'codex'],
+      attributed_agents: ['cursor', 'copilot', 'codex', 'gemini-cli'],
+      agent_names: ['codex'],
     });
   });
 
