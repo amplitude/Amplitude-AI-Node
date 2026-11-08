@@ -417,17 +417,19 @@ export function pendingConversations(dir: string): string[] {
 
 function staleSpools(dir: string, now: number, except: string): string[] {
   if (!existsSync(dir)) return [];
-  const names = new Set<string>();
+  // An old unsent batch doesn't make a conversation idle while its spool is still being written.
+  const newest = new Map<string, number>();
   for (const f of readdirSync(dir)) {
     const match = SPOOL_FILE.exec(f);
     if (!match?.[1] || match[1] === except) continue;
     try {
-      if (now - statSync(join(dir, f)).mtimeMs >= CURSOR_STALE_SPOOL_MS) names.add(match[1]);
+      const mtime = statSync(join(dir, f)).mtimeMs;
+      newest.set(match[1], Math.max(mtime, newest.get(match[1]) ?? mtime));
     } catch {
       // removed meanwhile
     }
   }
-  return [...names];
+  return [...newest].filter(([, mtime]) => now - mtime >= CURSOR_STALE_SPOOL_MS).map(([name]) => name);
 }
 
 /**

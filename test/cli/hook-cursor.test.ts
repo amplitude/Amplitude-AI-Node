@@ -297,6 +297,19 @@ describe('runCursorHook', () => {
     expect(existsSync(join(spoolDir(), 'abandoned.ndjson'))).toBe(false);
   });
 
+  it('does not treat a live conversation as idle because of an old unsent batch', async () => {
+    const { bodies, fetchImpl } = mockFetch();
+    const opts = { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), fetchImpl, gitEmail: () => null, stderr: () => undefined };
+    await runCursorHook({ ...inputs[0]!, conversation_id: 'live', session_id: 'live' }, opts);
+    const oldMs = Date.now() - 11 * 60 * 1000;
+    const leftover = join(spoolDir(), `live.${oldMs}.flushing`);
+    writeFileSync(leftover, '');
+    utimesSync(leftover, oldMs / 1000, oldMs / 1000);
+    await runCursorHook(inputs[8]!, opts);
+    expect(bodies.flatMap((b) => b.events).map((e) => e.event_properties?.['[Agent] Session ID'])).not.toContain('live');
+    expect(existsSync(join(spoolDir(), 'live.ndjson'))).toBe(true);
+  });
+
   it('appends in well under 50 ms at p95 with a 10 KB payload', async () => {
     const input = { ...inputs[1]!, tool_output: JSON.stringify({ output: 'x'.repeat(10_000), exitCode: 0 }) };
     const times: number[] = [];
