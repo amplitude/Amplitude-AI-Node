@@ -297,7 +297,8 @@ function _safeHeaderId(value: unknown): string | null {
 
 const _HTTP_WIRE_HEADERS = [...Object.values(HTTP_CONTEXT_HEADERS), HTTP_SIG_HEADER];
 
-function _httpWire(headers: Record<string, unknown>): Record<string, unknown> {
+/** @internal The agent context headers from a lowercase header map, first value of each. */
+export function _httpWire(headers: Record<string, unknown>): Record<string, unknown> {
   const wire: Record<string, unknown> = {};
   for (const name of _HTTP_WIRE_HEADERS) {
     if (!Object.prototype.hasOwnProperty.call(headers, name) || headers[name] == null) continue;

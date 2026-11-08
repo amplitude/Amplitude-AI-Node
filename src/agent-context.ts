@@ -513,6 +513,54 @@ function _nowSeconds(now: number | undefined): number {
   return now ?? Math.floor(Date.now() / 1000);
 }
 
+function _decodeInbound(
+  transport: ContextTransport,
+  wire: Record<string, unknown>,
+): { decoded: Decoded; traceOnly: boolean } {
+  const decoded = _decode(transport, wire);
+  if (transport !== 'http' || typeof decoded !== 'object' || decoded.sig != null) {
+    return { decoded, traceOnly: false };
+  }
+  // Unsigned HTTP is also produced by released SDKs and by unrelated OTel
+  // clients: ignore a traceparent that is not ours, and read a user ID sent
+  // without an identity type as an account ID.
+  const env = decoded.envelope;
+  if (_hasOwn(env, 'traceparent') && !_isStrictTraceparent(env.traceparent)) delete env.traceparent;
+  if (_hasOwn(env, 'user_id') && !_hasOwn(env, 'identity_type')) env.identity_type = 'account';
+  const keys = Object.keys(env);
+  if (keys.length === 0) return { decoded: 'none', traceOnly: false };
+  return { decoded, traceOnly: keys.length === 1 && keys[0] === 'traceparent' };
+}
+
+/** What {@link _inspectAgentContext} returns. `kid`, `iat` and `exp` are set only when well formed. */
+export type InspectedAgentContext = {
+  result: VerifyResult | 'none';
+  alg: string | null;
+  kid: string | null;
+  iat: number | null;
+  exp: number | null;
+};
+
+/**
+ * @internal Decode and verify an inbound context exactly as the `extract*`
+ * helpers do, without adopting it or logging. For `amplitude-ai doctor --verify`.
+ */
+export function _inspectAgentContext(
+  transport: ContextTransport,
+  wire: Record<string, unknown>,
+  policy: ContextPolicy,
+  now?: number,
+): InspectedAgentContext {
+  const { decoded } = _decodeInbound(transport, wire);
+  const { result } = _verifyDecoded(decoded, policy, _nowSeconds(now));
+  const envelope = typeof decoded === 'object' ? decoded.envelope : {};
+  const alg = typeof envelope.alg === 'string' && ID_RE.test(envelope.alg) ? envelope.alg : null;
+  const kid = typeof envelope.kid === 'string' && KID_RE.test(envelope.kid) ? envelope.kid : null;
+  const iat = Number.isSafeInteger(envelope.iat) ? (envelope.iat as number) : null;
+  const exp = Number.isSafeInteger(envelope.exp) ? (envelope.exp as number) : null;
+  return { result, alg, kid, iat, exp };
+}
+
 /**
  * Verify and read an inbound context from its transport encoding (A2A
  * `Message.metadata`, ACP `_meta`, or HTTP headers as a lowercase plain
@@ -527,20 +575,7 @@ export function extractAgentContext(
   const now = _nowSeconds(options.now);
   const acceptUnsignedHttp = options.acceptUnsignedHttp ?? policy.acceptUnsignedHttp;
 
-  let decoded = _decode(transport, wire);
-  let traceOnly = false;
-  if (transport === 'http' && typeof decoded === 'object' && decoded.sig == null) {
-    // Unsigned HTTP is also produced by released SDKs and by unrelated OTel
-    // clients: ignore a traceparent that is not ours, and read a user ID sent
-    // without an identity type as an account ID.
-    const env = decoded.envelope;
-    if (_hasOwn(env, 'traceparent') && !_isStrictTraceparent(env.traceparent)) delete env.traceparent;
-    if (_hasOwn(env, 'user_id') && !_hasOwn(env, 'identity_type')) env.identity_type = 'account';
-    const keys = Object.keys(env);
-    traceOnly = keys.length === 1 && keys[0] === 'traceparent';
-    if (keys.length === 0) decoded = 'none';
-  }
-
+  const { decoded, traceOnly } = _decodeInbound(transport, wire);
   const legacy = options.legacy;
   if (decoded === 'none') {
     if (transport === 'http' && acceptUnsignedHttp && (legacy?.traceId || legacy?.parentAgentId)) {

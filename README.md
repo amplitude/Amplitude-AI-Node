@@ -1716,6 +1716,21 @@ amplitude-ai doctor
 Useful flags:
 
 - `amplitude-ai doctor --no-mock-check`
+- `amplitude-ai doctor --json`
+
+Doctor also checks agent context (see [Context Propagation](#context-propagation)) without printing a secret:
+
+- `agent_context.keys`: the kids in `AMPLITUDE_AI_CONTEXT_KEYS`, their count and the active kid. Not configured is informational; bad JSON, a secret under 32 bytes, an invalid kid, or several keys without `AMPLITUDE_AI_CONTEXT_ACTIVE_KID` fail the check.
+- `agent_context.unsigned_http`: the effective `acceptUnsignedHttp`, which is deprecated.
+- `agent_context.pairwise_salts`: the salt versions in `AMPLITUDE_AI_PAIRWISE_SALTS`.
+
+To see why a receiver doesn't trust a context, pass what it received (an A2A `metadata` object, an ACP `_meta` object or the HTTP headers) as JSON:
+
+```bash
+amplitude-ai doctor --verify '{"x-amplitude-session-id":"s-1","x-amplitude-context-sig":"alg=HS256;kid=k1;..."}'
+```
+
+It verifies with the keys in the environment and prints `transport`, `verify_result`, `trust`, `kid`, `iat`, `exp`, `clock_delta_seconds` (`now - iat`) and an `explanation` such as `expired 161 s ago (60 s skew allowed)` or `kid k1 is not in AMPLITUDE_AI_CONTEXT_KEYS (configured: k2)`. The transport is detected from the keys; `--transport a2a|acp|http` overrides it, and `--json` prints the same fields as JSON. It exits 1 unless the result is `ok`.
 
 ### Status
 
@@ -2383,6 +2398,7 @@ amplitude.track('Checkout Completed', { orderId, ...contextProperties() });
 - **Responses.** `injectA2aResponseMetadata`, `injectAcpResultMeta` and `injectResponseHeaders` return the receiver's context. On the caller, `trackToolCall(..., { peer })` or `peerProperties(extracted)` attaches it to that one call, so parallel calls to several peers never mix.
 - **ACP.** `injectAcpMeta` / `extractAcpMeta` on `params._meta`, `injectAcpResultMeta` on the result.
 - **Browsers and mobile apps.** A backend mints a signed context with `mintContext({ sessionId, userId })`; the client forwards it unchanged.
+- **Debugging.** `amplitude-ai doctor` checks the key and salt configuration, and `amplitude-ai doctor --verify '<envelope JSON>'` explains why a context isn't trusted (see [Doctor CLI](#doctor-cli)).
 - The wire format and signing match the Python SDK. Spec: https://amplitude.com/docs/amplitude-ai/agent-analytics/agent-context-v1.
 
 ## Middleware

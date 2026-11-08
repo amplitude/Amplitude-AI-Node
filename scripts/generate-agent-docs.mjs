@@ -198,6 +198,7 @@ Prompt:
 - \`amplitude-ai --print-guide\` — Print the full amplitude-ai.md guide to stdout
 - \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json]\` — Validate environment, deps, and event pipeline
+- \`amplitude-ai doctor --verify '<envelope JSON>' [--transport a2a|acp|http] [--json]\` — Explain why an agent context is or isn't trusted
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
 - \`amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]\` — Wire coding-agent sessions and commit outcomes into a repo
 - \`amplitude-ai coding-agents doctor [--dir PATH] [--json]\` — Check that setup
@@ -723,6 +724,7 @@ with code examples for every step. Read this for guided instrumentation.
 - \`amplitude-ai --print-guide\` — Print the full amplitude-ai.md guide to stdout
 - \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json] [--no-mock-check]\` — Validate environment and event pipeline
+- \`amplitude-ai doctor --verify '<envelope JSON>' [--transport a2a|acp|http] [--json]\` — Explain why an agent context is or isn't trusted
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
 - \`amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]\` — Wire coding-agent sessions and commit outcomes into a repo
 - \`amplitude-ai coding-agents doctor [--dir PATH] [--json]\` — Check that setup
