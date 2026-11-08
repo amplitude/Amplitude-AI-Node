@@ -422,6 +422,14 @@ describe('coding-agents init', () => {
     ]);
   });
 
+  it("counts the Python SDK's Windows venv launcher as the forwarder", () => {
+    mkdirSync(join(repo, '.cursor'), { recursive: true });
+    const windows = { command: '.venv\\Scripts\\amplitude-ai.exe hook cursor' };
+    writeFileSync(join(repo, '.cursor/hooks.json'), JSON.stringify({ version: 1, hooks: { stop: [windows] } }));
+    init({ harnesses: ['cursor'] });
+    expect(readJson('.cursor/hooks.json').hooks.stop).toEqual([windows]);
+  });
+
   it('switches the npx and PATH launchers to node_modules/.bin once it exists, and keeps a custom one', () => {
     init({ harnesses: ['cursor'] });
     const hooks = readJson('.cursor/hooks.json');

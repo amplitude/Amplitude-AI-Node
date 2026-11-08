@@ -242,7 +242,7 @@ function cursorHookCommands(entries: unknown): string[] {
   return entries.filter(isObject).flatMap((e) => (typeof e.command === 'string' ? [e.command] : []));
 }
 
-const isCursorForwarder = (command: string) => command.trim().endsWith(CURSOR_HOOK_SUFFIX);
+const isCursorForwarder = (command: string) => /amplitude-ai(?:\.exe)? hook cursor$/.test(command.trim());
 
 /** Launchers init writes when no local binary exists; a later init with one replaces them. */
 const CURSOR_FALLBACK_COMMANDS = [CURSOR_HOOK_COMMAND, CURSOR_HOOK_SUFFIX];
