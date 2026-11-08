@@ -1,5 +1,23 @@
 import { randomUUID } from 'node:crypto';
+import {
+  A2A_CONTEXT_KEY,
+  ACP_CONTEXT_KEYS,
+  type ActorType,
+  AGENT_CONTEXT_EXTENSION_URI,
+  type AgentContext,
+  buildEnvelope,
+  type ContextPolicy,
+  type ContextTransport,
+  encodeContext,
+  extractAgentContext,
+  HTTP_CONTEXT_HEADERS,
+  HTTP_SIG_HEADER,
+  type IdentityMode,
+  resolveContextPolicy,
+  validateOutbound,
+} from './agent-context.js';
 import { getActiveContext } from './context.js';
+import { ConfigurationError } from './exceptions.js';
 import { getLogger } from './utils/logger.js';
 
 let _defaultPropagateContext = false;
@@ -48,27 +66,108 @@ function _traceparent(traceId: string | null): string {
   return `00-${_toTraceparentHex(traceId)}-${parentId}-01`;
 }
 
+/** Options for the outbound `inject*` helpers. */
+export type ContextInjectOptions = {
+  /**
+   * `'none'` leaves the end-user ID out, `'pairwise'` sends a per-recipient
+   * pseudonym (needs `recipient` and a pairwise salt) and `'raw'` sends the
+   * user ID, which requires a signing key. A2A and ACP default to `'none'`.
+   */
+  identity?: IdentityMode;
+  /**
+   * Shorthand for `identity`: `true` is `'raw'`, `false` is `'none'`. For
+   * {@link injectContext} the default is `true` and, during the HTTP
+   * deprecation window, the raw user ID is still sent unsigned.
+   */
+  includeIdentity?: boolean;
+  /** The peer's AgentCard URL or agent ID, for `identity: 'pairwise'`. */
+  recipient?: string | null;
+  /** Declare who is acting. Receivers honour it only from a signed context. */
+  actorType?: ActorType | null;
+  /** Defaults to the active session's policy, else `ContextPolicy.fromEnv()`. */
+  policy?: ContextPolicy | null;
+  /** Seconds the signature stays valid. Default 300, at most 86400. */
+  ttl?: number | null;
+};
+
+/** @deprecated Use {@link ContextInjectOptions}. */
+export type AgentProtocolOptions = ContextInjectOptions;
+
+/** Options for the `extract*` helpers. */
+export type ContextExtractOptions = {
+  /** Defaults to the active session's policy, else `ContextPolicy.fromEnv()`. */
+  policy?: ContextPolicy | null;
+  /** Unix seconds used for expiry checks; defaults to now. */
+  now?: number;
+};
+
+/** Options for {@link extractContext}. */
+export type HttpContextExtractOptions = ContextExtractOptions & {
+  /** Override the policy's `acceptUnsignedHttp` (default `true` until the next major). */
+  acceptUnsignedHttp?: boolean;
+};
+
+function _identityMode(options: ContextInjectOptions, fallback: IdentityMode): IdentityMode {
+  if (options.identity != null) return options.identity;
+  if (options.includeIdentity != null) return options.includeIdentity ? 'raw' : 'none';
+  return fallback;
+}
+
+type OutboundSpec = {
+  identity: IdentityMode;
+  actorType: ActorType | null;
+  allowUnsignedRaw?: boolean;
+};
+
+function _outbound(
+  options: ContextInjectOptions,
+  spec: OutboundSpec,
+): { envelope: Record<string, unknown>; sig: string | null } | null {
+  const policy = resolveContextPolicy(options.policy);
+  const build = {
+    identity: spec.identity,
+    recipient: options.recipient,
+    actorType: spec.actorType,
+    policy,
+    ttl: options.ttl,
+    allowUnsignedRaw: spec.allowUnsignedRaw,
+  };
+  validateOutbound(build);
+  const ctx = getActiveContext();
+  if (ctx == null) return null;
+  return buildEnvelope({
+    ...build,
+    sessionId: ctx.sessionId,
+    parentAgentId: ctx.agentId,
+    userId: ctx.userId,
+    traceparent: _traceparent(ctx.traceId ?? null),
+  });
+}
+
 /**
- * Build propagation headers for an outbound call to a first-party service
- * you operate. The output includes the end-user ID (`x-amplitude-user-id`),
- * so never forward it to a third-party host; provider wrappers use
- * {@link providerPropagationHeaders} instead.
+ * Build propagation headers for an outbound call to a service you operate:
+ * W3C `traceparent` and the `x-amplitude-*` headers, signed with
+ * `x-amplitude-context-sig` when a signing key is configured.
+ *
+ * By default the end-user ID (`x-amplitude-user-id`) is included, so never
+ * forward these headers to a third-party host; pass `includeIdentity: false`
+ * or `identity: 'pairwise'` for peers you don't operate. Provider wrappers
+ * use {@link providerPropagationHeaders} instead.
  */
 export function injectContext(
   headers?: Record<string, string>,
+  options: ContextInjectOptions = {},
 ): Record<string, string> {
   const result = headers ? { ...headers } : {};
-
-  const ctx = getActiveContext();
-  if (ctx == null) return result;
-
-  result.traceparent = _traceparent(ctx.traceId ?? null);
-
-  _setHeader(result, 'x-amplitude-session-id', ctx.sessionId);
-  _setHeader(result, 'x-amplitude-agent-id', ctx.agentId);
-  _setHeader(result, 'x-amplitude-parent-agent-id', ctx.parentAgentId);
-  _setHeader(result, 'x-amplitude-user-id', ctx.userId);
-
+  const identity = _identityMode(options, 'raw');
+  const built = _outbound(options, {
+    identity,
+    actorType: options.actorType ?? null,
+    allowUnsignedRaw: options.identity == null,
+  });
+  if (built == null) return result;
+  Object.assign(result, encodeContext('http', built.envelope, built.sig));
+  _setHeader(result, 'x-amplitude-parent-agent-id', getActiveContext()?.parentAgentId);
   return result;
 }
 
@@ -196,39 +295,45 @@ function _safeHeaderId(value: unknown): string | null {
   return _hasControlChars(raw) ? null : raw;
 }
 
+const _HTTP_WIRE_HEADERS = [...Object.values(HTTP_CONTEXT_HEADERS), HTTP_SIG_HEADER];
+
+function _httpWire(headers: Record<string, unknown>): Record<string, unknown> {
+  const wire: Record<string, unknown> = {};
+  for (const name of _HTTP_WIRE_HEADERS) {
+    if (!Object.prototype.hasOwnProperty.call(headers, name) || headers[name] == null) continue;
+    const value = headers[name];
+    wire[name] = Array.isArray(value) && typeof value[0] === 'string' ? value[0] : value;
+  }
+  return wire;
+}
+
 /**
- * Read propagation headers written by {@link injectContext}.
+ * Read propagation headers written by {@link injectContext} (a lowercase
+ * plain-object header map, as Express and Node `http` provide).
  *
- * Every value here is controlled by whoever sent the request. Only call this
- * on traffic from services you operate (e.g. an internal queue consumer),
- * never on requests that reach you from end users or the public internet —
- * otherwise a caller can choose the `userId` / `sessionId` their events are
- * attributed to. The trace ID is validated (W3C `traceparent`, else a short
- * `x-trace-id` token); other values longer than 256 characters or containing
- * control characters are dropped.
+ * A signed context that verifies is trusted and returns the sender's
+ * `sessionId`, `userId`, `agentId` and `traceId`. Any other context is
+ * untrusted and returns only `peerAgentId`, `peerSessionId` and
+ * `peerTraceId`, so `agent.session({ ...ctx })` starts a fresh session.
+ * `verifyResult`, `actorType` and `identityType` are always added.
+ *
+ * Deprecated behavior, kept until the next major: an unsigned context is
+ * still adopted as before (with `verifyResult: 'unsigned'` and a one-time
+ * warning) unless `acceptUnsignedHttp` is `false`. Until then, only call this
+ * on traffic from services you operate.
  */
 export function extractContext(
-  headers: Record<string, string>,
-): Record<string, string> {
-  const result: Record<string, string> = {};
-
-  const traceId =
-    parseTraceparent(headers.traceparent) ?? normalizeTraceId(headers['x-trace-id']);
-  if (traceId) result.traceId = traceId;
-
-  const headerMap: Array<[string, string]> = [
-    ['x-amplitude-session-id', 'sessionId'],
-    ['x-amplitude-agent-id', 'agentId'],
-    ['x-amplitude-parent-agent-id', 'parentAgentId'],
-    ['x-amplitude-user-id', 'userId'],
-  ];
-
-  for (const [header, key] of headerMap) {
-    const val = _safeHeaderId(headers[header]);
-    if (val) result[key] = val;
-  }
-
-  return result;
+  headers: Record<string, unknown>,
+  options: HttpContextExtractOptions = {},
+): AgentContext {
+  if (!_isPlainObject(headers)) return {};
+  return extractAgentContext('http', _httpWire(headers), {
+    ...options,
+    legacy: {
+      parentAgentId: _safeHeaderId(headers['x-amplitude-parent-agent-id']),
+      traceId: parseTraceparent(headers.traceparent) ?? normalizeTraceId(headers['x-trace-id']),
+    },
+  });
 }
 
 // ----------------------------------------------------------------------
@@ -236,103 +341,68 @@ export function extractContext(
 // ----------------------------------------------------------------------
 
 /** The one namespaced key written into an A2A `Message.metadata`. */
-export const A2A_METADATA_KEY = 'com.amplitude/context';
-export const ACP_SESSION_ID_KEY = 'com.amplitude/session-id';
-export const ACP_PARENT_AGENT_ID_KEY = 'com.amplitude/parent-agent-id';
-export const ACP_USER_ID_KEY = 'com.amplitude/user-id';
+export const A2A_METADATA_KEY = A2A_CONTEXT_KEY;
+export const ACP_SESSION_ID_KEY = ACP_CONTEXT_KEYS.session_id;
+export const ACP_PARENT_AGENT_ID_KEY = ACP_CONTEXT_KEYS.parent_agent_id;
+export const ACP_USER_ID_KEY = ACP_CONTEXT_KEYS.user_id;
+export const ACP_IDENTITY_TYPE_KEY = ACP_CONTEXT_KEYS.identity_type;
+export const ACP_ACTOR_TYPE_KEY = ACP_CONTEXT_KEYS.actor_type;
 /** ACP reserves `traceparent` in `_meta` for W3C Trace Context. */
-export const ACP_TRACEPARENT_KEY = 'traceparent';
+export const ACP_TRACEPARENT_KEY = ACP_CONTEXT_KEYS.traceparent;
+export { ACP_SIG_KEY, HTTP_SIG_HEADER } from './agent-context.js';
 
-export type AgentProtocolOptions = {
-  /**
-   * Also send the end-user ID. Default `true`; only for agents you operate,
-   * the same rule as {@link injectContext}.
-   */
-  includeIdentity?: boolean;
-};
+/** @deprecated Use {@link AgentContext}. */
+export type AgentProtocolContext = AgentContext;
 
-/** Context read back by {@link extractA2aMetadata} / {@link extractAcpMeta}. */
-export type AgentProtocolContext = {
-  sessionId?: string;
-  parentAgentId?: string;
-  userId?: string;
-  traceId?: string;
-};
-
-/**
- * The active context as seen by the receiving agent: the sender's agent ID
- * becomes the receiver's parent agent ID. Keys are the shared wire names.
- */
-function _outboundAgentContext(includeIdentity: boolean): Record<string, string> {
-  const headers = injectContext();
-  const fields: Array<[string, string | undefined]> = [
-    ['session_id', headers['x-amplitude-session-id']],
-    ['parent_agent_id', headers['x-amplitude-agent-id']],
-    ['user_id', includeIdentity ? headers['x-amplitude-user-id'] : undefined],
-    ['traceparent', headers.traceparent],
-  ];
-  const result: Record<string, string> = {};
-  for (const [key, value] of fields) if (value) result[key] = value;
-  return result;
-}
-
-function _inboundAgentContext(
-  sessionId: unknown,
-  parentAgentId: unknown,
-  userId: unknown,
-  traceparent: unknown,
-): AgentProtocolContext {
-  const result: AgentProtocolContext = {};
-  const traceId = typeof traceparent === 'string' ? parseTraceparent(traceparent) : null;
-  if (traceId) result.traceId = traceId;
-  const fields: Array<[keyof AgentProtocolContext, unknown]> = [
-    ['sessionId', sessionId],
-    ['parentAgentId', parentAgentId],
-    ['userId', userId],
-  ];
-  for (const [key, value] of fields) {
-    const valid = typeof value === 'string' ? _safeHeaderId(value) : null;
-    if (valid) result[key] = valid;
-  }
-  return result;
+function _injectInto(
+  transport: ContextTransport,
+  target: Record<string, unknown> | null | undefined,
+  options: ContextInjectOptions,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = target ? { ...target } : {};
+  const built = _outbound(options, {
+    identity: _identityMode(options, 'none'),
+    actorType: options.actorType ?? null,
+  });
+  if (built == null) return result;
+  return Object.assign(result, encodeContext(transport, built.envelope, built.sig));
 }
 
 /**
  * Add the active session context to an A2A `Message.metadata` object under
- * one namespaced key, {@link A2A_METADATA_KEY}, holding `session_id`,
- * `parent_agent_id` (this agent), `traceparent` and, unless
- * `includeIdentity` is false, `user_id`. Returns a new object; without an
- * active session the copy is returned unchanged.
+ * {@link A2A_METADATA_KEY}: `session_id`, `parent_agent_id` (this agent),
+ * `identity_type` and `traceparent`, signed when a key is configured.
+ * The end-user ID is left out unless `identity` is `'pairwise'`, or `'raw'`
+ * with a signing key. Returns a new object; without an active session the
+ * copy is returned unchanged.
  *
  * ```ts
  * const message: Message = { ...msg, metadata: injectA2aMetadata(msg.metadata) };
  * ```
+ *
+ * @throws {ConfigurationError} for `identity: 'raw'` without a signing key,
+ *   or `'pairwise'` without a recipient or salt.
  */
 export function injectA2aMetadata(
   metadata?: Record<string, unknown> | null,
-  options: AgentProtocolOptions = {},
+  options: ContextInjectOptions = {},
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = metadata ? { ...metadata } : {};
-  const context = _outboundAgentContext(options.includeIdentity ?? true);
-  if (Object.keys(context).length > 0) result[A2A_METADATA_KEY] = context;
-  return result;
+  return _injectInto('a2a', metadata, options);
 }
 
 /**
- * Read the context written by {@link injectA2aMetadata} from an A2A
- * `Message.metadata`. As with {@link extractContext}, only trust metadata
- * from agents you operate.
+ * Verify and read the context written by {@link injectA2aMetadata} from an
+ * A2A `Message.metadata`. Trusted only when the signature verifies; an
+ * untrusted context returns only the `peer*` IDs. Never throws.
  */
-export function extractA2aMetadata(metadata: unknown): AgentProtocolContext {
+export function extractA2aMetadata(metadata: unknown, options: ContextExtractOptions = {}): AgentContext {
   if (!_isPlainObject(metadata)) return {};
-  const context = metadata[A2A_METADATA_KEY];
-  if (!_isPlainObject(context)) return {};
-  return _inboundAgentContext(context.session_id, context.parent_agent_id, context.user_id, context.traceparent);
+  return extractAgentContext('a2a', metadata, options);
 }
 
-export const A2A_EXTENSION_URI = 'https://amplitude.com/a2a/extensions/agent-context/v1';
-export const A2A_EXTENSION_DESCRIPTION =
-  "Amplitude agent context: session, parent agent, user and trace ids in Message.metadata['com.amplitude/context'].";
+/** The agent context extension URI: the public spec page. Compared as an exact string, never fetched. */
+export const A2A_EXTENSION_URI = AGENT_CONTEXT_EXTENSION_URI;
+export const A2A_EXTENSION_DESCRIPTION = `Amplitude agent context v1: signed session, agent, identity and trace context in Message.metadata['com.amplitude/context']. Spec: ${AGENT_CONTEXT_EXTENSION_URI}`;
 
 /** Structurally an A2A `AgentExtension` (`@a2a-js/sdk`). */
 export type A2aAgentExtension = {
@@ -372,37 +442,75 @@ export function declareA2aExtension<T extends { capabilities?: { extensions?: un
 }
 
 /**
- * Add the active session context to an ACP `_meta` object:
- * `com.amplitude/session-id`, `com.amplitude/parent-agent-id` (this agent),
- * `com.amplitude/user-id` (unless `includeIdentity` is false) and the
- * ACP-reserved W3C `traceparent`. Returns a new object.
+ * Add the active session context to an Agent Client Protocol (ACP) `_meta`
+ * object: flat `com.amplitude/*` keys, the ACP-reserved W3C `traceparent`
+ * and `com.amplitude/sig` when a signing key is configured. Identity rules
+ * match {@link injectA2aMetadata}. Returns a new object.
+ *
+ * @throws {ConfigurationError} for `identity: 'raw'` without a signing key,
+ *   or `'pairwise'` without a recipient or salt.
  */
 export function injectAcpMeta(
   meta?: Record<string, unknown> | null,
-  options: AgentProtocolOptions = {},
+  options: ContextInjectOptions = {},
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = meta ? { ...meta } : {};
-  const context = _outboundAgentContext(options.includeIdentity ?? true);
-  const keys: Array<[string, string]> = [
-    ['session_id', ACP_SESSION_ID_KEY],
-    ['parent_agent_id', ACP_PARENT_AGENT_ID_KEY],
-    ['user_id', ACP_USER_ID_KEY],
-    ['traceparent', ACP_TRACEPARENT_KEY],
-  ];
-  for (const [field, key] of keys) {
-    const value = context[field];
-    if (value) result[key] = value;
-  }
-  return result;
+  return _injectInto('acp', meta, options);
 }
 
-/** Read the context written by {@link injectAcpMeta} from an ACP `_meta` object. */
-export function extractAcpMeta(meta: unknown): AgentProtocolContext {
+/** Verify and read the context written by {@link injectAcpMeta} from an ACP `_meta` object. Never throws. */
+export function extractAcpMeta(meta: unknown, options: ContextExtractOptions = {}): AgentContext {
   if (!_isPlainObject(meta)) return {};
-  return _inboundAgentContext(
-    meta[ACP_SESSION_ID_KEY],
-    meta[ACP_PARENT_AGENT_ID_KEY],
-    meta[ACP_USER_ID_KEY],
-    meta[ACP_TRACEPARENT_KEY],
-  );
+  return extractAgentContext('acp', meta, options);
+}
+
+export type MintContextOptions = {
+  sessionId: string;
+  userId?: string | null;
+  /** The minting service's agent, if any. Becomes the receiver's parent agent when trusted. */
+  parentAgentId?: string | null;
+  /** Default `'human'`: minted contexts usually stand for a person using a frontend. */
+  actorType?: ActorType;
+  traceId?: string | null;
+  /** Default `'raw'` when `userId` is set (the receiver holds the same key), else `'none'`. */
+  identity?: IdentityMode;
+  recipient?: string | null;
+  /** Seconds the signature stays valid. Default 300; refresh before it expires. */
+  ttl?: number | null;
+  policy?: ContextPolicy | null;
+  /** Encoding of the result. Default `'http'` (header map). */
+  transport?: ContextTransport;
+};
+
+/**
+ * Mint a signed context on a backend for a client that cannot hold a key
+ * (a browser or mobile app). The client forwards the result unchanged to the
+ * agent backend, which verifies it with the same key.
+ *
+ * ```ts
+ * res.json({ agentContext: mintContext({ sessionId, userId: req.user.id }) });
+ * ```
+ *
+ * @throws {ConfigurationError} when no signing key is configured.
+ */
+export function mintContext(options: MintContextOptions & { transport?: 'http' }): Record<string, string>;
+export function mintContext(options: MintContextOptions & { transport: 'a2a' | 'acp' }): Record<string, unknown>;
+export function mintContext(options: MintContextOptions): Record<string, unknown> {
+  const policy = resolveContextPolicy(options.policy);
+  if (!policy.canSign) {
+    throw new ConfigurationError(
+      'mintContext requires a signing key: set AMPLITUDE_AI_CONTEXT_KEYS or pass a ContextPolicy with signingKeys.',
+    );
+  }
+  const { envelope, sig } = buildEnvelope({
+    sessionId: options.sessionId,
+    parentAgentId: options.parentAgentId,
+    userId: options.userId,
+    identity: options.identity ?? (options.userId ? 'raw' : 'none'),
+    recipient: options.recipient,
+    actorType: options.actorType ?? 'human',
+    traceparent: _traceparent(options.traceId ?? null),
+    policy,
+    ttl: options.ttl,
+  });
+  return encodeContext(options.transport ?? 'http', envelope, sig);
 }

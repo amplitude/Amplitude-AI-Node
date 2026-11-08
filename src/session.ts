@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { ContextPolicy } from './agent-context.js';
 import type {
   AiMessageOpts,
   BoundAgent,
@@ -193,6 +194,9 @@ export class Session {
         (ai as unknown as { _privacyConfig?: PrivacyConfig | null })
           ._privacyConfig ?? null,
       skipAutoUserTracking: this._skipAutoUserTracking,
+      contextPolicy:
+        (ai as { config?: { contextPolicy?: ContextPolicy | null } }).config
+          ?.contextPolicy ?? null,
     });
     ctx._session = this;
     ctx.sessionExperiments = [...this._root()._experiments];

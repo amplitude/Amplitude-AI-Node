@@ -87,15 +87,13 @@ describe('extractContext', () => {
       ).toBeUndefined();
     });
 
-    it('drops identity headers that are too long or contain control characters', () => {
+    it('reports identity headers that are too long or contain control characters as malformed', () => {
       const result = extractContext({
         'x-amplitude-session-id': 's'.repeat(257),
         'x-amplitude-agent-id': 'agent\u0000x',
         'x-amplitude-user-id': 'ok-user-1',
       });
-      expect(result.sessionId).toBeUndefined();
-      expect(result.agentId).toBeUndefined();
-      expect(result.userId).toBe('ok-user-1');
+      expect(result).toEqual({ verifyResult: 'malformed' });
     });
   });
 });
