@@ -21,7 +21,9 @@ import {
   codexOutputFailure,
   codexUsageOpts,
 } from './codex-core.js';
+import { PROP_AGENT_CHAIN_DEPTH, PROP_ROOT_AGENT_NAME, PROP_SESSION_TRIGGER } from '../core/constants.js';
 import { commitShaProperties } from './commit-sha.js';
+import { type SessionTrigger, resolveSessionTrigger } from './session-trigger.js';
 
 export type CodexRolloutMeta = {
   threadId: string;
@@ -38,6 +40,8 @@ export type CodexRolloutMeta = {
    * `parent_thread_id` is set (then every message is accepted).
    */
   interAgentPath?: string | null;
+  /** From `session_meta.source`; absent in state saved by older versions. */
+  sourceTrigger?: SessionTrigger | null;
 };
 
 type PendingCall = { name: string; input: string; time: number; invocationId: string };
@@ -281,6 +285,7 @@ export function parseCodexSessionMeta(payload: Record<string, unknown>): CodexRo
     isSubagent: Boolean(parentThreadId || spawn),
     historyStartOrdinal: typeof ordinal === 'number' ? ordinal : null,
     interAgentPath: agentPath ?? (payload.parent_thread_id ? null : '/root'),
+    sourceTrigger: codexSourceTrigger(payload.source),
   };
 }
 
@@ -307,13 +312,38 @@ export function codexAgentIds(
 }
 
 /**
+ * `[Agent] Root Agent Name` and `[Agent] Agent Chain Depth` for a thread: the
+ * root is the base agent ID at depth 1; `/root/a/b` is depth 3, and a
+ * subagent without a path is depth 2.
+ */
+export function codexAgentLineage(
+  meta: CodexRolloutMeta,
+  baseAgentId: string = CODEX_AGENT_ID,
+): { rootAgentName: string; depth: number } {
+  if (!meta.isSubagent) return { rootAgentName: baseAgentId, depth: 1 };
+  if (meta.agentPath?.startsWith('/root/')) {
+    const segments = meta.agentPath.slice('/root/'.length).split('/').filter(Boolean).length;
+    return { rootAgentName: baseAgentId, depth: segments + 1 };
+  }
+  return { rootAgentName: baseAgentId, depth: 2 };
+}
+
+/** The trigger Codex's `session_meta.source` implies; null for an object (a subagent) or anything else. */
+export function codexSourceTrigger(source: unknown): SessionTrigger | null {
+  if (source === 'exec' || source === 'mcp') return 'headless';
+  if (source === 'cli' || source === 'vscode') return 'interactive';
+  return null;
+}
+
+/**
  * Maps new rollout lines. `flush` (default true) emits the turn's buffered
- * last AI Response with the usage seen so far, as at a Stop hook.
+ * last AI Response with the usage seen so far, as at a Stop hook. `env` is
+ * the hook process environment, read for `[Agent] Session Trigger`.
  */
 export function mapCodexRollout(
   lines: Array<string | CodexRolloutLine>,
   previous: CodexRolloutState = initialCodexRolloutState(),
-  options: { flush?: boolean; agentId?: string } = {},
+  options: { flush?: boolean; agentId?: string; env?: Record<string, string | undefined> } = {},
 ): CodexRolloutResult {
   const state: CodexRolloutState = { ...structuredClone(previous), byteOffset: previous.byteOffset ?? 0 };
   const calls: CodexTrackCall[] = [];
@@ -327,10 +357,13 @@ export function mapCodexRollout(
     const { agentId, parentAgentId } = codexAgentIds(state.meta, options.agentId);
     const opts: Record<string, unknown> = { sessionId: state.meta.threadId, traceId: state.turnId, agentId };
     if (parentAgentId) opts.parentAgentId = parentAgentId;
-    const props: Record<string, unknown> = {};
+    const { rootAgentName, depth } = codexAgentLineage(state.meta, options.agentId);
+    const props: Record<string, unknown> = { [PROP_ROOT_AGENT_NAME]: rootAgentName, [PROP_AGENT_CHAIN_DEPTH]: depth };
+    const trigger = resolveSessionTrigger({ env: options.env, harnessHint: state.meta.sourceTrigger });
+    if (trigger) props[PROP_SESSION_TRIGGER] = trigger;
     if (parentAgentId && state.meta.parentThreadId) props.codex_parent_thread_id = state.meta.parentThreadId;
     if (state.meta.sessionId !== state.meta.threadId) props.codex_root_session_id = state.meta.sessionId;
-    if (Object.keys(props).length > 0) opts.eventProperties = props;
+    opts.eventProperties = props;
     return opts;
   };
   const insertId = (kind: 'user' | 'ai' | 'tool', key: string) =>

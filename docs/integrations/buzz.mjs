@@ -9,9 +9,11 @@
 //   kind 0      raw_json is the profile event; an `auth` tag (NIP-OA) marks the author as an agent
 //   kind 44200  raw_json is the decrypted NIP-AM payload { harness, model, channelId, sessionId, turnId, timestamp, turn, deltaReliable, stopReason }
 // mapping: { users: { <pubkey>: <user id> }, agents?: { <pubkey>: { id?, name? } }, gooseMessages?: sessions.db rows,
-//            idleWindowMinutes?, contentMode?, redact?, minIdLength? }
+//            idleWindowMinutes?, contentMode?, redact?, minIdLength?, trigger? }
+// trigger: [Agent] Session Trigger on every event, one of SESSION_TRIGGERS; any other value is ignored.
 
 const FORWARDER_VERSION = 'http-forwarder/1.0';
+const SESSION_TRIGGERS = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
 const ARCHIVE_COLUMNS = ['id', 'kind', 'pubkey', 'created_at', 'raw_json'];
 const GOOSE_COLUMNS = ['session_id', 'role', 'content_json', 'created_timestamp'];
 const KIND_PROFILE = 0;
@@ -163,6 +165,7 @@ export function normalize(rows, mapping = {}) {
   const users = mapping.users ?? {};
   const idleMs = (mapping.idleWindowMinutes ?? 30) * 60_000;
   const minIdLength = mapping.minIdLength ?? 5;
+  const trigger = SESSION_TRIGGERS.includes(mapping.trigger) ? { '[Agent] Session Trigger': mapping.trigger } : {};
   const skipped = { unmappedUser: 0, shortId: 0, noHuman: 0, noAgent: 0, invalidMetric: 0, unreliableCost: 0, otherKinds: 0 };
 
   const agents = new Map(Object.entries(mapping.agents ?? {}));
@@ -289,6 +292,7 @@ export function normalize(rows, mapping = {}) {
           '[Agent] Ingestion Path': 'http_forwarder',
           '[Agent] Source': 'buzz',
           '[Agent] Content Mode': full ? 'full' : 'metadata_only',
+          ...trigger,
           ...extra,
         },
       });

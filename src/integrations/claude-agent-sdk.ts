@@ -30,8 +30,10 @@
  * ```
  */
 
+import { PROP_SESSION_TRIGGER } from '../core/constants.js';
 import { getLogger, safeTrack } from '../utils/logger.js';
 import { commitShaProperties } from './commit-sha.js';
+import { type SessionTrigger, resolveSessionTrigger } from './session-trigger.js';
 
 const logger = getLogger('claude-agent-sdk');
 
@@ -61,6 +63,11 @@ interface SessionLike {
 export interface ClaudeAgentSDKTrackerOptions {
   defaultProvider?: string;
   defaultModel?: string;
+  /**
+   * `[Agent] Session Trigger` on every event. Defaults to
+   * `AMPLITUDE_SESSION_TRIGGER`, then `ci` under CI; otherwise omitted.
+   */
+  sessionTrigger?: SessionTrigger;
 }
 
 /**
@@ -74,10 +81,13 @@ export class ClaudeAgentSDKTracker {
   private _defaultProvider: string;
   private _defaultModel: string | null;
   private _toolTimers = new Map<string, number>();
+  private readonly _triggerProps: Record<string, unknown> | null;
 
   constructor(options: ClaudeAgentSDKTrackerOptions = {}) {
     this._defaultProvider = options.defaultProvider ?? 'anthropic';
     this._defaultModel = options.defaultModel ?? null;
+    const trigger = resolveSessionTrigger({ explicit: options.sessionTrigger, env: process.env });
+    this._triggerProps = trigger ? { [PROP_SESSION_TRIGGER]: trigger } : null;
   }
 
   /**
@@ -172,9 +182,10 @@ export class ClaudeAgentSDKTracker {
         if (toolInput != null) opts.input = toolInput;
         if (toolResponse != null) opts.output = String(toolResponse);
         if (isError && toolResponse) opts.errorMessage = String(toolResponse);
+        if (this._triggerProps) opts.eventProperties = { ...this._triggerProps };
         if (!isError) {
           const commit = commitShaProperties(toolName, toolInput, toolResponse);
-          if (commit.commit_sha) opts.eventProperties = commit;
+          if (commit.commit_sha) opts.eventProperties = { ...(opts.eventProperties as Record<string, unknown>), ...commit };
         }
 
         session.trackToolCall(toolName, latencyMs, !isError, opts);
@@ -222,6 +233,7 @@ export class ClaudeAgentSDKTracker {
     if (usage?.output_tokens != null) {
       opts.outputTokens = usage.output_tokens;
     }
+    if (this._triggerProps) opts.eventProperties = { ...this._triggerProps };
 
     session.trackAiMessage(text, model, this._defaultProvider, 0, opts);
   }
@@ -249,7 +261,8 @@ export class ClaudeAgentSDKTracker {
     }
 
     if (text) {
-      session.trackUserMessage(text);
+      if (this._triggerProps) session.trackUserMessage(text, { eventProperties: { ...this._triggerProps } });
+      else session.trackUserMessage(text);
     }
   }
 }

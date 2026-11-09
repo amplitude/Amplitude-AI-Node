@@ -66,6 +66,7 @@
     "./integrations/openai-realtime": "./dist/integrations/openai-realtime.js",
     "./integrations/opentelemetry": "./dist/integrations/opentelemetry.js",
     "./integrations/pipecat": "./dist/integrations/pipecat.js",
+    "./integrations/session-trigger": "./dist/integrations/session-trigger.js",
     "./internals": "./dist/internals.js",
     "./mcp": "./dist/mcp/index.js",
     "./mcp/contract": "./dist/mcp/contract.js",

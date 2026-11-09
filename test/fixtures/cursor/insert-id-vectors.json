@@ -165,7 +165,10 @@
         "tool_name": null,
         "success": null,
         "latency_ms": 0,
-        "event_properties": {}
+        "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1
+        }
       },
       {
         "kind": "tool",
@@ -177,6 +180,8 @@
         "success": true,
         "latency_ms": 413,
         "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1,
           "commit_sha": "0123456"
         }
       },
@@ -190,6 +195,8 @@
         "success": false,
         "latency_ms": 1530,
         "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1,
           "cursor_failure_type": "error"
         }
       },
@@ -202,7 +209,10 @@
         "tool_name": "Read",
         "success": true,
         "latency_ms": 3,
-        "event_properties": {}
+        "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1
+        }
       },
       {
         "kind": "tool",
@@ -213,7 +223,10 @@
         "tool_name": "Task",
         "success": true,
         "latency_ms": 5200,
-        "event_properties": {}
+        "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1
+        }
       },
       {
         "kind": "ai",
@@ -225,6 +238,8 @@
         "success": null,
         "latency_ms": 0,
         "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1,
           "cursor_turn_duration_ms": 7000
         }
       },
@@ -237,7 +252,10 @@
         "tool_name": null,
         "success": null,
         "latency_ms": 0,
-        "event_properties": {}
+        "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 1
+        }
       }
     ],
     "00000000-0000-4000-8000-00000000c0a2": [
@@ -251,6 +269,8 @@
         "success": true,
         "latency_ms": 2,
         "event_properties": {
+          "[Agent] Root Agent Name": "cursor",
+          "[Agent] Agent Chain Depth": 2,
           "cursor_parent_conversation_id": "00000000-0000-4000-8000-00000000c0a1"
         }
       }

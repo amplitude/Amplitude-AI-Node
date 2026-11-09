@@ -286,6 +286,21 @@
           "name": "[Agent] Voice Overlap Ms",
           "type": "number",
           "description": "Milliseconds this turn's speech overlapped the other side's previous turn. Set on the turn that started while the other side was still speaking. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Session Trigger",
+          "type": "string",
+          "description": "How the session was started: interactive (a person at the keyboard), headless (a non-interactive run such as codex exec), ci (a CI job), scheduled (a schedule), or event (a webhook or channel event). Unset when the harness can't tell. Delegation is not a trigger; see [Agent] Agent Chain Depth."
+        },
+        {
+          "name": "[Agent] Root Agent Name",
+          "type": "string",
+          "description": "Entry-point agent in multi-agent flows."
+        },
+        {
+          "name": "[Agent] Agent Chain Depth",
+          "type": "number",
+          "description": "Number of agents in the delegation chain."
         }
       ]
     },
@@ -733,6 +748,21 @@
           "name": "[Agent] Voice Overlap Ms",
           "type": "number",
           "description": "Milliseconds this turn's speech overlapped the other side's previous turn. Set on the turn that started while the other side was still speaking. Omitted when the platform does not report it."
+        },
+        {
+          "name": "[Agent] Session Trigger",
+          "type": "string",
+          "description": "How the session was started: interactive (a person at the keyboard), headless (a non-interactive run such as codex exec), ci (a CI job), scheduled (a schedule), or event (a webhook or channel event). Unset when the harness can't tell. Delegation is not a trigger; see [Agent] Agent Chain Depth."
+        },
+        {
+          "name": "[Agent] Root Agent Name",
+          "type": "string",
+          "description": "Entry-point agent in multi-agent flows."
+        },
+        {
+          "name": "[Agent] Agent Chain Depth",
+          "type": "number",
+          "description": "Number of agents in the delegation chain."
         }
       ]
     },
@@ -959,6 +989,21 @@
           "name": "[Agent] Parent Message ID",
           "type": "string",
           "description": "The message_id of the user message that triggered this tool call. Links the tool call into the event graph."
+        },
+        {
+          "name": "[Agent] Session Trigger",
+          "type": "string",
+          "description": "How the session was started: interactive (a person at the keyboard), headless (a non-interactive run such as codex exec), ci (a CI job), scheduled (a schedule), or event (a webhook or channel event). Unset when the harness can't tell. Delegation is not a trigger; see [Agent] Agent Chain Depth."
+        },
+        {
+          "name": "[Agent] Root Agent Name",
+          "type": "string",
+          "description": "Entry-point agent in multi-agent flows."
+        },
+        {
+          "name": "[Agent] Agent Chain Depth",
+          "type": "number",
+          "description": "Number of agents in the delegation chain."
         }
       ]
     },
@@ -1468,6 +1513,21 @@
           "name": "[Agent] Session Idle Timeout Minutes",
           "type": "number",
           "description": "Custom idle timeout for this session (default 30 min). Tells the server how long to wait before auto-closing."
+        },
+        {
+          "name": "[Agent] Session Trigger",
+          "type": "string",
+          "description": "How the session was started: interactive (a person at the keyboard), headless (a non-interactive run such as codex exec), ci (a CI job), scheduled (a schedule), or event (a webhook or channel event). Unset when the harness can't tell. Delegation is not a trigger; see [Agent] Agent Chain Depth."
+        },
+        {
+          "name": "[Agent] Root Agent Name",
+          "type": "string",
+          "description": "Entry-point agent in multi-agent flows."
+        },
+        {
+          "name": "[Agent] Agent Chain Depth",
+          "type": "number",
+          "description": "Number of agents in the delegation chain."
         }
       ]
     },

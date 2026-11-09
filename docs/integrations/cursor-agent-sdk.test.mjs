@@ -97,6 +97,17 @@ test('counters continue from the hook state and a short user id is skipped', () 
   assert.equal(short.skipped.shortId, 1);
 });
 
+test('mapping.trigger stamps every event; an unknown trigger or none adds nothing', () => {
+  const plain = normalize(fixture, mapping).events;
+  assert.equal(plain.some((event) => '[Agent] Session Trigger' in event.event_properties), false);
+  const scheduled = normalize(fixture, { ...mapping, trigger: 'scheduled' }).events;
+  assert.deepEqual(scheduled.map((event) => event.insert_id), plain.map((event) => event.insert_id));
+  assert.equal(scheduled.every((event) => event.event_properties['[Agent] Session Trigger'] === 'scheduled'), true);
+  assert.deepEqual(checkAgentEvents(scheduled).errors, []);
+  const unknown = normalize(fixture, { ...mapping, trigger: 'cron' }).events;
+  assert.equal(unknown.some((event) => '[Agent] Session Trigger' in event.event_properties), false);
+});
+
 test('a failed turn becomes an error reply and metadata_only drops text', () => {
   const failed = normalize(
     [

@@ -141,6 +141,7 @@ export const PROP_TASK_FAILURE_TYPE = '[Agent] Task Failure Type';
 export const PROP_TASK_FAILURE_REASON = '[Agent] Task Failure Reason';
 export const PROP_AGENT_CHAIN = '[Agent] Agent Chain';
 export const PROP_ROOT_AGENT_NAME = '[Agent] Root Agent Name';
+export const PROP_AGENT_CHAIN_DEPTH = '[Agent] Agent Chain Depth';
 export const PROP_REQUEST_COMPLEXITY = '[Agent] Request Complexity';
 
 // Voice turn properties (AA-152825). Absent means unknown, never false.
@@ -170,6 +171,10 @@ export const VOICE_END_OF_TURN_REASONS = [
   'transferred',
   'error',
 ] as const;
+
+// How a coding-agent session was started (AA-152843). Omitted when the harness can't tell.
+export const PROP_SESSION_TRIGGER = '[Agent] Session Trigger';
+export const SESSION_TRIGGERS = ['interactive', 'headless', 'ci', 'scheduled', 'event'] as const;
 
 const _require = createRequire(import.meta.url);
 let _sdkVersion = '0.1.0';

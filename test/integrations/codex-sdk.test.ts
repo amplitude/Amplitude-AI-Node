@@ -1,6 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { codexExitCode, codexUsageOpts } from '../../src/integrations/codex-core.js';
 import { CodexSDKTracker } from '../../src/integrations/codex-sdk.js';
+
+// The tracker reads the trigger from the environment; keep CI's out of these cases.
+beforeEach(() => {
+  vi.stubEnv('CI', '');
+  vi.stubEnv('GITHUB_ACTIONS', '');
+  vi.stubEnv('AMPLITUDE_SESSION_TRIGGER', '');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function mockSession() {
   return {
@@ -272,5 +282,55 @@ describe('codex-core', () => {
       reasoningTokens: 30,
     });
     expect(codexUsageOpts(null)).toEqual({});
+  });
+});
+
+describe('CodexSDKTracker session trigger', () => {
+  const trigger = '[Agent] Session Trigger';
+  const turn = async (tracker: CodexSDKTracker) => {
+    const session = mockSession();
+    const events = [
+      { type: 'thread.started', thread_id: 'thr_1' },
+      { type: 'turn.started' },
+      {
+        type: 'item.completed',
+        item: {
+          id: 'c1',
+          type: 'command_execution',
+          command: 'git commit -m x',
+          aggregated_output: '[main 1a2b3c4] x',
+          exit_code: 0,
+          status: 'completed',
+        },
+      },
+      { type: 'item.completed', item: { id: 'm1', type: 'agent_message', text: 'Done' } },
+      { type: 'turn.completed', usage },
+    ];
+    for await (const _ of tracker.track(session, stream(events), 'commit it')) {
+      // drain
+    }
+    const props = (mock: ReturnType<typeof vi.fn>) =>
+      mock.mock.calls.map((c) => (c.at(-1) as { eventProperties?: Record<string, unknown> }).eventProperties ?? {});
+    return [...props(session.trackUserMessage), ...props(session.trackToolCall), ...props(session.trackAiMessage)];
+  };
+
+  it('stamps an explicit trigger on every event and keeps commit_sha', async () => {
+    const props = await turn(new CodexSDKTracker({ sessionTrigger: 'scheduled' }));
+    expect(props).toHaveLength(3);
+    for (const p of props) expect(p[trigger]).toBe('scheduled');
+    expect(props[1]).toMatchObject({ commit_sha: '1a2b3c4' });
+  });
+
+  it('falls back to AMPLITUDE_SESSION_TRIGGER, then CI, and ignores invalid values', async () => {
+    vi.stubEnv('AMPLITUDE_SESSION_TRIGGER', 'event');
+    expect((await turn(new CodexSDKTracker()))[0]![trigger]).toBe('event');
+    vi.stubEnv('AMPLITUDE_SESSION_TRIGGER', 'nightly');
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    expect((await turn(new CodexSDKTracker({ sessionTrigger: 'bogus' as never })))[0]![trigger]).toBe('ci');
+    expect((await turn(new CodexSDKTracker({ sessionTrigger: 'interactive' })))[0]![trigger]).toBe('interactive');
+  });
+
+  it('omits the property when nothing says how the session started', async () => {
+    for (const p of await turn(new CodexSDKTracker())) expect(p).not.toHaveProperty(trigger);
   });
 });

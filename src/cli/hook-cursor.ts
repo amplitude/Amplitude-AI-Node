@@ -17,6 +17,9 @@
  * - `postToolUse` / `postToolUseFailure` → `[Agent] Tool Call` with `commit_sha`
  * - `sessionEnd` → `[Agent] Session End`
  * - a subagent's events → agent `cursor/<subagent_type>` with parent `cursor`
+ * - every event: `[Agent] Root Agent Name` `cursor`, `[Agent] Agent Chain Depth`
+ *   1 (2 for a subagent), and `[Agent] Session Trigger` from
+ *   `AMPLITUDE_SESSION_TRIGGER` or a CI environment, else omitted
  *
  * The spool keeps prompt, reply and tool content only in `full` content
  * mode. Insert IDs are uuid5 of `<conversation>:<generation>:<kind>:<key>`, the
@@ -24,7 +27,8 @@
  *
  * Environment and `.amplitude-ai/local.env` are read as by `hook codex`
  * (`AMPLITUDE_AI_API_KEY`, `AMPLITUDE_SERVER_ZONE` / `AMPLITUDE_REGION`,
- * `AMPLITUDE_USER_ID`, `AMPLITUDE_AI_CONTENT_MODE`, `AMPLITUDE_AI_HOME`).
+ * `AMPLITUDE_USER_ID`, `AMPLITUDE_AI_CONTENT_MODE`, `AMPLITUDE_AI_HOME`,
+ * `AMPLITUDE_SESSION_TRIGGER`).
  *
  * Never blocks Cursor: it prints `{}` (`{"continue":true}` for
  * `beforeSubmitPrompt`), reports failures on stderr, and exits 0.
@@ -42,8 +46,10 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { PROP_AGENT_CHAIN_DEPTH, PROP_ROOT_AGENT_NAME, PROP_SESSION_TRIGGER } from '../core/constants.js';
 import { uuid5 } from '../integrations/codex-core.js';
 import { parseCommitSha } from '../integrations/commit-sha.js';
+import { resolveSessionTrigger } from '../integrations/session-trigger.js';
 import { type LocalEnv, withLocalEnv } from './local-env.js';
 
 /** Namespace for Cursor insert IDs; the Python SDK uses the same one. */
@@ -213,19 +219,32 @@ export type CursorTrackCall =
     }
   | { kind: 'session_end'; insertId: string; time: number; opts: Record<string, unknown> };
 
-/** Maps one conversation's spool records (in spool order) to tracking calls. */
-export function mapCursorSpool(records: CursorSpoolRecord[]): CursorTrackCall[] {
+/**
+ * Maps one conversation's spool records (in spool order) to tracking calls.
+ * `env` is the flushing hook's environment, read for `[Agent] Session Trigger`;
+ * Cursor's payload never says whether a person is present.
+ */
+export function mapCursorSpool(
+  records: CursorSpoolRecord[],
+  options: { env?: LocalEnv } = {},
+): CursorTrackCall[] {
   const calls: CursorTrackCall[] = [];
   const link = records.find((r) => r.e === 'subagentLink');
   const agentId = link ? `${CURSOR_AGENT_ID}/${link.type ?? 'subagent'}` : CURSOR_AGENT_ID;
+  const lineage: Record<string, unknown> = {
+    [PROP_ROOT_AGENT_NAME]: CURSOR_AGENT_ID,
+    [PROP_AGENT_CHAIN_DEPTH]: link ? 2 : 1,
+  };
+  const trigger = resolveSessionTrigger({ env: options.env });
+  if (trigger) lineage[PROP_SESSION_TRIGGER] = trigger;
   const promptAt = new Map<string, number>();
   const seen = new Set<string>();
   for (const r of records) {
-    const opts: Record<string, unknown> = { sessionId: r.c, agentId };
+    const opts: Record<string, unknown> = { sessionId: r.c, agentId, eventProperties: { ...lineage } };
     if (r.g) opts.traceId = r.g;
     if (link) {
       opts.parentAgentId = CURSOR_AGENT_ID;
-      if (link.parent) opts.eventProperties = { cursor_parent_conversation_id: link.parent };
+      if (link.parent) opts.eventProperties = { ...lineage, cursor_parent_conversation_id: link.parent };
     }
     const once = (kind: string, key: string) => {
       const insertId = cursorInsertId(r.c, r.g, kind, key);
@@ -377,7 +396,7 @@ async function flushSpool(ctx: FlushContext, name: string): Promise<void> {
     };
     if (!apiKey && !dryRun) return drop('missing_api_key', 'AMPLITUDE_AI_API_KEY is not set');
     if (!userId) return drop('missing_user_id', 'no AMPLITUDE_USER_ID, git user.email or Cursor user email');
-    const events = await buildCursorEvents(mapCursorSpool(records), {
+    const events = await buildCursorEvents(mapCursorSpool(records, { env }), {
       userId,
       contentMode: contentModeFrom(env.AMPLITUDE_AI_CONTENT_MODE, ctx.stderr, 'cursor'),
     });

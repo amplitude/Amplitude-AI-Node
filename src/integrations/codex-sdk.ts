@@ -36,7 +36,9 @@ import {
   codexOutputFailure,
   codexUsageOpts,
 } from './codex-core.js';
+import { PROP_SESSION_TRIGGER } from '../core/constants.js';
 import { commitShaProperties } from './commit-sha.js';
+import { type SessionTrigger, resolveSessionTrigger } from './session-trigger.js';
 
 const logger = getLogger('codex-sdk');
 
@@ -62,6 +64,11 @@ export interface CodexSDKTrackerOptions {
    * session ID of the Amplitude session you pass in.
    */
   sessionId?: 'thread' | 'session';
+  /**
+   * `[Agent] Session Trigger` on every event. Defaults to
+   * `AMPLITUDE_SESSION_TRIGGER`, then `ci` under CI; otherwise omitted.
+   */
+  sessionTrigger?: SessionTrigger;
 }
 
 type PendingResponse = {
@@ -108,6 +115,7 @@ export class CodexSDKTracker {
   private readonly _model: string;
   private readonly _provider: string;
   private readonly _useThreadId: boolean;
+  private readonly _trigger: SessionTrigger | null;
   private _threadId: string | null = null;
   private _unboundInput: string | null = null;
   private _states = new WeakMap<SessionLike, TurnState>();
@@ -116,6 +124,7 @@ export class CodexSDKTracker {
     this._model = options.model || 'unknown';
     this._provider = options.provider ?? CODEX_PROVIDER;
     this._useThreadId = (options.sessionId ?? 'thread') === 'thread';
+    this._trigger = resolveSessionTrigger({ explicit: options.sessionTrigger, env: process.env });
   }
 
   /** Codex `thread_id` of the last `thread.started` seen. */
@@ -230,6 +239,7 @@ export class CodexSDKTracker {
     const opts: Record<string, unknown> = {};
     if (state.traceId) opts.traceId = state.traceId;
     if (this._useThreadId && state.threadId) opts.sessionId = state.threadId;
+    if (this._trigger) opts.eventProperties = { [PROP_SESSION_TRIGGER]: this._trigger };
     return opts;
   }
 
@@ -360,7 +370,7 @@ export class CodexSDKTracker {
     if (errorMessage) opts.errorMessage = errorMessage;
     if (success) {
       const commit = commitShaProperties(toolName, input, output);
-      if (commit.commit_sha) opts.eventProperties = commit;
+      if (commit.commit_sha) opts.eventProperties = { ...(opts.eventProperties as Record<string, unknown>), ...commit };
     }
     safeTrack(() => session.trackToolCall(toolName, latencyMs, success, opts));
   }
