@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.29.0 (unreleased)
+## 0.29.0
 
 ### Added
 - **Signed agent context (v1).** Agents that call each other over A2A, the Agent Client Protocol or HTTP, including agents another company runs, can sign the context they send with HMAC-SHA256. Configure keys with `AMPLITUDE_AI_CONTEXT_KEYS` (a JSON object of key ID to secret, each at least 32 bytes) and optionally `AMPLITUDE_AI_CONTEXT_ACTIVE_KID`, or pass `contextPolicy: new ContextPolicy({ signingKeys })` in `AIConfig`. Signatures carry a key ID, issue time and expiry (default 300 seconds), so keys can rotate. The wire format, signing input and golden test vectors are shared with the Python SDK. Spec: https://amplitude.com/docs/amplitude-ai/agent-analytics/agent-context-v1.
