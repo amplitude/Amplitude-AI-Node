@@ -89,6 +89,16 @@ jobs:
             };
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
             const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id');
+            const isMerge = (c) => (c.parents?.length || 0) > 1;
+            // How mixed a change is: its agent sessions and its human commits (merge commits
+            // aside), so a comparison can keep to single-session, agent-only changes.
+            const mixOf = (cs) => {
+              const authored = cs.filter((c) => !isMerge(c));
+              return {
+                pr_session_count: new Set(authored.map(sessionOf).filter(Boolean)).size,
+                pr_human_commit_count: authored.filter((c) => !sessionOf(c)).length,
+              };
+            };
             // The agent that signed the commit: its commit author email, else its Co-authored-by line.
             const signingAgent = (c) => {
               const author = agentForEmail(c.commit?.author?.email);
@@ -350,14 +360,20 @@ jobs:
               }
               const setupVersions = new Map();
               for (const c of agentCommits) setupVersions.set(c.sha, await setupVersionFor(c));
+              const mergedMix = mixOf(commits);
               for (const c of agentCommits) {
                 pushScore('commit_merged', 1, c, {
                   merge_commit_sha: pr.merge_commit_sha,
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
+                  ...mergedMix,
                   agent_setup_version: setupVersions.get(c.sha),
                 }, c.sha, mergedAt);
               }
+              // A squash or merge commit keeps no trailers, so a revert of a PR's merge commit
+              // stands for that PR's commits. A revert of any other commit is that commit.
+              const revertedCommits = new Map();
+              const revertedPrs = new Set();
               for (const sha of reverted) {
                 let original;
                 try {
@@ -367,12 +383,33 @@ jobs:
                   continue;
                 }
                 remember(original);
-                if (!sessionOf(original)) continue;
-                pushScore('commit_reverted', 1, original, {
+                const fromPr = sessionOf(original) ? null : await enrich('reverted_prs', async () => {
+                  const { data: prs } = await call(() => github.rest.repos.listPullRequestsAssociatedWithCommit({
+                    owner, repo, commit_sha: original.sha,
+                  }));
+                  const source = prs.find((p) => p.merged_at && p.merge_commit_sha === original.sha);
+                  if (!source) return null;
+                  if (revertedPrs.has(source.number)) return [];
+                  revertedPrs.add(source.number);
+                  return listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: source.number });
+                });
+                if (!fromPr) {
+                  revertedCommits.set(original.sha, original);
+                  continue;
+                }
+                for (const c of fromPr) {
+                  remember(c);
+                  revertedCommits.set(c.sha, c);
+                }
+              }
+              const revertedMix = mixOf([...revertedCommits.values()]);
+              for (const c of [...revertedCommits.values()].filter(sessionOf)) {
+                pushScore('commit_reverted', 1, c, {
                   revert_pr_number: pr.number,
                   revert_merge_commit_sha: pr.merge_commit_sha,
-                  agent_setup_version: await setupVersionFor(original),
-                }, `${original.sha}:${pr.number}`, mergedAt);
+                  ...revertedMix,
+                  agent_setup_version: await setupVersionFor(c),
+                }, `${c.sha}:${pr.number}`, mergedAt);
               }
 
               // Review timing uses the human reviews above. A round is a change request the
@@ -402,7 +439,7 @@ jobs:
                   commit_count: pr.commits ?? commits.length,
                   agent_commit_count: agentCommits.length,
                   session_commit_count: own.length,
-                  pr_session_count: sessions.size,
+                  ...mergedMix,
                   agent_setup_version: setupVersions.get(first.sha),
                 };
                 for (const [name, value] of Object.entries(prScores)) {

@@ -81,16 +81,17 @@ Commits made through the GitHub API or MCP tools carry no trailer, so they get n
 
 | Trigger | Score Name | Value | One per | Also carries |
 |---|---|---|---|---|
-| `pull_request` closed and merged | `commit_merged` | 1 | agent commit in the PR | `merge_commit_sha`, `pr_number`, `base_branch` |
-| A merged PR containing `This reverts commit <sha>` | `commit_reverted` | 1 | reverted agent commit, on its own session | `revert_pr_number`, `revert_merge_commit_sha` |
+| `pull_request` closed and merged | `commit_merged` | 1 | agent commit in the PR | `merge_commit_sha`, `pr_number`, `base_branch`, `pr_session_count`, `pr_human_commit_count` |
+| A merged PR containing `This reverts commit <sha>` | `commit_reverted` | 1 | reverted agent commit, on its own session; a reverted squash or merge commit stands for its PR's commits | `revert_pr_number`, `revert_merge_commit_sha`, `pr_session_count`, `pr_human_commit_count` |
 | `deployment_status` success | `deploy_succeeded` | 1 | agent commit since the previous successful deployment; a deployed commit from a merged PR (a squash commit, say) stands for that PR's commits, each scored once | `deployment_sha`, `environment` |
 | `deployment_status` failure or error | `deploy_failed` | 1 | agent commit in the same range | `deployment_sha`, `environment`, `deployment_state` |
-| `pull_request` closed and merged | `ci_passed_first_run` (1 or 0), `review_rounds`, `review_count`, `changes_requested_count`, `hours_open`, `hours_to_first_review` | the measure | agent session in the PR, on its first commit there | `pr_number`, `pr_session_count`, `session_commit_count`, `agent_commit_count`, `commit_count`, `merge_commit_sha`, `base_branch` |
+| `pull_request` closed and merged | `ci_passed_first_run` (1 or 0), `review_rounds`, `review_count`, `changes_requested_count`, `hours_open`, `hours_to_first_review` | the measure | agent session in the PR, on its first commit there | `pr_number`, `pr_session_count`, `pr_human_commit_count`, `session_commit_count`, `agent_commit_count`, `commit_count`, `merge_commit_sha`, `base_branch` |
 
 Every Score also carries `commit_sha`, `agent_session_id`, `agent_name`, `agent_trigger`, `agent_setup_version`, `repo`, `outcome_time` and `outcomes_workflow_version` (currently `3`).
 
 - **Only agent sessions are scored.** A commit without an `Agent-Session-Id` trailer sends nothing: human commits, Gemini CLI commits, commits made through the API or MCP tools, and cloud-agent commits known only by their author or `Co-authored-by` line. A PR without one also skips the reviews and CI lookups.
 - **A PR counts once per session.** When several sessions wrote one PR, each gets the PR scores, with `pr_session_count` saying how many. Count PRs with distinct `pr_number`.
+- **Mixed changes are labeled, not split.** Attribution is per commit: each agent commit goes to the session in its trailer, and human commits get no score. `pr_session_count` and `pr_human_commit_count` (merge commits aside) say how mixed the PR was; on `commit_reverted` they count the reverted commits. Filter both to keep a comparison to single-session, agent-only changes: `pr_session_count` = 1 and `pr_human_commit_count` = 0.
 - **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`; `coding-agents init` sets all three to the git email). The PR scores fall back to the PR author when, with `login`, the session's first commit has no GitHub account.
 - **Dry run:** set the repository variable `AMPLITUDE_OUTCOMES_DRY_RUN=true` and the job prints the scores instead of sending.
 - **EU:** set the repository variable `AMPLITUDE_REGION=eu`.
@@ -126,7 +127,7 @@ The session side is `[Agent] Session Trigger` on `[Agent] User Message`, `[Agent
 
 #### Best effort
 
-Setup version, reviews, first-run CI and the PR lookup behind deploy scores are enrichments. When the PR lookup fails, each deployed commit is scored on its own trailers, so a squash commit sends nothing. Each one is isolated and together they make at most 300 GitHub API requests per run, counting each page. When one fails or the budget runs out, its score or property is left out and the rest are still sent; the job log prints an `enrichments:` line with each one's status.
+Setup version, reviews, first-run CI and the PR lookups behind deploy and revert scores are enrichments. When a PR lookup fails, each deployed or reverted commit is scored on its own trailers, so a squash commit sends nothing. Each one is isolated and together they make at most 300 GitHub API requests per run, counting each page. When one fails or the budget runs out, its score or property is left out and the rest are still sent; the job log prints an `enrichments:` line with each one's status.
 
 #### Upgrading
 

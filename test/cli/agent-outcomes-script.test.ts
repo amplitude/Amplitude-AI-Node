@@ -292,6 +292,8 @@ describe('agent-outcomes.yml script', () => {
         repo: 'acme/app',
         merge_commit_sha: 'merge7',
         pr_number: 7,
+        pr_human_commit_count: 1,
+        pr_session_count: 2,
         base_branch: 'main',
         agent_setup_version: setupHash(['AGENTS.md:blob-a']),
         outcome_time: '2026-11-03T00:00:00.000Z',
@@ -648,8 +650,51 @@ describe('agent-outcomes.yml script', () => {
       revert_pr_number: 7,
       revert_merge_commit_sha: 'merge7',
       outcome_time: '2026-11-03T00:00:00.000Z',
+      pr_session_count: 1,
+      pr_human_commit_count: 1,
     });
     expect(r.events).toHaveLength(1);
+  });
+
+  it("scores a reverted squash commit on its PR's agent commits, with how mixed the change was", async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-10-20T01:00:00Z' });
+    world.commits.fb = commit('fb', 'fa', { message: agentMessage('s2', 'codex'), authored: '2026-10-20T02:00:00Z' });
+    world.commits.face0001 = commit('face0001', 'fb', { email: 'human@example.com' });
+    world.commits.feed41aa = commit('feed41aa', 'base', { message: 'Speed up checkout (#41)', email: 'human@example.com' });
+    world.associatedPrs = { feed41aa: [{ number: 41, merge_commit_sha: 'feed41aa', merged_at: '2026-10-21T00:00:00Z' }] };
+    world.prCommitsByNumber = { 41: ['fa', 'fb', 'face0001'] };
+    world.prCommits = ['c3'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload({ body: 'This reverts commit feed41aa.' }) });
+    const reverted = r.byName('commit_reverted');
+    expect(reverted.map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.time])).toEqual([
+      ['commit_reverted:acme/app:fa:7', 's1', Date.parse('2026-10-20T01:00:00Z')],
+      ['commit_reverted:acme/app:fb:7', 's2', Date.parse('2026-10-20T02:00:00Z')],
+    ]);
+    expect(props(reverted[0])).toMatchObject({ pr_session_count: 2, pr_human_commit_count: 1 });
+  });
+
+  it('reverts only the named commit when it is not the PR merge commit', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1') });
+    world.commits.face0001 = commit('face0001', 'fa', { email: 'human@example.com' });
+    world.associatedPrs = { face0001: [{ number: 41, merge_commit_sha: 'feed41aa', merged_at: '2026-10-21T00:00:00Z' }] };
+    world.prCommitsByNumber = { 41: ['fa', 'face0001'] };
+    world.prCommits = ['c3'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload({ body: 'This reverts commit face0001.' }) });
+    expect(r.byName('commit_reverted')).toEqual([]);
+    expect(r.calls.filter((c) => c === 'pulls.listCommits')).toHaveLength(1);
+  });
+
+  it('stamps how mixed the PR was on commit_merged, leaving merge commits out', async () => {
+    const world = linearWorld();
+    world.commits.mm = { ...commit('mm', 'c2', { message: "Merge branch 'main' into feature" }), parents: [{ sha: 'c2' }, { sha: 'base' }] };
+    world.prCommits = ['c1', 'c2', 'mm', 'c3'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byName('commit_merged').map((e) => [e.event_properties.pr_session_count, e.event_properties.pr_human_commit_count])).toEqual([
+      [2, 1],
+      [2, 1],
+    ]);
   });
 
   it.each([
