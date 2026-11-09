@@ -37,6 +37,8 @@ export async function runAgent(userId: string, sessionId: string, prompt: string
 
 Python has the same tracker: `from amplitude_ai.integrations.claude_agent_sdk import ClaudeAgentSDKTracker`.
 
+`new ClaudeAgentSDKTracker({ sessionTrigger: 'headless' })` sets `[Agent] Session Trigger` (`interactive`, `headless`, `ci`, `scheduled` or `event`) on every event. Without it the tracker uses `AMPLITUDE_SESSION_TRIGGER`, then `ci` under CI, and otherwise omits the property.
+
 `git commit` tool calls carry `commit_sha`, so code the agent writes joins its outcomes (see [Connect to outcomes](#connect-to-outcomes)).
 
 ---
@@ -85,6 +87,7 @@ These are your choice. Metadata only still sends tool names, success, tokens, co
 | `claude_code.api_request` (`model`, tokens, `cost_usd`, `duration_ms`) and `claude_code.assistant_response` (`response`) | one `[Agent] AI Response`, merged on `request_id` in either arrival order; tokens and cost are never doubled |
 | `claude_code.tool_result` (`tool_name`, `success`, `duration_ms`, `error_type`, `tool_input`, `vcs.ref.head.revision`) | `[Agent] Tool Call`, with `commit_sha` from `vcs.ref.head.revision` |
 | `claude_code.subagent_completed` | `[Agent] Span` |
+| how the session started | `[Agent] Session Trigger` is not mapped from Claude Code telemetry yet; that receiver mapping ships separately. The commit trailer already carries it: in CI it is `Agent-Trigger: ci`, or set it per job, for example `AMPLITUDE_SESSION_TRIGGER=ci claude -p "..."`. `[Agent] Root Agent Name` and `[Agent] Agent Chain Depth` aren't set for Claude Code either |
 
 Other Claude Code log events are accepted, counted and dropped.
 

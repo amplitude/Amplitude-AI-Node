@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.0
+
+### Added
+- **`[Agent] Session Trigger`.** How a coding-agent session started: `interactive`, `headless`, `ci`, `scheduled` or `event` (`PROP_SESSION_TRIGGER`, `SESSION_TRIGGERS`). `resolveSessionTrigger` from `@amplitude/ai/integrations/session-trigger` picks an explicit value, then `AMPLITUDE_SESSION_TRIGGER`, then `ci` when `GITHUB_ACTIONS=true` or `CI` is set (not `false` or `0`), then the harness's own hint; only those five exact values count, and the property is omitted when none applies. `CodexSDKTracker` and `ClaudeAgentSDKTracker` take a `sessionTrigger` option. The Codex hook reads the variable and falls back to the rollout's `source` (`exec` and `mcp` are `headless`, `cli` and `vscode` are `interactive`); the Cursor hook reads it at send time. `buzz.mjs` and `cursor-agent-sdk.mjs` take a `trigger` mapping option. The OpenTelemetry harnesses (Claude Code, Copilot, Gemini CLI, goose) get it from the receiver, which ships separately.
+- **Agent tree lineage for Codex and Cursor.** Every event from the Codex and Cursor hooks carries `[Agent] Root Agent Name` (`codex` or `AMPLITUDE_AGENT_ID`, and `cursor`) and the new `[Agent] Agent Chain Depth` (`PROP_AGENT_CHAIN_DEPTH`): 1 for the root, 2 for a subagent, one more per level of a Codex `agent_path`. `codexAgentLineage` and `codexSourceTrigger` are exported from `@amplitude/ai/integrations/codex-rollout`.
+- **`Agent-Trigger` commit trailer.** The `prepare-commit-msg` hook adds `Agent-Trigger: <trigger>` to agent commits when `AMPLITUDE_SESSION_TRIGGER` is one of the five values or CI is detected. `coding-agents init` replaces the untouched 0.28.0 hook without `--force` and keeps an edited one; `doctor` reports an earlier shipped hook as `installed (outdated: re-run init)`.
+- **Outcomes workflow: trigger and review timing.** Commit-level events carry `agent_trigger`, from the `Agent-Trigger` trailer, else `event` for a commit authored by a bot coding agent. `Pull Request Merged` carries `agent_triggers` (distinct, sorted, at most 5), `hours_open`, `hours_to_first_review` (to the first human review; `null` without one) and `review_rounds` (change requests followed by a PR commit); the review fields are `null` when the reviews enrichment fails. `outcomes_workflow_version` stays `2` and insert IDs are unchanged. `init` replaces the untouched 0.28.0 workflow without `--force`. The Python SDK ships the same bytes for both files.
+- **Guides.** The `code-outcomes` recipe documents the new fields, four by-stage chart recipes and how to measure a prompt that spread across a team; each harness guide has a Session Trigger row, and the Codex and Cursor guides the lineage rows. Step 3m of `amplitude-ai.md`, the instrument skill and command, `AGENTS.md`, `llms.txt` and `scan_project` mention the trigger, the trailer and the review fields.
+
+### Changed
+- **Cursor insert-ID vectors.** `test/fixtures/cursor/insert-id-vectors.json` now lists the lineage properties in each call's `event_properties`. Insert IDs are unchanged.
+
 ## 0.28.0
 
 ### Added

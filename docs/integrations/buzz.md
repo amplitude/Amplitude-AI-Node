@@ -124,6 +124,7 @@ Copy [buzz.mjs](./buzz.mjs) unchanged next to the job (it also ships in the npm 
 | Kind 44200 `sessionId` (goose `sessions.id`) and `harness` | `harness_session_id` and `harness` in `[Agent] Context`; the key to the worker's tool calls |
 | goose `toolRequest` and `toolResponse` | `[Agent] Tool Call` with `[Agent] Tool Name`, `[Agent] Tool Input`, `[Agent] Tool Output`, `[Agent] Tool Success`, and `commit_sha` |
 | Kind 0 profile with an `auth` tag | an agent; its `name` is the Agent ID unless the mapping names one |
+| The mapping's `trigger` (`interactive`, `headless`, `ci`, `scheduled` or `event`) | `[Agent] Session Trigger` on every event. Buzz doesn't record how a thread started, so it is omitted unless you pass it; any other value is ignored. Mentions between agents are delegation, not a trigger |
 
 ### Buzz job
 

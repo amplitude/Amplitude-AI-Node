@@ -47,6 +47,7 @@ bot/hooks/amplitude.ts
 - **User ID:** a field you name on `ctx.session.auth` or channel state. It must match product analytics. The guide does not guess it. Slack `attributes.user_id` on an approval is the approver, not the default.
 - **Reply text:** `turn.completed.data.result`. Phase 2 checks that this is the full reply.
 - **Model:** the `model` string in `bot/agent.ts`. If `agent.ts` omits it, ask which model the deployment runs. The SDK default is not available on every account.
+- **Session Trigger:** the `trigger` you pass to `normalize`, one of `interactive`, `headless`, `ci`, `scheduled` or `event`, becomes `[Agent] Session Trigger`. The hook below reads `AMPLITUDE_SESSION_TRIGGER`; set it per deployment, for example `scheduled` for an agent that runs from `bot/schedules/`. Omitted when unset.
 
 Turns with no user id are skipped and counted, not sent.
 
@@ -160,6 +161,8 @@ async function onEvent(event: SessionEvent, ctx: HookContext, flush = false) {
     mode: ctx.session.mode,
     state: prior,
     contentMode: process.env.AMPLITUDE_CONTENT_MODE === 'metadata_only' ? 'metadata_only' : 'full',
+    // [Agent] Session Trigger: interactive, headless, ci, scheduled or event. Other values are ignored.
+    trigger: process.env.AMPLITUDE_SESSION_TRIGGER,
   });
   buffers.delete(ctx.session.id);
   if (result.events.length === 0) return;

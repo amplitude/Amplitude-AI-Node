@@ -44,6 +44,7 @@ Python has the same tracker for `openai-codex`: `from amplitude_ai.integrations.
 | `command_execution`, `file_change`, `mcp_tool_call`, `web_search` | `[Agent] Tool Call` with status and exit code; `commit_sha` from `git commit` output |
 | `turn.completed.usage` | tokens on the turn's last AI Response |
 | `turn.failed`, `error` | errors |
+| the `sessionTrigger` option, else `AMPLITUDE_SESSION_TRIGGER`, else `ci` under CI | `[Agent] Session Trigger` on every event (omitted when none applies) |
 
 Codex events don't carry the model, so pass `ThreadOptions.model`; cost is never invented.
 
@@ -77,6 +78,7 @@ Variables set in the environment win over `.amplitude-ai/local.env` (found by wa
 | `AMPLITUDE_USER_ID` | `git config user.email` | User ID; must match the commit author email the outcomes workflow uses |
 | `AMPLITUDE_AI_CONTENT_MODE` | `full` | `metadata_only` (alias `metadata`) or `customer_enriched` |
 | `AMPLITUDE_AGENT_ID` | `codex` | Root agent ID |
+| `AMPLITUDE_SESSION_TRIGGER` | `ci` under CI, else from the rollout's `source` | `interactive`, `headless`, `ci`, `scheduled` or `event`: `[Agent] Session Trigger` |
 | `AMPLITUDE_AI_HOME` | `~/.amplitude-ai` | Cursor directory (`codex/` under it) |
 | `AMPLITUDE_AI_HOOK_DRY_RUN=1` or `--dry-run` | off | Print events instead of sending |
 
@@ -92,6 +94,8 @@ Variables set in the environment win over `.amplitude-ai/local.env` (found by wa
 | `token_count.last_token_usage` | tokens on the turn's last AI Response |
 | `task_complete.error`, `turn_aborted` | errors. A user interrupt or a replaced turn is not an error |
 | subagent `session_meta` (`parent_thread_id` or `source.subagent.thread_spawn`) | `[Agent] Agent ID` `codex/<role>` (or `codex/<path>`) with `[Agent] Parent Agent ID`; records copied from the parent before `subagent_history_start_ordinal` are skipped |
+| the thread's place in the agent tree | `[Agent] Root Agent Name` (`codex`, or `AMPLITUDE_AGENT_ID`) and `[Agent] Agent Chain Depth`: 1 for the root thread, 2 for a subagent it spawned, one more per level of an `agent_path` (`/root/a/b` is 3) |
+| `session_meta` `source` | `[Agent] Session Trigger` when `AMPLITUDE_SESSION_TRIGGER` and CI don't set it: `exec` and `mcp` are `headless`, `cli` and `vscode` are `interactive`; other sources leave it unset |
 | `mcp_tool_call_end`, `patch_apply_end`, `item_completed` (`McpToolCall`, `FileChange`) | the success and error of that call's `[Agent] Tool Call`: function outputs don't record them, so an MCP `Err` or `isError` result, or a failed or declined patch, is read from these events |
 | `inter_agent_communication`, a plaintext `agent_message` item, or (older rollouts) an assistant message whose text is the inter-agent JSON, addressed to this thread (`recipient` or `other_recipients`) | `[Agent] User Message` with `[Agent] Message Source` `agent`: the parent's instruction to a subagent, or a subagent's report to the root. Messages the thread sent itself and messages for other agents are skipped |
 

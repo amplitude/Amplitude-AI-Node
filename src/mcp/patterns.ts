@@ -93,19 +93,23 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       'npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\n' +
       'printf %s "$AMPLITUDE_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-agents init --api-key-stdin --privacy full\n' +
       'npx -y -p @amplitude/ai amplitude-ai coding-agents doctor\n' +
-      '# Then add the AMPLITUDE_API_KEY repository secret for the outcomes workflow.',
+      '# Then add the AMPLITUDE_API_KEY repository secret for the outcomes workflow.\n' +
+      '# Scheduled or webhook-started agents: set the trigger in that job ([Agent] Session Trigger and the\n' +
+      '# Agent-Trigger commit trailer; CI is detected as ci). Pull Request Merged carries review_rounds and hours_to_first_review.\n' +
+      'export AMPLITUDE_SESSION_TRIGGER=scheduled   # interactive | headless | ci | scheduled | event',
   },
   {
     id: 'codex-sdk-tracker',
     title: 'App built on the Codex SDK: CodexSDKTracker',
     whenToUse:
       'The app drives Codex through @openai/codex-sdk (or `codex exec --json`). Maps thread events to User Message, ' +
-      'AI Response (with turn usage) and Tool Call (with commit_sha on git commits).',
+      'AI Response (with turn usage) and Tool Call (with commit_sha on git commits). sessionTrigger sets ' +
+      '[Agent] Session Trigger (default AMPLITUDE_SESSION_TRIGGER, then ci under CI).',
     snippet:
       'import { Codex } from "@openai/codex-sdk";\n' +
       'import { CodexSDKTracker } from "@amplitude/ai/integrations/codex-sdk";\n' +
       'const thread = new Codex().startThread({ model: "gpt-5.5" });\n' +
-      'const tracker = new CodexSDKTracker({ model: "gpt-5.5" });\n' +
+      'const tracker = new CodexSDKTracker({ model: "gpt-5.5", sessionTrigger: "headless" });\n' +
       'const session = ai.agent("codex-runner").session({ userId });\n' +
       'const { events } = await thread.runStreamed(prompt);\n' +
       'for await (const event of tracker.track(session, events, prompt)) { /* your handling */ }',
