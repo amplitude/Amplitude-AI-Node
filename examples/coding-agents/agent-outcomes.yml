@@ -89,6 +89,9 @@ jobs:
             };
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
             const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id');
+            // A commit may stand for a merged PR when it has no session, or when its title ends
+            // in GitHub's squash "(#123)": a squash keeps its commits' trailers in the body.
+            const mayStandForPr = (c) => !sessionOf(c) || /\(#\d+\)\s*$/.test((c.commit.message || '').split('\n')[0]);
             const isMerge = (c) => (c.parents?.length || 0) > 1;
             // How mixed a change is: its agent sessions and its human commits (merge commits
             // aside), so a comparison can keep to single-session, agent-only changes.
@@ -370,8 +373,8 @@ jobs:
                   agent_setup_version: setupVersions.get(c.sha),
                 }, c.sha, mergedAt);
               }
-              // A squash or merge commit keeps no trailers, so a revert of a PR's merge commit
-              // stands for that PR's commits. A revert of any other commit is that commit.
+              // A revert of a PR's squash or merge commit stands for that PR's commits. A revert
+              // of any other commit is that commit.
               const revertedCommits = new Map();
               const revertedPrs = new Set();
               for (const sha of reverted) {
@@ -383,7 +386,7 @@ jobs:
                   continue;
                 }
                 remember(original);
-                const fromPr = sessionOf(original) ? null : await enrich('reverted_prs', async () => {
+                const fromPr = !mayStandForPr(original) ? null : await enrich('reverted_prs', async () => {
                   const { data: prs } = await call(() => github.rest.repos.listPullRequestsAssociatedWithCommit({
                     owner, repo, commit_sha: original.sha,
                   }));
@@ -479,17 +482,17 @@ jobs:
                 commits = [(await github.rest.repos.getCommit({ owner, repo, ref: deployment.sha })).data];
               }
               commits.forEach(remember);
-              // A squash or rebase merge writes new commits, and a squash commit keeps
-              // neither the trailers nor the author date. So a deployed commit stands for
-              // its merged PR's commits, each scored once on the session that wrote it. A
-              // commit with no merged PR, or whose lookup fails, stands for itself.
+              // A squash or merge commit has the merge time as its author date and may hold
+              // several sessions. So it stands for its merged PR's commits, each scored once
+              // on the session that wrote it. A commit with no merged PR, or whose lookup
+              // fails, stands for itself.
               const scored = new Map();
               const seen = new Set();
               const listedPrs = new Set();
               for (const c of commits) {
                 if (seen.has(c.sha)) continue;
                 seen.add(c.sha);
-                const fromPr = sessionOf(c) ? null : await enrich('deployed_prs', async () => {
+                const fromPr = !mayStandForPr(c) ? null : await enrich('deployed_prs', async () => {
                   const { data: prs } = await call(() => github.rest.repos.listPullRequestsAssociatedWithCommit({
                     owner, repo, commit_sha: c.sha,
                   }));

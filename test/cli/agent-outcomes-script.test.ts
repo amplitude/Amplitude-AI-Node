@@ -674,6 +674,22 @@ describe('agent-outcomes.yml script', () => {
     expect(props(reverted[0])).toMatchObject({ pr_session_count: 2, pr_human_commit_count: 1 });
   });
 
+  it('expands a reverted squash commit that kept its commit\'s trailer', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-10-20T01:00:00Z' });
+    world.commits.feed41aa = commit('feed41aa', 'base', {
+      message: `Speed up checkout (#41)\n\n${agentMessage('s1')}`,
+      authored: '2026-10-21T00:00:00Z',
+    });
+    world.associatedPrs = { feed41aa: [{ number: 41, merge_commit_sha: 'feed41aa', merged_at: '2026-10-21T00:00:00Z' }] };
+    world.prCommitsByNumber = { 41: ['fa'] };
+    world.prCommits = ['c3'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload({ body: 'This reverts commit feed41aa.' }) });
+    expect(r.byName('commit_reverted').map((e) => [e.insert_id, e.time])).toEqual([
+      ['commit_reverted:acme/app:fa:7', Date.parse('2026-10-20T01:00:00Z')],
+    ]);
+  });
+
   it('reverts only the named commit when it is not the PR merge commit', async () => {
     const world = linearWorld();
     world.commits.fa = commit('fa', 'base', { message: agentMessage('s1') });
@@ -759,6 +775,24 @@ describe('agent-outcomes.yml script', () => {
       ['deploy_succeeded:acme/app:fb:2', 's2', Date.parse('2026-11-01T02:00:00Z')],
     ]);
     expect(r.events[0]!.event_properties.deployment_sha).toBe('head');
+  });
+
+  it('expands a deployed squash commit that kept its commits\' trailers', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
+    world.commits.fb = commit('fb', 'fa', { message: agentMessage('s2', 'codex'), authored: '2026-11-01T02:00:00Z' });
+    world.commits.head = commit('head', 'base', {
+      message: `Speed up checkout (#7)\n\n* one\n\n${agentMessage('s1')}* two\n\n${agentMessage('s2', 'codex')}`,
+      authored: '2026-11-01T09:00:00Z',
+    });
+    world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
+    world.prCommitsByNumber = { 7: ['fa', 'fb'] };
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.time])).toEqual([
+      ['deploy_succeeded:acme/app:fa:2', 's1', Date.parse('2026-11-01T01:00:00Z')],
+      ['deploy_succeeded:acme/app:fb:2', 's2', Date.parse('2026-11-01T02:00:00Z')],
+    ]);
   });
 
   it('looks up each merged PR once when the deploy range holds its commits and merge commit', async () => {
