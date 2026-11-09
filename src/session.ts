@@ -15,6 +15,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { AgentContext, ContextPolicy } from './agent-context.js';
+import {
+  AGENT_CONTEXT_PROPERTIES,
+  type InboundContext,
+  resolveInboundContext,
+  sessionAgentContextProperties,
+} from './agent-context-properties.js';
 import type {
   AiMessageOpts,
   BoundAgent,
@@ -29,6 +36,7 @@ import {
   _sessionStorage,
   getActiveContext,
   SessionContext,
+  type SessionContextOptions,
 } from './context.js';
 import {
   DEFAULT_FLUSH_TIMEOUT_MS,
@@ -112,6 +120,16 @@ export interface SessionOptions {
    *   where the caller manages session lifecycle externally
    */
   trackSessionEnd?: boolean;
+  /**
+   * The inbound context from `extractA2aMetadata`, `extractAcpMeta` or
+   * `extractContext`. A trusted context adopts the caller's session, user,
+   * parent agent and trace ID. An untrusted one starts a fresh session and
+   * records the caller as `[Agent] Peer Agent ID`, `Peer Session ID` and
+   * `Peer Trace ID`. Every event also carries `[Agent] Context Trust`,
+   * `Context Verify Result`, `Actor Type` and `Identity Type`. Explicit
+   * `sessionId` / `userId` options win.
+   */
+  context?: AgentContext | null;
 }
 
 export class Session {
@@ -138,11 +156,28 @@ export class Session {
   private _parent: Session | null = null;
   private readonly _children = new Set<Session>();
   private readonly _contexts = new Set<SessionContext>();
+  /** @internal The resolved inbound agent context, if `context` was passed. */
+  _inbound: InboundContext | null;
+  private _parentAgentId: string | null;
 
   constructor(agent: BoundAgent, opts: SessionOptions = {}) {
-    this.sessionId = opts.sessionId ?? randomUUID();
+    let inbound = resolveInboundContext(opts.context);
+    // An explicit session leaves the caller's session, so its trace is linked as a peer, not shared:
+    // two sessions on one trace merge into one trace row.
+    if (inbound?.sessionId != null && opts.sessionId && opts.sessionId !== inbound.sessionId) {
+      inbound = {
+        ...inbound,
+        traceId: null,
+        peerSessionId: inbound.peerSessionId ?? inbound.sessionId,
+        peerTraceId: inbound.peerTraceId ?? inbound.traceId,
+      };
+    }
+    this._inbound = inbound;
+    this._parentAgentId = inbound?.parentAgentId ?? null;
+    if (inbound?.traceId) this.traceId = inbound.traceId;
+    this.sessionId = opts.sessionId ?? inbound?.sessionId ?? randomUUID();
     this.idleTimeoutMinutes = opts.idleTimeoutMinutes ?? null;
-    this.userId = opts.userId ?? null;
+    this.userId = opts.userId ?? inbound?.userId ?? null;
     this.deviceId =
       opts.deviceId ?? (agent._defaults.deviceId as string | null);
     this.browserSessionId =
@@ -174,7 +209,7 @@ export class Session {
       traceId: this.traceId,
       userId: (this.userId ?? defaults.userId) as string | null,
       agentId: defaults.agentId as string | null,
-      parentAgentId: defaults.parentAgentId as string | null,
+      parentAgentId: this._parentAgentId ?? (defaults.parentAgentId as string | null),
       env: defaults.env as string | null,
       customerOrgId: defaults.customerOrgId as string | null,
       agentVersion: defaults.agentVersion as string | null,
@@ -193,10 +228,31 @@ export class Session {
         (ai as unknown as { _privacyConfig?: PrivacyConfig | null })
           ._privacyConfig ?? null,
       skipAutoUserTracking: this._skipAutoUserTracking,
+      contextPolicy:
+        (ai as { config?: { contextPolicy?: ContextPolicy | null } }).config
+          ?.contextPolicy ?? null,
+      ...this._inboundFields(),
     });
     ctx._session = this;
     ctx.sessionExperiments = [...this._root()._experiments];
     return ctx;
+  }
+
+  private _inboundFields(): Pick<
+    SessionContextOptions,
+    'peerAgentId' | 'peerSessionId' | 'peerTraceId' | 'contextTrust' | 'verifyResult' | 'actorType' | 'identityType'
+  > {
+    const inbound = this._inbound;
+    if (inbound == null) return {};
+    return {
+      peerAgentId: inbound.peerAgentId,
+      peerSessionId: inbound.peerSessionId,
+      peerTraceId: inbound.peerTraceId,
+      contextTrust: inbound.contextTrust,
+      verifyResult: inbound.verifyResult,
+      actorType: inbound.actorType,
+      identityType: inbound.identityType,
+    };
   }
 
   /**
@@ -317,6 +373,7 @@ export class Session {
       trackSessionEnd: false,
     });
     childSession.traceId = this.traceId;
+    childSession._inbound = this._inbound;
     childSession._skipAutoUserTracking = true;
     childSession._parent = this;
     this._children.add(childSession);
@@ -459,11 +516,20 @@ export class Session {
       merged.deviceId = this.deviceId;
     if (this.browserSessionId != null && merged.browserSessionId == null)
       merged.browserSessionId = this.browserSessionId;
-    if (this._sessionReplayId != null || this.tags != null) {
+    if (this._parentAgentId != null && merged.parentAgentId == null)
+      merged.parentAgentId = this._parentAgentId;
+    const inboundProps =
+      this._inbound != null && merged.sessionId === this.sessionId && merged.peer == null
+        ? sessionAgentContextProperties(this._inboundFields())
+        : null;
+    if (this._sessionReplayId != null || this.tags != null || inboundProps != null) {
       const existingEp = merged.eventProperties as
         | Record<string, unknown>
         | undefined;
       const ep = existingEp != null ? { ...existingEp } : {};
+      if (inboundProps != null && !AGENT_CONTEXT_PROPERTIES.some((key) => key in ep)) {
+        Object.assign(ep, inboundProps);
+      }
       if (this._sessionReplayId != null && !(PROP_SESSION_REPLAY_ID in ep)) {
         ep[PROP_SESSION_REPLAY_ID] = this._sessionReplayId;
       }

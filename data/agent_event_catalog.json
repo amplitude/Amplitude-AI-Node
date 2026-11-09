@@ -37,6 +37,41 @@
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
         },
         {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
+        },
+        {
           "name": "[Agent] Customer Org ID",
           "type": "string",
           "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
@@ -333,6 +368,41 @@
           "name": "[Agent] Parent Agent ID",
           "type": "string",
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
         },
         {
           "name": "[Agent] Customer Org ID",
@@ -797,6 +867,41 @@
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
         },
         {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
+        },
+        {
           "name": "[Agent] Customer Org ID",
           "type": "string",
           "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
@@ -1038,6 +1143,41 @@
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
         },
         {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
+        },
+        {
           "name": "[Agent] Customer Org ID",
           "type": "string",
           "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
@@ -1211,6 +1351,41 @@
           "name": "[Agent] Parent Agent ID",
           "type": "string",
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
         },
         {
           "name": "[Agent] Customer Org ID",
@@ -1402,6 +1577,41 @@
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
         },
         {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
+        },
+        {
           "name": "[Agent] Customer Org ID",
           "type": "string",
           "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
@@ -1562,6 +1772,41 @@
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
         },
         {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
+        },
+        {
           "name": "[Agent] Customer Org ID",
           "type": "string",
           "description": "Organization ID for multi-tenant platforms. Enables account-level group analytics."
@@ -1696,6 +1941,41 @@
           "name": "[Agent] Parent Agent ID",
           "type": "string",
           "description": "For multi-agent orchestration: the agent that delegated to this agent."
+        },
+        {
+          "name": "[Agent] Peer Agent ID",
+          "type": "string",
+          "description": "Agent context: the calling agent, when its context did not verify (untrusted). Links the session to the caller without adopting its IDs. On a tool call, the peer that answered that call."
+        },
+        {
+          "name": "[Agent] Peer Session ID",
+          "type": "string",
+          "description": "Agent context: the calling agent's session, when its context did not verify (untrusted). On a tool call, the peer's session for that call."
+        },
+        {
+          "name": "[Agent] Peer Trace ID",
+          "type": "string",
+          "description": "Agent context: the caller's trace ID, when its context did not verify. The session keeps its own [Agent] Trace ID."
+        },
+        {
+          "name": "[Agent] Context Trust",
+          "type": "string",
+          "description": "Agent context: 'trusted' (signature verified), 'untrusted' (any other verify result) or 'none' (no inbound context). Derived from [Agent] Context Verify Result."
+        },
+        {
+          "name": "[Agent] Context Verify Result",
+          "type": "string",
+          "description": "Agent context: why the inbound context was or was not trusted: ok, unsigned, unsupported_alg, bad_signature, unknown_kid, expired, not_yet_valid or malformed."
+        },
+        {
+          "name": "[Agent] Actor Type",
+          "type": "string",
+          "description": "Agent context: who is acting, 'agent' or 'human'. A2A is always agent; ACP and HTTP use the signed actor type, else human."
+        },
+        {
+          "name": "[Agent] Identity Type",
+          "type": "string",
+          "description": "Agent context: how the user ID was propagated: 'account', 'pairwise' (per-recipient pseudonym) or 'none'."
         },
         {
           "name": "[Agent] Customer Org ID",

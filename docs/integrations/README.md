@@ -74,6 +74,12 @@ Scrub content before it leaves your infrastructure. Amplitude does not scrub aft
 
 Requests go through a router or gateway that picks the model. Wrap the client with the SDK, have the router export OpenTelemetry GenAI spans with the identity your application passes on each request, or post events over the HTTP API. See [routers.md](./routers.md) and the identity contract in [analytics-metadata.schema.json](./analytics-metadata.schema.json).
 
+## Agents that call other agents
+
+When your agent calls another agent over A2A, the Agent Client Protocol or HTTP, including an agent another company runs, the SDK links the two sessions with agent context. Pass the extracted context to `session({ context })`. A context signed with a key both sides share joins the caller's session; any other context starts a new session linked by `[Agent] Peer Agent ID`, `[Agent] Peer Session ID` and `[Agent] Peer Trace ID`, with `[Agent] Context Trust` and `[Agent] Context Verify Result` recording why. See "Context Propagation" in the [Node README](../../README.md#context-propagation); the Python SDK uses the same wire format and signing.
+
+If you instrument with OpenTelemetry instead of the SDK, the same properties come from the span attributes `amplitude.peer.agent.id`, `amplitude.peer.session.id`, `amplitude.peer.trace.id`, `amplitude.context.trust`, `amplitude.context.verify.result`, `amplitude.actor.type` and `amplitude.identity.type`. Don't copy inbound W3C `baggage` from agents you don't operate into span attributes such as `session.id`, `user.id`, `enduser.id`, `gen_ai.conversation.id` or any `amplitude.*` key: a peer could then set your session or user.
+
 ## Data warehouses
 
 Conversations or traces already land in Snowflake, BigQuery, or Databricks; a SQL view turns them into `[Agent]` events that Amplitude's warehouse import reads. Span exports (OpenTelemetry GenAI, OpenInference, MLflow Tracing) are replayed to Amplitude's OTLP endpoint instead. Start at [warehouses/README.md](./warehouses/README.md).

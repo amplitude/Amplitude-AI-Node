@@ -1,18 +1,308 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  A2A_CONTEXT_KEY,
+  AGENT_CONTEXT_CLOCK_SKEW_SECONDS,
+  AGENT_CONTEXT_MIN_SECRET_BYTES,
+  _inspectAgentContext,
+  ContextPolicy,
+  type ContextTransport,
+  type ContextTrust,
+  contextTrust,
+  ENV_CONTEXT_ACTIVE_KID,
+  ENV_CONTEXT_KEYS,
+  ENV_PAIRWISE_SALTS,
+  type VerifyResult,
+} from '../agent-context.js';
 import { redactPiiPatterns } from '../core/privacy.js';
+import { _httpWire } from '../propagation.js';
 import { MockAmplitudeAI } from '../testing.js';
 import { hasCodingAgentsSetup, runCodingAgentsDoctor } from './coding-agents.js';
 import { PROVIDER_NPM_PACKAGES } from './providers.js';
 
+type DoctorCheck = {
+  name: string;
+  ok: boolean;
+  detail: string;
+  fix?: string;
+  /** A passing check worth a look (`warning`) or for information only (`info`). */
+  level?: 'info' | 'warning';
+};
+
 type DoctorResult = {
   ok: boolean;
-  checks: Array<{ name: string; ok: boolean; detail: string; fix?: string }>;
+  checks: DoctorCheck[];
 };
 
 type DoctorOptions = {
   includeMockCheck?: boolean;
   apiKeyEnv?: string;
+  /** Environment to read; defaults to `process.env`. */
+  env?: Record<string, string | undefined>;
+};
+
+type Env = Record<string, string | undefined>;
+
+// An invalid kid is echoed by ContextPolicy; it may be a secret pasted in the wrong place.
+const _errorMessage = (e: unknown): string =>
+  e instanceof Error
+    ? e.message.replace(/^Invalid agent context kid .*?: use/s, 'Invalid agent context kid: use')
+    : 'invalid configuration';
+
+const _keysPolicy = (env: Env): ContextPolicy =>
+  ContextPolicy.fromEnv({
+    [ENV_CONTEXT_KEYS]: env[ENV_CONTEXT_KEYS],
+    [ENV_CONTEXT_ACTIVE_KID]: env[ENV_CONTEXT_ACTIVE_KID],
+  });
+
+/** The policy the runtime builds: keys, active kid and pairwise salts together. */
+const _runtimePolicy = (env: Env): ContextPolicy =>
+  ContextPolicy.fromEnv({
+    [ENV_CONTEXT_KEYS]: env[ENV_CONTEXT_KEYS],
+    [ENV_CONTEXT_ACTIVE_KID]: env[ENV_CONTEXT_ACTIVE_KID],
+    [ENV_PAIRWISE_SALTS]: env[ENV_PAIRWISE_SALTS],
+  });
+
+const _list = (items: readonly unknown[]): string =>
+  items.length > 0 ? items.join(', ') : 'none';
+
+/**
+ * The `agent_context.*` checks. Messages come from `ContextPolicy`, which
+ * never includes a secret; only kids, counts and salt versions are printed.
+ */
+const agentContextChecks = (env: Env): DoctorCheck[] => {
+  const checks: DoctorCheck[] = [];
+  const keysFix = `Set ${ENV_CONTEXT_KEYS} to a JSON object of key ID to secret (each at least ${AGENT_CONTEXT_MIN_SECRET_BYTES} random bytes, kids of [A-Za-z0-9._-]), and ${ENV_CONTEXT_ACTIVE_KID} when there are several keys.`;
+
+  let policy: ContextPolicy | null = null;
+  let keysError: string | null = null;
+  try {
+    policy = _keysPolicy(env);
+  } catch (e) {
+    keysError = _errorMessage(e);
+  }
+  // Mirror the runtime: an invalid configuration is ignored and unsigned HTTP is then rejected.
+  let runtime: ContextPolicy | null = null;
+  try {
+    runtime = _runtimePolicy(env);
+  } catch {
+    runtime = null;
+  }
+  if (keysError != null) {
+    checks.push({
+      name: 'agent_context.keys',
+      ok: false,
+      detail: `invalid: ${keysError} The SDK ignores it and treats every inbound context as untrusted.`,
+      fix: keysFix,
+    });
+  } else if (policy == null || policy.kids.length === 0) {
+    checks.push({
+      name: 'agent_context.keys',
+      ok: true,
+      level: 'info',
+      detail: `not configured: outbound agent context is unsigned and receivers treat it as untrusted (link-only). Set ${ENV_CONTEXT_KEYS} on both services to sign it.`,
+    });
+  } else if (runtime == null) {
+    checks.push({
+      name: 'agent_context.keys',
+      ok: false,
+      detail: `${policy.kids.length} key(s) configured but ignored at runtime: ${ENV_PAIRWISE_SALTS} is invalid, so the SDK verifies with no keys and treats every inbound context as untrusted.`,
+      fix: `Fix ${ENV_PAIRWISE_SALTS} (see agent_context.pairwise_salts).`,
+    });
+  } else {
+    checks.push({
+      name: 'agent_context.keys',
+      ok: true,
+      detail: `${policy.kids.length} key(s) configured (kids: ${_list(policy.kids)}); active kid: ${policy.activeKid ?? 'none'}`,
+    });
+  }
+
+  checks.push({
+    name: 'agent_context.unsigned_http',
+    ok: true,
+    level: 'info',
+    detail:
+      runtime == null
+        ? 'acceptUnsignedHttp=false (key configuration is invalid): the SDK ignores it and treats unsigned x-amplitude-* headers as untrusted.'
+        : runtime.acceptUnsignedHttp
+          ? 'acceptUnsignedHttp=true (no signing keys): extractContext adopts unsigned x-amplitude-* headers. Deprecated: the next major release treats unsigned HTTP context as untrusted.'
+          : 'acceptUnsignedHttp=false (signing keys configured): unsigned x-amplitude-* headers are untrusted. Adopting unsigned HTTP context is deprecated and ends in the next major release.',
+  });
+
+  try {
+    const salts = ContextPolicy.fromEnv({ [ENV_PAIRWISE_SALTS]: env[ENV_PAIRWISE_SALTS] });
+    const versions = salts.pairwiseVersions;
+    checks.push({
+      name: 'agent_context.pairwise_salts',
+      ok: true,
+      ...(versions.length === 0 && { level: 'info' as const }),
+      detail:
+        versions.length === 0
+          ? `not configured: identity 'pairwise' is unavailable until ${ENV_PAIRWISE_SALTS} is set.`
+          : `versions: ${_list(versions)} (active: ${versions[versions.length - 1]})`,
+    });
+  } catch (e) {
+    checks.push({
+      name: 'agent_context.pairwise_salts',
+      ok: false,
+      detail: `invalid: ${_errorMessage(e)}`,
+      fix: `Set ${ENV_PAIRWISE_SALTS} to a JSON object of positive integer version to salt (each at least ${AGENT_CONTEXT_MIN_SECRET_BYTES} random bytes).`,
+    });
+  }
+  return checks;
+};
+
+// ----------------------------------------------------------------------
+// doctor --verify
+// ----------------------------------------------------------------------
+
+type VerifyReport = {
+  transport: ContextTransport | null;
+  verify_result: VerifyResult;
+  trust: ContextTrust;
+  kid: string | null;
+  iat: number | null;
+  exp: number | null;
+  /** `now - iat` in seconds; negative when `iat` is in the future. */
+  clock_delta_seconds: number | null;
+  explanation: string;
+};
+
+type VerifyOptions = {
+  transport?: ContextTransport;
+  env?: Env;
+  /** Unix seconds; defaults to now. */
+  now?: number;
+};
+
+const TRANSPORTS: readonly ContextTransport[] = ['a2a', 'acp', 'http'];
+
+const _isRecord = (value: unknown): value is Record<string, unknown> =>
+  value != null && typeof value === 'object' && !Array.isArray(value);
+
+const detectTransport = (wire: Record<string, unknown>): ContextTransport | null => {
+  const keys = Object.keys(wire);
+  if (keys.includes(A2A_CONTEXT_KEY)) return 'a2a';
+  if (keys.some((k) => k.toLowerCase().startsWith('x-amplitude-'))) return 'http';
+  if (keys.some((k) => k.startsWith('com.amplitude/'))) return 'acp';
+  return null;
+};
+
+const _malformed = (transport: ContextTransport | null, explanation: string): VerifyReport => ({
+  transport,
+  verify_result: 'malformed',
+  trust: 'untrusted',
+  kid: null,
+  iat: null,
+  exp: null,
+  clock_delta_seconds: null,
+  explanation,
+});
+
+/**
+ * Verify one envelope (A2A `metadata`, ACP `_meta` or an HTTP header map, as
+ * JSON) with the environment's policy and explain the result. Never prints
+ * or returns a secret.
+ */
+const runVerify = (input: string, options: VerifyOptions = {}): VerifyReport => {
+  const env = options.env ?? process.env;
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  if (options.transport != null && !TRANSPORTS.includes(options.transport)) {
+    return _malformed(null, `unknown transport ${JSON.stringify(String(options.transport).slice(0, 16))}: use a2a, acp or http`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    return _malformed(options.transport ?? null, 'the envelope is not valid JSON');
+  }
+  if (!_isRecord(parsed)) {
+    return _malformed(options.transport ?? null, 'the envelope must be a JSON object (A2A metadata, ACP _meta or HTTP headers)');
+  }
+  const transport = options.transport ?? detectTransport(parsed);
+  if (transport == null) {
+    return _malformed(
+      null,
+      `no agent context found: expected a "${A2A_CONTEXT_KEY}" key (A2A), x-amplitude-* headers (HTTP) or com.amplitude/* keys (ACP)`,
+    );
+  }
+
+  let configNote = '';
+  let policy: ContextPolicy;
+  try {
+    _keysPolicy(env);
+    try {
+      policy = _runtimePolicy(env);
+    } catch (e) {
+      policy = new ContextPolicy({ acceptUnsignedHttp: false });
+      configNote = ` (the agent context configuration is invalid and ignored, as at runtime: ${_errorMessage(e)})`;
+    }
+  } catch (e) {
+    policy = new ContextPolicy({ acceptUnsignedHttp: false });
+    configNote = ` (${ENV_CONTEXT_KEYS} is invalid and ignored, as at runtime: ${_errorMessage(e)})`;
+  }
+
+  const wire =
+    transport === 'http'
+      ? _httpWire(Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k.toLowerCase(), v])))
+      : parsed;
+  const inspected = _inspectAgentContext(transport, wire, policy, now);
+  if (inspected.result === 'none') {
+    return _malformed(transport, `no ${transport} agent context fields found in the envelope`);
+  }
+  const { result, kid, iat, exp } = inspected;
+  const skew = `${AGENT_CONTEXT_CLOCK_SKEW_SECONDS} s skew allowed`;
+  const kidName = kid ?? '(none)';
+  let explanation: string;
+  switch (result) {
+    case 'ok':
+      explanation = `signature verified with key ${kidName}; valid for ${(exp ?? now) - now} more s`;
+      break;
+    case 'unsigned':
+      explanation =
+        transport === 'http' && policy.acceptUnsignedHttp
+          ? 'no signature; extractContext still adopts unsigned HTTP context because acceptUnsignedHttp is true (deprecated)'
+          : `no signature; the ${transport} context is untrusted (link-only)`;
+      break;
+    case 'unsupported_alg':
+      explanation = `alg ${inspected.alg ?? '(none)'} is not supported: only HS256`;
+      break;
+    case 'unknown_kid':
+      explanation = `kid ${kidName} is not in ${ENV_CONTEXT_KEYS} (configured: ${_list(policy.kids)})`;
+      break;
+    case 'bad_signature':
+      explanation = `signature does not match key ${kidName}: payload altered or wrong secret`;
+      break;
+    case 'expired':
+      explanation = `expired ${now - (exp ?? now)} s ago (${skew})`;
+      break;
+    case 'not_yet_valid':
+      explanation = `issued ${(iat ?? now) - now} s in the future (${skew}): check the sender's clock`;
+      break;
+    default:
+      explanation =
+        'the context does not match the v1 wire format: a field, ID, traceparent, signature or TTL (at most 86400 s) is invalid';
+  }
+  const valid = result !== 'malformed';
+  return {
+    transport,
+    verify_result: result,
+    trust: contextTrust(result),
+    kid: valid ? kid : null,
+    iat: valid ? iat : null,
+    exp: valid ? exp : null,
+    clock_delta_seconds: valid && iat != null ? now - iat : null,
+    explanation: `${explanation}${configNote}`,
+  };
+};
+
+const formatVerifyReport = (report: VerifyReport): string => {
+  const lines = ['amplitude-ai doctor --verify', ''];
+  for (const key of ['transport', 'verify_result', 'trust', 'kid', 'iat', 'exp', 'clock_delta_seconds'] as const) {
+    lines.push(`  ${key}: ${report[key] ?? '-'}`);
+  }
+  lines.push(`  explanation: ${report.explanation}`);
+  return `${lines.join('\n')}\n`;
 };
 
 type PackageJsonRead =
@@ -230,6 +520,8 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
     }
   }
 
+  checks.push(...agentContextChecks(options.env ?? process.env));
+
   if (hasCodingAgentsSetup(cwd)) {
     checks.push(...runCodingAgentsDoctor(cwd).checks);
   }
@@ -238,4 +530,15 @@ const runDoctor = (cwd: string, options: DoctorOptions = {}): DoctorResult => {
   return { ok, checks };
 };
 
-export { runDoctor, runFillRates, type DoctorResult, type DoctorOptions, type FillRateResult };
+export {
+  formatVerifyReport,
+  runDoctor,
+  runFillRates,
+  runVerify,
+  type DoctorCheck,
+  type DoctorOptions,
+  type DoctorResult,
+  type FillRateResult,
+  type VerifyOptions,
+  type VerifyReport,
+};

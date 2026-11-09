@@ -67,6 +67,15 @@ export const AMP_TURN_ID = 'amplitude.turn.id';
 export const AMP_AGENT_ID = 'amplitude.agent.id';
 export const AMP_PARENT_AGENT_ID = 'amplitude.parent.agent.id';
 
+// Agent context v1: inbound peer, trust and actor
+export const AMP_PEER_AGENT_ID = 'amplitude.peer.agent.id';
+export const AMP_PEER_SESSION_ID = 'amplitude.peer.session.id';
+export const AMP_PEER_TRACE_ID = 'amplitude.peer.trace.id';
+export const AMP_CONTEXT_TRUST = 'amplitude.context.trust';
+export const AMP_CONTEXT_VERIFY_RESULT = 'amplitude.context.verify.result';
+export const AMP_ACTOR_TYPE = 'amplitude.actor.type';
+export const AMP_IDENTITY_TYPE = 'amplitude.identity.type';
+
 // Serialised input/output for tool and agent spans
 export const AMP_INPUT_STATE = 'amplitude.input.state';
 export const AMP_OUTPUT_STATE = 'amplitude.output.state';

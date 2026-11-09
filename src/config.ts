@@ -1,3 +1,4 @@
+import type { ContextPolicy } from './agent-context.js';
 import {
   compileCustomRedactionPatterns,
   PrivacyConfig,
@@ -66,6 +67,15 @@ export interface AIConfigOptions {
    * non-numeric values fall back to the default.
    */
   flushTimeoutMs?: number;
+  /**
+   * Agent context trust policy: signing keys, the active kid and pairwise
+   * salts. Sessions of this instance sign outbound context and verify inbound
+   * context with it. Defaults to `ContextPolicy.fromEnv()` at first use.
+   * Outside a session, the most recently constructed client's policy applies
+   * process-wide; a second client with a different policy replaces it and
+   * logs a warning once. Pass `policy` per call to use different keys.
+   */
+  contextPolicy?: ContextPolicy | null;
 }
 
 /** Default for {@link AIConfigOptions.flushTimeoutMs}. */
@@ -111,6 +121,7 @@ export class AIConfig {
   readonly captureStackTrace: boolean;
   readonly strictCost: boolean;
   readonly flushTimeoutMs: number;
+  readonly contextPolicy: ContextPolicy | null;
 
   constructor(options: AIConfigOptions = {}) {
     this.contentMode = options.contentMode ?? ContentMode.FULL;
@@ -134,6 +145,7 @@ export class AIConfig {
     this.strictCost = options.strictCost ?? false;
     this.flushTimeoutMs =
       normalizeFlushTimeoutMs(options.flushTimeoutMs) ?? DEFAULT_FLUSH_TIMEOUT_MS;
+    this.contextPolicy = options.contextPolicy ?? null;
   }
 
   toPrivacyConfig(): PrivacyConfig {

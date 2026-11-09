@@ -151,7 +151,7 @@ ${runtimes.map((r) => `- Agent built on the ${r.name}: the runtime owns the mode
 - Developers use Claude Code, Codex, goose, Cursor, Gemini CLI or GitHub Copilot and you want those sessions and their commits in Agent Analytics: run \`amplitude-ai coding-agents init\`, then \`amplitude-ai coding-agents doctor\`, and follow \`docs/integrations/<harness>.md\` (${codingAgents.harnesses.filter((h) => h.id !== 'buzz').map((h) => h.id).join(', ')}). The key is \`AMPLITUDE_AI_API_KEY\`, falling back to \`AMPLITUDE_API_KEY\`; the outcomes workflow reads the \`AMPLITUDE_API_KEY\` repository secret. Set \`AMPLITUDE_SESSION_TRIGGER\` (\`interactive\`, \`headless\`, \`ci\`, \`scheduled\`, \`event\`) where the harness can't tell how a session started; it becomes \`[Agent] Session Trigger\` and the commit's \`Agent-Trigger\` trailer (CI runs are \`ci\` without it). Join sessions to commits, and read \`agent_trigger\`, \`review_rounds\` and \`hours_to_first_review\`, with \`docs/integrations/recipes/code-outcomes.md\`.
 - Agent built on the Claude Agent SDK or the Codex SDK in your own app: use \`ClaudeAgentSDKTracker\` from \`@amplitude/ai/integrations/claude-agent-sdk\` or \`CodexSDKTracker\` from \`@amplitude/ai/integrations/codex-sdk\` inside \`ai.agent(...).session(...).run(...)\` (Path 1 of \`docs/integrations/claude-code.md\` and \`docs/integrations/codex.md\`).
 - Agents talk in Buzz (block/buzz): read the relay archive and forward with \`docs/integrations/buzz.md\`.
-- Agents call each other over A2A or ACP: carry session, parent agent, user, and trace with \`injectA2aMetadata\` / \`extractA2aMetadata\` or \`injectAcpMeta\` / \`extractAcpMeta\` so child sessions link to the parent.
+- Agents call each other over A2A, ACP or HTTP, including agents another company runs: send context with \`injectA2aMetadata\` / \`injectAcpMeta\` / \`injectContext\`, and on the receiver pass the extracted context to \`agent.session({ context })\` (never spread its fields into session options). A context signed with a shared \`AMPLITUDE_AI_CONTEXT_KEYS\` joins the caller's session; anything else starts a new session linked by \`[Agent] Peer Agent ID\`. Reply with \`injectA2aResponseMetadata\` / \`injectAcpResultMeta\` / \`injectResponseHeaders\`, attach replies to the call with \`trackToolCall(..., { peer })\`, and spread \`contextProperties()\` into business events such as a checkout. See "Agents in other processes" in \`amplitude-ai.md\`.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}), including Google ADK's BigQuery Agent Analytics table (\`docs/integrations/warehouses/adk-bigquery-agent-analytics.md\`): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
 - Requests go through an inference router or AI gateway (Fireworks, OpenRouter, LiteLLM, Requesty): follow \`docs/integrations/routers.md\` for the base URL, the \`context: { ingestion_path: 'gateway', gateway: '...' }\` tag, the routed model ID rule, and pricing; the per-request identity contract is \`docs/integrations/analytics-metadata.schema.json\`.
@@ -178,6 +178,7 @@ Prompt:
 - tool-decorator — \`tool(fn, { name: 'tool_name' })\`
 - observe-spans — \`observe(fn, { name: 'span-name' })\`
 - express-middleware — \`createAmplitudeAIMiddleware({ amplitudeAI: ai, userIdResolver })\`
+- agent-protocol-propagation — \`agent.session({ context: extractA2aMetadata(message.metadata) })\`
 
 ## Gotchas
 
@@ -197,6 +198,7 @@ Prompt:
 - \`amplitude-ai --print-guide\` — Print the full amplitude-ai.md guide to stdout
 - \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json]\` — Validate environment, deps, and event pipeline
+- \`amplitude-ai doctor --verify '<envelope JSON>' [--transport a2a|acp|http] [--json]\` — Explain why an agent context is or isn't trusted
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
 - \`amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]\` — Wire coding-agent sessions and commit outcomes into a repo
 - \`amplitude-ai coding-agents doctor [--dir PATH] [--json]\` — Check that setup
@@ -509,10 +511,10 @@ import { injectContext, extractContext } from '@amplitude/ai';
 // Sender (inside session.run):
 const headers = injectContext();
 await queue.send({ payload, headers });
-// Receiver:
-const ctx = extractContext(message.headers);
-const session = agent.session({ ...ctx });
+// Receiver: pass the context; never copy its fields into session options.
+const session = agent.session({ context: extractContext(message.headers) });
 \`\`\`
+Signed context (\`AMPLITUDE_AI_CONTEXT_KEYS\` on both sides) joins the sender's session; anything else is linked with \`[Agent] Peer Agent ID\`. See "Agents in other processes" below.
 
 ### createAmplitudeAIMiddleware(opts)
 Express/Fastify/Hono middleware for automatic session tracking.
@@ -598,7 +600,8 @@ const askRecipeAgent = tool(async (args: { query: string }) => {
 }, { name: 'ask_recipe_agent' });
 
 export async function POST(req: Request) {
-  const { messages, userId } = await req.json();
+  const { messages } = await req.json();
+  const userId = await getAuthenticatedUserId(req); // from your auth, never the request body
   const browserSessionId = req.headers.get('x-amplitude-session-id');
   const deviceId = req.headers.get('x-amplitude-device-id');
 
@@ -622,10 +625,31 @@ const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY! });
 app.use(createAmplitudeAIMiddleware({
   amplitudeAI: ai,
   userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
+  acceptContext: true, // optional: link calls from other agent services (signed context joins their session)
 }));
 \`\`\`
 
-### 6. Testing with MockAmplitudeAI
+### 6. Agents in other processes (A2A, ACP, HTTP)
+\`\`\`typescript
+import {
+  extractA2aMetadata, injectA2aMetadata, injectA2aResponseMetadata, contextProperties,
+} from '@amplitude/ai';
+
+// Caller, inside session.run(): send context; the user ID stays out unless identity is set.
+message.metadata = injectA2aMetadata(message.metadata);
+const reply = await client.sendMessage({ message });
+s.trackToolCall('call_seller', latencyMs, true, { peer: extractA2aMetadata(reply.metadata) });
+
+// Receiver: pass the extracted context; never copy its fields into session options.
+const session = agent.session({ context: extractA2aMetadata(message.metadata) });
+await session.run(async () => ({ ...result, metadata: injectA2aResponseMetadata(result.metadata) }));
+
+// Business events join the agent session in charts:
+amplitude.track('Checkout Completed', { orderId, ...contextProperties() });
+\`\`\`
+Signed context (\`AMPLITUDE_AI_CONTEXT_KEYS\` on both sides) is trusted: the receiver joins the caller's session, user, parent agent and trace. Unsigned or failed context is untrusted: the receiver starts its own session and trace and records \`[Agent] Peer Agent ID\`, \`[Agent] Peer Session ID\` and \`[Agent] Peer Trace ID\`. Every event also carries \`[Agent] Context Trust\`, \`[Agent] Context Verify Result\`, \`[Agent] Actor Type\` and \`[Agent] Identity Type\`. ACP uses \`injectAcpMeta\` / \`extractAcpMeta\` / \`injectAcpResultMeta\`; HTTP uses \`injectContext\` / \`extractContext\` / \`injectResponseHeaders\`. A browser that can't hold a key gets a context minted by its backend with \`mintContext({ sessionId, userId })\`.
+
+### 7. Testing with MockAmplitudeAI
 \`\`\`typescript
 import { AIConfig, tool } from '@amplitude/ai';
 import { MockAmplitudeAI } from '@amplitude/ai/testing';
@@ -700,6 +724,7 @@ with code examples for every step. Read this for guided instrumentation.
 - \`amplitude-ai --print-guide\` — Print the full amplitude-ai.md guide to stdout
 - \`amplitude-ai mcp\` — Start the MCP server for AI coding agents
 - \`amplitude-ai doctor [--json] [--no-mock-check]\` — Validate environment and event pipeline
+- \`amplitude-ai doctor --verify '<envelope JSON>' [--transport a2a|acp|http] [--json]\` — Explain why an agent context is or isn't trusted
 - \`amplitude-ai status [--json]\` — Show SDK version, installed providers, and env config
 - \`amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--privacy full|metadata] [--region us|eu] [--api-key-stdin | --api-key-env NAME] [--dry-run] [--force] [--dir PATH] [--json]\` — Wire coding-agent sessions and commit outcomes into a repo
 - \`amplitude-ai coding-agents doctor [--dir PATH] [--json]\` — Check that setup

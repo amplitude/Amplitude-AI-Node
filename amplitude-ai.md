@@ -778,6 +778,7 @@ app.use(createAmplitudeAIMiddleware({
   userIdResolver: (req) => req.user?.id ?? null, // authenticated user, not a request header
 }));
 ```
+If other agent services call this one, add `acceptContext: true` (see "Agents in other processes").
 
 ### Step 3l: Voice agents
 
@@ -901,7 +902,40 @@ Skip this step unless Phase 1 found coding agents. There are two different jobs;
 3. Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor` and fix every failure it reports.
 4. Point the developer at `docs/integrations/claude-code.md`, `codex.md`, `goose.md`, `cursor.md`, `gemini-cli.md` and `copilot.md` for the content gates and verification, and at `docs/integrations/recipes/code-outcomes.md` for the commit evaluators and the session-to-commit join.
 
-**Agents calling agents.** If agents call each other over A2A or ACP, carry the session across the call so child sessions link to the parent: `injectA2aMetadata(metadata)` / `extractA2aMetadata(metadata)` or `injectAcpMeta(meta)` / `extractAcpMeta(meta)` from `@amplitude/ai`. The wire format matches the Python SDK, so a Node agent and a Python agent can call each other. An A2A server can advertise this with `declareA2aExtension(agentCard)`, which adds the optional (`required: false`) extension `https://amplitude.com/a2a/extensions/agent-context/v1` to `capabilities.extensions`.
+### Agents in other processes
+
+If agents call each other over A2A, the Agent Client Protocol (ACP) or HTTP, including agents another company runs, send agent context with the call and pass what arrives to `session({ context })`. The wire format and signing match the Python SDK, so Node and Python agents interoperate. Spec: https://amplitude.com/docs/amplitude-ai/agent-analytics/agent-context-v1.
+
+```typescript
+import {
+  extractA2aMetadata, injectA2aMetadata, injectA2aResponseMetadata, contextProperties,
+} from '@amplitude/ai';
+
+// Caller, inside session.run(). The end-user ID is not sent by default.
+message.metadata = injectA2aMetadata(message.metadata);
+const reply = await client.sendMessage({ message });
+s.trackToolCall('call_seller', latencyMs, true, { peer: extractA2aMetadata(reply.metadata) });
+
+// Receiver
+const session = agent.session({ context: extractA2aMetadata(message.metadata) });
+await session.run(async () => {
+  const result = await handle(message);
+  return { ...result, metadata: injectA2aResponseMetadata(result.metadata) };
+});
+```
+
+Rules for the coding agent:
+
+- **Pass the context, never its fields.** Write `agent.session({ context })`. Do not copy `sessionId`, `userId` or `parentAgentId` from an extracted context, request body or header into session options; the SDK only adopts them from a context it trusts.
+- **Trust comes from a signature.** Set the same `AMPLITUDE_AI_CONTEXT_KEYS` (a JSON object of key ID to secret, each secret at least 32 bytes) on both sides, from a secret manager. With a valid signature the receiver joins the caller's session, user, parent agent and trace. Without one, or with a bad, expired or unknown-key signature, the receiver starts its own session and trace and records the caller as `[Agent] Peer Agent ID`, `[Agent] Peer Session ID` and `[Agent] Peer Trace ID`. Never log or commit the keys.
+- **Every event in the session carries** `[Agent] Context Trust` (`trusted`, `untrusted` or `none`), `[Agent] Context Verify Result`, `[Agent] Actor Type` (`agent` or `human`; A2A is always `agent`) and `[Agent] Identity Type`. `[Agent] Message Source` is unchanged: `agent` only for a trusted delegation.
+- **Identity.** A2A and ACP send no user ID by default. `identity: 'pairwise'` with `recipient` (the peer's AgentCard URL or agent ID) sends a stable per-recipient pseudonym and needs `AMPLITUDE_AI_PAIRWISE_SALTS`; `identity: 'raw'` sends the user ID and requires a signing key.
+- **Replies link both ways.** The receiver returns its context with `injectA2aResponseMetadata`, `injectAcpResultMeta` or `injectResponseHeaders`. The caller attaches it to that one call with `trackToolCall(..., { peer })` or `peerProperties(extracted)`, which is safe when one agent fans out to several peers at once.
+- **Business events.** Spread `contextProperties()` into product events tracked with the Amplitude SDK, for example `amplitude.track('Checkout Completed', { orderId, ...contextProperties() })`, so outcomes join the agent session. It returns `{}` outside a session and never includes the user ID. For an outcome tracked later or in another service, use `contextProperties({ context: extracted })`.
+- **ACP and HTTP.** ACP uses `injectAcpMeta` / `extractAcpMeta` on `params._meta`. HTTP uses `injectContext` / `extractContext`, or `createAmplitudeAIMiddleware({ ..., acceptContext: true })`. Unsigned HTTP headers are still adopted by `extractContext` in this release, with a one-time deprecation warning; the next major release treats them as untrusted. The middleware never adopts unsigned headers.
+- **Browsers and mobile apps** can't hold a key: their backend mints a signed context with `mintContext({ sessionId, userId })` and the client forwards it unchanged.
+- **Advertise it.** An A2A server adds the optional (`required: false`) extension to its AgentCard with `declareA2aExtension(agentCard)`.
+- Provider wrappers' `propagateContext` headers to LLM providers are never signed and never carry the user ID.
 
 ## Phase 4: Verify
 
@@ -1275,7 +1309,12 @@ All imported from `@amplitude/ai`:
 | `patch({ amplitudeAI: ai })` / `unpatch()` | Zero-code instrumentation (also auto-extracts `[Agent] Tool Call` from message arrays — see below) |
 | `wrap(client, ai)` | Wrap existing provider client (OpenAI, Azure OpenAI, Anthropic, Gemini, Google Gen AI, Bedrock, Mistral) |
 | `injectContext()` / `extractContext(headers)` | Cross-service propagation |
-| `createAmplitudeAIMiddleware(opts)` | Express/Fastify/Hono middleware |
+| `injectA2aMetadata` / `extractA2aMetadata`, `injectAcpMeta` / `extractAcpMeta` | Agent context over A2A and ACP; pass the result to `session({ context })` |
+| `injectA2aResponseMetadata` / `injectAcpResultMeta` / `injectResponseHeaders` | Return this agent's context in a response |
+| `peerProperties(extracted)` / `trackToolCall(..., { peer })` | Link one outbound call to the peer that answered |
+| `contextProperties()` | Agent session IDs for business events (never the user ID) |
+| `mintContext({ sessionId, userId })` | Signed context minted by a backend for a browser or mobile client |
+| `createAmplitudeAIMiddleware(opts)` | Express/Fastify/Hono middleware (`acceptContext: true` for agent callers) |
 | `MockAmplitudeAI` (from `@amplitude/ai/testing`) | Deterministic test double |
 | `ClaudeAgentSDKTracker` (from `@amplitude/ai/integrations/claude-agent-sdk`) | PreToolUse/PostToolUse hooks + message processing for Claude Agent SDK |
 

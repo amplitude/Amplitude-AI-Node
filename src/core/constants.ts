@@ -69,6 +69,16 @@ export const PROP_AGENT_DESCRIPTION = '[Agent] Agent Description';
 export const PROP_MESSAGE_SOURCE = '[Agent] Message Source';
 export const PROP_CONTEXT = '[Agent] Context';
 
+// Agent context v1 (cross-org propagation). Peer IDs are set when the inbound
+// context is untrusted; Context Trust is derived from Context Verify Result.
+export const PROP_PEER_AGENT_ID = '[Agent] Peer Agent ID';
+export const PROP_PEER_SESSION_ID = '[Agent] Peer Session ID';
+export const PROP_PEER_TRACE_ID = '[Agent] Peer Trace ID';
+export const PROP_CONTEXT_TRUST = '[Agent] Context Trust';
+export const PROP_CONTEXT_VERIFY_RESULT = '[Agent] Context Verify Result';
+export const PROP_ACTOR_TYPE = '[Agent] Actor Type';
+export const PROP_IDENTITY_TYPE = '[Agent] Identity Type';
+
 // v0.3.0 properties
 export const PROP_SPAN_ID = '[Agent] Span ID';
 export const PROP_SPAN_NAME = '[Agent] Span Name';

@@ -213,7 +213,7 @@ function addSessionWrapping(
     const handlerMatch = result.match(ROUTE_HANDLER_HEAD_RE);
     result = result.replace(
       ROUTE_HANDLER_HEAD_RE,
-      (head: string) => `${head}\n  ${agentLine}\n  ${experimentsTodo}const { messages, userId, sessionId } = await req.json();\n  // TODO(required): Ensure userId comes from auth, not the request body, to prevent spoofing.\n  // sessionId is optional — omit it and the SDK auto-generates a unique UUID per request.\n  const _response = await agent.session({ userId, ...(sessionId && { sessionId }) }).run(async (s) => {`,
+      (head: string) => `${head}\n  ${agentLine}\n  ${experimentsTodo}// TODO(required): Replace with the authenticated user from your auth, never a request body or header field.\n  const _userId: string | null = null;\n  // Called by another agent? Pass its context instead of reading IDs from the request:\n  // agent.session({ userId: _userId, context: extractContext(req.headers) })\n  const _response = await agent.session({ userId: _userId }).run(async (s) => {`,
     );
     if (handlerMatch?.index != null) {
       const openBraceIdx = result.indexOf('{', handlerMatch.index);

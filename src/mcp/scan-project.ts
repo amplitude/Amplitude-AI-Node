@@ -711,7 +711,7 @@ export function scanProject(requestedRoot: string): ScanResult {
   }
   if (messageQueueDeps.length > 0) {
     recommendations.push(
-      `Message queue deps detected (${messageQueueDeps.join(', ')}): enable propagateContext in the bootstrap file and use injectContext/extractContext to correlate events across services.`,
+      `Message queue deps detected (${messageQueueDeps.join(', ')}): use injectContext() on the producer and pass extractContext(message.headers) to session({ context }) on the consumer to correlate events across services. Set AMPLITUDE_AI_CONTEXT_KEYS on both sides so the consumer joins the producer's session; unsigned context is deprecated for adoption.`,
     );
   }
   if (hasFrontendDeps) {
