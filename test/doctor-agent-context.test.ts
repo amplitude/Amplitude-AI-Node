@@ -73,7 +73,7 @@ describe('doctor agent_context checks', () => {
     expect(byName['agent_context.keys']).toMatchObject({ ok: false });
     expect(byName['agent_context.keys']?.detail).toMatch(message);
     expect(byName['agent_context.keys']?.fix).toContain('AMPLITUDE_AI_CONTEXT_KEYS');
-    expect(byName['agent_context.unsigned_http']?.detail).toMatch(/^acceptUnsignedHttp=true/);
+    expect(byName['agent_context.unsigned_http']?.detail).toMatch(/^acceptUnsignedHttp=false \(key configuration is invalid\)/);
     expectNoSecret(text);
   });
 
@@ -81,6 +81,7 @@ describe('doctor agent_context checks', () => {
     const { byName, text } = agentChecks({ AMPLITUDE_AI_PAIRWISE_SALTS: JSON.stringify({ 1: 'SALT-0123-short' }) });
     expect(byName['agent_context.pairwise_salts']).toMatchObject({ ok: false });
     expect(byName['agent_context.pairwise_salts']?.detail).toMatch(/version 1 is too short/);
+    expect(byName['agent_context.unsigned_http']?.detail).toMatch(/^acceptUnsignedHttp=false \(key configuration is invalid\)/);
     expectNoSecret(text);
   });
 });

@@ -22,7 +22,7 @@
 - **Coding-agent guidance.** `amplitude-ai.md`, the MCP patterns, `scan_project`, `instrument_file`, `AGENTS.md` and `llms-full.txt` route cross-process agents to `session({ context })`. Generated route handlers no longer read `userId` or `sessionId` from the request body.
 
 ### Deprecated
-- **Unsigned HTTP context.** On a receiver without signing keys, `extractContext` still adopts unsigned `x-amplitude-*` headers in this release, logging a one-time deprecation warning and recording `[Agent] Context Verify Result = unsigned`. Once keys are configured, `acceptUnsignedHttp` defaults to `false`, so leaving out the signature can't bypass verification. An invalid or over-long `x-trace-id` on an unsigned request is still dropped rather than rejecting the context. The next major release (1.0.0) treats unsigned HTTP context as untrusted, like A2A.
+- **Unsigned HTTP context.** On a receiver without signing keys, `extractContext` still adopts unsigned `x-amplitude-*` headers in this release, logging a one-time deprecation warning and recording `[Agent] Context Verify Result = unsigned`. Once keys are configured, `acceptUnsignedHttp` defaults to `false`, so leaving out the signature can't bypass verification. An invalid `AMPLITUDE_AI_CONTEXT_KEYS`, `AMPLITUDE_AI_CONTEXT_ACTIVE_KID` or `AMPLITUDE_AI_PAIRWISE_SALTS` is logged and ignored, and unsigned HTTP headers are then rejected too, so a typo in the key configuration never makes a receiver adopt unsigned context; `doctor` reports this. An invalid or over-long `x-trace-id` on an unsigned request is still dropped rather than rejecting the context. The next major release (1.0.0) treats unsigned HTTP context as untrusted, like A2A.
 
 ## 0.28.0
 

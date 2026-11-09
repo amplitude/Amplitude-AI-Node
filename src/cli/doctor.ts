@@ -95,14 +95,27 @@ const agentContextChecks = (env: Env): DoctorCheck[] => {
     });
   }
 
-  const acceptUnsignedHttp = policy?.acceptUnsignedHttp ?? true;
+  // Mirror the runtime: an invalid configuration is ignored and unsigned HTTP is then rejected.
+  let runtime: ContextPolicy | null = null;
+  try {
+    runtime = ContextPolicy.fromEnv({
+      [ENV_CONTEXT_KEYS]: env[ENV_CONTEXT_KEYS],
+      [ENV_CONTEXT_ACTIVE_KID]: env[ENV_CONTEXT_ACTIVE_KID],
+      [ENV_PAIRWISE_SALTS]: env[ENV_PAIRWISE_SALTS],
+    });
+  } catch {
+    runtime = null;
+  }
   checks.push({
     name: 'agent_context.unsigned_http',
     ok: true,
     level: 'info',
-    detail: acceptUnsignedHttp
-      ? 'acceptUnsignedHttp=true (no valid signing keys): extractContext adopts unsigned x-amplitude-* headers. Deprecated: the next major release treats unsigned HTTP context as untrusted.'
-      : 'acceptUnsignedHttp=false (signing keys configured): unsigned x-amplitude-* headers are untrusted. Adopting unsigned HTTP context is deprecated and ends in the next major release.',
+    detail:
+      runtime == null
+        ? 'acceptUnsignedHttp=false (key configuration is invalid): the SDK ignores it and treats unsigned x-amplitude-* headers as untrusted.'
+        : runtime.acceptUnsignedHttp
+          ? 'acceptUnsignedHttp=true (no signing keys): extractContext adopts unsigned x-amplitude-* headers. Deprecated: the next major release treats unsigned HTTP context as untrusted.'
+          : 'acceptUnsignedHttp=false (signing keys configured): unsigned x-amplitude-* headers are untrusted. Adopting unsigned HTTP context is deprecated and ends in the next major release.',
   });
 
   try {
@@ -208,7 +221,7 @@ const runVerify = (input: string, options: VerifyOptions = {}): VerifyReport => 
   try {
     policy = _keysPolicy(env);
   } catch (e) {
-    policy = new ContextPolicy();
+    policy = new ContextPolicy({ acceptUnsignedHttp: false });
     configNote = ` (${ENV_CONTEXT_KEYS} is invalid and ignored, as at runtime: ${_errorMessage(e)})`;
   }
 
