@@ -15,14 +15,21 @@ import {
 import { runDoctor } from '../../src/cli/doctor.js';
 import {
   OUTCOMES_WORKFLOW_SHA256,
+  PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
+  PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   outcomesWorkflowState,
   sha256Hex,
 } from '../../src/cli/outcomes-workflow.js';
-import { parseLocalEnv } from '../../src/cli/hook-codex.js';
+import { parseLocalEnv, withLocalEnv } from '../../src/cli/hook-codex.js';
+import { PROP_SESSION_TRIGGER } from '../../src/core/constants.js';
+import { mapCodexRollout } from '../../src/integrations/codex-rollout.js';
+import { resolveSessionTrigger } from '../../src/integrations/session-trigger.js';
 
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
 const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
+const V2_028_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.28.0.yml');
+const PREVIOUS_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.28.0');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
@@ -59,6 +66,16 @@ describe('coding-agents templates', () => {
   it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
     expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
     expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v2');
+  });
+
+  it('pins the hashes of the previously shipped hook and workflow', () => {
+    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toEqual([sha256Hex(readFileSync(PREVIOUS_HOOK))]);
+    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).not.toContain(sha256Hex(readFileSync(join(TEMPLATES, 'prepare-commit-msg'))));
+    expect(PREVIOUS_OUTCOMES_WORKFLOW_SHA256).toEqual([
+      sha256Hex(readFileSync(V1_WORKFLOW)),
+      sha256Hex(readFileSync(V2_028_WORKFLOW)),
+    ]);
+    expect(outcomesWorkflowState(readFileSync(V2_028_WORKFLOW))).toBe('outdated');
   });
 
   it('lists the v1 workflow as a previous version', () => {
@@ -272,6 +289,31 @@ describe('coding-agents init', () => {
     expect(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8')).toBe(
       '# mine\nOTHER=1\nAMPLITUDE_SERVER_ZONE=EU\nAMPLITUDE_AI_CONTENT_MODE=full\n',
     );
+  });
+
+  it('upgrades an untouched 0.28.0 commit hook without --force and keeps a customized one', () => {
+    const hook = '.githooks/prepare-commit-msg';
+    mkdirSync(join(repo, '.githooks'));
+    writeFileSync(join(repo, hook), readFileSync(PREVIOUS_HOOK), { mode: 0o755 });
+    const upgraded = init({ harnesses: ['goose'] });
+    const change = upgraded.changes.find((c) => c.path === hook)!;
+    expect(change.action).toBe('update');
+    expect(change.detail).toContain('upgraded from an earlier shipped version');
+    expect(readFileSync(join(repo, hook), 'utf8')).toBe(template('prepare-commit-msg'));
+    expect(statSync(join(repo, hook)).mode & 0o777).toBe(0o755);
+
+    writeFileSync(join(repo, hook), `${readFileSync(PREVIOUS_HOOK, 'utf8')}# mine\n`);
+    const kept = init({ harnesses: ['goose'] });
+    expect(kept.changes.find((c) => c.path === hook)!.action).toBe('conflict');
+    expect(readFileSync(join(repo, hook), 'utf8')).toContain('# mine');
+  });
+
+  it('upgrades an untouched 0.28.0 v2 outcomes workflow without --force', () => {
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, WORKFLOW), readFileSync(V2_028_WORKFLOW));
+    const change = init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!;
+    expect(change.action).toBe('update');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
   });
 
   it('upgrades an untouched v1 outcomes workflow without --force', () => {
@@ -493,6 +535,14 @@ describe('coding-agents init', () => {
     [{ CURSOR_AGENT: '1', CURSOR_CONVERSATION_ID: 'c1' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
     [{ GEMINI_CLI: '1' }, ['Agent-Name: gemini-cli']],
     [{}, []],
+    [{ CODEX_THREAD_ID: 't1', AMPLITUDE_SESSION_TRIGGER: 'headless' }, ['Agent-Session-Id: t1', 'Agent-Name: codex', 'Agent-Trigger: headless']],
+    [{ CLAUDE_CODE_SESSION_ID: 's1', GITHUB_ACTIONS: 'true' }, ['Agent-Session-Id: s1', 'Agent-Name: claude-code', 'Agent-Trigger: ci']],
+    [{ AGENT_SESSION_ID: 'g1', CI: '1' }, ['Agent-Session-Id: g1', 'Agent-Name: goose', 'Agent-Trigger: ci']],
+    [{ AGENT_SESSION_ID: 'g1', CI: 'false' }, ['Agent-Session-Id: g1', 'Agent-Name: goose']],
+    [{ CURSOR_CONVERSATION_ID: 'c1', CI: '0', AMPLITUDE_SESSION_TRIGGER: 'cron' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
+    [{ CODEX_THREAD_ID: 't1', CI: 'true', AMPLITUDE_SESSION_TRIGGER: 'scheduled' }, ['Agent-Session-Id: t1', 'Agent-Name: codex', 'Agent-Trigger: scheduled']],
+    [{ GEMINI_CLI: '1', AMPLITUDE_SESSION_TRIGGER: 'event' }, ['Agent-Name: gemini-cli', 'Agent-Trigger: event']],
+    [{ CI: 'true', AMPLITUDE_SESSION_TRIGGER: 'ci' }, []],
   ])('the commit hook stamps %o', (env, trailers) => {
     const msg = join(repo, 'MSG');
     writeFileSync(msg, 'feat: x\n');
@@ -505,6 +555,108 @@ describe('coding-agents init', () => {
     const text = readFileSync(msg, 'utf8');
     expect(text.trim().split('\n').slice(2)).toEqual(trailers);
     expect(text).not.toContain('Agent-Session-Id: \n');
+  });
+
+  describe('Agent-Trigger matches the session events', () => {
+    const THREAD = '019a5f2e-7c1d-7b2a-9e44-0c1f5a6b7c8d';
+    const sessionMeta = (source: unknown, extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ type: 'session_meta', payload: { id: THREAD, ...extra, source } });
+    const writeRollout = (source: unknown, extra?: Record<string, unknown>, id = THREAD) => {
+      const dir = join(home, '.codex/sessions/2026/11/08');
+      mkdirSync(dir, { recursive: true });
+      const lines = [
+        sessionMeta(source, extra),
+        JSON.stringify({ type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.5' } }),
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] } }),
+      ];
+      writeFileSync(join(dir, `rollout-2026-11-08T12-00-00-${id}.jsonl`), `${lines.join('\n')}\n`);
+      return lines;
+    };
+    const writeLocalEnv = (text: string) => {
+      mkdirSync(join(repo, '.amplitude-ai'), { recursive: true });
+      writeFileSync(join(repo, '.amplitude-ai/local.env'), text);
+    };
+    const hookTrigger = (env: Record<string, string>) => {
+      const msg = join(repo, 'MSG');
+      writeFileSync(msg, 'feat: x\n');
+      const r = spawnSync('sh', [join(TEMPLATES, 'prepare-commit-msg'), msg], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: home, ...env },
+      });
+      expect(r.status).toBe(0);
+      return /^Agent-Trigger: (.*)$/m.exec(readFileSync(msg, 'utf8'))?.[1] ?? null;
+    };
+    const codexSessionTrigger = (lines: string[], env: Record<string, string>) => {
+      const merged = withLocalEnv(env, repo, () => {});
+      const triggers = mapCodexRollout(lines, undefined, { env: merged }).calls.map(
+        (c) => (c.opts.eventProperties as Record<string, unknown>)[PROP_SESSION_TRIGGER] ?? null,
+      );
+      expect(new Set(triggers).size).toBe(1);
+      return triggers[0];
+    };
+
+    it.each([
+      ['exec', {}, null, 'headless'],
+      ['cli', {}, null, 'interactive'],
+      ['vscode', { CI: 'false' }, null, 'interactive'],
+      ['mcp', {}, null, 'headless'],
+      ['cli', { GITHUB_ACTIONS: 'true' }, 'AMPLITUDE_SESSION_TRIGGER=interactive\n', 'interactive'],
+      ['cli', { AMPLITUDE_SESSION_TRIGGER: 'event' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'event'],
+      ['exec', { CI: 'true' }, null, 'ci'],
+      ['exec', {}, 'AMPLITUDE_SESSION_TRIGGER=cron\n', 'headless'],
+      ['cli', { AMPLITUDE_SESSION_TRIGGER: 'cron' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'interactive'],
+      ['exec', { AMPLITUDE_SESSION_TRIGGER: '' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'scheduled'],
+      ['cli', {}, '# AMPLITUDE_SESSION_TRIGGER=ci\nexport  AMPLITUDE_SESSION_TRIGGER = "headless"\r\nOTHER=1\n', 'headless'],
+      ['cli', {}, "AMPLITUDE_SESSION_TRIGGER=ci\nAMPLITUDE_SESSION_TRIGGER='event'\n", 'event'],
+      [{ subagent: { thread_spawn: { parent_thread_id: 'p', agent_path: '/root/a' } } }, {}, null, null],
+      ['app', {}, null, null],
+    ] as Array<[unknown, Record<string, string>, string | null, string | null]>)(
+      'codex source %j, env %o, local.env %j: %s',
+      (source, env, localEnv, expected) => {
+        if (localEnv !== null) writeLocalEnv(localEnv);
+        const lines = writeRollout(source);
+        expect(codexSessionTrigger(lines, env)).toBe(expected);
+        expect(hookTrigger({ CODEX_THREAD_ID: THREAD, ...env })).toBe(expected);
+      },
+    );
+
+    it('ignores a source key inside escaped text', () => {
+      const lines = writeRollout({ subagent: {} }, { instructions: 'set {"source":"exec"} in config' });
+      expect(codexSessionTrigger(lines, {})).toBeNull();
+      expect(hookTrigger({ CODEX_THREAD_ID: THREAD })).toBeNull();
+    });
+
+    it('omits the trailer without a rollout, and never searches for an unsafe thread ID', () => {
+      expect(hookTrigger({ CODEX_THREAD_ID: THREAD })).toBeNull();
+      writeRollout('exec', {}, 'abc');
+      for (const id of ['*', 'a/../abc', 'ab?', 'a\\bc']) expect(hookTrigger({ CODEX_THREAD_ID: id })).toBeNull();
+      expect(hookTrigger({ CODEX_THREAD_ID: 'abc' })).toBe('headless');
+    });
+
+    it('reads CODEX_HOME when it is set', () => {
+      const codexHome = join(home, 'elsewhere');
+      const dir = join(codexHome, 'sessions/2026/11/08');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `rollout-2026-11-08T12-00-00-${THREAD}.jsonl`), `${sessionMeta('exec')}\n`);
+      expect(hookTrigger({ CODEX_THREAD_ID: THREAD, CODEX_HOME: codexHome })).toBe('headless');
+    });
+
+    it.each([
+      [{}, 'AMPLITUDE_SESSION_TRIGGER=headless\n', 'headless'],
+      [{ GITHUB_ACTIONS: 'true' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'scheduled'],
+      [{ AMPLITUDE_SESSION_TRIGGER: 'event' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'event'],
+      [{ CI: '1' }, 'AMPLITUDE_SESSION_TRIGGER=cron\n', 'ci'],
+      [{}, null, null],
+    ] as Array<[Record<string, string>, string | null, string | null]>)(
+      'cursor env %o, local.env %j: %s',
+      (env, localEnv, expected) => {
+        if (localEnv !== null) writeLocalEnv(localEnv);
+        writeRollout('exec');
+        expect(resolveSessionTrigger({ env: withLocalEnv(env, repo, () => {}, 'cursor') })).toBe(expected);
+        expect(hookTrigger({ CURSOR_CONVERSATION_ID: 'c1', ...env })).toBe(expected);
+      },
+    );
   });
 
   it('chains onto an existing prepare script', () => {
@@ -549,6 +701,22 @@ describe('coding-agents doctor', () => {
     )!;
     expect(check.detail.startsWith(state)).toBe(true);
     expect(check.ok).toBe(ok);
+    expect(Boolean(check.fix)).toBe(hasFix);
+  });
+
+  it.each([
+    ['current', null, 'installed', false],
+    ['outdated', 'previous', 'installed (outdated: re-run init)', true],
+    ['customized', 'custom', 'installed (differs from the shipped template)', false],
+  ] as const)('reports a %s commit hook', (_state, setup, detail, hasFix) => {
+    init({ harnesses: ['goose'] });
+    const hook = join(repo, '.githooks/prepare-commit-msg');
+    if (setup === 'previous') writeFileSync(hook, readFileSync(PREVIOUS_HOOK));
+    if (setup === 'custom') writeFileSync(hook, '#!/bin/sh\necho mine\n');
+    const check = runCodingAgentsDoctor(repo, { env: {}, home }).checks.find(
+      (c) => c.name === 'coding_agents.prepare_commit_msg',
+    )!;
+    expect(check).toMatchObject({ ok: true, detail });
     expect(Boolean(check.fix)).toBe(hasFix);
   });
 

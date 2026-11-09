@@ -64,6 +64,7 @@ These are the standard OpenTelemetry variables, so exporting them from the profi
 | `gen_ai.input.messages`, `gen_ai.output.messages` | User Message and AI Response text (content gate on) |
 | `execute_tool` spans: `gen_ai.tool.name`, `gen_ai.tool.call.id`, arguments, result | `[Agent] Tool Call` |
 | `invoke_agent` root span | `[Agent] Span`. AI Response tokens come from the `chat` spans only, so the root's session totals aren't counted twice |
+| how the session started | `[Agent] Session Trigger` is not mapped from Copilot telemetry yet; that receiver mapping ships separately. The commit trailer already carries it: in CI it is `Agent-Trigger: ci`, or set it per job, for example `AMPLITUDE_SESSION_TRIGGER=ci copilot -p "..."` |
 
 ## Known gaps
 

@@ -13,7 +13,8 @@
  * (`US` default, `EU`), `AMPLITUDE_USER_ID` (default `git config user.email`),
  * `AMPLITUDE_AI_CONTENT_MODE` (`full` default, `metadata_only` alias
  * `metadata`, `customer_enriched`), `AMPLITUDE_AGENT_ID` (default `codex`),
- * `AMPLITUDE_AI_HOME` (default `~/.amplitude-ai`). Variables not set in the
+ * `AMPLITUDE_AI_HOME` (default `~/.amplitude-ai`), `AMPLITUDE_SESSION_TRIGGER`
+ * (else `ci` under CI, else from the rollout's `source`). Variables not set in the
  * environment are read from the gitignored `.amplitude-ai/local.env` that
  * `coding-agents init` writes at the repo root.
  *
@@ -451,7 +452,7 @@ export async function runCodexHook(input: CodexHookInput, options: CodexHookOpti
           continue;
         }
         if (read.reset) cursor = { ...cursor, offset: 0, turnCounter: 0, state: initialCodexRolloutState() };
-        const mapped = mapCodexRollout(read.records, cursor.state, { agentId });
+        const mapped = mapCodexRollout(read.records, cursor.state, { agentId, env });
         for (const [k, v] of Object.entries(mapped.skipped)) result.skipped[k] = (result.skipped[k] ?? 0) + v;
         const { events, turnCounter } = buildCodexEvents(mapped.calls, {
           userId,

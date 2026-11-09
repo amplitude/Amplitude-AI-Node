@@ -44,6 +44,7 @@ export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
 | chat spans: model, provider, input, output and cache tokens, finish reasons | `[Agent] AI Response` with `[Agent] Model Name`, `[Agent] Provider`, tokens |
 | `gen_ai.input.messages`, `gen_ai.output.messages` | User Message and AI Response text (content gate on) |
 | tool spans: `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` | `[Agent] Tool Call` with `[Agent] Tool Name`, `[Agent] Tool Input`, `[Agent] Tool Output` |
+| how the session started | `[Agent] Session Trigger` is not mapped from goose telemetry yet; that receiver mapping ships separately. The commit trailer already carries it: in CI it is `Agent-Trigger: ci`, or set it per job, for example `AMPLITUDE_SESSION_TRIGGER=ci goose run -t "..."` |
 
 A shared `goosed` server scopes sessions per call, so desktop sessions stay separate.
 

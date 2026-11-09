@@ -106,6 +106,14 @@ jobs:
               if (named) return { agent_attribution: 'name_trailer', attributed_agent: named };
               return { agent_attribution: 'none', attributed_agent: null };
             };
+            // How the agent's session started: the Agent-Trigger trailer, else `event` for a
+            // commit a bot agent authored (cloud agents run from an issue or an assignment).
+            const TRIGGERS = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
+            const agentTrigger = (c) => {
+              const value = trailer(c.commit.message, 'Agent-Trigger');
+              if (TRIGGERS.includes(value)) return value;
+              return attribution(c).agent_attribution === 'agent_author' ? 'event' : null;
+            };
             const baseProps = (c) => {
               const sessionId = trailer(c.commit.message, 'Agent-Session-Id');
               return {
@@ -114,9 +122,11 @@ jobs:
                 agent_name: sessionId ? trailer(c.commit.message, 'Agent-Name') : null,
                 agent_authored: Boolean(sessionId),
                 ...attribution(c),
+                agent_trigger: agentTrigger(c),
                 repo: repoName,
               };
             };
+            const hoursBetween = (from, to) => Math.round(((Date.parse(to) - Date.parse(from)) / 3600000) * 100) / 100;
 
             const events = [];
             const pushEvent = (eventType, userId, props, insertKey, time = Date.now()) => {
@@ -347,6 +357,16 @@ jobs:
               const distinct = (key) =>
                 [...new Set(agentCommits.map((c) => trailer(c.commit.message, key)).filter(Boolean))].slice(0, 50);
               const prUser = agentCommits[0] || commits[0];
+              // Review timing uses the human reviews above. A round is a change request the
+              // author answered with a later commit. Omitted, like review_count, when the reviews
+              // enrichment failed; hours_to_first_review is null when no review counted.
+              const submitted = (reviews || []).map((r) => r.submitted_at).filter(Boolean)
+                .sort((a, b) => Date.parse(a) - Date.parse(b));
+              const committedAt = commits.map((c) => c.commit?.committer?.date).filter(Boolean);
+              const firstReviewHours = !reviews ? undefined
+                : submitted.length ? hoursBetween(pr.created_at, submitted[0]) : null;
+              const reviewRounds = reviews ? reviews.filter((r) => r.state === 'CHANGES_REQUESTED' && r.submitted_at
+                && committedAt.some((d) => Date.parse(d) > Date.parse(r.submitted_at))).length : undefined;
               if (prUser) {
                 const prUserId = userIdFor(prUser) || (userIdSource === 'login' ? pr.user?.login : null);
                 pushEvent('Pull Request Merged', prUserId, {
@@ -367,6 +387,10 @@ jobs:
                   changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
                   ci_passed_first_run: ciPassed,
                   agent_setup_version: setupVersions.get(commits[0].sha),
+                  agent_triggers: [...new Set(commits.map(agentTrigger).filter(Boolean))].sort().slice(0, 5),
+                  hours_open: pr.merged_at ? hoursBetween(pr.created_at, pr.merged_at) : null,
+                  hours_to_first_review: firstReviewHours,
+                  review_rounds: reviewRounds,
                 }, pr.number, pr.merged_at ? Date.parse(pr.merged_at) : Date.now());
               }
             } else {

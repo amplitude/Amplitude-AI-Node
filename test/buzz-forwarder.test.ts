@@ -55,6 +55,16 @@ describe('buzz forwarder', () => {
     for (const e of team) expect(e.event_properties['[Agent] Root Agent Name']).toBe('coordinator');
   });
 
+  it('stamps mapping.trigger on every event and ignores an unknown one', () => {
+    const plain = run().events;
+    expect(plain.some((e) => '[Agent] Session Trigger' in e.event_properties)).toBe(false);
+    const channel = run({ trigger: 'event' }).events;
+    expect(channel.map((e) => e.insert_id)).toEqual(plain.map((e) => e.insert_id));
+    expect(channel.every((e) => e.event_properties['[Agent] Session Trigger'] === 'event')).toBe(true);
+    expect(checkAgentEvents(channel).errors).toEqual([]);
+    expect(run({ trigger: 'slack' }).events.some((e) => '[Agent] Session Trigger' in e.event_properties)).toBe(false);
+  });
+
   it('attaches kind 44200 to the right reply and drops cost when deltaReliable is false', () => {
     const { events, skipped } = run();
     const reply = (id: string) => events.find((e) => e.insert_id === `buzz:${id}:reply`)?.event_properties ?? {};

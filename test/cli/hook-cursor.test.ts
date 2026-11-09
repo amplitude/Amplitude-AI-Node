@@ -286,6 +286,32 @@ describe('runCursorHook', () => {
     expect(response.event_properties?.cursor_turn_duration_ms).toBe(7000);
   });
 
+  it('stamps lineage on every event and the trigger only when the environment names it', async () => {
+    const sent = async (extra: Record<string, string>) => {
+      rmSync(spoolDir(), { recursive: true, force: true });
+      const { bodies, fetchImpl } = mockFetch();
+      await replay({ AMPLITUDE_AI_API_KEY: SECRET, ...extra }, fetchImpl);
+      return bodies.flatMap((b) => b.events);
+    };
+    const plain = await sent({});
+    expect(plain.map((e) => e.event_type)).toContain('[Agent] Session End');
+    for (const e of plain) {
+      const child = e.event_properties?.['[Agent] Session ID'] === CHILD;
+      expect(e.event_properties).toMatchObject({
+        '[Agent] Root Agent Name': 'cursor',
+        '[Agent] Agent Chain Depth': child ? 2 : 1,
+      });
+      expect(e.event_properties).not.toHaveProperty('[Agent] Session Trigger');
+    }
+    const ci = await sent({ GITHUB_ACTIONS: 'true' });
+    expect(ci.map((e) => e.insert_id)).toEqual(plain.map((e) => e.insert_id));
+    expect(ci.every((e) => e.event_properties?.['[Agent] Session Trigger'] === 'ci')).toBe(true);
+    const named = await sent({ AMPLITUDE_SESSION_TRIGGER: 'event', CI: '1' });
+    expect(named.every((e) => e.event_properties?.['[Agent] Session Trigger'] === 'event')).toBe(true);
+    const invalid = await sent({ AMPLITUDE_SESSION_TRIGGER: 'webhook', CI: 'false' });
+    expect(invalid.some((e) => e.event_properties && '[Agent] Session Trigger' in e.event_properties)).toBe(false);
+  });
+
   it('sends spools idle for 10 minutes when another conversation stops', async () => {
     const { bodies, fetchImpl } = mockFetch();
     const opts = { env: env({ AMPLITUDE_AI_API_KEY: SECRET }), fetchImpl, gitEmail: () => null, stderr: () => undefined };

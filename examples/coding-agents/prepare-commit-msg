@@ -17,13 +17,59 @@ elif [ -n "$CURSOR_CONVERSATION_ID" ]; then
   id="$CURSOR_CONVERSATION_ID"; name="cursor"
 elif [ "$GEMINI_CLI" = "1" ]; then
   # Gemini CLI marks its shells but gives them no session ID.
-  git interpret-trailers --in-place --if-exists addIfDifferent --trailer "Agent-Name: gemini-cli" "$1"
-  exit 0
+  id=""; name="gemini-cli"
 else
   exit 0
 fi
 
-git interpret-trailers --in-place --if-exists addIfDifferent \
-  --trailer "Agent-Session-Id: $id" \
-  --trailer "Agent-Name: $name" \
-  "$1"
+# How the session started, resolved as the session hooks resolve [Agent] Session Trigger:
+# AMPLITUDE_SESSION_TRIGGER from the environment, else from .amplitude-ai/local.env (read as
+# KEY=value text, never run), else ci under CI, else for Codex the rollout's session source.
+valid_trigger() {
+  case "$1" in interactive|headless|ci|scheduled|event) return 0 ;; esac
+  return 1
+}
+requested="$AMPLITUDE_SESSION_TRIGGER"
+if [ -z "$requested" ]; then
+  local_env="$(git rev-parse --show-toplevel 2>/dev/null)/.amplitude-ai/local.env"
+  if [ -f "$local_env" ]; then
+    requested=$(awk -v q="'" '
+      { sub(/\r$/, ""); line = $0; gsub(/^[ \t]+|[ \t]+$/, "", line) }
+      line == "" || substr(line, 1, 1) == "#" || index(line, "=") == 0 { next }
+      {
+        eq = index(line, "="); key = substr(line, 1, eq - 1)
+        gsub(/^[ \t]+|[ \t]+$/, "", key); sub(/^export[ \t]+/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", key)
+        if (key != "AMPLITUDE_SESSION_TRIGGER") next
+        val = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", val); n = length(val)
+        if (n >= 2 && substr(val, 1, 1) == substr(val, n, 1) && (substr(val, 1, 1) == "\"" || substr(val, 1, 1) == q)) val = substr(val, 2, n - 2)
+        found = val
+      }
+      END { print found }' "$local_env" 2>/dev/null)
+  fi
+fi
+trigger=""
+if valid_trigger "$requested"; then trigger="$requested"
+elif [ "$GITHUB_ACTIONS" = "true" ]; then trigger="ci"
+elif [ -n "$CI" ] && [ "$CI" != "false" ] && [ "$CI" != "0" ]; then trigger="ci"
+elif [ "$name" = "codex" ]; then
+  case "$id" in
+    ""|*[!A-Za-z0-9-]*) ;;
+    *)
+      rollout=$(find "${CODEX_HOME:-$HOME/.codex}/sessions" -type f -name "rollout-*-$id.jsonl" 2>/dev/null | head -n 1)
+      if [ -n "$rollout" ]; then
+        codex_source=$(head -n 1 "$rollout" | grep -o '[{,][[:space:]]*"source"[[:space:]]*:[[:space:]]*"[a-z]*"' | head -n 1 | sed 's/.*"\([a-z]*\)"$/\1/')
+        case "$codex_source" in
+          exec|mcp) trigger="headless" ;;
+          cli|vscode) trigger="interactive" ;;
+        esac
+      fi
+      ;;
+  esac
+fi
+
+msg="$1"
+set --
+if [ -n "$id" ]; then set -- --trailer "Agent-Session-Id: $id"; fi
+set -- "$@" --trailer "Agent-Name: $name"
+if [ -n "$trigger" ]; then set -- "$@" --trailer "Agent-Trigger: $trigger"; fi
+git interpret-trailers --in-place --if-exists addIfDifferent "$@" "$msg"

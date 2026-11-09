@@ -1,5 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAgentSDKTracker } from '../../src/integrations/claude-agent-sdk.js';
+
+// The tracker reads the trigger from the environment; keep CI's out of these cases.
+beforeEach(() => {
+  vi.stubEnv('CI', '');
+  vi.stubEnv('GITHUB_ACTIONS', '');
+  vi.stubEnv('AMPLITUDE_SESSION_TRIGGER', '');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function createMockSession(): {
   trackToolCall: ReturnType<typeof vi.fn>;
@@ -264,6 +274,40 @@ describe('ClaudeAgentSDKTracker', () => {
       tracker.process(session, { role: 'user', content: '' });
 
       expect(session.trackUserMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('session trigger', () => {
+    const trigger = '[Agent] Session Trigger';
+    type Opts = { eventProperties?: Record<string, unknown> } | undefined;
+    const run = async (t: ClaudeAgentSDKTracker): Promise<Opts[]> => {
+      const session = createMockSession();
+      t.process(session, { role: 'user', content: 'commit it' });
+      t.process(session, { role: 'assistant', content: 'Done', model: 'claude-sonnet-4-5' });
+      const post = t.hooks(session).PostToolUse![0]!.hooks[0]!;
+      await post({ tool_name: 'Bash', tool_input: { command: 'git commit -m x' }, tool_response: '[main 1a2b3c4] x' }, 't1', {});
+      const lastArg = (mock: ReturnType<typeof vi.fn>, index: number) => (mock.mock.calls[0] as unknown[])[index] as Opts;
+      return [
+        lastArg(session.trackUserMessage, 1),
+        lastArg(session.trackAiMessage, 4),
+        lastArg(session.trackToolCall, 3),
+      ];
+    };
+
+    it('stamps an explicit trigger on every event and keeps commit_sha', async () => {
+      const opts = await run(new ClaudeAgentSDKTracker({ sessionTrigger: 'headless' }));
+      for (const o of opts) expect(o?.eventProperties?.[trigger]).toBe('headless');
+      expect(opts[2]?.eventProperties).toMatchObject({ commit_sha: '1a2b3c4' });
+    });
+
+    it('uses CI when no explicit or env value is valid, and omits it otherwise', async () => {
+      expect((await run(new ClaudeAgentSDKTracker()))[0]).toBeUndefined();
+      vi.stubEnv('AMPLITUDE_SESSION_TRIGGER', 'cron');
+      vi.stubEnv('CI', '1');
+      const opts = await run(new ClaudeAgentSDKTracker({ sessionTrigger: 'later' as never }));
+      for (const o of opts) expect(o?.eventProperties?.[trigger]).toBe('ci');
+      vi.stubEnv('CI', 'false');
+      expect((await run(new ClaudeAgentSDKTracker()))[1]?.eventProperties).toBeUndefined();
     });
   });
 });

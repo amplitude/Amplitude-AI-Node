@@ -795,15 +795,15 @@ export function scanProject(requestedRoot: string): ScanResult {
   }
   if (codingAgents.harnesses.length > 0 && !codingAgents.has_amplitude_setup) {
     const merge = codingAgents.existing_prepare_commit_msg
-      ? ` An existing ${codingAgents.existing_prepare_commit_msg} was found: add the Agent-Session-Id trailer lines to it instead of replacing it.`
+      ? ` An existing ${codingAgents.existing_prepare_commit_msg} was found: add the Agent-Session-Id, Agent-Name and Agent-Trigger trailer lines to it instead of replacing it.`
       : '';
     recommendations.push(
-      `Coding agents configured (${codingAgents.harnesses.join(', ')}): run \`npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\`, then without --dry-run, to send their sessions and stamp agent commits for merge, revert and deploy outcomes.${merge} See "Coding agents" in amplitude-ai.md.`,
+      `Coding agents configured (${codingAgents.harnesses.join(', ')}): run \`npx -y -p @amplitude/ai amplitude-ai coding-agents init --dry-run\`, then without --dry-run, to send their sessions and stamp agent commits for merge, revert and deploy outcomes.${merge} Agents run on a schedule or from a webhook: set AMPLITUDE_SESSION_TRIGGER=scheduled or event in that job so sessions carry [Agent] Session Trigger and commits the Agent-Trigger trailer. See "Coding agents" in amplitude-ai.md.`,
     );
   }
   if (codingAgents.outcomes_workflow === 'outdated') {
     recommendations.push(
-      '.github/workflows/agent-outcomes.yml is an earlier shipped version: re-run `npx -y -p @amplitude/ai amplitude-ai coding-agents init` to upgrade it (adds Pull Request Merged, Deploy Failed and agent_setup_version).',
+      '.github/workflows/agent-outcomes.yml is an earlier shipped version: re-run `npx -y -p @amplitude/ai amplitude-ai coding-agents init` to upgrade it (adds agent_trigger, and review_rounds, hours_to_first_review and hours_open on Pull Request Merged).',
     );
   }
 

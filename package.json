@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -68,6 +68,7 @@
     "./integrations/openai-realtime": "./dist/integrations/openai-realtime.js",
     "./integrations/opentelemetry": "./dist/integrations/opentelemetry.js",
     "./integrations/pipecat": "./dist/integrations/pipecat.js",
+    "./integrations/session-trigger": "./dist/integrations/session-trigger.js",
     "./internals": "./dist/internals.js",
     "./mcp": "./dist/mcp/index.js",
     "./mcp/contract": "./dist/mcp/contract.js",

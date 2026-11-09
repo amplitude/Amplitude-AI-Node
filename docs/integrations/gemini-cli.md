@@ -57,6 +57,7 @@ Amplitude reads Gemini CLI's log records; its spans and metrics are dropped (the
 | `gemini_cli.api_error` | errored `[Agent] AI Response` |
 | `gemini_cli.tool_call`: `function_name`, `success`, `duration_ms`, `error` | `[Agent] Tool Call` (arguments with `logPrompts`) |
 | `prompt_id` | `[Agent] Trace ID`, one per turn |
+| how the session started | `[Agent] Session Trigger` is not mapped from Gemini CLI telemetry yet; that receiver mapping ships separately. The commit trailer already carries it next to `Agent-Name: gemini-cli`: in CI it is `Agent-Trigger: ci`, or set it per job, for example `AMPLITUDE_SESSION_TRIGGER=ci gemini -p "..."` |
 
 Responses with an internal `utility_*` role (routing, summarizing) are not counted as replies.
 

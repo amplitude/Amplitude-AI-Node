@@ -6,6 +6,8 @@ import { decompress as fzstdDecompress } from 'fzstd';
 import { cursorFileFor, runCodexHook, zstdDecompress } from '../../src/cli/hook-codex.js';
 import {
   codexAgentIds,
+  codexAgentLineage,
+  codexSourceTrigger,
   isContextualCodexUserMessage,
   mapCodexRollout,
   parseCodexSessionMeta,
@@ -69,9 +71,14 @@ describe('mapCodexRollout', () => {
     expect(test).toMatchObject({ toolName: 'exec_command', success: false, latencyMs: 5000 });
     expect(test!.opts.errorMessage).toBe('exit code 1');
     expect(commit).toMatchObject({ toolName: 'shell', success: true, insertId: '25494fe7-4ee9-57e2-9a31-29f3078c15cf' });
-    expect(commit!.opts.eventProperties).toEqual({ commit_sha: '1a2b3c4' });
+    const session = {
+      '[Agent] Root Agent Name': 'codex',
+      '[Agent] Agent Chain Depth': 1,
+      '[Agent] Session Trigger': 'interactive',
+    };
+    expect(commit!.opts.eventProperties).toEqual({ ...session, commit_sha: '1a2b3c4' });
     expect(pr).toMatchObject({ toolName: 'mcp__github__create_pull_request', success: true });
-    expect(pr!.opts.eventProperties).toEqual({ commit_sha: '3'.repeat(40) });
+    expect(pr!.opts.eventProperties).toEqual({ ...session, commit_sha: '3'.repeat(40) });
     expect(ai).toMatchObject({ kind: 'ai', model: 'gpt-5.5', content: 'Fixed the test, committed 1a2b3c4 and opened PR #7.' });
     expect(ai!.opts).toMatchObject({
       inputTokens: 3500,
@@ -161,6 +168,67 @@ describe('codexAgentIds', () => {
   });
 });
 
+describe('Codex lineage and session trigger', () => {
+  const spawn = (agentPath?: string) => ({
+    subagent: { thread_spawn: { parent_thread_id: 'p', ...(agentPath && { agent_path: agentPath }) } },
+  });
+  const meta = (extra: Record<string, unknown>) => parseCodexSessionMeta({ id: 'child', session_id: 'root', ...extra })!;
+
+  it('puts the root at depth 1 and counts path segments below /root', () => {
+    expect(codexAgentLineage(meta({}))).toEqual({ rootAgentName: 'codex', depth: 1 });
+    expect(codexAgentLineage(meta({ source: spawn('/root/a') }))).toEqual({ rootAgentName: 'codex', depth: 2 });
+    expect(codexAgentLineage(meta({ source: spawn('/root/a/b') }), 'my-agent')).toEqual({
+      rootAgentName: 'my-agent',
+      depth: 3,
+    });
+    expect(codexAgentLineage(meta({ parent_thread_id: 'root', agent_nickname: 'Ada' }))).toEqual({
+      rootAgentName: 'codex',
+      depth: 2,
+    });
+  });
+
+  it.each([
+    ['exec', 'headless'],
+    ['mcp', 'headless'],
+    ['cli', 'interactive'],
+    ['vscode', 'interactive'],
+    ['app', null],
+    [{ subagent: {} }, null],
+    [undefined, null],
+  ])('reads source %j as %s', (source, trigger) => {
+    expect(codexSourceTrigger(source)).toBe(trigger);
+  });
+
+  const rollout = (source: unknown) => [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'thread-1', source } }),
+    JSON.stringify({ type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.5' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hello' }] } }),
+  ];
+  const triggers = (source: unknown, env?: Record<string, string>) =>
+    mapCodexRollout(rollout(source), undefined, { env }).calls.map((c) => {
+      const p = c.opts.eventProperties as Record<string, unknown>;
+      return p['[Agent] Session Trigger'] ?? null;
+    });
+
+  it('resolves env, then CI, then the rollout source, and omits an unknown trigger', () => {
+    expect(triggers('exec')).toEqual(['headless', 'headless']);
+    expect(triggers('exec', { CI: 'true' })).toEqual(['ci', 'ci']);
+    expect(triggers('cli', { GITHUB_ACTIONS: 'true', AMPLITUDE_SESSION_TRIGGER: 'scheduled' })).toEqual([
+      'scheduled',
+      'scheduled',
+    ]);
+    expect(triggers('cli', { AMPLITUDE_SESSION_TRIGGER: 'cron', CI: '0' })).toEqual(['interactive', 'interactive']);
+    expect(triggers({ subagent: {} }, { CI: 'false' })).toEqual([null, null]);
+    expect(triggers('app')).toEqual([null, null]);
+  });
+
+  it('keeps insert IDs whatever the trigger', () => {
+    const ids = (env?: Record<string, string>) => mapCodexRollout(rollout('exec'), undefined, { env }).calls.map((c) => c.insertId);
+    expect(ids({ CI: '1' })).toEqual(ids());
+  });
+});
+
 describe('amplitude-ai hook codex', () => {
   it('sends events with deterministic insert IDs and advances the cursor', async () => {
     const transcript = join(work, ROOT);
@@ -205,6 +273,27 @@ describe('amplitude-ai hook codex', () => {
     const third = await run(transcript, {}, fetchImpl);
     expect(third.result.sent).toBe(3);
     expect(bodies.at(-1)!.events.map((e) => props(e)['[Agent] Turn ID'])).toEqual([6, 7, 8]);
+  });
+
+  it('stamps lineage and the hook process trigger on every event without changing insert IDs', async () => {
+    const transcript = join(work, ROOT);
+    copyFileSync(join(FIXTURES, ROOT), transcript);
+    const plain = mockFetch();
+    await run(transcript, {}, plain.fetchImpl);
+    rmSync(join(home, 'codex'), { recursive: true, force: true });
+    const ci = mockFetch();
+    await run(transcript, { AMPLITUDE_SESSION_TRIGGER: 'scheduled' }, ci.fetchImpl);
+    const before = plain.bodies[0]!.events;
+    const after = ci.bodies[0]!.events;
+    expect(after.map((e) => e.insert_id)).toEqual(before.map((e) => e.insert_id));
+    for (const e of before) expect(props(e)['[Agent] Session Trigger']).toBe('interactive');
+    for (const e of after) {
+      expect(props(e)).toMatchObject({
+        '[Agent] Session Trigger': 'scheduled',
+        '[Agent] Root Agent Name': 'codex',
+        '[Agent] Agent Chain Depth': 1,
+      });
+    }
   });
 
   it('drops message text, tool input and output in metadata mode but keeps commit_sha', async () => {

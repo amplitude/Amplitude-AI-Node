@@ -4,10 +4,13 @@
 // Envelope: { type, index, sessionId, turnId?, at, data }, from @grok/agent-sdk 0.3.0 SessionEvent.
 // The hook stamps purpose from ctx.session.purpose; the SDK does not put it on the event.
 // turn.completed carries tokens but no cost or model. The model is the agent.ts constant.
-// mapping: { userId, agentId, model?, channel?, mode?, contentMode?, redact?, displayedComponent?, minIdLength?, state? }
+// mapping: { userId, agentId, model?, channel?, mode?, contentMode?, redact?, displayedComponent?, minIdLength?, state?, trigger? }
 // state, when the hook calls this one turn at a time: { turn, trace, replied }
+// trigger: [Agent] Session Trigger on every event, one of SESSION_TRIGGERS; any other value is ignored.
+// A Slack or GitHub channel event is 'event', a schedule 'scheduled'. This file never reads process.env.
 
 const FORWARDER_VERSION = 'http-forwarder/1.0';
+const SESSION_TRIGGERS = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
 
 const serialize = (value) => (typeof value === 'string' ? value : JSON.stringify(value));
 
@@ -69,6 +72,7 @@ function emit(event, role, eventType, extra, mapping, state, skipped, full, reda
       '[Agent] Source': 'cursor-agent-sdk',
       '[Agent] Content Mode': full ? 'full' : 'metadata_only',
       ...(Object.keys(context).length ? { '[Agent] Context': JSON.stringify(context) } : {}),
+      ...(SESSION_TRIGGERS.includes(mapping.trigger) ? { '[Agent] Session Trigger': mapping.trigger } : {}),
       ...extra,
     },
   };
