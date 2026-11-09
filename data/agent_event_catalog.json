@@ -2044,6 +2044,11 @@
           "description": "Human-readable description of the agent's purpose (e.g., 'Handles user chat requests via OpenAI GPT-4o'). Enables observability-driven agent registry from event streams."
         },
         {
+          "name": "[Agent] Session Trigger",
+          "type": "string",
+          "description": "Session dimension: how the session started. One of 'interactive', 'headless', 'ci', 'scheduled' or 'event'; unset when the harness can't tell."
+        },
+        {
           "name": "[Agent] Context",
           "type": "string",
           "description": "Serialized JSON dict of arbitrary segmentation dimensions (surface, prompt_revision, etc.). Experiment assignment has its own [Agent] Experiment properties."
