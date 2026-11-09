@@ -31,6 +31,7 @@ type Vectors = {
   sign: Array<{
     name: string;
     envelope: Record<string, unknown>;
+    traceparent?: string;
     signing_input: string;
     sig: string;
     encoded: Record<ContextTransport, Record<string, unknown>>;
@@ -109,8 +110,10 @@ describe('agent context v1 golden vectors', () => {
   it.each(vectors.sign.map((c) => [c.name, c] as const))('sign: %s', (_name, c) => {
     expect(canonicalJson(c.envelope)).toBe(c.signing_input);
     expect(signEnvelope(c.envelope, vectors.keys[c.envelope.kid as string] as string)).toBe(c.sig);
+    const withCompanion = c.traceparent == null ? c.envelope : { ...c.envelope, traceparent: c.traceparent };
+    expect(canonicalJson(withCompanion)).toBe(c.signing_input);
     for (const transport of ['a2a', 'acp', 'http'] as const) {
-      const encoded = encodeContext(transport, c.envelope, c.sig);
+      const encoded = encodeContext(transport, withCompanion, c.sig);
       expect(JSON.stringify(encoded)).toBe(JSON.stringify(c.encoded[transport]));
     }
   });

@@ -76,14 +76,15 @@ const STRING_FIELDS = [
   'identity_type',
   'actor_type',
   'trace_id',
-  'traceparent',
 ] as const;
+// W3C trace context that instrumentation and proxies rewrite in transit: sent next to the context, never signed.
+const WIRE_FIELDS = [...STRING_FIELDS, 'traceparent'] as const;
 const SIGNING_FIELDS = ['alg', 'kid', 'iat', 'exp'] as const;
 const LOGICAL_FIELDS = [...STRING_FIELDS, ...SIGNING_FIELDS] as const;
 const IDENTITY_TYPES: readonly string[] = ['account', 'pairwise', 'none'];
 const ACTOR_TYPES: readonly string[] = ['agent', 'human'];
 
-type StringField = (typeof STRING_FIELDS)[number];
+type StringField = (typeof WIRE_FIELDS)[number];
 export type Envelope = Record<string, unknown>;
 
 export const A2A_CONTEXT_KEY = 'com.amplitude/context';
@@ -409,7 +410,7 @@ export function encodeContext(
   const keys = transport === 'acp' ? ACP_CONTEXT_KEYS : HTTP_CONTEXT_HEADERS;
   const sigKey = transport === 'acp' ? ACP_SIG_KEY : HTTP_SIG_HEADER;
   const out: Record<string, unknown> = {};
-  for (const key of STRING_FIELDS) if (_hasOwn(envelope, key)) out[keys[key]] = envelope[key];
+  for (const key of WIRE_FIELDS) if (_hasOwn(envelope, key)) out[keys[key]] = envelope[key];
   if (sig != null) out[sigKey] = compactSig(envelope, sig);
   return out;
 }
@@ -430,7 +431,7 @@ function _decode(transport: ContextTransport, wire: Record<string, unknown>): De
   const keys = transport === 'acp' ? ACP_CONTEXT_KEYS : HTTP_CONTEXT_HEADERS;
   const sigKey = transport === 'acp' ? ACP_SIG_KEY : HTTP_SIG_HEADER;
   const envelope: Envelope = {};
-  for (const key of STRING_FIELDS) if (_hasOwn(wire, keys[key])) envelope[key] = wire[keys[key]];
+  for (const key of WIRE_FIELDS) if (_hasOwn(wire, keys[key])) envelope[key] = wire[keys[key]];
   let sig: unknown = null;
   if (_hasOwn(wire, sigKey)) {
     const parsed = _parseCompactSig(wire[sigKey]);
@@ -438,6 +439,8 @@ function _decode(transport: ContextTransport, wire: Record<string, unknown>): De
     sig = parsed.sig;
     delete parsed.sig;
     Object.assign(envelope, parsed);
+    // A signed context's trace is its signed trace_id; traceparent may have been rewritten in transit.
+    delete envelope.traceparent;
   }
   // A bare W3C traceparent (or x-trace-id) is ordinary traced traffic, not agent context.
   if (sig == null && Object.keys(envelope).every((k) => k === 'trace_id' || k === 'traceparent')) return 'none';
@@ -454,7 +457,7 @@ function _bareTraceId(transport: 'acp' | 'http', wire: Record<string, unknown>):
 }
 
 function _wellFormed(envelope: Envelope, sig: unknown): boolean {
-  for (const key of STRING_FIELDS) {
+  for (const key of WIRE_FIELDS) {
     if (!_hasOwn(envelope, key)) continue;
     const value = envelope[key];
     if (typeof value !== 'string') return false;
@@ -502,7 +505,7 @@ export function contextTrust(result: VerifyResult | 'none' | null | undefined): 
   return result === 'ok' ? 'trusted' : 'untrusted';
 }
 
-/** The sender's exact `trace_id` when present, else the `traceparent` trace-id. */
+/** The sender's exact `trace_id` when present, else (unsigned only) the `traceparent` trace-id. */
 function _traceIdOf(envelope: Envelope | null): string | null {
   if (typeof envelope?.trace_id === 'string' && envelope.trace_id) return envelope.trace_id;
   const tp = envelope?.traceparent;
@@ -760,8 +763,8 @@ export type BuildEnvelopeOptions = {
   recipient?: string | null;
   actorType?: ActorType | null;
   /**
-   * The sender's exact `[Agent] Trace ID`. Signed as `trace_id`, plus a
-   * `traceparent` when it is hex-convertible. Left out (with any
+   * The sender's exact `[Agent] Trace ID`. Signed as `trace_id`; ACP and HTTP
+   * also send an unsigned `traceparent` when it is hex-convertible. Left out (with any
    * `traceparent`) when it isn't a valid ID for `transport`.
    */
   traceId?: string | null;

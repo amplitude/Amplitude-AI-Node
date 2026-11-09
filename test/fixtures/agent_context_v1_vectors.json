@@ -45,41 +45,44 @@
         "session_id": "sess-buyer-1",
         "parent_agent_id": "buyer-agent",
         "identity_type": "none",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "alg": "HS256",
         "kid": "k1",
         "iat": 1800000000,
         "exp": 1800000300
       },
-      "signing_input": "{\"alg\":\"HS256\",\"exp\":1800000300,\"iat\":1800000000,\"identity_type\":\"none\",\"kid\":\"k1\",\"parent_agent_id\":\"buyer-agent\",\"session_id\":\"sess-buyer-1\",\"traceparent\":\"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01\"}",
-      "sig": "DJ9WiTFO-YYnIJ4dF_5QhXWGMQx9BITDvcwdPlCvDHQ",
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "signing_input": "{\"alg\":\"HS256\",\"exp\":1800000300,\"iat\":1800000000,\"identity_type\":\"none\",\"kid\":\"k1\",\"parent_agent_id\":\"buyer-agent\",\"session_id\":\"sess-buyer-1\",\"trace_id\":\"4bf92f35-77b3-4da6-a3ce-929d0e0e4736\"}",
+      "sig": "9psFj4AidjGvzDdvHO7cePh0ang9m4eN0sfsNU12vC8",
       "encoded": {
         "a2a": {
           "com.amplitude/context": {
             "session_id": "sess-buyer-1",
             "parent_agent_id": "buyer-agent",
             "identity_type": "none",
-            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
             "alg": "HS256",
             "kid": "k1",
             "iat": 1800000000,
             "exp": 1800000300,
-            "sig": "DJ9WiTFO-YYnIJ4dF_5QhXWGMQx9BITDvcwdPlCvDHQ"
+            "sig": "9psFj4AidjGvzDdvHO7cePh0ang9m4eN0sfsNU12vC8"
           }
         },
         "acp": {
           "com.amplitude/session-id": "sess-buyer-1",
           "com.amplitude/parent-agent-id": "buyer-agent",
           "com.amplitude/identity-type": "none",
+          "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=DJ9WiTFO-YYnIJ4dF_5QhXWGMQx9BITDvcwdPlCvDHQ"
+          "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=9psFj4AidjGvzDdvHO7cePh0ang9m4eN0sfsNU12vC8"
         },
         "http": {
           "x-amplitude-session-id": "sess-buyer-1",
           "x-amplitude-agent-id": "buyer-agent",
           "x-amplitude-identity-type": "none",
+          "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=DJ9WiTFO-YYnIJ4dF_5QhXWGMQx9BITDvcwdPlCvDHQ"
+          "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=9psFj4AidjGvzDdvHO7cePh0ang9m4eN0sfsNU12vC8"
         }
       }
     },
@@ -89,7 +92,7 @@
         "session_id": "sess-buyer-1",
         "parent_agent_id": "buyer-agent",
         "identity_type": "account",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "alg": "HS256",
         "kid": "k1",
         "iat": 1800000000,
@@ -97,8 +100,9 @@
         "user_id": "user-42",
         "actor_type": "agent"
       },
-      "signing_input": "{\"actor_type\":\"agent\",\"alg\":\"HS256\",\"exp\":1800000300,\"iat\":1800000000,\"identity_type\":\"account\",\"kid\":\"k1\",\"parent_agent_id\":\"buyer-agent\",\"session_id\":\"sess-buyer-1\",\"traceparent\":\"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01\",\"user_id\":\"user-42\"}",
-      "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI",
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "signing_input": "{\"actor_type\":\"agent\",\"alg\":\"HS256\",\"exp\":1800000300,\"iat\":1800000000,\"identity_type\":\"account\",\"kid\":\"k1\",\"parent_agent_id\":\"buyer-agent\",\"session_id\":\"sess-buyer-1\",\"trace_id\":\"4bf92f35-77b3-4da6-a3ce-929d0e0e4736\",\"user_id\":\"user-42\"}",
+      "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE",
       "encoded": {
         "a2a": {
           "com.amplitude/context": {
@@ -107,12 +111,12 @@
             "user_id": "user-42",
             "identity_type": "account",
             "actor_type": "agent",
-            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
             "alg": "HS256",
             "kid": "k1",
             "iat": 1800000000,
             "exp": 1800000300,
-            "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+            "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
           }
         },
         "acp": {
@@ -121,8 +125,9 @@
           "com.amplitude/user-id": "user-42",
           "com.amplitude/identity-type": "account",
           "com.amplitude/actor-type": "agent",
+          "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         },
         "http": {
           "x-amplitude-session-id": "sess-buyer-1",
@@ -130,56 +135,53 @@
           "x-amplitude-user-id": "user-42",
           "x-amplitude-identity-type": "account",
           "x-amplitude-actor-type": "agent",
+          "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       }
     },
     {
-      "name": "with_trace_id",
+      "name": "custom_trace_id",
       "envelope": {
         "session_id": "sess-buyer-1",
         "parent_agent_id": "buyer-agent",
         "identity_type": "none",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "trace_id": "req-123",
         "alg": "HS256",
         "kid": "k1",
         "iat": 1800000000,
-        "exp": 1800000300,
-        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
+        "exp": 1800000300
       },
-      "signing_input": "{\"alg\":\"HS256\",\"exp\":1800000300,\"iat\":1800000000,\"identity_type\":\"none\",\"kid\":\"k1\",\"parent_agent_id\":\"buyer-agent\",\"session_id\":\"sess-buyer-1\",\"trace_id\":\"4bf92f35-77b3-4da6-a3ce-929d0e0e4736\",\"traceparent\":\"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01\"}",
-      "sig": "vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg",
+      "signing_input": "{\"alg\":\"HS256\",\"exp\":1800000300,\"iat\":1800000000,\"identity_type\":\"none\",\"kid\":\"k1\",\"parent_agent_id\":\"buyer-agent\",\"session_id\":\"sess-buyer-1\",\"trace_id\":\"req-123\"}",
+      "sig": "3hCFbeuinAyLXc8z4md8Wq6RAREsOzUysBck9fkKF8c",
       "encoded": {
         "a2a": {
           "com.amplitude/context": {
             "session_id": "sess-buyer-1",
             "parent_agent_id": "buyer-agent",
             "identity_type": "none",
-            "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "trace_id": "req-123",
             "alg": "HS256",
             "kid": "k1",
             "iat": 1800000000,
             "exp": 1800000300,
-            "sig": "vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
+            "sig": "3hCFbeuinAyLXc8z4md8Wq6RAREsOzUysBck9fkKF8c"
           }
         },
         "acp": {
           "com.amplitude/session-id": "sess-buyer-1",
           "com.amplitude/parent-agent-id": "buyer-agent",
           "com.amplitude/identity-type": "none",
-          "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
+          "com.amplitude/trace-id": "req-123",
+          "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=3hCFbeuinAyLXc8z4md8Wq6RAREsOzUysBck9fkKF8c"
         },
         "http": {
           "x-amplitude-session-id": "sess-buyer-1",
           "x-amplitude-agent-id": "buyer-agent",
           "x-amplitude-identity-type": "none",
-          "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
+          "x-trace-id": "req-123",
+          "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=3hCFbeuinAyLXc8z4md8Wq6RAREsOzUysBck9fkKF8c"
         }
       }
     }
@@ -195,12 +197,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000000,
@@ -210,7 +212,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -225,7 +227,7 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
         }
       },
       "now": 1800000000,
@@ -234,7 +236,7 @@
         "verify_result": "unsigned",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -249,12 +251,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000361,
@@ -263,7 +265,7 @@
         "verify_result": "expired",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -278,12 +280,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000360,
@@ -293,7 +295,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -308,12 +310,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1799999939,
@@ -322,7 +324,7 @@
         "verify_result": "not_yet_valid",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -337,12 +339,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000000,
@@ -351,7 +353,7 @@
         "verify_result": "bad_signature",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-attacker",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -366,12 +368,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k9",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000000,
@@ -380,7 +382,7 @@
         "verify_result": "unknown_kid",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -395,12 +397,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "EdDSA",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000000,
@@ -409,7 +411,7 @@
         "verify_result": "unsupported_alg",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -424,12 +426,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "5CPMEortPojNiQ89AXUJxgJsLjAz0MFhr56HTDGx74o"
+          "sig": "NVgGkgwmauG9MelBk7WnCp6zOhS4Qs_V1LGidJ4np54"
         }
       },
       "now": 1800000000,
@@ -438,7 +440,7 @@
         "verify_result": "bad_signature",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -453,69 +455,13 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
         }
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
       "expected": {
         "verify_result": "malformed"
-      }
-    },
-    {
-      "name": "a2a/ok_exact_trace_id",
-      "transport": "a2a",
-      "wire": {
-        "com.amplitude/context": {
-          "session_id": "sess-buyer-1",
-          "parent_agent_id": "buyer-agent",
-          "identity_type": "none",
-          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "alg": "HS256",
-          "kid": "k1",
-          "iat": 1800000000,
-          "exp": 1800000300,
-          "sig": "vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
-        }
-      },
-      "now": 1800000000,
-      "accept_unsigned_http": true,
-      "expected": {
-        "verify_result": "ok",
-        "session_id": "sess-buyer-1",
-        "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "actor_type": "agent",
-        "identity_type": "none"
-      }
-    },
-    {
-      "name": "a2a/expired_exact_peer_trace_id",
-      "transport": "a2a",
-      "wire": {
-        "com.amplitude/context": {
-          "session_id": "sess-buyer-1",
-          "parent_agent_id": "buyer-agent",
-          "identity_type": "none",
-          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-          "alg": "HS256",
-          "kid": "k1",
-          "iat": 1800000000,
-          "exp": 1800000300,
-          "sig": "vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
-        }
-      },
-      "now": 1800000361,
-      "accept_unsigned_http": true,
-      "expected": {
-        "verify_result": "expired",
-        "peer_agent_id": "buyer-agent",
-        "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "actor_type": "agent",
-        "identity_type": "none"
       }
     },
     {
@@ -552,14 +498,15 @@
         "com.amplitude/context": {
           "session_id": "sess-buyer-1",
           "parent_agent_id": "buyer-agent",
-          "identity_type": "none",
+          "user_id": "user-42",
+          "identity_type": "account",
+          "actor_type": "agent",
           "trace_id": "other-trace",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
         }
       },
       "now": 1800000000,
@@ -583,7 +530,7 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
         }
       },
       "now": 1800000000,
@@ -610,12 +557,12 @@
           "user_id": "user-42",
           "identity_type": "account",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI",
+          "sig": "6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE",
           "extra_field": "ignored"
         }
       },
@@ -626,7 +573,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -640,12 +587,12 @@
           "parent_agent_id": "buyer-agent",
           "identity_type": "none",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,
           "exp": 1800000300,
-          "sig": "-G06kXptH0Rcg8h5eq50Fm7AuV48bCCduD_NP69A4ss"
+          "sig": "ASTrYeF9bwWk8m7WnMhyuFGRCujPjyi3hJ8rKJkADWY"
         }
       },
       "now": 1800000000,
@@ -654,7 +601,7 @@
         "verify_result": "ok",
         "session_id": "sess-buyer-1",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -668,7 +615,7 @@
           "parent_agent_id": "buyer-agent",
           "identity_type": "none",
           "actor_type": "agent",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
         }
       },
       "now": 1800000000,
@@ -677,7 +624,7 @@
         "verify_result": "unsigned",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -691,8 +638,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -701,7 +649,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -715,6 +663,7 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
       },
       "now": 1800000000,
@@ -723,7 +672,7 @@
         "verify_result": "unsigned",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -737,8 +686,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000361,
       "accept_unsigned_http": true,
@@ -746,7 +696,7 @@
         "verify_result": "expired",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -760,8 +710,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000360,
       "accept_unsigned_http": true,
@@ -770,7 +721,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -784,8 +735,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1799999939,
       "accept_unsigned_http": true,
@@ -793,7 +745,7 @@
         "verify_result": "not_yet_valid",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -807,8 +759,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -816,7 +769,7 @@
         "verify_result": "bad_signature",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-attacker",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -830,8 +783,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k9;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=HS256;kid=k9;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -839,7 +793,7 @@
         "verify_result": "unknown_kid",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -853,8 +807,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=EdDSA;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "com.amplitude/sig": "alg=EdDSA;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -862,7 +817,7 @@
         "verify_result": "unsupported_alg",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -876,8 +831,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=5CPMEortPojNiQ89AXUJxgJsLjAz0MFhr56HTDGx74o"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=NVgGkgwmauG9MelBk7WnCp6zOhS4Qs_V1LGidJ4np54"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -885,7 +841,7 @@
         "verify_result": "bad_signature",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -899,56 +855,12 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
       "expected": {
         "verify_result": "malformed"
-      }
-    },
-    {
-      "name": "acp/ok_exact_trace_id",
-      "transport": "acp",
-      "wire": {
-        "com.amplitude/session-id": "sess-buyer-1",
-        "com.amplitude/parent-agent-id": "buyer-agent",
-        "com.amplitude/identity-type": "none",
-        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
-      },
-      "now": 1800000000,
-      "accept_unsigned_http": true,
-      "expected": {
-        "verify_result": "ok",
-        "session_id": "sess-buyer-1",
-        "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "actor_type": "human",
-        "identity_type": "none"
-      }
-    },
-    {
-      "name": "acp/expired_exact_peer_trace_id",
-      "transport": "acp",
-      "wire": {
-        "com.amplitude/session-id": "sess-buyer-1",
-        "com.amplitude/parent-agent-id": "buyer-agent",
-        "com.amplitude/identity-type": "none",
-        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
-      },
-      "now": 1800000361,
-      "accept_unsigned_http": true,
-      "expected": {
-        "verify_result": "expired",
-        "peer_agent_id": "buyer-agent",
-        "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "actor_type": "human",
-        "identity_type": "none"
       }
     },
     {
@@ -978,10 +890,12 @@
       "wire": {
         "com.amplitude/session-id": "sess-buyer-1",
         "com.amplitude/parent-agent-id": "buyer-agent",
-        "com.amplitude/identity-type": "none",
+        "com.amplitude/user-id": "user-42",
+        "com.amplitude/identity-type": "account",
+        "com.amplitude/actor-type": "agent",
         "com.amplitude/trace-id": "other-trace",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1003,7 +917,7 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1018,6 +932,75 @@
       "now": 1800000000,
       "accept_unsigned_http": true,
       "expected": {}
+    },
+    {
+      "name": "acp/traceparent_rewritten_after_signing",
+      "transport": "acp",
+      "wire": {
+        "com.amplitude/session-id": "sess-buyer-1",
+        "com.amplitude/parent-agent-id": "buyer-agent",
+        "com.amplitude/user-id": "user-42",
+        "com.amplitude/identity-type": "account",
+        "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "ok",
+        "session_id": "sess-buyer-1",
+        "user_id": "user-42",
+        "parent_agent_id": "buyer-agent",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "actor_type": "agent",
+        "identity_type": "account"
+      }
+    },
+    {
+      "name": "acp/traceparent_dropped_after_signing",
+      "transport": "acp",
+      "wire": {
+        "com.amplitude/session-id": "sess-buyer-1",
+        "com.amplitude/parent-agent-id": "buyer-agent",
+        "com.amplitude/user-id": "user-42",
+        "com.amplitude/identity-type": "account",
+        "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "ok",
+        "session_id": "sess-buyer-1",
+        "user_id": "user-42",
+        "parent_agent_id": "buyer-agent",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "actor_type": "agent",
+        "identity_type": "account"
+      }
+    },
+    {
+      "name": "acp/signed_without_trace_id_ignores_traceparent",
+      "transport": "acp",
+      "wire": {
+        "com.amplitude/session-id": "sess-buyer-1",
+        "com.amplitude/parent-agent-id": "buyer-agent",
+        "com.amplitude/identity-type": "none",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=DndlKPx44-h6Xvh_jrKZAinE0alBAOYzUNxklSdchbs"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "ok",
+        "session_id": "sess-buyer-1",
+        "parent_agent_id": "buyer-agent",
+        "actor_type": "human",
+        "identity_type": "none"
+      }
     },
     {
       "name": "acp/lone_traceparent",
@@ -1057,6 +1040,28 @@
       }
     },
     {
+      "name": "acp/unsigned_trace_from_traceparent",
+      "transport": "acp",
+      "wire": {
+        "com.amplitude/session-id": "sess-buyer-1",
+        "com.amplitude/parent-agent-id": "buyer-agent",
+        "com.amplitude/user-id": "user-42",
+        "com.amplitude/identity-type": "account",
+        "com.amplitude/actor-type": "agent",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "unsigned",
+        "peer_agent_id": "buyer-agent",
+        "peer_session_id": "sess-buyer-1",
+        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "actor_type": "human",
+        "identity_type": "none"
+      }
+    },
+    {
       "name": "acp/unknown_keys_ignored",
       "transport": "acp",
       "wire": {
@@ -1065,8 +1070,9 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI",
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE",
         "com.amplitude/extra": "ignored"
       },
       "now": 1800000000,
@@ -1076,7 +1082,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -1089,8 +1095,8 @@
         "com.amplitude/parent-agent-id": "buyer-agent",
         "com.amplitude/identity-type": "none",
         "com.amplitude/actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=-G06kXptH0Rcg8h5eq50Fm7AuV48bCCduD_NP69A4ss"
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "com.amplitude/sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=ASTrYeF9bwWk8m7WnMhyuFGRCujPjyi3hJ8rKJkADWY"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1098,7 +1104,7 @@
         "verify_result": "ok",
         "session_id": "sess-buyer-1",
         "parent_agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -1111,7 +1117,7 @@
         "com.amplitude/parent-agent-id": "buyer-agent",
         "com.amplitude/identity-type": "none",
         "com.amplitude/actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1119,7 +1125,7 @@
         "verify_result": "unsigned",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1133,8 +1139,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1143,7 +1150,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -1157,6 +1164,7 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
       },
       "now": 1800000000,
@@ -1166,7 +1174,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "account"
       }
@@ -1180,8 +1188,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000361,
       "accept_unsigned_http": true,
@@ -1189,7 +1198,7 @@
         "verify_result": "expired",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1203,8 +1212,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000360,
       "accept_unsigned_http": true,
@@ -1213,7 +1223,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -1227,8 +1237,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1799999939,
       "accept_unsigned_http": true,
@@ -1236,7 +1247,7 @@
         "verify_result": "not_yet_valid",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1250,8 +1261,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1259,7 +1271,7 @@
         "verify_result": "bad_signature",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-attacker",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1273,8 +1285,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k9;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=HS256;kid=k9;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1282,7 +1295,7 @@
         "verify_result": "unknown_kid",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1296,8 +1309,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=EdDSA;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI"
+        "x-amplitude-context-sig": "alg=EdDSA;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1305,7 +1319,7 @@
         "verify_result": "unsupported_alg",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1319,8 +1333,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=5CPMEortPojNiQ89AXUJxgJsLjAz0MFhr56HTDGx74o"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=NVgGkgwmauG9MelBk7WnCp6zOhS4Qs_V1LGidJ4np54"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1328,7 +1343,7 @@
         "verify_result": "bad_signature",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1342,56 +1357,12 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
       "expected": {
         "verify_result": "malformed"
-      }
-    },
-    {
-      "name": "http/ok_exact_trace_id",
-      "transport": "http",
-      "wire": {
-        "x-amplitude-session-id": "sess-buyer-1",
-        "x-amplitude-agent-id": "buyer-agent",
-        "x-amplitude-identity-type": "none",
-        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
-      },
-      "now": 1800000000,
-      "accept_unsigned_http": true,
-      "expected": {
-        "verify_result": "ok",
-        "session_id": "sess-buyer-1",
-        "agent_id": "buyer-agent",
-        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "actor_type": "human",
-        "identity_type": "none"
-      }
-    },
-    {
-      "name": "http/expired_exact_peer_trace_id",
-      "transport": "http",
-      "wire": {
-        "x-amplitude-session-id": "sess-buyer-1",
-        "x-amplitude-agent-id": "buyer-agent",
-        "x-amplitude-identity-type": "none",
-        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
-      },
-      "now": 1800000361,
-      "accept_unsigned_http": true,
-      "expected": {
-        "verify_result": "expired",
-        "peer_agent_id": "buyer-agent",
-        "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
-        "actor_type": "human",
-        "identity_type": "none"
       }
     },
     {
@@ -1421,10 +1392,12 @@
       "wire": {
         "x-amplitude-session-id": "sess-buyer-1",
         "x-amplitude-agent-id": "buyer-agent",
-        "x-amplitude-identity-type": "none",
+        "x-amplitude-user-id": "user-42",
+        "x-amplitude-identity-type": "account",
+        "x-amplitude-actor-type": "agent",
         "x-trace-id": "other-trace",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=vkNt04ngCvNd2ukip0l51LHsE4U1anYgu6jt60b0KDg"
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1446,7 +1419,7 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1461,6 +1434,75 @@
       "now": 1800000000,
       "accept_unsigned_http": true,
       "expected": {}
+    },
+    {
+      "name": "http/traceparent_rewritten_after_signing",
+      "transport": "http",
+      "wire": {
+        "x-amplitude-session-id": "sess-buyer-1",
+        "x-amplitude-agent-id": "buyer-agent",
+        "x-amplitude-user-id": "user-42",
+        "x-amplitude-identity-type": "account",
+        "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "ok",
+        "session_id": "sess-buyer-1",
+        "user_id": "user-42",
+        "agent_id": "buyer-agent",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "actor_type": "agent",
+        "identity_type": "account"
+      }
+    },
+    {
+      "name": "http/traceparent_dropped_after_signing",
+      "transport": "http",
+      "wire": {
+        "x-amplitude-session-id": "sess-buyer-1",
+        "x-amplitude-agent-id": "buyer-agent",
+        "x-amplitude-user-id": "user-42",
+        "x-amplitude-identity-type": "account",
+        "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "ok",
+        "session_id": "sess-buyer-1",
+        "user_id": "user-42",
+        "agent_id": "buyer-agent",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "actor_type": "agent",
+        "identity_type": "account"
+      }
+    },
+    {
+      "name": "http/signed_without_trace_id_ignores_traceparent",
+      "transport": "http",
+      "wire": {
+        "x-amplitude-session-id": "sess-buyer-1",
+        "x-amplitude-agent-id": "buyer-agent",
+        "x-amplitude-identity-type": "none",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=DndlKPx44-h6Xvh_jrKZAinE0alBAOYzUNxklSdchbs"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "ok",
+        "session_id": "sess-buyer-1",
+        "agent_id": "buyer-agent",
+        "actor_type": "human",
+        "identity_type": "none"
+      }
     },
     {
       "name": "http/lone_traceparent",
@@ -1500,6 +1542,29 @@
       }
     },
     {
+      "name": "http/unsigned_trace_from_traceparent",
+      "transport": "http",
+      "wire": {
+        "x-amplitude-session-id": "sess-buyer-1",
+        "x-amplitude-agent-id": "buyer-agent",
+        "x-amplitude-user-id": "user-42",
+        "x-amplitude-identity-type": "account",
+        "x-amplitude-actor-type": "agent",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "unsigned",
+        "session_id": "sess-buyer-1",
+        "user_id": "user-42",
+        "agent_id": "buyer-agent",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "actor_type": "human",
+        "identity_type": "account"
+      }
+    },
+    {
       "name": "http/unknown_keys_ignored",
       "transport": "http",
       "wire": {
@@ -1508,8 +1573,9 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=55JCaARxBVOBWzhTXGTFgy4o_BQZby8Seb0PsZA-gjI",
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=6V3p0-UkMrvVIFKPc67hin4vJfxxVGmuVG-EeENi1XE",
         "x-amplitude-extra": "ignored"
       },
       "now": 1800000000,
@@ -1519,7 +1585,7 @@
         "session_id": "sess-buyer-1",
         "user_id": "user-42",
         "agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "account"
       }
@@ -1532,8 +1598,8 @@
         "x-amplitude-agent-id": "buyer-agent",
         "x-amplitude-identity-type": "none",
         "x-amplitude-actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=-G06kXptH0Rcg8h5eq50Fm7AuV48bCCduD_NP69A4ss"
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+        "x-amplitude-context-sig": "alg=HS256;kid=k1;iat=1800000000;exp=1800000300;sig=ASTrYeF9bwWk8m7WnMhyuFGRCujPjyi3hJ8rKJkADWY"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1541,7 +1607,7 @@
         "verify_result": "ok",
         "session_id": "sess-buyer-1",
         "agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "agent",
         "identity_type": "none"
       }
@@ -1554,7 +1620,7 @@
         "x-amplitude-agent-id": "buyer-agent",
         "x-amplitude-identity-type": "none",
         "x-amplitude-actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": true,
@@ -1562,7 +1628,7 @@
         "verify_result": "unsigned",
         "session_id": "sess-buyer-1",
         "agent_id": "buyer-agent",
-        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1576,7 +1642,7 @@
         "x-amplitude-user-id": "user-42",
         "x-amplitude-identity-type": "account",
         "x-amplitude-actor-type": "agent",
-        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        "x-trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736"
       },
       "now": 1800000000,
       "accept_unsigned_http": false,
@@ -1584,7 +1650,7 @@
         "verify_result": "unsigned",
         "peer_agent_id": "buyer-agent",
         "peer_session_id": "sess-buyer-1",
-        "peer_trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+        "peer_trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "actor_type": "human",
         "identity_type": "none"
       }
@@ -1598,6 +1664,7 @@
         "com.amplitude/user-id": "user-42",
         "com.amplitude/identity-type": "account",
         "com.amplitude/actor-type": "agent",
+        "com.amplitude/trace-id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         "com.amplitude/sig": "alg=HS256;sig=x"
       },
@@ -1627,7 +1694,7 @@
           "session_id": "sess-buyer-1",
           "parent_agent_id": "buyer-agent",
           "identity_type": "account",
-          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
           "alg": "HS256",
           "kid": "k1",
           "iat": 1800000000,

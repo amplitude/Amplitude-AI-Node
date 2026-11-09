@@ -165,6 +165,28 @@ describe('ContextPolicy', () => {
   });
 });
 
+describe('traceparent rewritten in transit', () => {
+  const TRACE_HEX = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const REWRITTEN = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+
+  it.each(['http', 'acp'] as const)('still verifies on %s with the signed trace', (transport) => {
+    const wire = mintContext({ sessionId: 'sess-1', traceId: TRACE_HEX, transport, policy } as never) as Record<
+      string,
+      unknown
+    >;
+    expect(wire.traceparent).toBeDefined();
+    wire.traceparent = REWRITTEN;
+    const result = extractAgentContext(transport, wire, { policy });
+    expect(result.verifyResult).toBe('ok');
+    expect(result.traceId).toBe(TRACE_HEX);
+  });
+
+  it('sends no traceparent over A2A', () => {
+    const wire = mintContext({ sessionId: 'sess-1', traceId: TRACE_HEX, transport: 'a2a', policy });
+    expect(wire['com.amplitude/context']).not.toHaveProperty('traceparent');
+  });
+});
+
 describe('verify results', () => {
   const cases: Array<[VerifyResult, () => Record<string, unknown>, number]> = [
     ['ok', () => signedWire('a2a'), NOW],

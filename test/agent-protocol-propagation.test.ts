@@ -55,10 +55,8 @@ describe('A2A Message.metadata propagation', () => {
       'parent_agent_id',
       'session_id',
       'trace_id',
-      'traceparent',
     ]);
     expect(context.identity_type).toBe('none');
-    expect(context.traceparent).toMatch(new RegExp(`^00-${TRACE}-[0-9a-f]{16}-01$`));
     expect(JSON.stringify(metadata)).not.toContain('user-1');
   });
 

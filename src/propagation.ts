@@ -155,8 +155,9 @@ function _outbound(
 
 /**
  * Build propagation headers for an outbound call to a service you operate:
- * W3C `traceparent` and the `x-amplitude-*` headers, signed with
- * `x-amplitude-context-sig` when a signing key is configured.
+ * the `x-amplitude-*` headers and `x-trace-id`, signed with
+ * `x-amplitude-context-sig` when a signing key is configured, plus an
+ * unsigned W3C `traceparent` when the trace is hex-convertible.
  *
  * By default the end-user ID (`x-amplitude-user-id`) is included, so never
  * forward these headers to a third-party host; pass `includeIdentity: false`
@@ -377,8 +378,8 @@ function _injectInto(
 /**
  * Add the active session context to an A2A `Message.metadata` object under
  * {@link A2A_METADATA_KEY}: `session_id`, `parent_agent_id` (this agent),
- * `identity_type`, the session's exact `trace_id` and, when that is hex,
- * `traceparent`, signed when a key is configured.
+ * `identity_type` and the session's exact `trace_id`, signed when a key is
+ * configured.
  * The end-user ID is left out unless `identity` is `'pairwise'`, or `'raw'`
  * with a signing key. Returns a new object; without an active session the
  * copy is returned unchanged.
@@ -451,7 +452,7 @@ export function declareA2aExtension<T extends { capabilities?: { extensions?: un
 /**
  * Add the active session context to an Agent Client Protocol (ACP) `_meta`
  * object: flat `com.amplitude/*` keys, the ACP-reserved W3C `traceparent`
- * and `com.amplitude/sig` when a signing key is configured. Identity rules
+ * (unsigned) and `com.amplitude/sig` when a signing key is configured. Identity rules
  * match {@link injectA2aMetadata}. Returns a new object.
  *
  * @throws {ConfigurationError} for `identity: 'raw'` without a signing key,
