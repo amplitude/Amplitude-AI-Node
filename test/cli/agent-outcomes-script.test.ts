@@ -62,13 +62,15 @@ const tree = (n: string) => `tree-${n}`;
 const commit = (
   sha: string,
   parent: string | null,
-  opts: { message?: string; email?: string; tree?: string; committed?: string; authored?: string } = {},
+  opts: { message?: string; email?: string; tree?: string; committed?: string; authored?: string; byGitHub?: boolean } = {},
 ) => ({
   sha,
   commit: {
     message: opts.message ?? `change ${sha}`,
     author: { email: opts.email ?? 'dev@example.com', date: opts.authored ?? '2026-11-01T03:00:00Z' } as { email: string; date?: string },
-    ...(opts.committed && { committer: { date: opts.committed } }),
+    ...((opts.committed || opts.byGitHub) && {
+      committer: { ...(opts.committed && { date: opts.committed }), ...(opts.byGitHub && { email: 'noreply@github.com' }) },
+    }),
     tree: { sha: opts.tree ?? tree(sha) },
   },
   author: { login: 'dev' },
@@ -678,7 +680,7 @@ describe('agent-outcomes.yml script', () => {
     const world = linearWorld();
     world.commits.fa = commit('fa', 'base', { message: agentMessage('s1') });
     world.commits.fh = commit('fh', 'fa', { message: 'tidy\n', email: 'human@example.com', authored: '2026-10-20T02:00:00Z' });
-    world.commits.feed41aa = commit('feed41aa', 'base', { message: 'tidy\n', email: 'human@example.com', authored: '2026-10-20T02:00:00Z' });
+    world.commits.feed41aa = commit('feed41aa', 'base', { message: 'tidy\n', email: 'human@example.com', authored: '2026-10-20T02:00:00Z', byGitHub: true });
     world.associatedPrs = { feed41aa: [{ number: 41, merge_commit_sha: 'feed41aa', merged_at: '2026-10-21T00:00:00Z' }] };
     world.prCommitsByNumber = { 41: ['fa', 'fh'] };
     world.prCommits = ['c3'];
@@ -794,7 +796,7 @@ describe('agent-outcomes.yml script', () => {
     world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
     world.commits.fh = commit('fh', 'fa', { message: 'tidy\n', email: 'human@example.com', authored: '2026-11-01T02:00:00Z' });
     world.commits.ra = commit('ra', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
-    world.commits.head = commit('head', 'ra', { message: 'tidy\n', email: 'human@example.com', authored: '2026-11-01T02:00:00Z' });
+    world.commits.head = commit('head', 'ra', { message: 'tidy\n', email: 'human@example.com', authored: '2026-11-01T02:00:00Z', byGitHub: true });
     world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
     world.prCommitsByNumber = { 7: ['fa', 'fh'] };
     deployedSince(world, 'base');
@@ -836,7 +838,7 @@ describe('agent-outcomes.yml script', () => {
 
   it('looks up each merged PR once when the deploy range holds its commits and merge commit', async () => {
     const world = linearWorld();
-    world.commits.head = commit('head', 'c3', { message: 'Merge pull request #7', email: 'human@example.com' });
+    world.commits.head = commit('head', 'c3', { message: 'Merge pull request #7', email: 'human@example.com', byGitHub: true });
     world.associatedPrs = {
       c1: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
       head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
@@ -845,13 +847,13 @@ describe('agent-outcomes.yml script', () => {
     deployedSince(world, 'base');
     const r = await run(world, { event: 'deployment_status', payload: deployPayload });
     expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c1:2', 'deploy_succeeded:acme/app:c2:2']);
-    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(2);
+    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(1);
     expect(r.calls.filter((c) => c === 'pulls.listCommits')).toHaveLength(1);
   });
 
   it("scores each deployed commit itself when its PR's commits can't be listed", async () => {
     const world = linearWorld();
-    world.commits.head = commit('head', 'c2', { message: 'Merge pull request #7', email: 'human@example.com' });
+    world.commits.head = commit('head', 'c2', { message: 'Merge pull request #7', email: 'human@example.com', byGitHub: true });
     world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
     world.failing = new Set(['pulls.listCommits']);
     deployedSince(world, 'base');
@@ -860,22 +862,42 @@ describe('agent-outcomes.yml script', () => {
     expect(r.log.info.some((m) => m.includes('deployed_prs=error'))).toBe(true);
   });
 
-  it("looks up only commits without a trailer, and only a PR's own merge commit stands for it", async () => {
+  it("looks up only commits GitHub could have merged a PR with, and only a PR's own merge commit stands for it", async () => {
     const world = linearWorld();
     world.commits.x9 = commit('x9', 'base', { message: agentMessage('s9') });
-    world.commits.head = commit('head', 'c3', { email: 'human@example.com' });
-    world.associatedPrs = { c3: [{ number: 9, merge_commit_sha: 'other', merged_at: '2026-10-30T00:00:00Z' }] };
+    world.commits.head = commit('head', 'c3', { email: 'human@example.com', byGitHub: true });
+    world.associatedPrs = {
+      c3: [{ number: 9, merge_commit_sha: 'c3', merged_at: '2026-10-30T00:00:00Z' }],
+      head: [{ number: 9, merge_commit_sha: 'other', merged_at: '2026-10-30T00:00:00Z' }],
+    };
     world.prCommitsByNumber = { 9: ['x9'] };
     deployedSince(world, 'base');
     const r = await run(world, { event: 'deployment_status', payload: deployPayload });
     expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c1:2', 'deploy_succeeded:acme/app:c2:2']);
-    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(2);
+    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(1);
     expect(r.calls).not.toContain('pulls.listCommits');
+  });
+
+  it('spends no lookups on ordinary human commits, so a later squash still expands', async () => {
+    const world = linearWorld();
+    let parent = 'c3';
+    for (let i = 0; i < 320; i++) {
+      world.commits[`h${i}`] = commit(`h${i}`, parent, { email: 'human@example.com' });
+      parent = `h${i}`;
+    }
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s9'), authored: '2026-11-01T01:00:00Z' });
+    world.commits.head = commit('head', parent, { message: 'Speed up checkout (#7)', email: 'human@example.com', byGitHub: true });
+    world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
+    world.prCommitsByNumber = { 7: ['fa'] };
+    deployedSince(world, 'c3');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:fa:2']);
+    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(1);
   });
 
   it('scores the deployed commits themselves when the PR lookup fails', async () => {
     const world = linearWorld();
-    world.commits.head = commit('head', 'c3', { message: agentMessage('s3'), authored: '2026-11-01T08:00:00Z' });
+    world.commits.head = commit('head', 'c3', { message: agentMessage('s3'), authored: '2026-11-01T08:00:00Z', byGitHub: true });
     world.failing = new Set(['repos.listPullRequestsAssociatedWithCommit']);
     deployedSince(world, 'c1');
     const r = await run(world, { event: 'deployment_status', payload: deployPayload });
