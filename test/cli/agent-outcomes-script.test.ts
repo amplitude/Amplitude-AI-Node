@@ -40,6 +40,8 @@ type World = {
   commits: Record<string, Commit>;
   trees: Record<string, TreeEntry[]>;
   prCommits?: string[];
+  prCommitsByNumber?: Record<number, string[]>;
+  associatedPrs?: Record<string, Array<{ number: number; merge_commit_sha: string; merged_at: string | null }>>;
   reviews?: Array<{ state: string; body?: string; submitted_at?: string; user: { login: string; type: string } }>;
   checkRuns?: Record<string, Array<{ id: number; name: string; conclusion: string | null; app?: { id: number } }>>;
   statuses?: Record<string, Array<{ id: number; context: string; state: string }>>;
@@ -65,7 +67,7 @@ const commit = (
   sha,
   commit: {
     message: opts.message ?? `change ${sha}`,
-    author: { email: opts.email ?? 'dev@example.com', ...(opts.authored && { date: opts.authored }) },
+    author: { email: opts.email ?? 'dev@example.com', date: opts.authored ?? '2026-11-01T03:00:00Z' } as { email: string; date?: string },
     ...(opts.committed && { committer: { date: opts.committed } }),
     tree: { sha: opts.tree ?? tree(sha) },
   },
@@ -90,9 +92,10 @@ function fakeGitHub(world: World) {
   };
   const rest = {
     pulls: {
-      listCommits: async () => {
+      listCommits: async ({ pull_number }: { pull_number?: number }) => {
         record('pulls.listCommits');
-        return { data: (world.prCommits ?? []).map(getCommitData) };
+        const shas = (pull_number !== undefined && world.prCommitsByNumber?.[pull_number]) || world.prCommits || [];
+        return { data: shas.map(getCommitData) };
       },
       listReviews: async () => {
         record('pulls.listReviews');
@@ -108,6 +111,10 @@ function fakeGitHub(world: World) {
       listCommitStatusesForRef: async ({ ref }: { ref: string }) => {
         record('repos.listCommitStatusesForRef');
         return { data: world.statuses?.[ref] ?? [] };
+      },
+      listPullRequestsAssociatedWithCommit: async ({ commit_sha }: { commit_sha: string }) => {
+        record('repos.listPullRequestsAssociatedWithCommit');
+        return { data: world.associatedPrs?.[commit_sha] ?? [] };
       },
       listDeployments: async () => {
         record('repos.listDeployments');
@@ -337,13 +344,12 @@ describe('agent-outcomes.yml script', () => {
     expect(props(r.byName('commit_merged')[0])).toMatchObject({ '[Agent] Agent ID': 'cursor', agent_name: null });
   });
 
-  it('times a commit without an author date at send time', async () => {
+  it('sends no score for a commit without an author date', async () => {
     const world = linearWorld();
-    world.prCommits = ['c1'];
+    world.prCommits = ['c1', 'c2'];
     delete world.commits.c1!.commit.author.date;
-    const before = Date.now();
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(r.byName('commit_merged')[0]!.time).toBeGreaterThanOrEqual(before);
+    expect(r.byName('commit_merged').map((e) => e.event_properties.commit_sha)).toEqual(['c2']);
   });
 
   it('stamps agent_setup_version from each commit parent tree', async () => {
@@ -677,6 +683,62 @@ describe('agent-outcomes.yml script', () => {
     expect(e.event_properties.agent_setup_version).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
     if (state === 'success') expect(e.event_properties).not.toHaveProperty('deployment_state');
     else expect(e.event_properties.deployment_state).toBe(state);
+  });
+
+  const deployPayload = {
+    deployment: { id: 2, sha: 'head', environment: 'production', created_at: '2026-11-02T00:00:00Z' },
+    deployment_status: { state: 'success', created_at: '2026-11-02T00:05:00Z' },
+  };
+  const deployedSince = (world: World, previous: string) => {
+    world.deployments = [
+      { id: 2, sha: 'head', created_at: '2026-11-02T00:00:00Z', state: 'success' },
+      { id: 1, sha: previous, created_at: '2026-11-01T00:00:00Z', state: 'success' },
+    ];
+  };
+
+  it('scores a deployed squash commit on the sessions of its PR commits, at their author dates', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
+    world.commits.fb = commit('fb', 'fa', { message: agentMessage('s2', 'codex'), authored: '2026-11-01T02:00:00Z' });
+    world.commits.head = commit('head', 'base', {
+      message: 'Speed up checkout (#7)\n\nCo-authored-by: Claude <noreply@anthropic.com>\n',
+      email: 'human@example.com',
+      authored: '2026-11-01T09:00:00Z',
+    });
+    world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
+    world.prCommitsByNumber = { 7: ['fa', 'fb'] };
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.time])).toEqual([
+      ['deploy_succeeded:acme/app:fa:2', 's1', Date.parse('2026-11-01T01:00:00Z')],
+      ['deploy_succeeded:acme/app:fb:2', 's2', Date.parse('2026-11-01T02:00:00Z')],
+    ]);
+    expect(r.events[0]!.event_properties.deployment_sha).toBe('head');
+  });
+
+  it('looks up each merged PR once when the deploy range holds its commits and merge commit', async () => {
+    const world = linearWorld();
+    world.commits.head = commit('head', 'c3', { message: 'Merge pull request #7', email: 'human@example.com' });
+    world.associatedPrs = {
+      c1: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
+      head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
+    };
+    world.prCommitsByNumber = { 7: ['c1', 'c2', 'c3'] };
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c1:2', 'deploy_succeeded:acme/app:c2:2']);
+    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(2);
+    expect(r.calls.filter((c) => c === 'pulls.listCommits')).toHaveLength(1);
+  });
+
+  it('scores the deployed commits themselves when the PR lookup fails', async () => {
+    const world = linearWorld();
+    world.commits.head = commit('head', 'c3', { message: agentMessage('s3'), authored: '2026-11-01T08:00:00Z' });
+    world.failing = new Set(['repos.listPullRequestsAssociatedWithCommit']);
+    deployedSince(world, 'c1');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c2:2', 'deploy_succeeded:acme/app:head:2']);
+    expect(r.log.info.some((m) => m.includes('deployed_prs=error'))).toBe(true);
   });
 
   it('stamps agent_trigger from the Agent-Trigger trailer, else event for a bot agent author', async () => {

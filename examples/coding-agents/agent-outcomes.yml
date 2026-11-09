@@ -120,22 +120,24 @@ jobs:
             const hoursBetween = (from, to) => Math.round(((Date.parse(to) - Date.parse(from)) / 3600000) * 100) / 100;
             const authoredAt = (c) => {
               const t = Date.parse(c.commit?.author?.date || '');
-              return Number.isNaN(t) ? Date.now() : t;
+              return Number.isNaN(t) ? null : t;
             };
 
             // One [Agent] Score per outcome, on the session that wrote the commit. The
             // event time is the commit's author date, which falls inside the session, so
             // the session keeps the start and end its own events gave it; outcome_time is
-            // when the outcome happened. A value that is undefined or null is not sent.
+            // when the outcome happened. A value that is undefined or null is not sent, and
+            // neither is a score for a commit without an author date.
             const events = [];
             const pushScore = (name, value, c, props, insertKey, outcomeTime, userId = userIdFor(c)) => {
               const sessionId = sessionOf(c);
-              if (!sessionId || !userId || value === undefined || value === null) return;
+              const time = authoredAt(c);
+              if (!sessionId || !userId || time === null || value === undefined || value === null) return;
               events.push({
                 event_type: '[Agent] Score',
                 user_id: userId,
                 insert_id: `${name}:${repoName}:${insertKey}`,
-                time: authoredAt(c),
+                time,
                 event_properties: {
                   '[Agent] Score Name': name,
                   '[Agent] Score Value': value,
@@ -439,9 +441,39 @@ jobs:
                 commits = [(await github.rest.repos.getCommit({ owner, repo, ref: deployment.sha })).data];
               }
               commits.forEach(remember);
+              // A squash or rebase merge writes new commits, and a squash commit keeps
+              // neither the trailers nor the author date. So a deployed commit stands for
+              // its merged PR's commits, each scored once on the session that wrote it. A
+              // commit with no merged PR, or whose lookup fails, stands for itself.
+              const scored = new Map();
+              const seen = new Set();
+              const listedPrs = new Set();
+              for (const c of commits) {
+                if (seen.has(c.sha)) continue;
+                seen.add(c.sha);
+                const fromPr = await enrich('deployed_prs', async () => {
+                  const { data: prs } = await call(() => github.rest.repos.listPullRequestsAssociatedWithCommit({
+                    owner, repo, commit_sha: c.sha,
+                  }));
+                  const pr = prs.find((p) => p.merged_at && p.merge_commit_sha === c.sha) || prs.find((p) => p.merged_at);
+                  if (!pr) return null;
+                  if (listedPrs.has(pr.number)) return [];
+                  listedPrs.add(pr.number);
+                  return listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number });
+                });
+                if (!fromPr) {
+                  scored.set(c.sha, c);
+                  continue;
+                }
+                for (const pc of fromPr) {
+                  remember(pc);
+                  seen.add(pc.sha);
+                  scored.set(pc.sha, pc);
+                }
+              }
               const succeeded = state === 'success';
               const deployedAt = Date.parse(context.payload.deployment_status.created_at || '') || Date.now();
-              for (const c of commits.filter(sessionOf)) {
+              for (const c of [...scored.values()].filter(sessionOf)) {
                 pushScore(succeeded ? 'deploy_succeeded' : 'deploy_failed', 1, c, {
                   deployment_sha: deployment.sha,
                   environment,

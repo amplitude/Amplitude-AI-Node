@@ -77,13 +77,13 @@ Commits made through the GitHub API or MCP tools carry no trailer, so they get n
 | `[Agent] Agent ID` | The commit's `Agent-Name` (`claude-code`, `codex`, `cursor`, `goose`), else the agent that signed the commit |
 | `[Agent] Evaluation Source` | `outcome` |
 | `[Agent] Score Name`, `[Agent] Score Value` | Below |
-| Event time | The commit's author date, which falls inside the session. `outcome_time` is when the outcome happened (merge, revert merge or deployment) |
+| Event time | The commit's author date, which falls inside the session. `outcome_time` is when the outcome happened (merge, revert merge or deployment). A commit with no author date is not scored |
 
 | Trigger | Score Name | Value | One per | Also carries |
 |---|---|---|---|---|
 | `pull_request` closed and merged | `commit_merged` | 1 | agent commit in the PR | `merge_commit_sha`, `pr_number`, `base_branch` |
 | A merged PR containing `This reverts commit <sha>` | `commit_reverted` | 1 | reverted agent commit, on its own session | `revert_pr_number`, `revert_merge_commit_sha` |
-| `deployment_status` success | `deploy_succeeded` | 1 | agent commit since the previous successful deployment | `deployment_sha`, `environment` |
+| `deployment_status` success | `deploy_succeeded` | 1 | agent commit since the previous successful deployment; a deployed commit from a merged PR (a squash commit, say) stands for that PR's commits, each scored once | `deployment_sha`, `environment` |
 | `deployment_status` failure or error | `deploy_failed` | 1 | agent commit in the same range | `deployment_sha`, `environment`, `deployment_state` |
 | `pull_request` closed and merged | `ci_passed_first_run` (1 or 0), `review_rounds`, `review_count`, `changes_requested_count`, `hours_open`, `hours_to_first_review` | the measure | agent session in the PR, on its first commit there | `pr_number`, `pr_session_count`, `session_commit_count`, `agent_commit_count`, `commit_count`, `merge_commit_sha`, `base_branch` |
 
@@ -126,7 +126,7 @@ The session side is `[Agent] Session Trigger` on `[Agent] User Message`, `[Agent
 
 #### Best effort
 
-Setup version, reviews and first-run CI are enrichments. Each one is isolated and together they make at most 300 GitHub API requests per run, counting each page. When one fails or the budget runs out, its score or property is left out and the rest are still sent; the job log prints an `enrichments:` line with each one's status.
+Setup version, reviews, first-run CI and the PR lookup behind deploy scores are enrichments. When the PR lookup fails, each deployed commit is scored on its own trailers, so a squash commit sends nothing. Each one is isolated and together they make at most 300 GitHub API requests per run, counting each page. When one fails or the budget runs out, its score or property is left out and the rest are still sent; the job log prints an `enrichments:` line with each one's status.
 
 #### Upgrading
 
