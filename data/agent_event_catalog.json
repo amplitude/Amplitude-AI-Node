@@ -300,7 +300,7 @@
         {
           "name": "[Agent] Agent Chain Depth",
           "type": "number",
-          "description": "Number of agents in the delegation chain."
+          "description": "The emitting agent's depth in the delegation tree. The root agent is 1, and each delegation adds 1."
         }
       ]
     },
@@ -762,7 +762,7 @@
         {
           "name": "[Agent] Agent Chain Depth",
           "type": "number",
-          "description": "Number of agents in the delegation chain."
+          "description": "The emitting agent's depth in the delegation tree. The root agent is 1, and each delegation adds 1."
         }
       ]
     },
@@ -1003,7 +1003,7 @@
         {
           "name": "[Agent] Agent Chain Depth",
           "type": "number",
-          "description": "Number of agents in the delegation chain."
+          "description": "The emitting agent's depth in the delegation tree. The root agent is 1, and each delegation adds 1."
         }
       ]
     },
@@ -1527,7 +1527,7 @@
         {
           "name": "[Agent] Agent Chain Depth",
           "type": "number",
-          "description": "Number of agents in the delegation chain."
+          "description": "The emitting agent's depth in the delegation tree. The root agent is 1, and each delegation adds 1."
         }
       ]
     },
