@@ -17,13 +17,25 @@ elif [ -n "$CURSOR_CONVERSATION_ID" ]; then
   id="$CURSOR_CONVERSATION_ID"; name="cursor"
 elif [ "$GEMINI_CLI" = "1" ]; then
   # Gemini CLI marks its shells but gives them no session ID.
-  git interpret-trailers --in-place --if-exists addIfDifferent --trailer "Agent-Name: gemini-cli" "$1"
-  exit 0
+  id=""; name="gemini-cli"
 else
   exit 0
 fi
 
-git interpret-trailers --in-place --if-exists addIfDifferent \
-  --trailer "Agent-Session-Id: $id" \
-  --trailer "Agent-Name: $name" \
-  "$1"
+# How the session started: AMPLITUDE_SESSION_TRIGGER, else ci under CI.
+trigger=""
+case "$AMPLITUDE_SESSION_TRIGGER" in
+  interactive|headless|ci|scheduled|event) trigger="$AMPLITUDE_SESSION_TRIGGER" ;;
+esac
+if [ -z "$trigger" ]; then
+  if [ "$GITHUB_ACTIONS" = "true" ]; then trigger="ci"
+  elif [ -n "$CI" ] && [ "$CI" != "false" ] && [ "$CI" != "0" ]; then trigger="ci"
+  fi
+fi
+
+msg="$1"
+set --
+if [ -n "$id" ]; then set -- --trailer "Agent-Session-Id: $id"; fi
+set -- "$@" --trailer "Agent-Name: $name"
+if [ -n "$trigger" ]; then set -- "$@" --trailer "Agent-Trigger: $trigger"; fi
+git interpret-trailers --in-place --if-exists addIfDifferent "$@" "$msg"

@@ -15,6 +15,8 @@ import {
 import { runDoctor } from '../../src/cli/doctor.js';
 import {
   OUTCOMES_WORKFLOW_SHA256,
+  PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
+  PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   outcomesWorkflowState,
   sha256Hex,
 } from '../../src/cli/outcomes-workflow.js';
@@ -23,6 +25,8 @@ import { parseLocalEnv } from '../../src/cli/hook-codex.js';
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
 const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
+const V2_028_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.28.0.yml');
+const PREVIOUS_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.28.0');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
@@ -59,6 +63,16 @@ describe('coding-agents templates', () => {
   it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
     expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
     expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v2');
+  });
+
+  it('pins the hashes of the previously shipped hook and workflow', () => {
+    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toEqual([sha256Hex(readFileSync(PREVIOUS_HOOK))]);
+    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).not.toContain(sha256Hex(readFileSync(join(TEMPLATES, 'prepare-commit-msg'))));
+    expect(PREVIOUS_OUTCOMES_WORKFLOW_SHA256).toEqual([
+      sha256Hex(readFileSync(V1_WORKFLOW)),
+      sha256Hex(readFileSync(V2_028_WORKFLOW)),
+    ]);
+    expect(outcomesWorkflowState(readFileSync(V2_028_WORKFLOW))).toBe('outdated');
   });
 
   it('lists the v1 workflow as a previous version', () => {
@@ -272,6 +286,31 @@ describe('coding-agents init', () => {
     expect(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8')).toBe(
       '# mine\nOTHER=1\nAMPLITUDE_SERVER_ZONE=EU\nAMPLITUDE_AI_CONTENT_MODE=full\n',
     );
+  });
+
+  it('upgrades an untouched 0.28.0 commit hook without --force and keeps a customized one', () => {
+    const hook = '.githooks/prepare-commit-msg';
+    mkdirSync(join(repo, '.githooks'));
+    writeFileSync(join(repo, hook), readFileSync(PREVIOUS_HOOK), { mode: 0o755 });
+    const upgraded = init({ harnesses: ['goose'] });
+    const change = upgraded.changes.find((c) => c.path === hook)!;
+    expect(change.action).toBe('update');
+    expect(change.detail).toContain('upgraded from an earlier shipped version');
+    expect(readFileSync(join(repo, hook), 'utf8')).toBe(template('prepare-commit-msg'));
+    expect(statSync(join(repo, hook)).mode & 0o777).toBe(0o755);
+
+    writeFileSync(join(repo, hook), `${readFileSync(PREVIOUS_HOOK, 'utf8')}# mine\n`);
+    const kept = init({ harnesses: ['goose'] });
+    expect(kept.changes.find((c) => c.path === hook)!.action).toBe('conflict');
+    expect(readFileSync(join(repo, hook), 'utf8')).toContain('# mine');
+  });
+
+  it('upgrades an untouched 0.28.0 v2 outcomes workflow without --force', () => {
+    mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+    writeFileSync(join(repo, WORKFLOW), readFileSync(V2_028_WORKFLOW));
+    const change = init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!;
+    expect(change.action).toBe('update');
+    expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
   });
 
   it('upgrades an untouched v1 outcomes workflow without --force', () => {
@@ -493,6 +532,14 @@ describe('coding-agents init', () => {
     [{ CURSOR_AGENT: '1', CURSOR_CONVERSATION_ID: 'c1' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
     [{ GEMINI_CLI: '1' }, ['Agent-Name: gemini-cli']],
     [{}, []],
+    [{ CODEX_THREAD_ID: 't1', AMPLITUDE_SESSION_TRIGGER: 'headless' }, ['Agent-Session-Id: t1', 'Agent-Name: codex', 'Agent-Trigger: headless']],
+    [{ CLAUDE_CODE_SESSION_ID: 's1', GITHUB_ACTIONS: 'true' }, ['Agent-Session-Id: s1', 'Agent-Name: claude-code', 'Agent-Trigger: ci']],
+    [{ AGENT_SESSION_ID: 'g1', CI: '1' }, ['Agent-Session-Id: g1', 'Agent-Name: goose', 'Agent-Trigger: ci']],
+    [{ AGENT_SESSION_ID: 'g1', CI: 'false' }, ['Agent-Session-Id: g1', 'Agent-Name: goose']],
+    [{ CURSOR_CONVERSATION_ID: 'c1', CI: '0', AMPLITUDE_SESSION_TRIGGER: 'cron' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
+    [{ CODEX_THREAD_ID: 't1', CI: 'true', AMPLITUDE_SESSION_TRIGGER: 'scheduled' }, ['Agent-Session-Id: t1', 'Agent-Name: codex', 'Agent-Trigger: scheduled']],
+    [{ GEMINI_CLI: '1', AMPLITUDE_SESSION_TRIGGER: 'event' }, ['Agent-Name: gemini-cli', 'Agent-Trigger: event']],
+    [{ CI: 'true', AMPLITUDE_SESSION_TRIGGER: 'ci' }, []],
   ])('the commit hook stamps %o', (env, trailers) => {
     const msg = join(repo, 'MSG');
     writeFileSync(msg, 'feat: x\n');
@@ -549,6 +596,22 @@ describe('coding-agents doctor', () => {
     )!;
     expect(check.detail.startsWith(state)).toBe(true);
     expect(check.ok).toBe(ok);
+    expect(Boolean(check.fix)).toBe(hasFix);
+  });
+
+  it.each([
+    ['current', null, 'installed', false],
+    ['outdated', 'previous', 'installed (outdated: re-run init)', true],
+    ['customized', 'custom', 'installed (differs from the shipped template)', false],
+  ] as const)('reports a %s commit hook', (_state, setup, detail, hasFix) => {
+    init({ harnesses: ['goose'] });
+    const hook = join(repo, '.githooks/prepare-commit-msg');
+    if (setup === 'previous') writeFileSync(hook, readFileSync(PREVIOUS_HOOK));
+    if (setup === 'custom') writeFileSync(hook, '#!/bin/sh\necho mine\n');
+    const check = runCodingAgentsDoctor(repo, { env: {}, home }).checks.find(
+      (c) => c.name === 'coding_agents.prepare_commit_msg',
+    )!;
+    expect(check).toMatchObject({ ok: true, detail });
     expect(Boolean(check.fix)).toBe(hasFix);
   });
 

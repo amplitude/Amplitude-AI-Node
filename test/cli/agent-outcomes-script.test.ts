@@ -27,7 +27,7 @@ function extractScript(path: string): string {
 
 type Commit = {
   sha: string;
-  commit: { message: string; author: { email: string }; tree: { sha: string } };
+  commit: { message: string; author: { email: string }; committer?: { date: string }; tree: { sha: string } };
   author: { login: string } | null;
   parents: Array<{ sha: string }>;
 };
@@ -36,7 +36,7 @@ type World = {
   commits: Record<string, Commit>;
   trees: Record<string, TreeEntry[]>;
   prCommits?: string[];
-  reviews?: Array<{ state: string; body?: string; user: { login: string; type: string } }>;
+  reviews?: Array<{ state: string; body?: string; submitted_at?: string; user: { login: string; type: string } }>;
   checkRuns?: Record<string, Array<{ id: number; name: string; conclusion: string | null; app?: { id: number } }>>;
   statuses?: Record<string, Array<{ id: number; context: string; state: string }>>;
   deployments?: Array<{ id: number; sha: string; created_at: string; state: string }>;
@@ -53,11 +53,16 @@ type WorkflowRun = {
 const RUN_ID = 4242;
 
 const tree = (n: string) => `tree-${n}`;
-const commit = (sha: string, parent: string | null, opts: { message?: string; email?: string; tree?: string } = {}) => ({
+const commit = (
+  sha: string,
+  parent: string | null,
+  opts: { message?: string; email?: string; tree?: string; committed?: string } = {},
+) => ({
   sha,
   commit: {
     message: opts.message ?? `change ${sha}`,
     author: { email: opts.email ?? 'dev@example.com' },
+    ...(opts.committed && { committer: { date: opts.committed } }),
     tree: { sha: opts.tree ?? tree(sha) },
   },
   author: { login: 'dev' },
@@ -601,6 +606,117 @@ describe('agent-outcomes.yml script', () => {
     expect(props.agent_setup_version).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
     if (state === 'success') expect(props).not.toHaveProperty('deployment_state');
     else expect(props.deployment_state).toBe(state);
+  });
+
+  it('stamps agent_trigger from the Agent-Trigger trailer, else event for a bot agent author', async () => {
+    const world = linearWorld();
+    const stamped = (trigger: string) => `${agentMessage('s5', 'codex')}Agent-Trigger: ${trigger}\n`;
+    world.commits.hl = commit('hl', 'c3', { message: stamped('headless') });
+    world.commits.sc = commit('sc', 'hl', { message: stamped('scheduled') });
+    world.commits.bad = commit('bad', 'sc', { message: stamped('cron') });
+    world.commits.bot = commit('bot', 'bad', { email: '206951365+cursor[bot]@users.noreply.github.com' });
+    world.commits.botci = commit('botci', 'bot', {
+      email: '206951365+cursor[bot]@users.noreply.github.com',
+      message: 'fix\n\nAgent-Trigger: ci\n',
+    });
+    world.prCommits = ['c1', 'c3', 'hl', 'sc', 'bad', 'bot', 'botci'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    const by = Object.fromEntries(r.byType('Commit Merged').map((e) => [e.event_properties.commit_sha, e.event_properties]));
+    expect(Object.fromEntries(Object.entries(by).map(([sha, p]) => [sha, p.agent_trigger]))).toEqual({
+      c1: null,
+      c3: null,
+      hl: 'headless',
+      sc: 'scheduled',
+      bad: null,
+      bot: 'event',
+      botci: 'ci',
+    });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties.agent_triggers).toEqual(['ci', 'event', 'headless', 'scheduled']);
+  });
+
+  it('carries agent_trigger to Commit Reverted and deploy events', async () => {
+    const world = linearWorld();
+    world.commits.c2 = commit('c2', 'c1', { message: `${agentMessage('s2', 'codex')}Agent-Trigger: ci\n` });
+    world.commits.abcdef1234 = commit('abcdef1234', null, { message: `${agentMessage('s0')}Agent-Trigger: event\n` });
+    const pr = await run(world, { event: 'pull_request', payload: prPayload({ body: 'This reverts commit abcdef1234.' }) });
+    expect(pr.byType('Commit Reverted')[0]!.event_properties.agent_trigger).toBe('event');
+    world.deployments = [
+      { id: 2, sha: 'c3', created_at: '2026-11-02T00:00:00Z', state: 'failure' },
+      { id: 1, sha: 'c1', created_at: '2026-11-01T00:00:00Z', state: 'success' },
+    ];
+    const deploy = await run(world, {
+      event: 'deployment_status',
+      payload: {
+        deployment: { id: 2, sha: 'c3', environment: 'production', created_at: '2026-11-02T00:00:00Z' },
+        deployment_status: { state: 'failure' },
+      },
+    });
+    expect(deploy.byType('Deploy Failed').map((e) => e.event_properties.agent_trigger)).toEqual(['ci', null]);
+  });
+
+  it('caps agent_triggers at five distinct values', async () => {
+    const world = linearWorld();
+    const triggers = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
+    world.prCommits = [];
+    for (const [i, t] of triggers.entries()) {
+      world.commits[`t${i}`] = commit(`t${i}`, 'base', { message: `${agentMessage(`s${i}`)}Agent-Trigger: ${t}\n` });
+      world.commits[`u${i}`] = commit(`u${i}`, 'base', { message: `${agentMessage(`x${i}`)}Agent-Trigger: ${t}\n` });
+      world.prCommits.push(`t${i}`, `u${i}`);
+    }
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byType('Pull Request Merged')[0]!.event_properties.agent_triggers).toEqual([...triggers].sort());
+  });
+
+  describe('review timing', () => {
+    const human = (login: string) => ({ login, type: 'User' });
+    const timing = async (world: World) => {
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      const p = r.byType('Pull Request Merged')[0]!.event_properties;
+      return { hours_open: p.hours_open, hours_to_first_review: p.hours_to_first_review, review_rounds: p.review_rounds };
+    };
+
+    it('is open time only, with null review fields, when there are no reviews', async () => {
+      expect(await timing(linearWorld())).toEqual({ hours_open: 48, hours_to_first_review: null, review_rounds: 0 });
+    });
+
+    it('ignores bot and author reviews, which are already filtered out', async () => {
+      const world = linearWorld();
+      world.reviews = [
+        { state: 'CHANGES_REQUESTED', submitted_at: '2026-11-01T01:00:00Z', user: { login: 'bugbot', type: 'Bot' } },
+        { state: 'COMMENTED', body: 'self note', submitted_at: '2026-11-01T02:00:00Z', user: human('dev') },
+      ];
+      world.commits.c3!.commit.committer = { date: '2026-11-02T00:00:00Z' };
+      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: null, review_rounds: 0 });
+    });
+
+    it('counts two rounds of change requests answered by later commits', async () => {
+      const world = linearWorld();
+      world.commits.c1!.commit.committer = { date: '2026-11-01T00:30:00Z' };
+      world.commits.c2!.commit.committer = { date: '2026-11-01T06:00:00Z' };
+      world.commits.c3!.commit.committer = { date: '2026-11-02T03:00:00Z' };
+      world.reviews = [
+        { state: 'APPROVED', submitted_at: '2026-11-02T12:00:00Z', user: human('alice') },
+        { state: 'CHANGES_REQUESTED', submitted_at: '2026-11-01T03:20:00Z', user: human('bob') },
+        { state: 'CHANGES_REQUESTED', submitted_at: '2026-11-02T01:00:00Z', user: human('bob') },
+        { state: 'COMMENTED', body: 'nit', submitted_at: '2026-11-01T02:00:00Z', user: human('erin') },
+      ];
+      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: 2, review_rounds: 2 });
+    });
+
+    it('does not count a change request with no later commit', async () => {
+      const world = linearWorld();
+      world.commits.c3!.commit.committer = { date: '2026-11-01T05:00:00Z' };
+      world.reviews = [{ state: 'CHANGES_REQUESTED', submitted_at: '2026-11-01T07:15:00Z', user: human('bob') }];
+      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: 7.25, review_rounds: 0 });
+    });
+
+    it('rounds hours to two decimals and is null when the reviews enrichment failed', async () => {
+      const world = linearWorld();
+      world.reviews = [{ state: 'APPROVED', submitted_at: '2026-11-01T00:20:00Z', user: human('alice') }];
+      expect((await timing(world)).hours_to_first_review).toBe(0.33);
+      world.failing = new Set(['pulls.listReviews']);
+      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: null, review_rounds: null });
+    });
   });
 
   it('prints events and the enrichment summary on a dry run without sending', async () => {

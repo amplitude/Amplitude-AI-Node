@@ -28,6 +28,7 @@ import { LOCAL_ENV_PATH, findLocalEnv, parseLocalEnv } from './local-env.js';
 import {
   type OutcomesWorkflowState,
   PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
+  PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   outcomesWorkflowState,
   lfSha256Hex,
 } from './outcomes-workflow.js';
@@ -469,7 +470,8 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     0o755,
     force,
     warnings,
-    'adds Agent-Session-Id / Agent-Name trailers to agent commits',
+    'adds Agent-Session-Id / Agent-Name / Agent-Trigger trailers to agent commits',
+    PREVIOUS_PREPARE_COMMIT_MSG_SHA256,
   );
   writeTemplateFile(
     writer,
@@ -769,10 +771,13 @@ export function runCodingAgentsDoctor(
   const hookExists = existsSync(hookPath);
   const executable = hookExists && (statSync(hookPath).mode & 0o111) !== 0;
   let hookDetail = hookExists ? (executable ? 'installed' : 'not executable') : 'missing';
+  let hookOutdated = false;
   if (executable) {
     try {
-      if (readFileSync(hookPath, 'utf8') !== readCodingAgentsTemplate('prepare-commit-msg', options.templatesDir)) {
-        hookDetail = 'installed (differs from the shipped template)';
+      const installed = readFileSync(hookPath, 'utf8');
+      if (installed !== readCodingAgentsTemplate('prepare-commit-msg', options.templatesDir)) {
+        hookOutdated = PREVIOUS_PREPARE_COMMIT_MSG_SHA256.includes(lfSha256Hex(installed));
+        hookDetail = hookOutdated ? 'installed (outdated: re-run init)' : 'installed (differs from the shipped template)';
       }
     } catch {
       // Templates are optional for the check.
@@ -783,6 +788,7 @@ export function runCodingAgentsDoctor(
     ok: executable,
     detail: hookDetail,
     ...(!executable && { fix: hookExists ? `chmod +x ${PREPARE_COMMIT_MSG_PATH}` : fixInit }),
+    ...(hookOutdated && { fix: fixInit }),
   });
 
   const hooksPath = git(['config', '--get', 'core.hooksPath'], cwd).stdout;
