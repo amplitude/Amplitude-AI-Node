@@ -776,6 +776,19 @@ describe('agent-outcomes.yml script', () => {
     expect(r.calls.filter((c) => c === 'pulls.listCommits')).toHaveLength(1);
   });
 
+  it("scores each deployed commit itself when its PR's commits can't be listed", async () => {
+    const world = linearWorld();
+    world.commits.head = commit('head', 'c2', { message: 'Merge pull request #7', email: 'human@example.com' });
+    world.associatedPrs = {
+      c1: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
+      c2: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
+    };
+    world.failing = new Set(['pulls.listCommits']);
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c1:2', 'deploy_succeeded:acme/app:c2:2']);
+  });
+
   it('scores the deployed commits themselves when the PR lookup fails', async () => {
     const world = linearWorld();
     world.commits.head = commit('head', 'c3', { message: agentMessage('s3'), authored: '2026-11-01T08:00:00Z' });

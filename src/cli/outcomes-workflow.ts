@@ -4,12 +4,13 @@ import { createHash } from 'node:crypto';
  * sha256 of the shipped `agent-outcomes.yml`. The Python SDK ships the same
  * bytes and pins its own copy of this hash; keep the two equal.
  */
-export const OUTCOMES_WORKFLOW_SHA256 = '0a32525a02955495eef9a1c9995bb0735683bce5077146e3dbda594b501b2c5f';
+export const OUTCOMES_WORKFLOW_SHA256 = '54f61e353282326f9d5242bf2b6f6a91fd522b00526f9475808876284c3b3a62';
 
 /** Earlier shipped versions. `init` replaces an untouched copy of one without `--force`. */
 export const PREVIOUS_OUTCOMES_WORKFLOW_SHA256: readonly string[] = [
   'e47e514bd9dea23cf07764aafc2e77b7a6048e32bc4f9878b14569a9848edb34', // v1
   'c45411d70eef3bc93b609571e625de223cb86da22d25d1cefbfb215ba432382e', // v2, 0.28.0
+  '499ac61b1162510120fc9251f39a2e76c669006cb599828cb9fa26a3435c473e', // v2 with trigger and review timing, 0.29.0
 ];
 
 /** Earlier shipped `prepare-commit-msg` hooks; the Python SDK pins the same list. */

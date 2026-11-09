@@ -390,8 +390,9 @@ jobs:
                   const source = prs.find((p) => p.merged_at && p.merge_commit_sha === original.sha);
                   if (!source) return null;
                   if (revertedPrs.has(source.number)) return [];
+                  const prCommits = await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: source.number });
                   revertedPrs.add(source.number);
-                  return listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: source.number });
+                  return prCommits;
                 });
                 if (!fromPr) {
                   revertedCommits.set(original.sha, original);
@@ -495,8 +496,9 @@ jobs:
                   const pr = prs.find((p) => p.merged_at && p.merge_commit_sha === c.sha) || prs.find((p) => p.merged_at);
                   if (!pr) return null;
                   if (listedPrs.has(pr.number)) return [];
+                  const prCommits = await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number });
                   listedPrs.add(pr.number);
-                  return listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number });
+                  return prCommits;
                 });
                 if (!fromPr) {
                   scored.set(c.sha, c);

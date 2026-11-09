@@ -29,6 +29,7 @@ const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
 const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
 const V2_028_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.28.0.yml');
+const V2_029_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.29.0.yml');
 const PREVIOUS_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.28.0');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
@@ -74,8 +75,10 @@ describe('coding-agents templates', () => {
     expect(PREVIOUS_OUTCOMES_WORKFLOW_SHA256).toEqual([
       sha256Hex(readFileSync(V1_WORKFLOW)),
       sha256Hex(readFileSync(V2_028_WORKFLOW)),
+      sha256Hex(readFileSync(V2_029_WORKFLOW)),
     ]);
     expect(outcomesWorkflowState(readFileSync(V2_028_WORKFLOW))).toBe('outdated');
+    expect(outcomesWorkflowState(readFileSync(V2_029_WORKFLOW))).toBe('outdated');
   });
 
   it('lists the v1 workflow as a previous version', () => {
@@ -308,9 +311,12 @@ describe('coding-agents init', () => {
     expect(readFileSync(join(repo, hook), 'utf8')).toContain('# mine');
   });
 
-  it('upgrades an untouched 0.28.0 v2 outcomes workflow without --force', () => {
+  it.each([
+    ['0.28.0', V2_028_WORKFLOW],
+    ['0.29.0', V2_029_WORKFLOW],
+  ])('upgrades an untouched %s v2 outcomes workflow without --force', (_version, fixture) => {
     mkdirSync(join(repo, '.github/workflows'), { recursive: true });
-    writeFileSync(join(repo, WORKFLOW), readFileSync(V2_028_WORKFLOW));
+    writeFileSync(join(repo, WORKFLOW), readFileSync(fixture));
     const change = init({ harnesses: ['goose'] }).changes.find((c) => c.path === WORKFLOW)!;
     expect(change.action).toBe('update');
     expect(readFileSync(join(repo, WORKFLOW), 'utf8')).toBe(template('agent-outcomes.yml'));
