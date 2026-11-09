@@ -302,13 +302,22 @@ function _parseEnvMap(raw: string | undefined, name: string): Record<string, str
 
 let _envPolicy: ContextPolicy | undefined;
 let _registeredPolicy: ContextPolicy | null = null;
+let _warnedReplacedPolicy = false;
 
 /**
  * Set the process-wide `ContextPolicy`. `new AmplitudeAI({ config })` calls
  * this when `AIConfig.contextPolicy` is set. `null` falls back to the
- * environment again.
+ * environment again. There is one policy per process, so replacing a
+ * different one logs a warning (once).
  */
 export function setContextPolicy(policy: ContextPolicy | null): void {
+  if (policy != null && _registeredPolicy != null && policy !== _registeredPolicy && !_warnedReplacedPolicy) {
+    _warnedReplacedPolicy = true;
+    getLogger().warn(
+      'AmplitudeAI: a second ContextPolicy replaced the process-wide one; agent context uses the latest for every ' +
+        'client. Pass `policy` per call to use different keys.',
+    );
+  }
   _registeredPolicy = policy;
   _envPolicy = undefined;
 }
@@ -552,6 +561,7 @@ export function _resetAgentContextState(): void {
   _warned.clear();
   _envPolicy = undefined;
   _registeredPolicy = null;
+  _warnedReplacedPolicy = false;
 }
 
 // ----------------------------------------------------------------------
@@ -575,11 +585,9 @@ function _nowSeconds(now: number | undefined): number {
 function _decodeInbound(
   transport: ContextTransport,
   wire: Record<string, unknown>,
-): { decoded: Decoded; traceOnly: boolean } {
+): Decoded {
   const decoded = _decode(transport, wire);
-  if (transport !== 'http' || typeof decoded !== 'object' || decoded.sig != null) {
-    return { decoded, traceOnly: false };
-  }
+  if (transport !== 'http' || typeof decoded !== 'object' || decoded.sig != null) return decoded;
   // Unsigned HTTP is also produced by released SDKs and by unrelated OTel
   // clients: ignore a traceparent that is not ours, keep the released
   // `x-trace-id` rule (an invalid one is dropped, not malformed), and read a
@@ -592,7 +600,7 @@ function _decodeInbound(
     else env.trace_id = traceId;
   }
   if (_hasOwn(env, 'user_id') && !_hasOwn(env, 'identity_type')) env.identity_type = 'account';
-  return { decoded, traceOnly: false };
+  return decoded;
 }
 
 /** What {@link _inspectAgentContext} returns. `kid`, `iat` and `exp` are set only when well formed. */
@@ -614,7 +622,7 @@ export function _inspectAgentContext(
   policy: ContextPolicy,
   now?: number,
 ): InspectedAgentContext {
-  const { decoded } = _decodeInbound(transport, wire);
+  const decoded = _decodeInbound(transport, wire);
   const { result } = _verifyDecoded(decoded, policy, _nowSeconds(now));
   const envelope = typeof decoded === 'object' ? decoded.envelope : {};
   const alg = typeof envelope.alg === 'string' && ID_RE.test(envelope.alg) ? envelope.alg : null;
@@ -638,7 +646,7 @@ export function extractAgentContext(
   const now = _nowSeconds(options.now);
   const acceptUnsignedHttp = options.acceptUnsignedHttp ?? policy.acceptUnsignedHttp;
 
-  const { decoded, traceOnly } = _decodeInbound(transport, wire);
+  const decoded = _decodeInbound(transport, wire);
   const legacy = options.legacy;
   if (decoded === 'none') {
     const bareTrace = transport === 'a2a' ? null : _bareTraceId(transport, wire);
@@ -664,15 +672,13 @@ export function extractAgentContext(
   const unsignedHttp = transport === 'http' && result === 'unsigned' && acceptUnsignedHttp;
   const adopt = result === 'ok' || unsignedHttp;
   if (unsignedHttp) {
-    if (!traceOnly) {
-      _warnOnce(
-        'http_unsigned',
-        'AmplitudeAI: adopting unsigned x-amplitude-* context headers. This is deprecated: the next major ' +
-          'release treats unsigned HTTP context as untrusted (link-only). Configure AMPLITUDE_AI_CONTEXT_KEYS ' +
-          'on both services to sign it. Logged once per process.',
-      );
-    }
-  } else if (result !== 'ok' && !traceOnly) {
+    _warnOnce(
+      'http_unsigned',
+      'AmplitudeAI: adopting unsigned x-amplitude-* context headers. This is deprecated: the next major ' +
+        'release treats unsigned HTTP context as untrusted (link-only). Configure AMPLITUDE_AI_CONTEXT_KEYS ' +
+        'on both services to sign it. Logged once per process.',
+    );
+  } else if (result !== 'ok') {
     _warnVerifyResult(transport, result, envelope, now);
   }
 

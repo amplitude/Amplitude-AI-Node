@@ -71,6 +71,9 @@ export interface AIConfigOptions {
    * Agent context trust policy: signing keys, the active kid and pairwise
    * salts. Sessions of this instance sign outbound context and verify inbound
    * context with it. Defaults to `ContextPolicy.fromEnv()` at first use.
+   * Outside a session, the most recently constructed client's policy applies
+   * process-wide; a second client with a different policy replaces it and
+   * logs a warning once. Pass `policy` per call to use different keys.
    */
   contextPolicy?: ContextPolicy | null;
 }

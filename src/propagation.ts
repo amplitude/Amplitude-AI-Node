@@ -177,7 +177,8 @@ export function injectContext(
   });
   if (built == null) return result;
   Object.assign(result, encodeContext('http', built.envelope, built.sig));
-  _setHeader(result, 'x-amplitude-parent-agent-id', getActiveContext()?.parentAgentId);
+  // Unsigned headers next to a signed context would read as covered by the signature.
+  if (built.sig == null) _setHeader(result, 'x-amplitude-parent-agent-id', getActiveContext()?.parentAgentId);
   return result;
 }
 
@@ -314,9 +315,28 @@ export function _httpWire(headers: Record<string, unknown>): Record<string, unkn
   return wire;
 }
 
+/** A Fetch API `Headers` object, or anything shaped like one. */
+export type HeadersLike = {
+  get(name: string): string | null;
+  forEach(callback: (value: string, name: string) => void): void;
+};
+
+/** @internal A lowercase plain-object header map from a plain map or a `Headers` object. */
+export function _headerRecord(headers: unknown): Record<string, unknown> | null {
+  if (_isPlainObject(headers)) return headers as Record<string, unknown>;
+  const like = headers as Partial<HeadersLike> | null;
+  if (typeof like?.get !== 'function' || typeof like.forEach !== 'function') return null;
+  const out: Record<string, unknown> = {};
+  like.forEach((value, name) => {
+    out[name.toLowerCase()] = value;
+  });
+  return out;
+}
+
 /**
- * Read propagation headers written by {@link injectContext} (a lowercase
- * plain-object header map, as Express and Node `http` provide).
+ * Read propagation headers written by {@link injectContext}: a lowercase
+ * plain-object header map, as Express and Node `http` provide, or a Fetch
+ * API `Headers` object.
  *
  * A signed context that verifies is trusted and returns the sender's
  * `sessionId`, `userId`, `agentId` and `traceId`. Any other context is
@@ -330,10 +350,11 @@ export function _httpWire(headers: Record<string, unknown>): Record<string, unkn
  * on traffic from services you operate.
  */
 export function extractContext(
-  headers: Record<string, unknown>,
+  input: Record<string, unknown> | HeadersLike,
   options: HttpContextExtractOptions = {},
 ): AgentContext {
-  if (!_isPlainObject(headers)) return {};
+  const headers = _headerRecord(input);
+  if (headers == null) return {};
   return extractAgentContext('http', _httpWire(headers), {
     ...options,
     legacy: {

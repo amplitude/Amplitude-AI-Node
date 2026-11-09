@@ -163,6 +163,31 @@ describe('ContextPolicy', () => {
     expect(extractAgentContext('a2a', signed).verifyResult).toBe('ok');
     expect(extractContext({ 'x-amplitude-session-id': 'forged' }).sessionId).toBeUndefined();
   });
+
+  it('warns once when a different policy replaces the registered one', () => {
+    const first = new ContextPolicy({ signingKeys: { k1: K1 } });
+    const replaced = () => warn.mock.calls.filter((c) => String(c[0]).includes('process-wide')).length;
+    setContextPolicy(first);
+    setContextPolicy(first);
+    expect(replaced()).toBe(0);
+    setContextPolicy(new ContextPolicy());
+    setContextPolicy(first);
+    expect(replaced()).toBe(1);
+    expect(getContextPolicy()).toBe(first);
+  });
+});
+
+describe('Fetch API Headers', () => {
+  it('extracts a signed context from a Headers object', () => {
+    const headers = new Headers(mintContext({ sessionId: 'sess-1', policy }));
+    expect(extractContext(headers, { policy })).toMatchObject({ verifyResult: 'ok', sessionId: 'sess-1' });
+  });
+});
+
+describe('outbound option validation', () => {
+  it('throws for pairwise without salts even outside a session', () => {
+    expect(() => injectContext(undefined, { identity: 'pairwise', recipient: 'peer', policy })).toThrow(/salt/);
+  });
 });
 
 describe('traceparent rewritten in transit', () => {
@@ -301,6 +326,12 @@ describe('HTTP propagation', () => {
     expect(headers['x-amplitude-context-sig']).toMatch(/^alg=HS256;kid=k1;/);
     expect(headers).not.toHaveProperty('x-amplitude-user-id');
     expect(extractContext(headers, { policy })).toMatchObject({ verifyResult: 'ok', sessionId: 'sess-1', agentId: 'svc-a' });
+  });
+
+  it('sends no unsigned legacy headers next to a signed context', () => {
+    const headers = run(() => injectContext(undefined, { policy }));
+    expect(headers['x-amplitude-context-sig']).toBeDefined();
+    expect(headers).not.toHaveProperty('x-amplitude-parent-agent-id');
   });
 
   it('throws for an explicit raw identity without a key', () => {

@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from './client.js';
 import { resolveInboundContext, sessionAgentContextProperties } from './agent-context-properties.js';
 import { runWithContext, SessionContext } from './context.js';
-import { extractContext, normalizeTraceId, parseTraceparent } from './propagation.js';
+import { _headerRecord, extractContext, type HeadersLike, normalizeTraceId, parseTraceparent } from './propagation.js';
 import { getLogger } from './utils/logger.js';
 
 /** A static value or a `(req) => value` resolver for per-request values. */
@@ -63,7 +63,7 @@ function resolveOption<T>(value: ValueOrResolver<T>, req: unknown): T | null {
 }
 
 interface ExpressLikeRequest {
-  headers: Record<string, string | string[] | undefined>;
+  headers: Record<string, string | string[] | undefined> | HeadersLike;
 }
 
 interface ExpressLikeResponse {
@@ -108,9 +108,10 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     res: ExpressLikeResponse,
     next: () => void,
   ): void => {
+    const headers = _headerRecord(req.headers) ?? {};
     const inbound = acceptContext
       ? resolveInboundContext(
-          extractContext(req.headers, { policy: contextPolicy, acceptUnsignedHttp: false }),
+          extractContext(headers, { policy: contextPolicy, acceptUnsignedHttp: false }),
         )
       : null;
     const userId = userIdResolver(req) ?? inbound?.userId ?? null;
@@ -121,8 +122,8 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     const traceId =
       inbound != null && inbound.verifyResult != null
         ? (inbound.traceId ?? randomUUID())
-        : (normalizeTraceId(req.headers['x-trace-id']) ??
-          parseTraceparent(req.headers.traceparent) ??
+        : (normalizeTraceId(headers['x-trace-id']) ??
+          parseTraceparent(headers.traceparent) ??
           randomUUID());
     const inboundFields =
       inbound != null

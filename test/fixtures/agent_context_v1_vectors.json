@@ -1708,6 +1708,28 @@
       "expected": {
         "verify_result": "malformed"
       }
+    },
+    {
+      "name": "a2a/iat_beyond_safe_integer",
+      "transport": "a2a",
+      "wire": {
+        "com.amplitude/context": {
+          "session_id": "sess-buyer-1",
+          "parent_agent_id": "buyer-agent",
+          "identity_type": "none",
+          "trace_id": "4bf92f35-77b3-4da6-a3ce-929d0e0e4736",
+          "alg": "HS256",
+          "kid": "k1",
+          "iat": 9007199254740992,
+          "exp": 9007199254741292,
+          "sig": "mEO_sTwbH4UANUtbVO5mypeSWj_fGTvBmZQv_V5pO6c"
+        }
+      },
+      "now": 9007199254740992,
+      "accept_unsigned_http": true,
+      "expected": {
+        "verify_result": "malformed"
+      }
     }
   ],
   "pairwise": [
