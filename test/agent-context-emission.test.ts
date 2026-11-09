@@ -171,6 +171,24 @@ describe('session({ context })', () => {
     expect(session.userId).toBe('me');
   });
 
+  it('an explicit sessionId links a verified caller instead of sharing its trace', async () => {
+    const context = extractA2aMetadata(buyerMetadata(signing), { policy: signing });
+    const ai = new MockAmplitudeAI();
+    await ai
+      .agent('seller')
+      .session({ context, sessionId: 'mine' })
+      .run((s) => {
+        s.trackUserMessage('hi');
+      });
+    const p = props(ai, '[Agent] User Message');
+    expect(context.traceId).toBeTruthy();
+    expect(p[PROP_SESSION_ID]).toBe('mine');
+    expect(p[PROP_TRACE_ID]).not.toBe(context.traceId);
+    expect(p[PROP_PEER_SESSION_ID]).toBe(context.sessionId);
+    expect(p[PROP_PEER_TRACE_ID]).toBe(context.traceId);
+    expect(p[PROP_CONTEXT_TRUST]).toBe('trusted');
+  });
+
   it('without context, events carry none of the new properties', async () => {
     const ai = new MockAmplitudeAI();
     await ai

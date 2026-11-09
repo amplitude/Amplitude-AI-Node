@@ -161,7 +161,17 @@ export class Session {
   private _parentAgentId: string | null;
 
   constructor(agent: BoundAgent, opts: SessionOptions = {}) {
-    const inbound = resolveInboundContext(opts.context);
+    let inbound = resolveInboundContext(opts.context);
+    // An explicit session leaves the caller's session, so its trace is linked as a peer, not shared:
+    // two sessions on one trace merge into one trace row.
+    if (inbound?.sessionId != null && opts.sessionId && opts.sessionId !== inbound.sessionId) {
+      inbound = {
+        ...inbound,
+        traceId: null,
+        peerSessionId: inbound.peerSessionId ?? inbound.sessionId,
+        peerTraceId: inbound.peerTraceId ?? inbound.traceId,
+      };
+    }
     this._inbound = inbound;
     this._parentAgentId = inbound?.parentAgentId ?? null;
     if (inbound?.traceId) this.traceId = inbound.traceId;
