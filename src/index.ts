@@ -300,6 +300,8 @@ export {
   contextTrust,
   pairwiseId,
   canonicalRecipient,
+  setContextPolicy,
+  getContextPolicy,
   type AgentContext,
   type ActorType,
   type ContextTrust,

@@ -9,11 +9,15 @@ import {
   ENV_CONTEXT_KEYS,
   ENV_PAIRWISE_SALTS,
   extractAgentContext,
+  getContextPolicy,
   resolveContextPolicy,
+  setContextPolicy,
   type ContextTransport,
   type VerifyResult,
 } from '../src/agent-context.js';
+import { AIConfig } from '../src/config.js';
 import { _sessionStorage, SessionContext } from '../src/context.js';
+import { MockAmplitudeAI } from '../src/testing.js';
 import { ConfigurationError } from '../src/exceptions.js';
 import { extractContext, injectContext, mintContext } from '../src/propagation.js';
 
@@ -122,13 +126,42 @@ describe('ContextPolicy', () => {
     expect(String(error.mock.calls[0]?.[0])).not.toContain('not json');
   });
 
-  it('prefers an explicit policy, then the active session, then the environment', () => {
+  it.each([
+    ['bad JSON', { [ENV_CONTEXT_KEYS]: '{not json' }],
+    ['a short secret', { [ENV_CONTEXT_KEYS]: JSON.stringify({ k1: 'short' }) }],
+    ['several keys without an active kid', { [ENV_CONTEXT_KEYS]: JSON.stringify({ k1: K1, k2: K2 }) }],
+    ['an unknown active kid', { [ENV_CONTEXT_KEYS]: JSON.stringify({ k1: K1 }), [ENV_CONTEXT_ACTIVE_KID]: 'k9' }],
+  ])('rejects unsigned HTTP when the environment has %s', (_label, env) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    expect(resolveContextPolicy().acceptUnsignedHttp).toBe(false);
+    const forged = extractContext({ 'x-amplitude-session-id': 'forged', 'x-amplitude-user-id': 'victim' });
+    expect(forged.sessionId).toBeUndefined();
+    expect(forged.userId).toBeUndefined();
+    expect(forged.peerSessionId).toBe('forged');
+  });
+
+  it('prefers an explicit policy, then the active session, then the registered one, then the environment', () => {
     vi.stubEnv(ENV_CONTEXT_KEYS, JSON.stringify({ env: K1 }));
     const session = new ContextPolicy({ signingKeys: { sess: K1 } });
+    const registered = new ContextPolicy({ signingKeys: { reg: K1 } });
     const ctx = new SessionContext({ sessionId: 's', contextPolicy: session });
+    expect(resolveContextPolicy().activeKid).toBe('env');
+    setContextPolicy(registered);
+    expect(getContextPolicy()).toBe(registered);
     expect(resolveContextPolicy(policy)).toBe(policy);
     expect(_sessionStorage.run(ctx, () => resolveContextPolicy())).toBe(session);
+    expect(resolveContextPolicy()).toBe(registered);
+    setContextPolicy(null);
     expect(resolveContextPolicy().activeKid).toBe('env');
+  });
+
+  it('registers AIConfig.contextPolicy so extract outside a session uses it', () => {
+    const configured = new ContextPolicy({ signingKeys: { k1: K1 } });
+    new MockAmplitudeAI(new AIConfig({ contextPolicy: configured }));
+    expect(getContextPolicy()).toBe(configured);
+    const signed = mintContext({ sessionId: 'sess-1', transport: 'a2a' });
+    expect(extractAgentContext('a2a', signed).verifyResult).toBe('ok');
+    expect(extractContext({ 'x-amplitude-session-id': 'forged' }).sessionId).toBeUndefined();
   });
 });
 

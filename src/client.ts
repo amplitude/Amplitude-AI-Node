@@ -1,4 +1,4 @@
-import type { AgentContext } from './agent-context.js';
+import { setContextPolicy, type AgentContext } from './agent-context.js';
 import { peerProperties } from './agent-context-properties.js';
 import { BoundAgent, type AgentOptions } from './bound-agent.js';
 import { AIConfig, normalizeFlushTimeoutMs } from './config.js';
@@ -333,6 +333,7 @@ export class AmplitudeAI {
 
     this._config = options.config ?? new AIConfig();
     this._privacyConfig = this._config.toPrivacyConfig();
+    if (this._config.contextPolicy != null) setContextPolicy(this._config.contextPolicy);
     if (this._config.reviewMode) {
       this._reviewBuffer = new ReviewBuffer(
         '@amplitude/ai',

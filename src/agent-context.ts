@@ -300,17 +300,21 @@ function _parseEnvMap(raw: string | undefined, name: string): Record<string, str
 }
 
 let _envPolicy: ContextPolicy | undefined;
+let _registeredPolicy: ContextPolicy | null = null;
 
 /**
- * The policy `inject*` / `extract*` use when none is passed: the active
- * session's (from `AIConfig.contextPolicy`), else one built once from the
- * environment. A malformed environment logs an error and falls back to a
- * policy with no keys, so every inbound context is untrusted.
+ * Set the process-wide `ContextPolicy`. `new AmplitudeAI({ config })` calls
+ * this when `AIConfig.contextPolicy` is set. `null` falls back to the
+ * environment again.
  */
-export function resolveContextPolicy(explicit?: ContextPolicy | null): ContextPolicy {
-  if (explicit != null) return explicit;
-  const fromSession = getActiveContext()?.contextPolicy;
-  if (fromSession != null) return fromSession;
+export function setContextPolicy(policy: ContextPolicy | null): void {
+  _registeredPolicy = policy;
+  _envPolicy = undefined;
+}
+
+/** The registered policy, else one read once from the environment. */
+export function getContextPolicy(): ContextPolicy {
+  if (_registeredPolicy != null) return _registeredPolicy;
   if (_envPolicy === undefined) {
     try {
       _envPolicy = ContextPolicy.fromEnv();
@@ -318,10 +322,25 @@ export function resolveContextPolicy(explicit?: ContextPolicy | null): ContextPo
       getLogger().error(
         `AmplitudeAI: ignoring agent context configuration (${e instanceof Error ? e.message : 'invalid'}); inbound context is treated as untrusted.`,
       );
-      _envPolicy = new ContextPolicy();
+      // The operator meant to verify, so never fall back to adopting unsigned HTTP.
+      _envPolicy = new ContextPolicy({ acceptUnsignedHttp: false });
     }
   }
   return _envPolicy;
+}
+
+/**
+ * The policy `inject*` / `extract*` use when none is passed: the active
+ * session's (from `AIConfig.contextPolicy`), else the registered one, else
+ * one built once from the environment. A malformed environment logs an
+ * error and falls back to a policy with no keys that rejects unsigned HTTP,
+ * so every inbound context is untrusted.
+ */
+export function resolveContextPolicy(explicit?: ContextPolicy | null): ContextPolicy {
+  if (explicit != null) return explicit;
+  const fromSession = getActiveContext()?.contextPolicy;
+  if (fromSession != null) return fromSession;
+  return getContextPolicy();
 }
 
 // ----------------------------------------------------------------------
@@ -529,6 +548,7 @@ function _warnVerifyResult(
 export function _resetAgentContextState(): void {
   _warned.clear();
   _envPolicy = undefined;
+  _registeredPolicy = null;
 }
 
 // ----------------------------------------------------------------------
