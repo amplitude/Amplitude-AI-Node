@@ -89,9 +89,20 @@ jobs:
             };
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
             const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id');
-            // A commit may stand for a merged PR when it has no session, or when its title ends
-            // in GitHub's squash "(#123)": a squash keeps its commits' trailers in the body.
-            const mayStandForPr = (c) => !sessionOf(c) || /\(#\d+\)\s*$/.test((c.commit.message || '').split('\n')[0]);
+            // A commit may stand for a merged PR only when it could be that PR's squash or merge
+            // commit: GitHub made it (committer noreply@github.com), it has two parents, or its
+            // title ends in "(#123)". Any other commit stands for itself, with no lookup to spend
+            // the API budget on. A squash keeps its commits' trailers, so they don't decide it.
+            const mayStandForPr = (c) => isMerge(c)
+              || (c.commit.committer?.email || '').toLowerCase() === 'noreply@github.com'
+              || /\(#\d+\)\s*$/.test((c.commit.message || '').split('\n')[0]);
+            // On rebase-and-merge, the PR's merge_commit_sha is a copy of its last commit, with
+            // that commit's message and author date. Such a commit stands only for itself.
+            const isRebasedHead = (c, prCommits) => {
+              const head = prCommits[prCommits.length - 1];
+              return Boolean(head) && head.commit.message === c.commit.message
+                && head.commit.author?.date === c.commit.author?.date;
+            };
             const isMerge = (c) => (c.parents?.length || 0) > 1;
             // How mixed a change is: its agent sessions and its human commits (merge commits
             // aside), so a comparison can keep to single-session, agent-only changes.
@@ -394,6 +405,7 @@ jobs:
                   if (!source) return null;
                   if (revertedPrs.has(source.number)) return [];
                   const prCommits = await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: source.number });
+                  if (isRebasedHead(original, prCommits)) return null;
                   revertedPrs.add(source.number);
                   return prCommits;
                 });
@@ -500,6 +512,7 @@ jobs:
                   if (!pr) return null;
                   if (listedPrs.has(pr.number)) return [];
                   const prCommits = await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number });
+                  if (isRebasedHead(c, prCommits)) return null;
                   listedPrs.add(pr.number);
                   return prCommits;
                 });
