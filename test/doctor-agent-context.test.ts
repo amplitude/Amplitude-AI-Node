@@ -84,6 +84,16 @@ describe('doctor agent_context checks', () => {
     expect(byName['agent_context.unsigned_http']?.detail).toMatch(/^acceptUnsignedHttp=false \(key configuration is invalid\)/);
     expectNoSecret(text);
   });
+
+  it('reports valid keys as ignored at runtime when the pairwise salts are invalid', () => {
+    const { byName, text } = agentChecks({
+      ...keysEnv({ k1: SECRET_A }),
+      AMPLITUDE_AI_PAIRWISE_SALTS: JSON.stringify({ 1: 'SALT-0123-short' }),
+    });
+    expect(byName['agent_context.keys']).toMatchObject({ ok: false });
+    expect(byName['agent_context.keys']?.detail).toMatch(/ignored at runtime.*AMPLITUDE_AI_PAIRWISE_SALTS/);
+    expectNoSecret(text);
+  });
 });
 
 describe('doctor --verify', () => {
@@ -221,6 +231,16 @@ describe('doctor --verify', () => {
     });
     expect(report.verify_result).toBe('unknown_kid');
     expect(report.explanation).toMatch(/configured: none\) \(AMPLITUDE_AI_CONTEXT_KEYS is invalid and ignored/);
+    expectNoSecret(JSON.stringify(report));
+  });
+
+  it('verifies with no keys when the pairwise salts are invalid, like the runtime', () => {
+    const report = runVerify(JSON.stringify(mint('a2a')), {
+      env: { ...env, AMPLITUDE_AI_PAIRWISE_SALTS: JSON.stringify({ 1: 'SALT-0123-short' }) },
+      now: NOW,
+    });
+    expect(report.verify_result).toBe('unknown_kid');
+    expect(report.explanation).toMatch(/configuration is invalid and ignored/);
     expectNoSecret(JSON.stringify(report));
   });
 });

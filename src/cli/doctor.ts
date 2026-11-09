@@ -55,6 +55,14 @@ const _keysPolicy = (env: Env): ContextPolicy =>
     [ENV_CONTEXT_ACTIVE_KID]: env[ENV_CONTEXT_ACTIVE_KID],
   });
 
+/** The policy the runtime builds: keys, active kid and pairwise salts together. */
+const _runtimePolicy = (env: Env): ContextPolicy =>
+  ContextPolicy.fromEnv({
+    [ENV_CONTEXT_KEYS]: env[ENV_CONTEXT_KEYS],
+    [ENV_CONTEXT_ACTIVE_KID]: env[ENV_CONTEXT_ACTIVE_KID],
+    [ENV_PAIRWISE_SALTS]: env[ENV_PAIRWISE_SALTS],
+  });
+
 const _list = (items: readonly unknown[]): string =>
   items.length > 0 ? items.join(', ') : 'none';
 
@@ -73,6 +81,13 @@ const agentContextChecks = (env: Env): DoctorCheck[] => {
   } catch (e) {
     keysError = _errorMessage(e);
   }
+  // Mirror the runtime: an invalid configuration is ignored and unsigned HTTP is then rejected.
+  let runtime: ContextPolicy | null = null;
+  try {
+    runtime = _runtimePolicy(env);
+  } catch {
+    runtime = null;
+  }
   if (keysError != null) {
     checks.push({
       name: 'agent_context.keys',
@@ -87,6 +102,13 @@ const agentContextChecks = (env: Env): DoctorCheck[] => {
       level: 'info',
       detail: `not configured: outbound agent context is unsigned and receivers treat it as untrusted (link-only). Set ${ENV_CONTEXT_KEYS} on both services to sign it.`,
     });
+  } else if (runtime == null) {
+    checks.push({
+      name: 'agent_context.keys',
+      ok: false,
+      detail: `${policy.kids.length} key(s) configured but ignored at runtime: ${ENV_PAIRWISE_SALTS} is invalid, so the SDK verifies with no keys and treats every inbound context as untrusted.`,
+      fix: `Fix ${ENV_PAIRWISE_SALTS} (see agent_context.pairwise_salts).`,
+    });
   } else {
     checks.push({
       name: 'agent_context.keys',
@@ -95,17 +117,6 @@ const agentContextChecks = (env: Env): DoctorCheck[] => {
     });
   }
 
-  // Mirror the runtime: an invalid configuration is ignored and unsigned HTTP is then rejected.
-  let runtime: ContextPolicy | null = null;
-  try {
-    runtime = ContextPolicy.fromEnv({
-      [ENV_CONTEXT_KEYS]: env[ENV_CONTEXT_KEYS],
-      [ENV_CONTEXT_ACTIVE_KID]: env[ENV_CONTEXT_ACTIVE_KID],
-      [ENV_PAIRWISE_SALTS]: env[ENV_PAIRWISE_SALTS],
-    });
-  } catch {
-    runtime = null;
-  }
   checks.push({
     name: 'agent_context.unsigned_http',
     ok: true,
@@ -219,7 +230,13 @@ const runVerify = (input: string, options: VerifyOptions = {}): VerifyReport => 
   let configNote = '';
   let policy: ContextPolicy;
   try {
-    policy = _keysPolicy(env);
+    _keysPolicy(env);
+    try {
+      policy = _runtimePolicy(env);
+    } catch (e) {
+      policy = new ContextPolicy({ acceptUnsignedHttp: false });
+      configNote = ` (the agent context configuration is invalid and ignored, as at runtime: ${_errorMessage(e)})`;
+    }
   } catch (e) {
     policy = new ContextPolicy({ acceptUnsignedHttp: false });
     configNote = ` (${ENV_CONTEXT_KEYS} is invalid and ignored, as at runtime: ${_errorMessage(e)})`;
