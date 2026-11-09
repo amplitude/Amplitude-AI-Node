@@ -89,9 +89,12 @@ jobs:
             };
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
             const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id');
-            // A commit may stand for a merged PR when it has no session, or when its title ends
-            // in GitHub's squash "(#123)": a squash keeps its commits' trailers in the body.
-            const mayStandForPr = (c) => !sessionOf(c) || /\(#\d+\)\s*$/.test((c.commit.message || '').split('\n')[0]);
+            // A commit may stand for a merged PR when it has no session, or when GitHub made it
+            // (committer noreply@github.com) or its title ends in "(#123)": a squash keeps its
+            // commits' trailers in the body, whatever its subject.
+            const mayStandForPr = (c) => !sessionOf(c)
+              || (c.commit.committer?.email || '').toLowerCase() === 'noreply@github.com'
+              || /\(#\d+\)\s*$/.test((c.commit.message || '').split('\n')[0]);
             // On rebase-and-merge, the PR's merge_commit_sha is a copy of its last commit, with
             // that commit's message and author date. Such a commit stands only for itself.
             const isRebasedHead = (c, prCommits) => {
