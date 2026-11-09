@@ -802,6 +802,20 @@ describe('agent-outcomes.yml script', () => {
     expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:ra:2']);
   });
 
+  it('expands a squash GitHub made with a custom subject that kept a trailer', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
+    const squash = commit('head', 'base', { message: `Speed up checkout\n\n${agentMessage('s1')}`, authored: '2026-11-01T09:00:00Z' });
+    world.commits.head = { ...squash, commit: { ...squash.commit, committer: { email: 'noreply@github.com', date: '2026-11-01T09:00:00Z' } } };
+    world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
+    world.prCommitsByNumber = { 7: ['fa'] };
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => [e.insert_id, e.time])).toEqual([
+      ['deploy_succeeded:acme/app:fa:2', Date.parse('2026-11-01T01:00:00Z')],
+    ]);
+  });
+
   it('expands a deployed squash commit that kept its commits\' trailers', async () => {
     const world = linearWorld();
     world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
