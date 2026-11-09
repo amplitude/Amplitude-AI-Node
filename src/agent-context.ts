@@ -140,12 +140,12 @@ export function _legacyTraceId(value: unknown): string | null {
 }
 
 /**
- * @internal A W3C `traceparent` for a trace ID that is hex once dashes are
- * removed (cut or zero-padded to 32 characters, as the Python SDK does), else `null`.
+ * @internal A W3C `traceparent` for a trace ID that is exactly 32 hex characters
+ * once dashes are removed, else `null`. Never pads or truncates.
  */
 export function _traceparentFor(traceId: string | null | undefined): string | null {
   if (!traceId) return null;
-  const hex = traceId.replace(/-/g, '').slice(0, 32).padEnd(32, '0').toLowerCase();
+  const hex = traceId.replace(/-/g, '').toLowerCase();
   if (!/^[0-9a-f]{32}$/.test(hex) || /^0+$/.test(hex)) return null;
   return `00-${hex}-${randomUUID().replace(/-/g, '').slice(0, 16)}-01`;
 }
@@ -420,8 +420,18 @@ function _decode(transport: ContextTransport, wire: Record<string, unknown>): De
     delete parsed.sig;
     Object.assign(envelope, parsed);
   }
-  if (Object.keys(envelope).length === 0 && sig == null) return 'none';
+  // A bare W3C traceparent (or x-trace-id) is ordinary traced traffic, not agent context.
+  if (sig == null && Object.keys(envelope).every((k) => k === 'trace_id' || k === 'traceparent')) return 'none';
   return { envelope, sig };
+}
+
+/** The trace on a wire that carries no context: `trace_id` first, else the `traceparent` trace-id. */
+function _bareTraceId(transport: 'acp' | 'http', wire: Record<string, unknown>): string | null {
+  const keys = transport === 'acp' ? ACP_CONTEXT_KEYS : HTTP_CONTEXT_HEADERS;
+  const custom = transport === 'http' ? _legacyTraceId(wire[keys.trace_id]) : wire[keys.trace_id];
+  if (isValidContextId(custom)) return custom;
+  const tp = typeof wire.traceparent === 'string' ? wire.traceparent.trim().toLowerCase() : null;
+  return _isStrictTraceparent(tp) ? (TRACEPARENT_RE.exec(tp)?.[1] ?? null) : null;
 }
 
 function _wellFormed(envelope: Envelope, sig: unknown): boolean {
@@ -559,10 +569,7 @@ function _decodeInbound(
     else env.trace_id = traceId;
   }
   if (_hasOwn(env, 'user_id') && !_hasOwn(env, 'identity_type')) env.identity_type = 'account';
-  const keys = Object.keys(env);
-  // A lone `x-trace-id` is the released trace-only header, read as before.
-  if (keys.length === 0 || (keys.length === 1 && keys[0] === 'trace_id')) return { decoded: 'none', traceOnly: false };
-  return { decoded, traceOnly: keys.every((k) => k === 'traceparent' || k === 'trace_id') };
+  return { decoded, traceOnly: false };
 }
 
 /** What {@link _inspectAgentContext} returns. `kid`, `iat` and `exp` are set only when well formed. */
@@ -611,15 +618,17 @@ export function extractAgentContext(
   const { decoded, traceOnly } = _decodeInbound(transport, wire);
   const legacy = options.legacy;
   if (decoded === 'none') {
-    if (transport === 'http' && acceptUnsignedHttp && (legacy?.traceId || legacy?.parentAgentId)) {
+    const bareTrace = transport === 'a2a' ? null : _bareTraceId(transport, wire);
+    if (transport === 'http' && acceptUnsignedHttp && legacy?.parentAgentId) {
       const out: AgentContext = { verifyResult: 'unsigned' };
-      if (legacy.traceId) out.traceId = legacy.traceId;
-      if (legacy.parentAgentId) out.parentAgentId = legacy.parentAgentId;
+      if (bareTrace) out.traceId = bareTrace;
+      out.parentAgentId = legacy.parentAgentId;
       out.actorType = 'human';
       out.identityType = 'none';
       return out;
     }
-    return {};
+    // Not agent context: no verify result or trust, and the receiver continues the trace.
+    return bareTrace ? { traceId: bareTrace } : {};
   }
 
   const { result, envelope } = _verifyDecoded(decoded, policy, now);

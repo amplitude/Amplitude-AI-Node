@@ -1020,6 +1020,43 @@
       "expected": {}
     },
     {
+      "name": "acp/lone_traceparent",
+      "transport": "acp",
+      "wire": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    },
+    {
+      "name": "acp/lone_trace_id",
+      "transport": "acp",
+      "wire": {
+        "com.amplitude/trace-id": "req-123",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "trace_id": "req-123"
+      }
+    },
+    {
+      "name": "acp/lone_traceparent_with_keys_enforced",
+      "transport": "acp",
+      "wire": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": false,
+      "expected": {
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    },
+    {
       "name": "acp/unknown_keys_ignored",
       "transport": "acp",
       "wire": {
@@ -1424,6 +1461,43 @@
       "now": 1800000000,
       "accept_unsigned_http": true,
       "expected": {}
+    },
+    {
+      "name": "http/lone_traceparent",
+      "transport": "http",
+      "wire": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    },
+    {
+      "name": "http/lone_trace_id",
+      "transport": "http",
+      "wire": {
+        "x-trace-id": "req-123",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": true,
+      "expected": {
+        "trace_id": "req-123"
+      }
+    },
+    {
+      "name": "http/lone_traceparent_with_keys_enforced",
+      "transport": "http",
+      "wire": {
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+      },
+      "now": 1800000000,
+      "accept_unsigned_http": false,
+      "expected": {
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
     },
     {
       "name": "http/unknown_keys_ignored",

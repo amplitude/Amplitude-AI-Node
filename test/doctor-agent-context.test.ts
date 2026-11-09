@@ -124,8 +124,9 @@ describe('doctor --verify', () => {
     const headers = Object.fromEntries(Object.entries(mint('http')).map(([k, v]) => [k.toUpperCase(), v]));
     expect(runVerify(JSON.stringify(headers), { env, now: NOW }).verify_result).toBe('ok');
     const forced = runVerify(JSON.stringify(mint('http')), { env, now: NOW, transport: 'acp' });
-    // ACP shares only `traceparent` with HTTP, so read as ACP the headers are an unsigned trace.
-    expect(forced).toMatchObject({ transport: 'acp', verify_result: 'unsigned' });
+    // ACP shares only `traceparent` with HTTP, and a bare traceparent is not agent context.
+    expect(forced).toMatchObject({ transport: 'acp', verify_result: 'malformed' });
+    expect(forced.explanation).toContain('no acp agent context fields');
   });
 
   it('verifies the signed trace ID', () => {

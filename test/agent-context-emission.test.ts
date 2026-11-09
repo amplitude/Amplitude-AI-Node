@@ -494,12 +494,16 @@ describe('exact trace ID', () => {
     expect(
       extractContext({ 'x-amplitude-session-id': 'buyer-sess', 'x-trace-id': ' req-1 ' }, { policy: unsigned }),
     ).toMatchObject({ verifyResult: 'unsigned', traceId: 'req-1' });
-    expect(extractContext({ 'x-trace-id': 'req-1' }, { policy: unsigned })).toEqual({
-      verifyResult: 'unsigned',
-      traceId: 'req-1',
-      actorType: 'human',
-      identityType: 'none',
-    });
+    expect(extractContext({ 'x-trace-id': 'req-1' }, { policy: unsigned })).toEqual({ traceId: 'req-1' });
+  });
+
+  it('a bare trace header is a trace to continue, not agent context', () => {
+    const tp = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    for (const policy of [unsigned, signing]) {
+      expect(extractContext({ traceparent: tp }, { policy })).toEqual({ traceId: '4bf92f3577b34da6a3ce929d0e0e4736' });
+      expect(extractContext({ traceparent: tp, 'x-trace-id': 'req-1' }, { policy })).toEqual({ traceId: 'req-1' });
+      expect(extractAcpMeta({ traceparent: tp }, { policy })).toEqual({ traceId: '4bf92f3577b34da6a3ce929d0e0e4736' });
+    }
   });
 
   it('signed HTTP holds x-trace-id to the ID rule and the signature', () => {
