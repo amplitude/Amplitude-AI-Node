@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { stampAgentContextProperties } from '../agent-context-properties.js';
 import { ValidationError } from '../exceptions.js';
 import type {
   AmplitudeEvent,
@@ -340,6 +341,7 @@ export function trackUserMessage(opts: TrackUserMessageOptions): string {
 
   Object.assign(properties, contentData);
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_USER_MESSAGE,
     user_id: opts.userId || undefined,
@@ -597,6 +599,7 @@ export function trackAiMessage(opts: TrackAiMessageOptions): string {
     );
   }
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_AI_RESPONSE,
     user_id: opts.userId || undefined,
@@ -745,6 +748,7 @@ export function trackToolCall(opts: TrackToolCallOptions): string {
     properties[PROP_TOOL_OUTPUT] = serializeToJsonString(sanitized);
   }
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_TOOL_CALL,
     user_id: opts.userId || undefined,
@@ -996,6 +1000,7 @@ export function trackEmbedding(opts: TrackEmbeddingOptions): string {
     properties[PROP_CONTEXT] = serializeToJsonString(opts.context);
   if (opts.env) properties[PROP_ENV] = opts.env;
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_EMBEDDING,
     user_id: opts.userId || undefined,
@@ -1113,6 +1118,7 @@ export function trackSpan(opts: TrackSpanOptions): string {
     properties[PROP_OUTPUT_STATE] = serializeToJsonString(sanitized);
   }
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_SPAN,
     user_id: opts.userId || undefined,
@@ -1212,6 +1218,7 @@ export function trackSessionEnd(opts: TrackSessionEndOptions): void {
     properties[PROP_ENRICHMENTS] = serializeToJsonString(enrichmentDict);
   }
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_SESSION_END,
     user_id: opts.userId || undefined,
@@ -1305,6 +1312,7 @@ export function trackSessionEnrichment(
       : opts.enrichments;
   properties[PROP_ENRICHMENTS] = serializeToJsonString(enrichmentDict);
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_SESSION_ENRICHMENT,
     user_id: opts.userId || undefined,
@@ -1409,6 +1417,7 @@ export function trackScore(opts: TrackScoreOptions): void {
     }
   }
 
+  stampAgentContextProperties(properties);
   const event: AmplitudeEvent = {
     event_type: EVENT_SCORE,
     user_id: opts.userId || undefined,

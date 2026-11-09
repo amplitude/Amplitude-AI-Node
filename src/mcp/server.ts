@@ -87,7 +87,7 @@ const buildInstrumentationGuidance = (
   const frameworkStep = isWorker
     ? 'skip `session.run()` (needs AsyncLocalStorage, unavailable in Workers). Pass explicit `{ sessionId, userId }` on every tracking call. Use `ctx.waitUntil(ai.flush())` before the handler returns.'
     : framework === 'express' || framework === 'koa' || framework === 'fastify'
-      ? 'wire `createAmplitudeAIMiddleware()` for per-request identity propagation and run LLM calls inside session context'
+      ? 'wire `createAmplitudeAIMiddleware({ amplitudeAI: ai, userIdResolver: (req) => req.user?.id ?? null })` for per-request identity (the resolver must return the authenticated user, never a request header or body field) and run LLM calls inside session context; add `acceptContext: true` when other agent services call this one'
       : framework === 'next' || framework === 'nextjs'
         ? 'wrap route handlers in `session.run()` so every LLM call inherits user/session lineage'
         : 'attach `ai.agent(...).session(...)` where request or conversation identity exists';

@@ -5,6 +5,7 @@
  * automatically inherit agentId, userId, env, and other defaults.
  */
 
+import type { AgentContext } from './agent-context.js';
 import type { AmplitudeAI, FlushOptions } from './client.js';
 import { getActiveContext } from './context.js';
 import type { SessionEnrichments } from './core/enrichments.js';
@@ -367,6 +368,12 @@ export class BoundAgent {
       autoFlush?: boolean;
       tags?: string[] | null;
       experiments?: ExperimentInput[] | null;
+      /**
+       * The inbound context from an `extract*` helper. Trusted context adopts
+       * the caller's session, user, parent agent and trace; untrusted context
+       * is recorded as peer properties only.
+       */
+      context?: AgentContext | null;
     } = {},
   ): Session {
     if (opts.idleTimeoutMinutes != null && opts.idleTimeoutMinutes < -1) {

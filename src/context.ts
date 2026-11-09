@@ -1,4 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type {
+  ActorType,
+  ContextPolicy,
+  ContextTrust,
+  IdentityType,
+  VerifyResult,
+} from './agent-context.js';
 import type { Experiment, ExperimentInput } from './core/experiments.js';
 import type { PrivacyConfig } from './core/privacy.js';
 import type { AmplitudeLike } from './types.js';
@@ -28,6 +35,16 @@ export interface SessionContextOptions {
   privacyConfig?: PrivacyConfig | null;
   trackerManaged?: boolean;
   skipAutoUserTracking?: boolean;
+  /** Agent context trust policy of the `AmplitudeAI` that owns this session. */
+  contextPolicy?: ContextPolicy | null;
+  /** Inbound agent context: the untrusted caller's IDs, trust, actor and identity. */
+  peerAgentId?: string | null;
+  peerSessionId?: string | null;
+  peerTraceId?: string | null;
+  contextTrust?: ContextTrust | null;
+  verifyResult?: VerifyResult | null;
+  actorType?: ActorType | null;
+  identityType?: IdentityType | null;
 }
 
 /** @internal What `addExperiments()` needs from the session that owns a context. */
@@ -70,6 +87,14 @@ export class SessionContext {
   readonly privacyConfig: PrivacyConfig | null;
   readonly trackerManaged: boolean;
   readonly skipAutoUserTracking: boolean;
+  readonly contextPolicy: ContextPolicy | null;
+  readonly peerAgentId: string | null;
+  readonly peerSessionId: string | null;
+  readonly peerTraceId: string | null;
+  readonly contextTrust: ContextTrust | null;
+  readonly verifyResult: VerifyResult | null;
+  readonly actorType: ActorType | null;
+  readonly identityType: IdentityType | null;
   private readonly _nextTurnIdFn: (() => number) | null;
 
   constructor(options: SessionContextOptions) {
@@ -105,6 +130,14 @@ export class SessionContext {
     this.privacyConfig = options.privacyConfig ?? null;
     this.trackerManaged = options.trackerManaged ?? false;
     this.skipAutoUserTracking = options.skipAutoUserTracking ?? false;
+    this.contextPolicy = options.contextPolicy ?? null;
+    this.peerAgentId = options.peerAgentId ?? null;
+    this.peerSessionId = options.peerSessionId ?? null;
+    this.peerTraceId = options.peerTraceId ?? null;
+    this.contextTrust = options.contextTrust ?? null;
+    this.verifyResult = options.verifyResult ?? null;
+    this.actorType = options.actorType ?? null;
+    this.identityType = options.identityType ?? null;
     this._nextTurnIdFn = options.nextTurnIdFn ?? null;
   }
 

@@ -7,8 +7,9 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AmplitudeAI } from './client.js';
+import { resolveInboundContext, sessionAgentContextProperties } from './agent-context-properties.js';
 import { runWithContext, SessionContext } from './context.js';
-import { normalizeTraceId, parseTraceparent } from './propagation.js';
+import { _headerRecord, extractContext, type HeadersLike, normalizeTraceId, parseTraceparent } from './propagation.js';
 import { getLogger } from './utils/logger.js';
 
 /** A static value or a `(req) => value` resolver for per-request values. */
@@ -42,6 +43,16 @@ export interface MiddlewareOptions {
   groups?: ValueOrResolver<Record<string, unknown>>;
   trackSessionEvents?: boolean;
   flushOnResponse?: boolean;
+  /**
+   * Read the inbound `x-amplitude-*` context headers with the same trust
+   * rules as `session({ context })`. A signed context that verifies adopts the
+   * caller's session (over `sessionIdResolver`), parent agent, trace and, when
+   * `userIdResolver` returns `null`, user; anything else is recorded as peer
+   * properties and the request keeps its own session and trace. Unsigned
+   * headers are never adopted here.
+   * Default `false`: only the trace ID is read, as before.
+   */
+  acceptContext?: boolean;
 }
 
 function resolveOption<T>(value: ValueOrResolver<T>, req: unknown): T | null {
@@ -52,7 +63,7 @@ function resolveOption<T>(value: ValueOrResolver<T>, req: unknown): T | null {
 }
 
 interface ExpressLikeRequest {
-  headers: Record<string, string | string[] | undefined>;
+  headers: Record<string, string | string[] | undefined> | HeadersLike;
 }
 
 interface ExpressLikeResponse {
@@ -78,7 +89,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     amplitudeAI,
     userIdResolver,
     deviceIdResolver = null,
-    sessionIdResolver = () => randomUUID(),
+    sessionIdResolver = null,
     agentId = null,
     env = null,
     agentVersion = null,
@@ -87,22 +98,45 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     groups = null,
     trackSessionEvents = true,
     flushOnResponse = true,
+    acceptContext = false,
   } = options;
   const logger = getLogger(amplitudeAI.amplitude);
+  const contextPolicy = amplitudeAI.config?.contextPolicy ?? null;
 
   return (
     req: ExpressLikeRequest,
     res: ExpressLikeResponse,
     next: () => void,
   ): void => {
-    const userId = userIdResolver(req);
+    const headers = _headerRecord(req.headers) ?? {};
+    const inbound = acceptContext
+      ? resolveInboundContext(
+          extractContext(headers, { policy: contextPolicy, acceptUnsignedHttp: false }),
+        )
+      : null;
+    const userId = userIdResolver(req) ?? inbound?.userId ?? null;
     const deviceId = deviceIdResolver?.(req) ?? null;
-    const sessionId = sessionIdResolver(req);
+    const sessionId = inbound?.sessionId ?? sessionIdResolver?.(req) ?? randomUUID();
+    const parentAgentId = inbound?.parentAgentId ?? null;
 
     const traceId =
-      normalizeTraceId(req.headers['x-trace-id']) ??
-      parseTraceparent(req.headers.traceparent) ??
-      randomUUID();
+      inbound != null && inbound.verifyResult != null
+        ? (inbound.traceId ?? randomUUID())
+        : (normalizeTraceId(headers['x-trace-id']) ??
+          parseTraceparent(headers.traceparent) ??
+          randomUUID());
+    const inboundFields =
+      inbound != null
+        ? {
+            peerAgentId: inbound.peerAgentId,
+            peerSessionId: inbound.peerSessionId,
+            peerTraceId: inbound.peerTraceId,
+            contextTrust: inbound.contextTrust,
+            verifyResult: inbound.verifyResult,
+            actorType: inbound.actorType,
+            identityType: inbound.identityType,
+          }
+        : {};
 
     const resolvedCustomerOrgId = resolveOption(customerOrgId, req);
     const resolvedContext = resolveOption(context, req);
@@ -114,6 +148,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
       userId,
       deviceId,
       agentId,
+      parentAgentId,
       env,
       agentVersion,
       customerOrgId: resolvedCustomerOrgId,
@@ -121,7 +156,10 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
       groups: resolvedGroups,
       nextTurnIdFn: () => amplitudeAI._nextTurnId(sessionId),
       amplitude: amplitudeAI.amplitude,
+      contextPolicy,
+      ...inboundFields,
     });
+    const sessionEndProperties = inbound != null ? sessionAgentContextProperties(inboundFields) : null;
 
     runWithContext(ctx, () => {
       res.on('finish', () => {
@@ -138,6 +176,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
               customerOrgId: resolvedCustomerOrgId,
               context: resolvedContext,
               groups: resolvedGroups,
+              ...(inbound != null ? { parentAgentId, eventProperties: sessionEndProperties } : {}),
             });
           } catch (error) {
             logger.warn(

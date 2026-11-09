@@ -784,7 +784,7 @@ printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-
 npx -y -p @amplitude/ai amplitude-ai coding-agents doctor
 ```
 
-Commit evaluators and the session-to-commit join: [code outcomes recipe](docs/integrations/recipes/code-outcomes.md). Templates: [examples/coding-agents](examples/coding-agents). Agents that call each other over A2A or ACP keep one session with `injectA2aMetadata` / `extractA2aMetadata` and `injectAcpMeta` / `extractAcpMeta`, in the same wire format as the Python SDK; `declareA2aExtension(agentCard)` advertises it in the AgentCard's `capabilities.extensions` as the optional extension `https://amplitude.com/a2a/extensions/agent-context/v1`.
+Commit evaluators and the session-to-commit join: [code outcomes recipe](docs/integrations/recipes/code-outcomes.md). Templates: [examples/coding-agents](examples/coding-agents). Agents that call each other over A2A or ACP link their sessions with signed agent context; see [Agents in other processes](#agents-in-other-processes-a2a-and-acp).
 
 ## Privacy & Content Control
 
@@ -1716,6 +1716,21 @@ amplitude-ai doctor
 Useful flags:
 
 - `amplitude-ai doctor --no-mock-check`
+- `amplitude-ai doctor --json`
+
+Doctor also checks agent context (see [Context Propagation](#context-propagation)) without printing a secret:
+
+- `agent_context.keys`: the kids in `AMPLITUDE_AI_CONTEXT_KEYS`, their count and the active kid. Not configured is informational; bad JSON, a secret under 32 bytes, an invalid kid, or several keys without `AMPLITUDE_AI_CONTEXT_ACTIVE_KID` fail the check.
+- `agent_context.unsigned_http`: the effective `acceptUnsignedHttp`, which is deprecated.
+- `agent_context.pairwise_salts`: the salt versions in `AMPLITUDE_AI_PAIRWISE_SALTS`.
+
+To see why a receiver doesn't trust a context, pass what it received (an A2A `metadata` object, an ACP `_meta` object or the HTTP headers) as JSON:
+
+```bash
+amplitude-ai doctor --verify '{"x-amplitude-session-id":"s-1","x-amplitude-context-sig":"alg=HS256;kid=k1;..."}'
+```
+
+It verifies with the keys in the environment and prints `transport`, `verify_result`, `trust`, `kid`, `iat`, `exp`, `clock_delta_seconds` (`now - iat`) and an `explanation` such as `expired 161 s ago (60 s skew allowed)` or `kid k1 is not in AMPLITUDE_AI_CONTEXT_KEYS (configured: k2)`. The transport is detected from the keys; `--transport a2a|acp|http` overrides it, and `--json` prints the same fields as JSON. It exits 1 unless the result is `ok`.
 
 ### Status
 
@@ -2330,33 +2345,61 @@ Run `amplitude-ai doctor` for automated environment diagnostics with fix suggest
 
 ## Context Propagation
 
-For distributed tracing, inject context into outgoing request headers and extract on the receiving side:
+To link agent sessions across services, inject context into the outgoing call and pass what the receiver extracts to `session({ context })`:
 
 ```typescript
-import { randomUUID } from 'node:crypto';
-import {
-  extractContext,
-  injectContext,
-  runWithContextAsync,
-  SessionContext,
-} from '@amplitude/ai';
+import { extractContext, injectContext } from '@amplitude/ai';
 
-// Outgoing request
+// Outgoing request, inside session.run()
 const headers = injectContext();
 fetch(url, { headers });
 
 // Receiving side
-const extracted = extractContext(req.headers);
-const ctx = new SessionContext({
-  sessionId: extracted.sessionId ?? randomUUID(),
-  traceId: extracted.traceId ?? null,
-  userId: extracted.userId ?? null,
-});
-
-await runWithContextAsync(ctx, async () => {
-  // Context available via getActiveContext()
+const session = agent.session({ context: extractContext(req.headers) });
+await session.run(async () => {
+  // Events here join the caller's session when its context is trusted
 });
 ```
+
+Set the same `AMPLITUDE_AI_CONTEXT_KEYS` (a JSON object of key ID to secret, at least 32 bytes each) on both services to sign the context. A context whose signature verifies is trusted: the receiver adopts the caller's session, user, parent agent and trace ID. Anything else is untrusted: the receiver keeps its own session and trace and records the caller as `[Agent] Peer Agent ID`, `[Agent] Peer Session ID` and `[Agent] Peer Trace ID`. Every event also carries `[Agent] Context Trust`, `[Agent] Context Verify Result`, `[Agent] Actor Type` and `[Agent] Identity Type`.
+
+`injectContext()` includes the end-user ID by default, so only send it to services you operate. During this release, a receiver without signing keys still adopts unsigned `x-amplitude-*` headers in `extractContext`, with a one-time deprecation warning and `[Agent] Context Verify Result = unsigned`; a receiver with keys treats them as untrusted. The context carries the session's exact trace ID (`x-trace-id`, signed with the rest), plus `traceparent` when the trace is hex, so the receiver's Trace ID or Peer Trace ID matches the caller's. The next major release treats unsigned HTTP context as untrusted.
+
+### Agents in other processes (A2A and ACP)
+
+```typescript
+import {
+  contextProperties,
+  declareA2aExtension,
+  extractA2aMetadata,
+  injectA2aMetadata,
+  injectA2aResponseMetadata,
+} from '@amplitude/ai';
+
+// Caller, inside session.run(). No user ID is sent by default.
+message.metadata = injectA2aMetadata(message.metadata);
+const reply = await client.sendMessage({ message });
+s.trackToolCall('call_seller', latencyMs, true, { peer: extractA2aMetadata(reply.metadata) });
+
+// Receiver
+const session = agent.session({ context: extractA2aMetadata(message.metadata) });
+await session.run(async () => ({ ...result, metadata: injectA2aResponseMetadata(result.metadata) }));
+
+// AgentCard: advertise the optional extension
+const card = declareA2aExtension(agentCard);
+
+// Business events join the agent session in charts (never includes the user ID)
+amplitude.track('Checkout Completed', { orderId, ...contextProperties() });
+```
+
+- **Identity.** A2A and ACP leave the user ID out by default. `identity: 'pairwise'` with a `recipient` sends a stable per-recipient pseudonym (needs `AMPLITUDE_AI_PAIRWISE_SALTS`); `identity: 'raw'` sends the user ID and requires a signing key.
+- **Actor Type.** A2A is always `agent`. ACP and HTTP use the signed `actorType`, else `human`.
+- **Message Source** is unchanged: `agent` only inside a trusted delegation, so an untrusted request still counts as a user turn.
+- **Responses.** `injectA2aResponseMetadata`, `injectAcpResultMeta` and `injectResponseHeaders` return the receiver's context. On the caller, `trackToolCall(..., { peer })` or `peerProperties(extracted)` attaches it to that one call, so parallel calls to several peers never mix.
+- **ACP.** `injectAcpMeta` / `extractAcpMeta` on `params._meta`, `injectAcpResultMeta` on the result.
+- **Browsers and mobile apps.** A backend mints a signed context with `mintContext({ sessionId, userId })`; the client forwards it unchanged.
+- **Debugging.** `amplitude-ai doctor` checks the key and salt configuration, and `amplitude-ai doctor --verify '<envelope JSON>'` explains why a context isn't trusted (see [Doctor CLI](#doctor-cli)).
+- The wire format and signing match the Python SDK. Spec: https://amplitude.com/docs/amplitude-ai/agent-analytics/agent-context-v1.
 
 ## Middleware
 
@@ -2399,6 +2442,8 @@ app.post('/chat', async (req, res) => {
 ```
 
 `createAmplitudeAIMiddleware` propagates `agentVersion`, `customerOrgId`, `context`, and `groups` (in addition to `userId`, `sessionId`, `traceId`, `agentId`, `env`) into the per-request session context and the `[Agent] Session End` event. `customerOrgId`, `context`, and `groups` accept either a static value or a `(req) => value` resolver.
+
+Pass `acceptContext: true` when other agent services call this one. The middleware then reads the inbound `x-amplitude-*` headers with the same trust rules as `session({ context })`: a signed context that verifies joins the caller's session (over `sessionIdResolver`), parent agent and trace; anything else is recorded as peer properties. It never adopts unsigned headers. Off by default, which keeps today's trace-only behavior.
 
 ## Bulk Conversation Import
 

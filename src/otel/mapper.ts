@@ -6,6 +6,10 @@
  * created (provider wrapper, @observe, external OTEL instrumentor, or manual span).
  */
 
+import {
+  agentContextPropertiesFromAttributes,
+  sessionAgentContextProperties,
+} from '../agent-context-properties.js';
 import { getActiveContext, type SessionContext } from '../context.js';
 import {
   PROP_AGENT_ID,
@@ -649,6 +653,12 @@ export class SpanEventMapper {
     if (opts.customerOrgId) extra[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
     if (opts.agentVersion) extra[PROP_AGENT_VERSION] = opts.agentVersion;
     if (opts.otelAgentName) extra['[Agent] Agent Name'] = opts.otelAgentName;
+    Object.assign(
+      extra,
+      opts.sessionContext?.contextTrust != null
+        ? sessionAgentContextProperties(opts.sessionContext)
+        : agentContextPropertiesFromAttributes(attrs),
+    );
 
     const tags = attrs[AMP_TAGS];
     if (tags != null) {

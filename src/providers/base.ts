@@ -5,6 +5,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { agentContextSpanAttributes } from '../agent-context-properties.js';
 import { getActiveContext, isTrackerManaged } from '../context.js';
 import {
   PROP_EXPERIMENTS,
@@ -401,6 +402,7 @@ function _stampLineage(
   if (ctx?.agentId) attrs[AMP_AGENT_ID] = ctx.agentId;
   if (ctx?.parentAgentId) attrs[AMP_PARENT_AGENT_ID] = ctx.parentAgentId;
   if (ctx?.skipAutoUserTracking) attrs[AMP_SKIP_AUTO_USER_TRACKING] = true;
+  Object.assign(attrs, agentContextSpanAttributes(ctx));
 }
 
 function _sanitizeGenAiMessagesForSpan(

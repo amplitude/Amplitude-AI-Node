@@ -13,6 +13,7 @@ import {
   getActiveContext,
   SessionContext,
 } from './context.js';
+import { agentContextSpanAttributes } from './agent-context-properties.js';
 import { _getOtelOwner } from './client.js';
 import { PrivacyConfig, redactPiiPatterns } from './core/privacy.js';
 import { trackSessionEnd, trackSpan, trackToolCall } from './core/tracking.js';
@@ -661,6 +662,9 @@ function _wrapObserve<T extends AnyFn>(fn: T, opts: ObserveOptions): T {
           if (ctx?.agentId) span.setAttribute(AMP_AGENT_ID, ctx.agentId);
           if (ctx?.parentAgentId) span.setAttribute(AMP_PARENT_AGENT_ID, ctx.parentAgentId);
           if (ctx?.skipAutoUserTracking) span.setAttribute(AMP_SKIP_AUTO_USER_TRACKING, true);
+          for (const [key, value] of Object.entries(agentContextSpanAttributes(ctx))) {
+            span.setAttribute(key, value);
+          }
           if (inputState != null && gateOpen) {
             span.setAttribute(AMP_INPUT_STATE, JSON.stringify(inputState));
           }
