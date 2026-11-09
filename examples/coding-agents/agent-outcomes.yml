@@ -1,6 +1,8 @@
-# agent-outcomes v2
-# Amplitude Agent Analytics: send code outcomes (merged, reverted, deployed)
-# for commits made by coding agents. Installed by `amplitude-ai coding-agents init`.
+# agent-outcomes v3
+# Amplitude Agent Analytics: score coding-agent sessions with code outcomes (merged,
+# reverted, deployed, first-run CI, review). Each outcome is an [Agent] Score on the
+# session that wrote the commit, so only commits with an Agent-Session-Id trailer
+# (from the prepare-commit-msg hook) are scored. Installed by `amplitude-ai coding-agents init`.
 #
 # Setup:
 #   - Repository secret AMPLITUDE_API_KEY: the Amplitude project API key.
@@ -44,7 +46,7 @@ jobs:
         with:
           script: |
             const crypto = require('crypto');
-            const WORKFLOW_VERSION = 2;
+            const WORKFLOW_VERSION = 3;
             const { owner, repo } = context.repo;
             const repoName = `${owner}/${repo}`;
             const dryRun = process.env.AMPLITUDE_OUTCOMES_DRY_RUN === 'true';
@@ -86,61 +88,69 @@ jobs:
               '243557089+warp-factories[bot]@users.noreply.github.com': 'warp',
             };
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
-            // How the commit is known to be an agent's: our session trailer, the agent as
-            // commit author, or the agent's Co-authored-by line.
-            const attribution = (c) => {
-              const message = c.commit.message;
+            const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id');
+            // The agent that signed the commit: its commit author email, else its Co-authored-by line.
+            const signingAgent = (c) => {
               const author = agentForEmail(c.commit?.author?.email);
-              let coAuthor = null;
-              for (const m of message.matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)) {
-                coAuthor = agentForEmail(m[1]);
-                if (coAuthor) break;
+              if (author) return { agent: author, authored: true };
+              for (const m of c.commit.message.matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)) {
+                const coAuthor = agentForEmail(m[1]);
+                if (coAuthor) return { agent: coAuthor, authored: false };
               }
-              const named = trailer(message, 'Agent-Name');
-              if (trailer(message, 'Agent-Session-Id')) {
-                return { agent_attribution: 'session_trailer', attributed_agent: named || author || coAuthor };
-              }
-              if (author) return { agent_attribution: 'agent_author', attributed_agent: author };
-              if (coAuthor) return { agent_attribution: 'co_author', attributed_agent: coAuthor };
-              // Agents whose shells carry no session ID (Gemini CLI) stamp only their name.
-              if (named) return { agent_attribution: 'name_trailer', attributed_agent: named };
-              return { agent_attribution: 'none', attributed_agent: null };
+              return { agent: null, authored: false };
             };
+            // The hook's Agent-Name values (claude-code, codex, cursor, goose) are the
+            // [Agent] Agent ID each harness's own events carry.
+            const agentIdFor = (c) => trailer(c.commit.message, 'Agent-Name') || signingAgent(c).agent;
             // How the agent's session started: the Agent-Trigger trailer, else `event` for a
             // commit a bot agent authored (cloud agents run from an issue or an assignment).
             const TRIGGERS = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
             const agentTrigger = (c) => {
               const value = trailer(c.commit.message, 'Agent-Trigger');
               if (TRIGGERS.includes(value)) return value;
-              return attribution(c).agent_attribution === 'agent_author' ? 'event' : null;
+              return signingAgent(c).authored ? 'event' : null;
             };
-            const baseProps = (c) => {
-              const sessionId = trailer(c.commit.message, 'Agent-Session-Id');
-              return {
-                commit_sha: c.sha,
-                agent_session_id: sessionId,
-                agent_name: sessionId ? trailer(c.commit.message, 'Agent-Name') : null,
-                agent_authored: Boolean(sessionId),
-                ...attribution(c),
-                agent_trigger: agentTrigger(c),
-                repo: repoName,
-              };
-            };
+            const baseProps = (c) => ({
+              commit_sha: c.sha,
+              agent_session_id: sessionOf(c),
+              agent_name: trailer(c.commit.message, 'Agent-Name'),
+              agent_trigger: agentTrigger(c),
+              repo: repoName,
+            });
             const hoursBetween = (from, to) => Math.round(((Date.parse(to) - Date.parse(from)) / 3600000) * 100) / 100;
+            const authoredAt = (c) => {
+              const t = Date.parse(c.commit?.author?.date || '');
+              return Number.isNaN(t) ? Date.now() : t;
+            };
 
+            // One [Agent] Score per outcome, on the session that wrote the commit. The
+            // event time is the commit's author date, which falls inside the session, so
+            // the session keeps the start and end its own events gave it; outcome_time is
+            // when the outcome happened. A value that is undefined or null is not sent.
             const events = [];
-            const pushEvent = (eventType, userId, props, insertKey, time = Date.now()) => {
-              if (!userId) return;
+            const pushScore = (name, value, c, props, insertKey, outcomeTime, userId = userIdFor(c)) => {
+              const sessionId = sessionOf(c);
+              if (!sessionId || !userId || value === undefined || value === null) return;
               events.push({
-                event_type: eventType,
+                event_type: '[Agent] Score',
                 user_id: userId,
-                insert_id: `${eventType}:${repoName}:${insertKey}`,
-                time,
-                event_properties: { ...props, outcomes_workflow_version: WORKFLOW_VERSION },
+                insert_id: `${name}:${repoName}:${insertKey}`,
+                time: authoredAt(c),
+                event_properties: {
+                  '[Agent] Score Name': name,
+                  '[Agent] Score Value': value,
+                  '[Agent] Session ID': sessionId,
+                  '[Agent] Target ID': sessionId,
+                  '[Agent] Target Type': 'session',
+                  '[Agent] Agent ID': agentIdFor(c),
+                  '[Agent] Evaluation Source': 'outcome',
+                  ...baseProps(c),
+                  ...props,
+                  outcome_time: new Date(outcomeTime).toISOString(),
+                  outcomes_workflow_version: WORKFLOW_VERSION,
+                },
               });
             };
-            const push = (eventType, c, extra, insertKey) =>
-              pushEvent(eventType, userIdFor(c), { ...baseProps(c), ...extra }, insertKey);
 
             // Enrichments are best effort: each one is isolated, and together they
             // make at most API_BUDGET GitHub API calls. A failed enrichment omits
@@ -316,25 +326,35 @@ jobs:
                 let m;
                 while ((m = revertRe.exec(text)) !== null) reverted.add(m[1].toLowerCase());
               }
+              const mergedAt = pr.merged_at ? Date.parse(pr.merged_at) : Date.now();
+              const agentCommits = commits.filter(sessionOf);
+              const sessions = new Map();
+              for (const c of agentCommits) {
+                if (!sessions.has(sessionOf(c))) sessions.set(sessionOf(c), []);
+                sessions.get(sessionOf(c)).push(c);
+              }
               // The PR-level enrichments are cheap, so they run before the per-commit
               // setup lookups that can use up the budget on a long PR.
-              const reviews = await enrich('reviews', async () => {
-                const all = await listAll(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number });
-                // A reply in a review thread is an empty COMMENTED review; it is not a review.
-                return all.filter((r) => (['APPROVED', 'CHANGES_REQUESTED'].includes(r.state)
-                  || (r.state === 'COMMENTED' && (r.body || '').trim()))
-                  && r.user?.type !== 'Bot' && r.user?.login !== pr.user?.login);
-              });
-              const ciPassed = await ciPassedFirstRun(pr, commits);
+              let reviews, ciPassed;
+              if (sessions.size) {
+                reviews = await enrich('reviews', async () => {
+                  const all = await listAll(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number });
+                  // A reply in a review thread is an empty COMMENTED review; it is not a review.
+                  return all.filter((r) => (['APPROVED', 'CHANGES_REQUESTED'].includes(r.state)
+                    || (r.state === 'COMMENTED' && (r.body || '').trim()))
+                    && r.user?.type !== 'Bot' && r.user?.login !== pr.user?.login);
+                });
+                ciPassed = await ciPassedFirstRun(pr, commits);
+              }
               const setupVersions = new Map();
-              for (const c of commits) setupVersions.set(c.sha, await setupVersionFor(c));
-              for (const c of commits) {
-                push('Commit Merged', c, {
+              for (const c of agentCommits) setupVersions.set(c.sha, await setupVersionFor(c));
+              for (const c of agentCommits) {
+                pushScore('commit_merged', 1, c, {
                   merge_commit_sha: pr.merge_commit_sha,
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
                   agent_setup_version: setupVersions.get(c.sha),
-                }, c.sha);
+                }, c.sha, mergedAt);
               }
               for (const sha of reverted) {
                 let original;
@@ -345,53 +365,47 @@ jobs:
                   continue;
                 }
                 remember(original);
-                push('Commit Reverted', original, {
+                if (!sessionOf(original)) continue;
+                pushScore('commit_reverted', 1, original, {
                   revert_pr_number: pr.number,
                   revert_merge_commit_sha: pr.merge_commit_sha,
                   agent_setup_version: await setupVersionFor(original),
-                }, `${original.sha}:${pr.number}`);
+                }, `${original.sha}:${pr.number}`, mergedAt);
               }
 
-              const agentCommits = commits.filter((c) => trailer(c.commit.message, 'Agent-Session-Id'));
-              const attributed = commits.map(attribution).filter((a) => a.agent_attribution !== 'none');
-              const distinct = (key) =>
-                [...new Set(agentCommits.map((c) => trailer(c.commit.message, key)).filter(Boolean))].slice(0, 50);
-              const prUser = agentCommits[0] || commits[0];
               // Review timing uses the human reviews above. A round is a change request the
-              // author answered with a later commit. Omitted, like review_count, when the reviews
-              // enrichment failed; hours_to_first_review is null when no review counted.
+              // author answered with a later commit. Not sent, like review_count, when the reviews
+              // enrichment failed; hours_to_first_review is not sent when no review counted.
               const submitted = (reviews || []).map((r) => r.submitted_at).filter(Boolean)
                 .sort((a, b) => Date.parse(a) - Date.parse(b));
               const committedAt = commits.map((c) => c.commit?.committer?.date).filter(Boolean);
-              const firstReviewHours = !reviews ? undefined
-                : submitted.length ? hoursBetween(pr.created_at, submitted[0]) : null;
-              const reviewRounds = reviews ? reviews.filter((r) => r.state === 'CHANGES_REQUESTED' && r.submitted_at
-                && committedAt.some((d) => Date.parse(d) > Date.parse(r.submitted_at))).length : undefined;
-              if (prUser) {
-                const prUserId = userIdFor(prUser) || (userIdSource === 'login' ? pr.user?.login : null);
-                pushEvent('Pull Request Merged', prUserId, {
-                  repo: repoName,
+              const prScores = {
+                ci_passed_first_run: ciPassed === undefined ? undefined : Number(ciPassed),
+                review_rounds: reviews ? reviews.filter((r) => r.state === 'CHANGES_REQUESTED' && r.submitted_at
+                  && committedAt.some((d) => Date.parse(d) > Date.parse(r.submitted_at))).length : undefined,
+                review_count: reviews?.length,
+                changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
+                hours_open: pr.merged_at ? hoursBetween(pr.created_at, pr.merged_at) : undefined,
+                hours_to_first_review: submitted.length ? hoursBetween(pr.created_at, submitted[0]) : undefined,
+              };
+              // PR scores go on every agent session in the PR, each on its first commit.
+              // Count a PR once with distinct pr_number.
+              for (const [sessionId, own] of sessions) {
+                const first = own[0];
+                const userId = userIdFor(first) || (userIdSource === 'login' ? pr.user?.login : null);
+                const props = {
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
                   merge_commit_sha: pr.merge_commit_sha,
                   commit_count: pr.commits ?? commits.length,
                   agent_commit_count: agentCommits.length,
-                  unattributed_commit_count: commits.length - attributed.length,
-                  agent_authored: agentCommits.length > 0,
-                  agent_attributed: attributed.length > 0,
-                  agent_names: distinct('Agent-Name'),
-                  agent_session_ids: distinct('Agent-Session-Id'),
-                  attributed_commit_count: attributed.length,
-                  attributed_agents: [...new Set(attributed.map((a) => a.attributed_agent).filter(Boolean))],
-                  review_count: reviews?.length,
-                  changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
-                  ci_passed_first_run: ciPassed,
-                  agent_setup_version: setupVersions.get(commits[0].sha),
-                  agent_triggers: [...new Set(commits.map(agentTrigger).filter(Boolean))].sort().slice(0, 5),
-                  hours_open: pr.merged_at ? hoursBetween(pr.created_at, pr.merged_at) : null,
-                  hours_to_first_review: firstReviewHours,
-                  review_rounds: reviewRounds,
-                }, pr.number, pr.merged_at ? Date.parse(pr.merged_at) : Date.now());
+                  session_commit_count: own.length,
+                  pr_session_count: sessions.size,
+                  agent_setup_version: setupVersions.get(first.sha),
+                };
+                for (const [name, value] of Object.entries(prScores)) {
+                  pushScore(name, value, first, props, `${pr.number}:${sessionId}`, mergedAt, userId);
+                }
               }
             } else {
               const deployment = context.payload.deployment;
@@ -426,18 +440,19 @@ jobs:
               }
               commits.forEach(remember);
               const succeeded = state === 'success';
-              for (const c of commits) {
-                push(succeeded ? 'Deploy Succeeded' : 'Deploy Failed', c, {
+              const deployedAt = Date.parse(context.payload.deployment_status.created_at || '') || Date.now();
+              for (const c of commits.filter(sessionOf)) {
+                pushScore(succeeded ? 'deploy_succeeded' : 'deploy_failed', 1, c, {
                   deployment_sha: deployment.sha,
                   environment,
                   ...(succeeded ? {} : { deployment_state: state }),
                   agent_setup_version: await setupVersionFor(c),
-                }, `${c.sha}:${deployment.id}`);
+                }, `${c.sha}:${deployment.id}`, deployedAt);
               }
             }
 
-            const agentEvents = events.filter((e) => e.event_properties.agent_authored).length;
-            core.info(`${events.length} outcome events (${agentEvents} agent-authored)`);
+            const scoredSessions = new Set(events.map((e) => e.event_properties['[Agent] Session ID'])).size;
+            core.info(`${events.length} outcome scores on ${scoredSessions} agent sessions`);
             const enrichments = Object.entries(enrichment).map(([k, v]) => `${k}=${v}`).join(', ') || 'none';
             core.info(`enrichments: ${enrichments}; ${apiCalls}/${API_BUDGET} API calls`);
             if (events.length === 0) return;

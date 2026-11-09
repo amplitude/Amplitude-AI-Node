@@ -65,7 +65,7 @@ describe('coding-agents templates', () => {
 
   it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
     expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
-    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v2');
+    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v3');
   });
 
   it('pins the hashes of the previously shipped hook and workflow', () => {

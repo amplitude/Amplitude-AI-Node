@@ -38,7 +38,7 @@ scheduled job on the owner's machine (for example, every 15 minutes)
 - One session per thread, with the person's requests, the coordinator's replies and delegations, and each worker's replies.
 - `[Agent] Parent Agent ID` on each worker, plus `[Agent] Root Agent Name` and `[Agent] Agent Chain Depth`, so delegation shows as a tree.
 - Tokens, cost and model per agent reply from kind 44200. Cost is sent only when `deltaReliable` is true; Amplitude never invents cost.
-- goose workers' tool calls (name, arguments, output, success) from `sessions.db`, with `commit_sha` on `git commit` calls, so merged code joins the team session (see [code outcomes](recipes/code-outcomes.md)).
+- goose workers' tool calls (name, arguments, output, success) from `sessions.db`, with `commit_sha` on `git commit` calls, so the team session records the commits it made (see [code outcomes](recipes/code-outcomes.md)).
 
 ### What this guide does not do
 
@@ -106,7 +106,7 @@ Copy [buzz.mjs](./buzz.mjs) unchanged next to the job (it also ships in the npm 
 ### Phase 5: Ship
 
 - Run the job on the owner's machine, where the archive lives. Nothing leaves the machine except the events.
-- Add the [code outcomes](recipes/code-outcomes.md) workflow so merged and reverted commits join the team session by `commit_sha`.
+- The [code outcomes](recipes/code-outcomes.md) workflow doesn't score Buzz team sessions: it scores the session in a commit's `Agent-Session-Id` trailer, and a goose worker's `AGENT_SESSION_ID` isn't the Buzz thread's `[Agent] Session ID`. Don't enable the commit hook (`core.hooksPath .githooks`) in worker checkouts, or merged commits get scored on the goose worker's own session ID, which Buzz doesn't report. Match `commit_sha` on the Tool Calls against GitHub instead.
 
 ---
 
@@ -575,5 +575,5 @@ async function postBatch(
 
 ### More
 
-- [Code outcomes](recipes/code-outcomes.md): merged, reverted and deployed commits joined to the session.
+- [Code outcomes](recipes/code-outcomes.md): in-session outcomes from Tool Calls; the outcomes workflow does not score Buzz team sessions.
 - [goose](goose.md): goose on its own, over OpenTelemetry.

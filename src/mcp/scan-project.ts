@@ -803,7 +803,7 @@ export function scanProject(requestedRoot: string): ScanResult {
   }
   if (codingAgents.outcomes_workflow === 'outdated') {
     recommendations.push(
-      '.github/workflows/agent-outcomes.yml is an earlier shipped version: re-run `npx -y -p @amplitude/ai amplitude-ai coding-agents init` to upgrade it (adds agent_trigger, and review_rounds, hours_to_first_review and hours_open on Pull Request Merged).',
+      '.github/workflows/agent-outcomes.yml is an earlier shipped version: re-run `npx -y -p @amplitude/ai amplitude-ai coding-agents init` to upgrade it (sends each outcome as an [Agent] Score on the session that wrote the commit).',
     );
   }
 

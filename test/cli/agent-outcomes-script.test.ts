@@ -10,8 +10,7 @@ import { describe, expect, it } from 'vitest';
  * `context`, `core`, `fetch` and `require` in scope.
  */
 
-const V2 = join(__dirname, '../../examples/coding-agents/agent-outcomes.yml');
-const V1 = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
+const WORKFLOW = join(__dirname, '../../examples/coding-agents/agent-outcomes.yml');
 
 function extractScript(path: string): string {
   const lines = readFileSync(path, 'utf8').split('\n');
@@ -27,7 +26,12 @@ function extractScript(path: string): string {
 
 type Commit = {
   sha: string;
-  commit: { message: string; author: { email: string }; committer?: { date: string }; tree: { sha: string } };
+  commit: {
+    message: string;
+    author: { email: string; date?: string };
+    committer?: { date: string };
+    tree: { sha: string };
+  };
   author: { login: string } | null;
   parents: Array<{ sha: string }>;
 };
@@ -56,12 +60,12 @@ const tree = (n: string) => `tree-${n}`;
 const commit = (
   sha: string,
   parent: string | null,
-  opts: { message?: string; email?: string; tree?: string; committed?: string } = {},
+  opts: { message?: string; email?: string; tree?: string; committed?: string; authored?: string } = {},
 ) => ({
   sha,
   commit: {
     message: opts.message ?? `change ${sha}`,
-    author: { email: opts.email ?? 'dev@example.com' },
+    author: { email: opts.email ?? 'dev@example.com', ...(opts.authored && { date: opts.authored }) },
     ...(opts.committed && { committer: { date: opts.committed } }),
     tree: { sha: opts.tree ?? tree(sha) },
   },
@@ -196,11 +200,12 @@ async function run(world: World, options: RunOptions) {
   };
   const env = { AMPLITUDE_API_KEY: 'test-key', ...options.env };
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
-  const body = extractScript(options.script ?? V2);
+  const body = extractScript(options.script ?? WORKFLOW);
   const fn = new AsyncFunction('github', 'context', 'core', 'fetch', 'require', 'process', body);
   await fn(github, context, core, fetch, createRequire(import.meta.url), { env });
   const events = sent.flatMap((s) => s.events);
-  return { events, log, calls, byType: (t: string) => events.filter((e) => e.event_type === t) };
+  const byName = (name: string) => events.filter((e) => e.event_properties['[Agent] Score Name'] === name);
+  return { events, log, calls, byName };
 }
 
 type Event = {
@@ -231,8 +236,12 @@ function linearWorld(): World {
   return {
     commits: {
       base: commit('base', null),
-      c1: commit('c1', 'base', { message: agentMessage('s1'), email: 'agent-user@example.com' }),
-      c2: commit('c2', 'c1', { message: agentMessage('s2', 'codex') }),
+      c1: commit('c1', 'base', {
+        message: agentMessage('s1'),
+        email: 'agent-user@example.com',
+        authored: '2026-11-01T00:10:00Z',
+      }),
+      c2: commit('c2', 'c1', { message: agentMessage('s2', 'codex'), authored: '2026-11-01T05:00:00Z' }),
       c3: commit('c3', 'c2', { email: 'human@example.com' }),
     },
     trees: {
@@ -245,59 +254,137 @@ function linearWorld(): World {
 }
 
 describe('agent-outcomes.yml script', () => {
-  it('keeps every v1 event, property and insert ID', async () => {
+  const props = (e: Event | undefined) => e?.event_properties ?? {};
+  const forSession = (events: Event[], session: string) =>
+    events.find((e) => e.event_properties['[Agent] Session ID'] === session);
+  const prScore = (r: Awaited<ReturnType<typeof run>>, name: string, session = 's1') =>
+    props(forSession(r.byName(name), session))['[Agent] Score Value'];
+
+  it('sends commit_merged as an [Agent] Score on the session that wrote each agent commit', async () => {
+    const r = await run(linearWorld(), { event: 'pull_request', payload: prPayload() });
+    expect(r.events.every((e) => e.event_type === '[Agent] Score')).toBe(true);
+    const merged = r.byName('commit_merged');
+    expect(merged.map((e) => e.event_properties.commit_sha)).toEqual(['c1', 'c2']);
+    expect(merged[0]).toEqual({
+      event_type: '[Agent] Score',
+      user_id: 'agent-user@example.com',
+      insert_id: 'commit_merged:acme/app:c1',
+      time: Date.parse('2026-11-01T00:10:00Z'),
+      event_properties: {
+        '[Agent] Score Name': 'commit_merged',
+        '[Agent] Score Value': 1,
+        '[Agent] Session ID': 's1',
+        '[Agent] Target ID': 's1',
+        '[Agent] Target Type': 'session',
+        '[Agent] Agent ID': 'claude-code',
+        '[Agent] Evaluation Source': 'outcome',
+        commit_sha: 'c1',
+        agent_session_id: 's1',
+        agent_name: 'claude-code',
+        agent_trigger: null,
+        repo: 'acme/app',
+        merge_commit_sha: 'merge7',
+        pr_number: 7,
+        base_branch: 'main',
+        agent_setup_version: setupHash(['AGENTS.md:blob-a']),
+        outcome_time: '2026-11-03T00:00:00.000Z',
+        outcomes_workflow_version: 3,
+      },
+    });
+    expect(props(merged[1])).toMatchObject({ '[Agent] Session ID': 's2', '[Agent] Agent ID': 'codex' });
+  });
+
+  it('scores no commit without a session trailer, and skips the PR lookups when none has one', async () => {
     const world = linearWorld();
-    world.commits.abcdef1234 = commit('abcdef1234', null, { message: agentMessage('s0') });
-    const payload = prPayload({ body: 'This reverts commit abcdef1234.' });
-    const v1 = await run(world, { script: V1, event: 'pull_request', payload });
-    const v2 = await run(world, { event: 'pull_request', payload });
-    expect(v1.events.length).toBe(4);
-    for (const e of v1.events) {
-      const match = v2.events.find((x) => x.insert_id === e.insert_id)!;
-      expect(match, e.insert_id).toBeDefined();
-      expect(match.event_type).toBe(e.event_type);
-      expect(match.user_id).toBe(e.user_id);
-      expect(match.event_properties).toMatchObject(e.event_properties);
-      expect(match.event_properties.outcomes_workflow_version).toBe(2);
+    world.commits.cur = commit('cur', 'c3', { message: 'fix\n\nCo-authored-by: Cursor <cursoragent@cursor.com>\n' });
+    world.commits.cop = commit('cop', 'cur', { email: '198982749+Copilot@users.noreply.github.com' });
+    world.commits.gem = commit('gem', 'cop', { message: 'feat: y\n\nAgent-Name: gemini-cli\n' });
+    world.prCommits = ['c3', 'cur', 'cop', 'gem'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.events).toEqual([]);
+    expect(r.calls).toEqual(['pulls.listCommits']);
+    expect(r.log.info[0]).toBe('0 outcome scores on 0 agent sessions');
+  });
+
+  it.each([
+    ['claude-code', 'CLAUDE_CODE_SESSION_ID', '3f2c9a1e-7b4d-4c21-9e8f-1a2b3c4d5e6f'],
+    ['codex', 'CODEX_THREAD_ID', '019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b'],
+    ['cursor', 'CURSOR_CONVERSATION_ID', 'c7d8e9f0-1a2b-4c3d-8e4f-5a6b7c8d9e0f'],
+    ['goose', 'AGENT_SESSION_ID', '20261101_42'],
+  ])('keeps the %s session ID from %s exactly', async (name, _env, session) => {
+    const world = linearWorld();
+    world.commits.h = commit('h', 'base', { message: agentMessage(session, name) });
+    world.prCommits = ['h'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.events.length).toBeGreaterThan(0);
+    for (const e of r.events) {
+      expect(props(e)).toMatchObject({
+        '[Agent] Session ID': session,
+        '[Agent] Target ID': session,
+        '[Agent] Agent ID': name,
+        agent_session_id: session,
+      });
     }
+  });
+
+  it('takes the Agent ID from the signing agent when the commit has no Agent-Name', async () => {
+    const world = linearWorld();
+    world.commits.n = commit('n', 'base', {
+      message: 'fix\n\nAgent-Session-Id: s7\nCo-authored-by: Cursor <CursorAgent@cursor.com>\n',
+    });
+    world.prCommits = ['n'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(props(r.byName('commit_merged')[0])).toMatchObject({ '[Agent] Agent ID': 'cursor', agent_name: null });
+  });
+
+  it('times a commit without an author date at send time', async () => {
+    const world = linearWorld();
+    world.prCommits = ['c1'];
+    delete world.commits.c1!.commit.author.date;
+    const before = Date.now();
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byName('commit_merged')[0]!.time).toBeGreaterThanOrEqual(before);
   });
 
   it('stamps agent_setup_version from each commit parent tree', async () => {
     const r = await run(linearWorld(), { event: 'pull_request', payload: prPayload() });
     const version = Object.fromEntries(
-      r.byType('Commit Merged').map((e) => [e.event_properties.commit_sha, e.event_properties.agent_setup_version]),
+      r.byName('commit_merged').map((e) => [e.event_properties.commit_sha, e.event_properties.agent_setup_version]),
     );
-    expect(version.c1).toBe(setupHash(['AGENTS.md:blob-a']));
-    expect(version.c2).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
-    expect(version.c3).toBe(version.c2);
+    expect(version).toEqual({
+      c1: setupHash(['AGENTS.md:blob-a']),
+      c2: setupHash(['AGENTS.md:blob-b', '.claude:claude-1']),
+    });
     expect(r.calls.filter((c) => c === 'git.getCommit')).toEqual(['git.getCommit']);
   });
 
   it('is null when the tree has no setup files, and honours AMPLITUDE_AGENT_SETUP_PATHS', async () => {
     const world = linearWorld();
     const none = await run(world, { event: 'pull_request', payload: prPayload(), env: { AMPLITUDE_AGENT_SETUP_PATHS: 'docs' } });
-    expect(none.byType('Commit Merged').map((e) => e.event_properties.agent_setup_version)).toEqual([null, null, null]);
+    expect(none.byName('commit_merged').map((e) => e.event_properties.agent_setup_version)).toEqual([null, null]);
 
     const custom = await run(world, {
       event: 'pull_request',
       payload: prPayload(),
       env: { AMPLITUDE_AGENT_SETUP_PATHS: 'src, ../etc, a/b' },
     });
-    expect(custom.byType('Commit Merged')[0]!.event_properties.agent_setup_version).toBe(setupHash(['src:src-1']));
+    expect(custom.byName('commit_merged')[0]!.event_properties.agent_setup_version).toBe(setupHash(['src:src-1']));
     expect(custom.log.warning.join('\n')).toContain('not root-level');
   });
 
   it('looks up parents by SHA, not by list position', async () => {
     const world = linearWorld();
-    world.prCommits = ['c3', 'c1', 'c2'];
+    world.prCommits = ['c3', 'c2', 'c1'];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    const c3 = r.byType('Commit Merged').find((e) => e.event_properties.commit_sha === 'c3')!;
-    expect(c3.event_properties.agent_setup_version).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
+    const c2 = r.byName('commit_merged').find((e) => e.event_properties.commit_sha === 'c2')!;
+    expect(c2.event_properties.agent_setup_version).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
     expect(r.calls.filter((c) => c === 'git.getCommit')).toHaveLength(1);
   });
 
-  it('sends one Pull Request Merged with attribution and human review counts', async () => {
+  it('sends the PR scores once per agent session, on its first commit, with human review counts', async () => {
     const world = linearWorld();
+    world.commits.c2b = commit('c2b', 'c3', { message: agentMessage('s2', 'codex'), authored: '2026-11-02T09:00:00Z' });
+    world.prCommits = ['c1', 'c2', 'c3', 'c2b'];
     world.reviews = [
       { state: 'APPROVED', user: { login: 'alice', type: 'User' } },
       { state: 'CHANGES_REQUESTED', user: { login: 'bob', type: 'User' } },
@@ -309,43 +396,36 @@ describe('agent-outcomes.yml script', () => {
       { state: 'DISMISSED', user: { login: 'dan', type: 'User' } },
     ];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    const [pr, ...rest] = r.byType('Pull Request Merged');
-    expect(rest).toEqual([]);
-    expect(pr!.insert_id).toBe('Pull Request Merged:acme/app:7');
-    expect(pr!.user_id).toBe('agent-user@example.com');
-    expect(pr!.event_properties).toMatchObject({
-      repo: 'acme/app',
+    const prNames = ['review_rounds', 'review_count', 'changes_requested_count', 'hours_open'];
+    for (const name of prNames) {
+      expect(r.byName(name).map((e) => e.insert_id)).toEqual([`${name}:acme/app:7:s1`, `${name}:acme/app:7:s2`]);
+    }
+    expect(r.byName('ci_passed_first_run')).toEqual([]);
+    expect(r.byName('hours_to_first_review')).toEqual([]);
+    expect(Object.fromEntries(prNames.map((n) => [n, prScore(r, n)]))).toEqual({
+      review_rounds: 0,
+      review_count: 3,
+      changes_requested_count: 1,
+      hours_open: 48,
+    });
+    const s1 = forSession(r.byName('review_count'), 's1')!;
+    const s2 = forSession(r.byName('review_count'), 's2')!;
+    expect(s1.user_id).toBe('agent-user@example.com');
+    expect(s1.time).toBe(Date.parse('2026-11-01T00:10:00Z'));
+    expect(s2.time).toBe(Date.parse('2026-11-01T05:00:00Z'));
+    expect(s1.event_properties).toMatchObject({
+      commit_sha: 'c1',
       pr_number: 7,
       base_branch: 'main',
       merge_commit_sha: 'merge7',
-      commit_count: 3,
-      agent_commit_count: 2,
-      unattributed_commit_count: 1,
-      agent_authored: true,
-      agent_names: ['claude-code', 'codex'],
-      agent_session_ids: ['s1', 's2'],
-      agent_attributed: true,
-      review_count: 3,
-      changes_requested_count: 1,
+      commit_count: 4,
+      agent_commit_count: 3,
+      session_commit_count: 1,
+      pr_session_count: 2,
       agent_setup_version: setupHash(['AGENTS.md:blob-a']),
-      outcomes_workflow_version: 2,
+      outcome_time: '2026-11-03T00:00:00.000Z',
     });
-    expect(pr!.event_properties).not.toHaveProperty('ci_passed_first_run');
-    expect(pr!.time).toBe(Date.parse('2026-11-03T00:00:00Z'));
-  });
-
-  it('sends Pull Request Merged for a human-only PR, as the first commit author', async () => {
-    const world = linearWorld();
-    world.prCommits = ['c3'];
-    const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    const pr = r.byType('Pull Request Merged')[0]!;
-    expect(pr.user_id).toBe('human@example.com');
-    expect(pr.event_properties).toMatchObject({
-      agent_authored: false,
-      agent_attributed: false,
-      agent_commit_count: 0,
-      agent_names: [],
-    });
+    expect(s2.event_properties).toMatchObject({ commit_sha: 'c2', session_commit_count: 2 });
   });
 
   it('judges first-run CI by the earliest attempt on the first commit with results', async () => {
@@ -359,7 +439,8 @@ describe('agent-outcomes.yml script', () => {
       ],
     };
     const failed = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(failed.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+    expect(prScore(failed, 'ci_passed_first_run')).toBe(0);
+    expect(prScore(failed, 'ci_passed_first_run', 's2')).toBe(0);
 
     world.checkRuns.c2 = [
       { id: 10, name: 'build', conclusion: 'success', app: { id: 1 } },
@@ -367,11 +448,11 @@ describe('agent-outcomes.yml script', () => {
     ];
     world.statuses = { c2: [{ id: 3, context: 'ci/legacy', state: 'success' }, { id: 2, context: 'ci/legacy', state: 'pending' }] };
     const passed = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(passed.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+    expect(prScore(passed, 'ci_passed_first_run')).toBe(1);
 
     world.statuses = { c2: [{ id: 3, context: 'ci/legacy', state: 'success' }, { id: 2, context: 'ci/legacy', state: 'error' }] };
     const status = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(status.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+    expect(prScore(status, 'ci_passed_first_run')).toBe(0);
   });
 
   it('judges first-run CI on the head of the first push CI ran on, ignoring other PRs on the branch', async () => {
@@ -387,7 +468,7 @@ describe('agent-outcomes.yml script', () => {
       { id: 4, head_sha: 'c2', created_at: '2026-11-02T00:00:00Z', pull_requests: [{ number: 7 }] },
     ];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+    expect(prScore(r, 'ci_passed_first_run')).toBe(1);
     expect(r.calls.filter((c) => c === 'checks.listForRef')).toHaveLength(1);
   });
 
@@ -404,7 +485,7 @@ describe('agent-outcomes.yml script', () => {
       { id: 5, head_sha: 'c1', created_at: '2026-11-03T00:00:00Z', pull_requests: [] },
     ];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+    expect(prScore(r, 'ci_passed_first_run')).toBe(1);
     expect(r.calls.filter((c) => c === 'checks.listForRef')).toHaveLength(1);
   });
 
@@ -420,11 +501,11 @@ describe('agent-outcomes.yml script', () => {
     world.workflowRuns = [{ id: 3, head_sha: 'c3', created_at: at(0), pull_requests: [] }, ...noise(150)];
     // The matching run is the oldest of 151, so it is on page 2.
     const found = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(found.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(true);
+    expect(prScore(found, 'ci_passed_first_run')).toBe(1);
 
     world.workflowRuns = [{ id: 3, head_sha: 'c3', created_at: at(0), pull_requests: [] }, ...noise(500)];
     const capped = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(capped.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+    expect(prScore(capped, 'ci_passed_first_run')).toBe(0);
   });
 
   it('does not count this workflow\'s own runs as the first CI run', async () => {
@@ -444,7 +525,7 @@ describe('agent-outcomes.yml script', () => {
       payload: prPayload(),
       env: { GITHUB_WORKFLOW_REF: `acme/app/${self}@refs/pull/7/merge` },
     });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+    expect(prScore(r, 'ci_passed_first_run')).toBe(0);
   });
 
   it('falls back to the oldest commits when workflow runs cannot be read', async () => {
@@ -452,90 +533,48 @@ describe('agent-outcomes.yml script', () => {
     world.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
     world.failing = new Set(['actions.listWorkflowRunsForRepo']);
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties.ci_passed_first_run).toBe(false);
+    expect(prScore(r, 'ci_passed_first_run')).toBe(0);
     expect(r.log.warning.join('\n')).toContain('workflow runs unavailable');
   });
 
-  it('attributes commits by session trailer, agent author, then agent co-author', async () => {
-    const world = linearWorld();
-    world.commits.cur = commit('cur', 'c3', {
-      message: 'fix: thing\n\nCo-authored-by: Someone <someone@example.com>\nCo-authored-by: Cursor <CursorAgent@cursor.com>\n',
-    });
-    world.commits.cop = commit('cop', 'cur', { email: '198982749+Copilot@users.noreply.github.com' });
-    world.commits.dep = commit('dep', 'cop', { email: '49699333+dependabot[bot]@users.noreply.github.com' });
-    world.commits.fake = commit('fake', 'dep', { message: 'x\n\nCo-authored-by: Cursor <cursor@example.com>\n' });
-    world.commits.both = commit('both', 'fake', {
-      message: `${agentMessage('s9', 'codex')}Co-Authored-By: Claude <noreply@anthropic.com>\n`,
-    });
-    world.commits.gem = commit('gem', 'both', { message: 'feat: y\n\nAgent-Name: gemini-cli\n' });
-    world.prCommits = ['c3', 'cur', 'cop', 'dep', 'fake', 'both', 'gem'];
-    const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    const by = Object.fromEntries(r.byType('Commit Merged').map((e) => [e.event_properties.commit_sha, e.event_properties]));
-    expect(by.cur).toMatchObject({ agent_attribution: 'co_author', attributed_agent: 'cursor', agent_authored: false, agent_name: null });
-    expect(by.gem).toMatchObject({
-      agent_attribution: 'name_trailer',
-      attributed_agent: 'gemini-cli',
-      agent_authored: false,
-      agent_name: null,
-      agent_session_id: null,
-    });
-    expect(by.cop).toMatchObject({ agent_attribution: 'agent_author', attributed_agent: 'copilot', agent_authored: false });
-    expect(by.both).toMatchObject({ agent_attribution: 'session_trailer', attributed_agent: 'codex', agent_authored: true });
-    for (const sha of ['c3', 'dep', 'fake']) {
-      expect(by[sha], sha).toMatchObject({ agent_attribution: 'none', attributed_agent: null });
-    }
-    expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({
-      commit_count: 7,
-      agent_commit_count: 1,
-      attributed_commit_count: 4,
-      unattributed_commit_count: 3,
-      attributed_agents: ['cursor', 'copilot', 'codex', 'gemini-cli'],
-      agent_names: ['codex'],
-    });
-  });
-
-  it('isolates a failed enrichment: the property is omitted and events still send', async () => {
+  it('isolates a failed enrichment: the score or property is left out and the rest still send', async () => {
     const world = linearWorld();
     world.failing = new Set(['pulls.listReviews', 'git.getTree']);
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
     expect(r.log.failed).toEqual([]);
-    expect(r.byType('Commit Merged')).toHaveLength(3);
-    const pr = r.byType('Pull Request Merged')[0]!;
-    expect(pr.event_properties).not.toHaveProperty('review_count');
-    expect(pr.event_properties).not.toHaveProperty('agent_setup_version');
+    expect(r.byName('commit_merged')).toHaveLength(2);
+    expect(r.byName('review_count')).toEqual([]);
+    expect(r.byName('hours_open')).toHaveLength(2);
+    expect(props(r.byName('hours_open')[0])).not.toHaveProperty('agent_setup_version');
     expect(r.log.warning.filter((w) => w.startsWith('agent_setup_version omitted'))).toHaveLength(1);
     expect(r.log.info.join('\n')).toMatch(/enrichments: reviews=error, ci_passed_first_run=ok, agent_setup_version=error;/);
   });
 
-  it('stops enriching at 300 API calls and still sends every event', async () => {
+  it('stops enriching at 300 API calls and still sends every score', async () => {
     const world: World = { commits: {}, trees: {}, prCommits: [] };
     for (let i = 0; i < 250; i++) {
       world.commits[`p${i}`] = commit(`p${i}`, null);
-      world.commits[`k${i}`] = commit(`k${i}`, `p${i}`);
+      world.commits[`k${i}`] = commit(`k${i}`, `p${i}`, { message: agentMessage(`s${i}`) });
       world.trees[tree(`p${i}`)] = [{ path: 'AGENTS.md', sha: `blob-${i}` }];
       world.prCommits!.push(`k${i}`);
     }
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
     const enrichmentCalls = r.calls.filter((c) => c !== 'pulls.listCommits');
     expect(enrichmentCalls.length).toBe(300);
-    expect(r.byType('Commit Merged')).toHaveLength(250);
-    expect(r.byType('Pull Request Merged')).toHaveLength(1);
+    expect(r.byName('commit_merged')).toHaveLength(250);
+    expect(r.byName('review_count')).toHaveLength(250);
+    expect(props(r.byName('review_count')[0])).toMatchObject({ '[Agent] Score Value': 0, pr_session_count: 250 });
     expect(r.log.info.join('\n')).toContain('agent_setup_version=budget');
     expect(r.log.info.join('\n')).toContain('300/300 API calls');
-    expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({ review_count: 0 });
     expect(r.log.info.join('\n')).toContain('ci_passed_first_run=ok');
   });
 
   it('counts every PR commit past the 250 the API lists', async () => {
     const r = await run(linearWorld(), { event: 'pull_request', payload: prPayload({ commits: 300 }) });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties).toMatchObject({
-      commit_count: 300,
-      attributed_commit_count: 2,
-      unattributed_commit_count: 1,
-    });
+    expect(props(r.byName('hours_open')[0])).toMatchObject({ commit_count: 300, agent_commit_count: 2 });
   });
 
-  it('sends Pull Request Merged as the PR author when the commit has no GitHub login', async () => {
+  it('sends the PR scores as the PR author when the commit has no GitHub login', async () => {
     const world = linearWorld();
     for (const c of Object.values(world.commits)) c.author = null;
     const r = await run(world, {
@@ -543,8 +582,8 @@ describe('agent-outcomes.yml script', () => {
       payload: prPayload(),
       env: { AMPLITUDE_USER_ID_SOURCE: 'login' },
     });
-    expect(r.byType('Commit Merged')).toEqual([]);
-    expect(r.byType('Pull Request Merged')[0]!.user_id).toBe('dev');
+    expect(r.byName('commit_merged')).toEqual([]);
+    expect(r.byName('hours_open').map((e) => e.user_id)).toEqual(['dev', 'dev']);
   });
 
   it('exits cleanly for a fork PR without the secret, and fails for a same-repo PR', async () => {
@@ -576,17 +615,42 @@ describe('agent-outcomes.yml script', () => {
     });
     world.prCommits = ['sq'];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(r.byType('Commit Merged')[0]!.event_properties).toMatchObject({
+    expect(props(r.byName('commit_merged')[0])).toMatchObject({
+      '[Agent] Session ID': 'last',
+      '[Agent] Agent ID': 'claude-code',
       agent_session_id: 'last',
       agent_name: 'claude-code',
     });
   });
 
+  it('scores a reverted agent commit on its own session, at its author date', async () => {
+    const world = linearWorld();
+    world.commits.abcdef1234 = commit('abcdef1234', null, { message: agentMessage('s0'), authored: '2026-10-20T08:00:00Z' });
+    world.commits['0123456789'] = commit('0123456789', null, { email: 'human@example.com' });
+    world.prCommits = ['c3'];
+    const r = await run(world, {
+      event: 'pull_request',
+      payload: prPayload({ body: 'This reverts commit abcdef1234.\nThis reverts commit 0123456789.' }),
+    });
+    const reverted = r.byName('commit_reverted');
+    expect(reverted).toHaveLength(1);
+    expect(reverted[0]!.insert_id).toBe('commit_reverted:acme/app:abcdef1234:7');
+    expect(reverted[0]!.time).toBe(Date.parse('2026-10-20T08:00:00Z'));
+    expect(props(reverted[0])).toMatchObject({
+      '[Agent] Score Value': 1,
+      '[Agent] Session ID': 's0',
+      revert_pr_number: 7,
+      revert_merge_commit_sha: 'merge7',
+      outcome_time: '2026-11-03T00:00:00.000Z',
+    });
+    expect(r.events).toHaveLength(1);
+  });
+
   it.each([
-    ['success', 'Deploy Succeeded'],
-    ['failure', 'Deploy Failed'],
-    ['error', 'Deploy Failed'],
-  ])('sends a %s deployment as %s over the range since the last success', async (state, eventType) => {
+    ['success', 'deploy_succeeded'],
+    ['failure', 'deploy_failed'],
+    ['error', 'deploy_failed'],
+  ])('scores a %s deployment as %s over the agent commits since the last success', async (state, name) => {
     const world = linearWorld();
     world.deployments = [
       { id: 2, sha: 'c3', created_at: '2026-11-02T00:00:00Z', state },
@@ -596,16 +660,23 @@ describe('agent-outcomes.yml script', () => {
       event: 'deployment_status',
       payload: {
         deployment: { id: 2, sha: 'c3', environment: 'production', created_at: '2026-11-02T00:00:00Z' },
-        deployment_status: { state },
+        deployment_status: { state, created_at: '2026-11-02T00:05:00Z' },
       },
     });
-    expect(r.events.map((e) => e.event_type)).toEqual([eventType, eventType]);
-    expect(r.events.map((e) => e.insert_id)).toEqual([`${eventType}:acme/app:c2:2`, `${eventType}:acme/app:c3:2`]);
-    const props = r.events[0]!.event_properties;
-    expect(props).toMatchObject({ deployment_sha: 'c3', environment: 'production', agent_session_id: 's2' });
-    expect(props.agent_setup_version).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
-    if (state === 'success') expect(props).not.toHaveProperty('deployment_state');
-    else expect(props.deployment_state).toBe(state);
+    expect(r.events.map((e) => e.insert_id)).toEqual([`${name}:acme/app:c2:2`]);
+    const e = r.events[0]!;
+    expect(e.time).toBe(Date.parse('2026-11-01T05:00:00Z'));
+    expect(e.event_properties).toMatchObject({
+      '[Agent] Score Name': name,
+      '[Agent] Score Value': 1,
+      '[Agent] Session ID': 's2',
+      deployment_sha: 'c3',
+      environment: 'production',
+      outcome_time: '2026-11-02T00:05:00.000Z',
+    });
+    expect(e.event_properties.agent_setup_version).toBe(setupHash(['AGENTS.md:blob-b', '.claude:claude-1']));
+    if (state === 'success') expect(e.event_properties).not.toHaveProperty('deployment_state');
+    else expect(e.event_properties.deployment_state).toBe(state);
   });
 
   it('stamps agent_trigger from the Agent-Trigger trailer, else event for a bot agent author', async () => {
@@ -614,32 +685,29 @@ describe('agent-outcomes.yml script', () => {
     world.commits.hl = commit('hl', 'c3', { message: stamped('headless') });
     world.commits.sc = commit('sc', 'hl', { message: stamped('scheduled') });
     world.commits.bad = commit('bad', 'sc', { message: stamped('cron') });
-    world.commits.bot = commit('bot', 'bad', { email: '206951365+cursor[bot]@users.noreply.github.com' });
-    world.commits.botci = commit('botci', 'bot', {
+    world.commits.bot = commit('bot', 'bad', {
       email: '206951365+cursor[bot]@users.noreply.github.com',
-      message: 'fix\n\nAgent-Trigger: ci\n',
+      message: 'fix\n\nAgent-Session-Id: bc-1\n',
     });
-    world.prCommits = ['c1', 'c3', 'hl', 'sc', 'bad', 'bot', 'botci'];
+    world.prCommits = ['c1', 'hl', 'sc', 'bad', 'bot'];
     const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    const by = Object.fromEntries(r.byType('Commit Merged').map((e) => [e.event_properties.commit_sha, e.event_properties]));
+    const by = Object.fromEntries(r.byName('commit_merged').map((e) => [e.event_properties.commit_sha, e.event_properties]));
     expect(Object.fromEntries(Object.entries(by).map(([sha, p]) => [sha, p.agent_trigger]))).toEqual({
       c1: null,
-      c3: null,
       hl: 'headless',
       sc: 'scheduled',
       bad: null,
       bot: 'event',
-      botci: 'ci',
     });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties.agent_triggers).toEqual(['ci', 'event', 'headless', 'scheduled']);
+    expect(by.bot).toMatchObject({ '[Agent] Agent ID': 'cursor' });
   });
 
-  it('carries agent_trigger to Commit Reverted and deploy events', async () => {
+  it('carries agent_trigger to commit_reverted and deploy scores', async () => {
     const world = linearWorld();
     world.commits.c2 = commit('c2', 'c1', { message: `${agentMessage('s2', 'codex')}Agent-Trigger: ci\n` });
     world.commits.abcdef1234 = commit('abcdef1234', null, { message: `${agentMessage('s0')}Agent-Trigger: event\n` });
     const pr = await run(world, { event: 'pull_request', payload: prPayload({ body: 'This reverts commit abcdef1234.' }) });
-    expect(pr.byType('Commit Reverted')[0]!.event_properties.agent_trigger).toBe('event');
+    expect(props(pr.byName('commit_reverted')[0]).agent_trigger).toBe('event');
     world.deployments = [
       { id: 2, sha: 'c3', created_at: '2026-11-02T00:00:00Z', state: 'failure' },
       { id: 1, sha: 'c1', created_at: '2026-11-01T00:00:00Z', state: 'success' },
@@ -651,32 +719,22 @@ describe('agent-outcomes.yml script', () => {
         deployment_status: { state: 'failure' },
       },
     });
-    expect(deploy.byType('Deploy Failed').map((e) => e.event_properties.agent_trigger)).toEqual(['ci', null]);
-  });
-
-  it('caps agent_triggers at five distinct values', async () => {
-    const world = linearWorld();
-    const triggers = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
-    world.prCommits = [];
-    for (const [i, t] of triggers.entries()) {
-      world.commits[`t${i}`] = commit(`t${i}`, 'base', { message: `${agentMessage(`s${i}`)}Agent-Trigger: ${t}\n` });
-      world.commits[`u${i}`] = commit(`u${i}`, 'base', { message: `${agentMessage(`x${i}`)}Agent-Trigger: ${t}\n` });
-      world.prCommits.push(`t${i}`, `u${i}`);
-    }
-    const r = await run(world, { event: 'pull_request', payload: prPayload() });
-    expect(r.byType('Pull Request Merged')[0]!.event_properties.agent_triggers).toEqual([...triggers].sort());
+    expect(deploy.byName('deploy_failed').map((e) => e.event_properties.agent_trigger)).toEqual(['ci']);
   });
 
   describe('review timing', () => {
     const human = (login: string) => ({ login, type: 'User' });
     const timing = async (world: World) => {
       const r = await run(world, { event: 'pull_request', payload: prPayload() });
-      const p = r.byType('Pull Request Merged')[0]!.event_properties;
-      return { hours_open: p.hours_open, hours_to_first_review: p.hours_to_first_review, review_rounds: p.review_rounds };
+      return {
+        hours_open: prScore(r, 'hours_open'),
+        hours_to_first_review: prScore(r, 'hours_to_first_review'),
+        review_rounds: prScore(r, 'review_rounds'),
+      };
     };
 
-    it('is open time only, with null review fields, when there are no reviews', async () => {
-      expect(await timing(linearWorld())).toEqual({ hours_open: 48, hours_to_first_review: null, review_rounds: 0 });
+    it('is open time only, with no first-review score, when there are no reviews', async () => {
+      expect(await timing(linearWorld())).toEqual({ hours_open: 48, hours_to_first_review: undefined, review_rounds: 0 });
     });
 
     it('ignores bot and author reviews, which are already filtered out', async () => {
@@ -686,7 +744,7 @@ describe('agent-outcomes.yml script', () => {
         { state: 'COMMENTED', body: 'self note', submitted_at: '2026-11-01T02:00:00Z', user: human('dev') },
       ];
       world.commits.c3!.commit.committer = { date: '2026-11-02T00:00:00Z' };
-      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: null, review_rounds: 0 });
+      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: undefined, review_rounds: 0 });
     });
 
     it('counts two rounds of change requests answered by later commits', async () => {
@@ -710,29 +768,28 @@ describe('agent-outcomes.yml script', () => {
       expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: 7.25, review_rounds: 0 });
     });
 
-    it('rounds hours to two decimals and omits review timing when the reviews enrichment failed', async () => {
+    it('rounds hours to two decimals and sends no review scores when the reviews enrichment failed', async () => {
       const world = linearWorld();
       world.reviews = [{ state: 'APPROVED', submitted_at: '2026-11-01T00:20:00Z', user: human('alice') }];
       expect((await timing(world)).hours_to_first_review).toBe(0.33);
       world.failing = new Set(['pulls.listReviews']);
       const r = await run(world, { event: 'pull_request', payload: prPayload() });
-      const p = r.byType('Pull Request Merged')[0]!.event_properties;
-      expect(p.hours_open).toBe(48);
-      for (const key of ['review_count', 'changes_requested_count', 'hours_to_first_review', 'review_rounds']) {
-        expect(p, key).not.toHaveProperty(key);
+      expect(prScore(r, 'hours_open')).toBe(48);
+      for (const name of ['review_count', 'changes_requested_count', 'hours_to_first_review', 'review_rounds']) {
+        expect(r.byName(name), name).toEqual([]);
       }
     });
   });
 
-  it('prints events and the enrichment summary on a dry run without sending', async () => {
+  it('prints scores and the enrichment summary on a dry run without sending', async () => {
     const r = await run(linearWorld(), {
       event: 'pull_request',
       payload: prPayload(),
       env: { AMPLITUDE_API_KEY: '', AMPLITUDE_OUTCOMES_DRY_RUN: 'true' },
     });
     expect(r.events).toEqual([]);
-    expect(r.log.info[0]).toBe('4 outcome events (3 agent-authored)');
+    expect(r.log.info[0]).toBe('10 outcome scores on 2 agent sessions');
     expect(r.log.info[1]).toMatch(/^enrichments: reviews=ok, ci_passed_first_run=ok, agent_setup_version=ok; \d+\/300 API calls$/);
-    expect(JSON.parse(r.log.info[2]!)).toHaveLength(4);
+    expect(JSON.parse(r.log.info[2]!)).toHaveLength(10);
   });
 });

@@ -104,7 +104,7 @@ const INTEGRATION_PATTERNS: IntegrationPattern[] = [
       'npx -y -p @amplitude/ai amplitude-ai coding-agents doctor\n' +
       '# Then add the AMPLITUDE_API_KEY repository secret for the outcomes workflow.\n' +
       '# Scheduled or webhook-started agents: set the trigger in that job ([Agent] Session Trigger and the\n' +
-      '# Agent-Trigger commit trailer; CI is detected as ci). Pull Request Merged carries review_rounds and hours_to_first_review.\n' +
+      '# Agent-Trigger commit trailer; CI is detected as ci). Outcomes arrive as [Agent] Score (source outcome) on that session.\n' +
       'export AMPLITUDE_SESSION_TRIGGER=scheduled   # interactive | headless | ci | scheduled | event',
   },
   {

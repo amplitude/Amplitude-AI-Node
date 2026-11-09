@@ -481,7 +481,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     undefined,
     force,
     warnings,
-    'sends Commit Merged / Commit Reverted / Pull Request Merged / Deploy Succeeded / Deploy Failed',
+    'sends code outcomes as [Agent] Score on the session that wrote each commit',
     PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
   );
 
