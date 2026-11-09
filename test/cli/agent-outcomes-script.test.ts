@@ -674,6 +674,18 @@ describe('agent-outcomes.yml script', () => {
     expect(props(reverted[0])).toMatchObject({ pr_session_count: 2, pr_human_commit_count: 1 });
   });
 
+  it('reverts only the commit itself when it is the rebased head of a rebase-merged PR', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1') });
+    world.commits.fh = commit('fh', 'fa', { message: 'tidy\n', email: 'human@example.com', authored: '2026-10-20T02:00:00Z' });
+    world.commits.feed41aa = commit('feed41aa', 'base', { message: 'tidy\n', email: 'human@example.com', authored: '2026-10-20T02:00:00Z' });
+    world.associatedPrs = { feed41aa: [{ number: 41, merge_commit_sha: 'feed41aa', merged_at: '2026-10-21T00:00:00Z' }] };
+    world.prCommitsByNumber = { 41: ['fa', 'fh'] };
+    world.prCommits = ['c3'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload({ body: 'This reverts commit feed41aa.' }) });
+    expect(r.byName('commit_reverted')).toEqual([]);
+  });
+
   it('expands a reverted squash commit that kept its commit\'s trailer', async () => {
     const world = linearWorld();
     world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-10-20T01:00:00Z' });
@@ -775,6 +787,19 @@ describe('agent-outcomes.yml script', () => {
       ['deploy_succeeded:acme/app:fb:2', 's2', Date.parse('2026-11-01T02:00:00Z')],
     ]);
     expect(r.events[0]!.event_properties.deployment_sha).toBe('head');
+  });
+
+  it('scores only the rebased copies when a rebase-merged PR ends in a commit without a trailer', async () => {
+    const world = linearWorld();
+    world.commits.fa = commit('fa', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
+    world.commits.fh = commit('fh', 'fa', { message: 'tidy\n', email: 'human@example.com', authored: '2026-11-01T02:00:00Z' });
+    world.commits.ra = commit('ra', 'base', { message: agentMessage('s1'), authored: '2026-11-01T01:00:00Z' });
+    world.commits.head = commit('head', 'ra', { message: 'tidy\n', email: 'human@example.com', authored: '2026-11-01T02:00:00Z' });
+    world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
+    world.prCommitsByNumber = { 7: ['fa', 'fh'] };
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:ra:2']);
   });
 
   it('expands a deployed squash commit that kept its commits\' trailers', async () => {
