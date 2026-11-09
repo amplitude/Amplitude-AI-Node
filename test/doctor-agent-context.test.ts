@@ -10,6 +10,7 @@ const SECRET_A = 'a'.repeat(31) + 'SECRET-A-0123456789';
 const SECRET_B = 'b'.repeat(31) + 'SECRET-B-0123456789';
 const SALT = 's'.repeat(31) + 'SALT-0123456789';
 const NOW = 1_800_000_000;
+const TRACE = '4bf92f35-77b3-4da6-a3ce-929d0e0e4736';
 
 const keysEnv = (keys: Record<string, string>, activeKid?: string): Record<string, string> => ({
   AMPLITUDE_AI_CONTEXT_KEYS: JSON.stringify(keys),
@@ -91,10 +92,14 @@ describe('doctor --verify', () => {
     const realNow = Date.now;
     Date.now = () => NOW * 1000;
     try {
-      return mintContext({ sessionId: 's-1', userId: 'u-1', transport, policy: signer, ...options } as never) as Record<
-        string,
-        unknown
-      >;
+      return mintContext({
+        sessionId: 's-1',
+        userId: 'u-1',
+        traceId: TRACE,
+        transport,
+        policy: signer,
+        ...options,
+      } as never) as Record<string, unknown>;
     } finally {
       Date.now = realNow;
     }
@@ -121,6 +126,19 @@ describe('doctor --verify', () => {
     const forced = runVerify(JSON.stringify(mint('http')), { env, now: NOW, transport: 'acp' });
     // ACP shares only `traceparent` with HTTP, so read as ACP the headers are an unsigned trace.
     expect(forced).toMatchObject({ transport: 'acp', verify_result: 'unsigned' });
+  });
+
+  it('verifies the signed trace ID', () => {
+    const http = mint('http');
+    expect(http['x-trace-id']).toBe(TRACE);
+    const a2a = mint('a2a');
+    const body = a2a['com.amplitude/context'] as Record<string, unknown>;
+    expect(body.trace_id).toBe(TRACE);
+    const tampered = { 'com.amplitude/context': { ...body, trace_id: 'other-trace' } };
+    expect(runVerify(JSON.stringify(tampered), { env, now: NOW }).verify_result).toBe('bad_signature');
+    expect(runVerify(JSON.stringify({ ...http, 'x-trace-id': 'other-trace' }), { env, now: NOW }).verify_result).toBe(
+      'bad_signature',
+    );
   });
 
   it('explains an unsigned context', () => {

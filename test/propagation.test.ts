@@ -22,7 +22,8 @@ describe('injectContext', () => {
     });
 
     const result = _sessionStorage.run(ctx, () => injectContext());
-    expect(result['traceparent']).toMatch(/^00-/);
+    expect(result['x-trace-id']).toBe('trace-123');
+    expect(result['traceparent']).toBeUndefined();
     expect(result['x-amplitude-session-id']).toBe('sess-1');
     expect(result['x-amplitude-agent-id']).toBe('agent-1');
     expect(result['x-amplitude-user-id']).toBe('u1');

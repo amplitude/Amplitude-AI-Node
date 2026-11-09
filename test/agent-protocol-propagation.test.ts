@@ -50,7 +50,13 @@ describe('A2A Message.metadata propagation', () => {
     const metadata = inSession(() => injectA2aMetadata({ other: 1 }, { policy: unsigned }));
     expect(Object.keys(metadata).sort()).toEqual([A2A_METADATA_KEY, 'other']);
     const context = metadata[A2A_METADATA_KEY] as Record<string, string>;
-    expect(Object.keys(context).sort()).toEqual(['identity_type', 'parent_agent_id', 'session_id', 'traceparent']);
+    expect(Object.keys(context).sort()).toEqual([
+      'identity_type',
+      'parent_agent_id',
+      'session_id',
+      'trace_id',
+      'traceparent',
+    ]);
     expect(context.identity_type).toBe('none');
     expect(context.traceparent).toMatch(new RegExp(`^00-${TRACE}-[0-9a-f]{16}-01$`));
     expect(JSON.stringify(metadata)).not.toContain('user-1');

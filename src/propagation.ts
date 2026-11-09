@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  _legacyTraceId,
+  _outboundTraceId,
   A2A_CONTEXT_KEY,
   ACP_CONTEXT_KEYS,
   type ActorType,
@@ -119,7 +121,13 @@ type OutboundSpec = {
   allowUnsignedRaw?: boolean;
 };
 
+/**
+ * The active context as the receiver sees it. The trace is the context's
+ * exact `traceId`; a context without one sends no trace rather than a
+ * random one its own events never carry.
+ */
 function _outbound(
+  transport: ContextTransport,
   options: ContextInjectOptions,
   spec: OutboundSpec,
 ): { envelope: Record<string, unknown>; sig: string | null } | null {
@@ -140,7 +148,8 @@ function _outbound(
     sessionId: ctx.sessionId,
     parentAgentId: ctx.agentId,
     userId: ctx.userId,
-    traceparent: _traceparent(ctx.traceId ?? null),
+    traceId: ctx.traceId,
+    transport,
   });
 }
 
@@ -160,7 +169,7 @@ export function injectContext(
 ): Record<string, string> {
   const result = headers ? { ...headers } : {};
   const identity = _identityMode(options, 'raw');
-  const built = _outbound(options, {
+  const built = _outbound('http', options, {
     identity,
     actorType: options.actorType ?? null,
     allowUnsignedRaw: options.identity == null,
@@ -241,11 +250,9 @@ function _isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 const _MAX_TRACEPARENT_LENGTH = 512;
-const _MAX_TRACE_ID_LENGTH = 64;
 const _MAX_HEADER_ID_LENGTH = 256;
 const _TRACEPARENT_RE =
   /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(?:-.*)?$/;
-const _TRACE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 function _hasControlChars(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
@@ -284,9 +291,7 @@ export function parseTraceparent(value: unknown): string | null {
  * and UUIDs) up to 64 characters; returns `null` for anything else.
  */
 export function normalizeTraceId(value: unknown): string | null {
-  const raw = _firstHeader(value)?.trim();
-  if (!raw || raw.length > _MAX_TRACE_ID_LENGTH) return null;
-  return _TRACE_TOKEN_RE.test(raw) ? raw : null;
+  return _legacyTraceId(_firstHeader(value));
 }
 
 function _safeHeaderId(value: unknown): string | null {
@@ -361,7 +366,7 @@ function _injectInto(
   options: ContextInjectOptions,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = target ? { ...target } : {};
-  const built = _outbound(options, {
+  const built = _outbound(transport, options, {
     identity: _identityMode(options, 'none'),
     actorType: options.actorType ?? null,
   });
@@ -372,7 +377,8 @@ function _injectInto(
 /**
  * Add the active session context to an A2A `Message.metadata` object under
  * {@link A2A_METADATA_KEY}: `session_id`, `parent_agent_id` (this agent),
- * `identity_type` and `traceparent`, signed when a key is configured.
+ * `identity_type`, the session's exact `trace_id` and, when that is hex,
+ * `traceparent`, signed when a key is configured.
  * The end-user ID is left out unless `identity` is `'pairwise'`, or `'raw'`
  * with a signing key. Returns a new object; without an active session the
  * copy is returned unchanged.
@@ -511,6 +517,11 @@ export type MintContextOptions = {
   parentAgentId?: string | null;
   /** Default `'human'`: minted contexts usually stand for a person using a frontend. */
   actorType?: ActorType;
+  /**
+   * The trace the receiver adopts, signed exactly as given (any context ID;
+   * over HTTP, letters, digits and `._:-` up to 64 characters). Without it no
+   * trace is sent and the receiver starts its own.
+   */
   traceId?: string | null;
   /** Default `'raw'` when `userId` is set (the receiver holds the same key), else `'none'`. */
   identity?: IdentityMode;
@@ -542,6 +553,14 @@ export function mintContext(options: MintContextOptions): Record<string, unknown
       'mintContext requires a signing key: set AMPLITUDE_AI_CONTEXT_KEYS or pass a ContextPolicy with signingKeys.',
     );
   }
+  const transport = options.transport ?? 'http';
+  if (options.traceId != null && _outboundTraceId(options.traceId, transport) == null) {
+    throw new ConfigurationError(
+      transport === 'http'
+        ? 'mintContext traceId must be 1-64 letters, digits or ._:- starting with a letter or digit.'
+        : 'mintContext traceId must be 1-128 printable ASCII characters without leading or trailing spaces.',
+    );
+  }
   const { envelope, sig } = buildEnvelope({
     sessionId: options.sessionId,
     parentAgentId: options.parentAgentId,
@@ -549,9 +568,10 @@ export function mintContext(options: MintContextOptions): Record<string, unknown
     identity: options.identity ?? (options.userId ? 'raw' : 'none'),
     recipient: options.recipient,
     actorType: options.actorType ?? 'human',
-    traceparent: _traceparent(options.traceId ?? null),
+    traceId: options.traceId,
+    transport,
     policy,
     ttl: options.ttl,
   });
-  return encodeContext(options.transport ?? 'http', envelope, sig);
+  return encodeContext(transport, envelope, sig);
 }

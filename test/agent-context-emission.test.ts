@@ -35,6 +35,7 @@ import {
   extractContext,
   injectA2aMetadata,
   injectA2aResponseMetadata,
+  injectAcpMeta,
   injectAcpResultMeta,
   injectContext,
   injectResponseHeaders,
@@ -361,12 +362,18 @@ describe('contextProperties', () => {
   });
 
   it('applies the trust rules to a propagated context', () => {
-    const minted = mintContext({ sessionId: 'web-sess', userId: 'web-user', parentAgentId: 'web', policy: signing });
+    const minted = mintContext({
+      sessionId: 'web-sess',
+      userId: 'web-user',
+      parentAgentId: 'web',
+      traceId: 'req-123',
+      policy: signing,
+    });
     const trusted = extractContext(minted, { policy: signing });
     expect(contextProperties({ context: trusted })).toEqual({
       [PROP_SESSION_ID]: 'web-sess',
       [PROP_AGENT_ID]: 'web',
-      [PROP_TRACE_ID]: expect.any(String),
+      [PROP_TRACE_ID]: 'req-123',
     });
     const untrusted = extractContext(minted, { policy: new ContextPolicy({ signingKeys: { k1: `${KEY}x` } }) });
     expect(contextProperties({ context: untrusted })).toEqual({
@@ -374,6 +381,136 @@ describe('contextProperties', () => {
       [PROP_PEER_SESSION_ID]: 'web-sess',
     });
     expect(contextProperties({ context: null })).toEqual({});
+  });
+});
+
+describe('exact trace ID', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  async function senderInject<T>(inject: () => T): Promise<{ traceId: string; sent: T }> {
+    const ai = new MockAmplitudeAI();
+    let traceId = '';
+    let sent: T | undefined;
+    await ai
+      .agent('buyer')
+      .session({ sessionId: 'buyer-sess' })
+      .run((s) => {
+        traceId = s.traceId as string;
+        sent = inject();
+        s.trackUserMessage('hi');
+      });
+    expect(props(ai, '[Agent] User Message')[PROP_TRACE_ID]).toBe(traceId);
+    return { traceId, sent: sent as T };
+  }
+
+  async function receiverTrace(context: AgentContext): Promise<Record<string, unknown>> {
+    const ai = new MockAmplitudeAI();
+    await ai
+      .agent('seller')
+      .session({ context })
+      .run((s) => {
+        s.trackUserMessage('hi');
+      });
+    return props(ai, '[Agent] User Message');
+  }
+
+  it('a default session and a trusted receiver share the dashed Trace ID on every transport', async () => {
+    const extractors = {
+      a2a: () => senderInject(() => injectA2aMetadata(undefined, { policy: signing })),
+      acp: () => senderInject(() => injectAcpMeta(undefined, { policy: signing })),
+      http: () => senderInject(() => injectContext({}, { policy: signing })),
+    };
+    for (const [transport, send] of Object.entries(extractors)) {
+      const { traceId, sent } = await send();
+      expect(traceId).toMatch(UUID_RE);
+      const extracted =
+        transport === 'a2a'
+          ? extractA2aMetadata(sent, { policy: signing })
+          : transport === 'acp'
+            ? extractAcpMeta(sent, { policy: signing })
+            : extractContext(sent, { policy: signing });
+      expect(extracted).toMatchObject({ verifyResult: 'ok', traceId });
+      expect((await receiverTrace(extracted))[PROP_TRACE_ID]).toBe(traceId);
+    }
+  });
+
+  it("an untrusted receiver records the sender's exact trace as Peer Trace ID", async () => {
+    const { traceId, sent } = await senderInject(() => injectA2aMetadata(undefined, { policy: signing }));
+    const extracted = extractA2aMetadata(sent, { policy: new ContextPolicy({ signingKeys: { k1: `${KEY}x` } }) });
+    expect(extracted).toMatchObject({ verifyResult: 'bad_signature', peerTraceId: traceId });
+    const p = await receiverTrace(extracted);
+    expect(p[PROP_PEER_TRACE_ID]).toBe(traceId);
+    expect(p[PROP_TRACE_ID]).not.toBe(traceId);
+  });
+
+  it('a custom trace ID survives signing on every transport', () => {
+    const run = <T>(fn: () => T): T => inContext({ sessionId: 's', traceId: 'req-123', agentId: 'buyer' }, fn);
+    const a2a = run(() => injectA2aMetadata(undefined, { policy: signing }));
+    const acp = run(() => injectAcpMeta(undefined, { policy: signing }));
+    const http = run(() => injectContext({}, { policy: signing }));
+    expect(http['x-trace-id']).toBe('req-123');
+    expect(http.traceparent).toBeUndefined();
+    expect(extractA2aMetadata(a2a, { policy: signing })).toMatchObject({ verifyResult: 'ok', traceId: 'req-123' });
+    expect(extractAcpMeta(acp, { policy: signing })).toMatchObject({ verifyResult: 'ok', traceId: 'req-123' });
+    expect(extractContext(http, { policy: signing })).toMatchObject({ verifyResult: 'ok', traceId: 'req-123' });
+  });
+
+  it('a context without a trace signs no trace instead of a random one', () => {
+    const run = <T>(fn: () => T): T => inContext({ sessionId: 's', agentId: 'buyer' }, fn);
+    const a2a = run(() => injectA2aMetadata(undefined, { policy: signing }));
+    const http = run(() => injectContext({}, { policy: signing }));
+    const response = run(() => injectResponseHeaders({}, { policy: signing }));
+    expect(Object.keys(a2a['com.amplitude/context'] as object)).not.toContain('traceparent');
+    expect(Object.keys(a2a['com.amplitude/context'] as object)).not.toContain('trace_id');
+    for (const headers of [http, response]) {
+      expect(headers.traceparent).toBeUndefined();
+      expect(headers['x-trace-id']).toBeUndefined();
+    }
+    const extracted = extractA2aMetadata(a2a, { policy: signing });
+    expect(extracted.verifyResult).toBe('ok');
+    expect(extracted.traceId).toBeUndefined();
+    expect(mintContext({ sessionId: 'web', policy: signing }).traceparent).toBeUndefined();
+  });
+
+  it('an HTTP trace beyond the x-trace-id limit is not sent, so no differing traceparent is signed', () => {
+    const long = 'a'.repeat(65);
+    const http = inContext({ sessionId: 's', traceId: long }, () => injectContext({}, { policy: signing }));
+    expect(http['x-trace-id']).toBeUndefined();
+    expect(http.traceparent).toBeUndefined();
+    const a2a = inContext({ sessionId: 's', traceId: long }, () => injectA2aMetadata(undefined, { policy: signing }));
+    expect(extractA2aMetadata(a2a, { policy: signing }).traceId).toBe(long);
+    expect(() => mintContext({ sessionId: 'web', traceId: long, policy: signing })).toThrow(/traceId/);
+  });
+
+  it('unsigned HTTP drops an invalid or over-long x-trace-id instead of rejecting the context', () => {
+    for (const bad of ['a'.repeat(65), 'has space', '-lead']) {
+      const out = extractContext(
+        { 'x-amplitude-session-id': 'buyer-sess', 'x-trace-id': bad },
+        { policy: unsigned },
+      );
+      expect(out).toMatchObject({ verifyResult: 'unsigned', sessionId: 'buyer-sess' });
+      expect(out.traceId).toBeUndefined();
+    }
+    expect(
+      extractContext({ 'x-amplitude-session-id': 'buyer-sess', 'x-trace-id': ' req-1 ' }, { policy: unsigned }),
+    ).toMatchObject({ verifyResult: 'unsigned', traceId: 'req-1' });
+    expect(extractContext({ 'x-trace-id': 'req-1' }, { policy: unsigned })).toEqual({
+      verifyResult: 'unsigned',
+      traceId: 'req-1',
+      actorType: 'human',
+      identityType: 'none',
+    });
+  });
+
+  it('signed HTTP holds x-trace-id to the ID rule and the signature', () => {
+    const headers = inContext({ sessionId: 's', traceId: 'req-123' }, () => injectContext({}, { policy: signing }));
+    expect(extractContext({ ...headers, 'x-trace-id': 'req-999' }, { policy: signing })).toMatchObject({
+      verifyResult: 'bad_signature',
+      peerTraceId: 'req-999',
+    });
+    expect(extractContext({ ...headers, 'x-trace-id': 'a'.repeat(129) }, { policy: signing })).toEqual({
+      verifyResult: 'malformed',
+    });
   });
 });
 

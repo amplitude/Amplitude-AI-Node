@@ -8,7 +8,7 @@
  * byte-identical signing input.
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { getActiveContext } from './context.js';
 import { ConfigurationError } from './exceptions.js';
 import { getLogger } from './utils/logger.js';
@@ -75,6 +75,7 @@ const STRING_FIELDS = [
   'user_id',
   'identity_type',
   'actor_type',
+  'trace_id',
   'traceparent',
 ] as const;
 const SIGNING_FIELDS = ['alg', 'kid', 'iat', 'exp'] as const;
@@ -92,6 +93,7 @@ export const ACP_CONTEXT_KEYS: Readonly<Record<StringField, string>> = {
   user_id: 'com.amplitude/user-id',
   identity_type: 'com.amplitude/identity-type',
   actor_type: 'com.amplitude/actor-type',
+  trace_id: 'com.amplitude/trace-id',
   traceparent: 'traceparent',
 };
 export const ACP_SIG_KEY = 'com.amplitude/sig';
@@ -101,6 +103,7 @@ export const HTTP_CONTEXT_HEADERS: Readonly<Record<StringField, string>> = {
   user_id: 'x-amplitude-user-id',
   identity_type: 'x-amplitude-identity-type',
   actor_type: 'x-amplitude-actor-type',
+  trace_id: 'x-trace-id',
   traceparent: 'traceparent',
 };
 export const HTTP_SIG_HEADER = 'x-amplitude-context-sig';
@@ -124,6 +127,27 @@ function _isStrictTraceparent(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const m = TRACEPARENT_RE.exec(value);
   return m != null && !value.startsWith('ff') && m[1] !== '0'.repeat(32);
+}
+
+// The `x-trace-id` rule of released SDKs: unsigned HTTP and outbound HTTP keep it.
+const LEGACY_TRACE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+/** @internal A trimmed `x-trace-id` token (letters, digits, `._:-`, at most 64 characters), else `null`. */
+export function _legacyTraceId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  return LEGACY_TRACE_ID_RE.test(raw) ? raw : null;
+}
+
+/**
+ * @internal A W3C `traceparent` for a trace ID that is hex once dashes are
+ * removed (cut or zero-padded to 32 characters, as the Python SDK does), else `null`.
+ */
+export function _traceparentFor(traceId: string | null | undefined): string | null {
+  if (!traceId) return null;
+  const hex = traceId.replace(/-/g, '').slice(0, 32).padEnd(32, '0').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex) || /^0+$/.test(hex)) return null;
+  return `00-${hex}-${randomUUID().replace(/-/g, '').slice(0, 16)}-01`;
 }
 
 function _utf8Length(value: string): number {
@@ -449,7 +473,9 @@ export function contextTrust(result: VerifyResult | 'none' | null | undefined): 
   return result === 'ok' ? 'trusted' : 'untrusted';
 }
 
+/** The sender's exact `trace_id` when present, else the `traceparent` trace-id. */
 function _traceIdOf(envelope: Envelope | null): string | null {
+  if (typeof envelope?.trace_id === 'string' && envelope.trace_id) return envelope.trace_id;
   const tp = envelope?.traceparent;
   if (typeof tp !== 'string') return null;
   return TRACEPARENT_RE.exec(tp)?.[1] ?? null;
@@ -522,14 +548,21 @@ function _decodeInbound(
     return { decoded, traceOnly: false };
   }
   // Unsigned HTTP is also produced by released SDKs and by unrelated OTel
-  // clients: ignore a traceparent that is not ours, and read a user ID sent
-  // without an identity type as an account ID.
+  // clients: ignore a traceparent that is not ours, keep the released
+  // `x-trace-id` rule (an invalid one is dropped, not malformed), and read a
+  // user ID sent without an identity type as an account ID.
   const env = decoded.envelope;
   if (_hasOwn(env, 'traceparent') && !_isStrictTraceparent(env.traceparent)) delete env.traceparent;
+  if (_hasOwn(env, 'trace_id')) {
+    const traceId = _legacyTraceId(env.trace_id);
+    if (traceId == null) delete env.trace_id;
+    else env.trace_id = traceId;
+  }
   if (_hasOwn(env, 'user_id') && !_hasOwn(env, 'identity_type')) env.identity_type = 'account';
   const keys = Object.keys(env);
-  if (keys.length === 0) return { decoded: 'none', traceOnly: false };
-  return { decoded, traceOnly: keys.length === 1 && keys[0] === 'traceparent' };
+  // A lone `x-trace-id` is the released trace-only header, read as before.
+  if (keys.length === 0 || (keys.length === 1 && keys[0] === 'trace_id')) return { decoded: 'none', traceOnly: false };
+  return { decoded, traceOnly: keys.every((k) => k === 'traceparent' || k === 'trace_id') };
 }
 
 /** What {@link _inspectAgentContext} returns. `kid`, `iat` and `exp` are set only when well formed. */
@@ -697,6 +730,15 @@ export type BuildEnvelopeOptions = {
   identity: IdentityMode;
   recipient?: string | null;
   actorType?: ActorType | null;
+  /**
+   * The sender's exact `[Agent] Trace ID`. Signed as `trace_id`, plus a
+   * `traceparent` when it is hex-convertible. Left out (with any
+   * `traceparent`) when it isn't a valid ID for `transport`.
+   */
+  traceId?: string | null;
+  /** The transport the envelope is for; HTTP keeps the 64-character `x-trace-id` limit. */
+  transport?: ContextTransport;
+  /** A W3C `traceparent` to send without a `trace_id`. Ignored when `traceId` is set. */
   traceparent?: string | null;
   policy: ContextPolicy;
   /** Seconds the signature stays valid. Default 300, at most 86400. */
@@ -705,6 +747,16 @@ export type BuildEnvelopeOptions = {
   /** HTTP deprecation window only: allow a raw user ID without a signature. */
   allowUnsignedRaw?: boolean;
 };
+
+/**
+ * @internal The trace ID as it can be sent on `transport`: a context ID, and on HTTP
+ * also the released `x-trace-id` token rule. `null` when it can't be sent unchanged.
+ */
+export function _outboundTraceId(traceId: unknown, transport?: ContextTransport): string | null {
+  if (!isValidContextId(traceId)) return null;
+  if (transport === 'http' && _legacyTraceId(traceId) !== traceId) return null;
+  return traceId;
+}
 
 /** Throw for an outbound identity or TTL the policy cannot honour, before anything is built. */
 export function validateOutbound(options: BuildEnvelopeOptions): void {
@@ -760,7 +812,16 @@ export function buildEnvelope(options: BuildEnvelopeOptions): { envelope: Envelo
   }
   envelope.identity_type = identityType;
   if (options.actorType != null) envelope.actor_type = options.actorType;
-  if (_isStrictTraceparent(options.traceparent)) envelope.traceparent = options.traceparent;
+  if (options.traceId != null) {
+    const traceId = _outboundTraceId(options.traceId, options.transport);
+    if (traceId != null) {
+      envelope.trace_id = traceId;
+      const traceparent = _traceparentFor(traceId);
+      if (traceparent != null) envelope.traceparent = traceparent;
+    }
+  } else if (_isStrictTraceparent(options.traceparent)) {
+    envelope.traceparent = options.traceparent;
+  }
   if (!policy.canSign) return { envelope, sig: null };
   const now = _nowSeconds(options.now);
   envelope.alg = AGENT_CONTEXT_ALG;
