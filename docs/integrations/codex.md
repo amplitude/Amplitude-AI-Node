@@ -114,7 +114,7 @@ Variables set in the environment win over `.amplitude-ai/local.env` (found by wa
 Agent sessions join what happened to the code afterwards. Full recipe: [code-outcomes.md](recipes/code-outcomes.md).
 
 - **In-session:** "Produced Commit", "Opened PR" and "Tests Passed" evaluators read tool calls.
-- **Downstream:** the trailer hook plus the workflow send `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed` with `commit_sha`, `agent_session_id` and `agent_setup_version` (needs the `AMPLITUDE_API_KEY` repository secret).
+- **Downstream:** the trailer hook plus the workflow send each code outcome as an `[Agent] Score` on this session (Evaluation Source `outcome`; Score Names `commit_merged`, `commit_reverted`, `deploy_succeeded`, `deploy_failed`, and per PR `ci_passed_first_run`, `review_rounds` and the review counts), with `commit_sha` and `agent_setup_version` (needs the `AMPLITUDE_API_KEY` repository secret).
 - **Path 1 agents** join product outcomes too, by user ID.
 
 ## Coding-agent prompt

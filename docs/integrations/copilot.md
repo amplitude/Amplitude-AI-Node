@@ -68,7 +68,7 @@ These are the standard OpenTelemetry variables, so exporting them from the profi
 
 ## Known gaps
 
-- **No session on commits.** Copilot gives its shell commands no session ID, so the commit hook adds nothing. Where Copilot signs a commit (its noreply address as author or in `Co-authored-by`), the outcomes workflow attributes it as `agent_author` or `co_author` with `attributed_agent: copilot`. They can't be joined to a session.
+- **No session on commits.** Copilot gives its shell commands no session ID, so the commit hook adds nothing. Copilot's commits (its noreply address as author or in `Co-authored-by`) can't be joined to a session, so the outcomes workflow sends nothing for them.
 - **Copilot coding agent.** It runs in GitHub's sandbox, where your environment doesn't reach, so it sends no sessions; its commits are attributed by author.
 - **Metrics.** Copilot also posts metrics to `/otlp/v1/metrics`. Amplitude accepts and discards them.
 - **Policy.** Enterprise policy can block telemetry or content capture.
@@ -81,7 +81,7 @@ These are the standard OpenTelemetry variables, so exporting them from the profi
 
 ## Connect to outcomes
 
-Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The workflow sends `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed` (needs the `AMPLITUDE_API_KEY` repository secret). Copilot commits show up as `attributed_agent: copilot`.
+Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The workflow scores only commits with an `Agent-Session-Id` trailer, so Copilot sessions get no code outcomes. The in-session outcomes (Tier 1) still apply.
 
 ## Coding-agent prompt
 

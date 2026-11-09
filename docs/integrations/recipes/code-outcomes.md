@@ -58,96 +58,94 @@ Other harnesses get no trailer from step 4, so a person at the keyboard in Claud
 | Codex | `CODEX_THREAD_ID` | the rollout `session_meta` thread ID the forwarder sends |
 | goose | `AGENT_SESSION_ID` | `session.id` on its spans |
 | Cursor | `CURSOR_CONVERSATION_ID` | the hook input's `conversation_id` the forwarder sends |
-| Gemini CLI | none (`GEMINI_CLI=1`) | no session: `Agent-Name: gemini-cli` only |
+| Gemini CLI | none (`GEMINI_CLI=1`) | no session: `Agent-Name: gemini-cli` only, so no outcome scores |
 
 Human commits (none of those set) are untouched. `prepare-commit-msg` runs even with `--no-verify`; merge and squash messages are skipped.
 
 **No per-clone step.** The hook lives in committed `.githooks/`. `core.hooksPath` is set by a committed `SessionStart` hook in `.claude/settings.json`, `.codex/hooks.json` and `.cursor/hooks.json`, and Node repos also get a `prepare` script. goose has no lifecycle hooks; `coding-agents doctor` checks `core.hooksPath`.
 
-Commits made through the GitHub API or MCP tools carry no trailer. They join by `commit_sha` from the Tool Call that created them. Buzz goose workers join the same way.
+Commits made through the GitHub API or MCP tools carry no trailer, so they get no outcome scores; the Tool Call that created them still carries `commit_sha`. Buzz goose workers commit that way, and their `[Agent] Session ID` is the Buzz thread, not goose's `AGENT_SESSION_ID`, so Buzz team sessions get no outcome scores either.
 
 ### 2. Repo side: the outcomes workflow
 
-`.github/workflows/agent-outcomes.yml` posts to the HTTP API with the `AMPLITUDE_API_KEY` repository secret.
+`.github/workflows/agent-outcomes.yml` posts to the HTTP API with the `AMPLITUDE_API_KEY` repository secret. Each outcome is an `[Agent] Score` on the session that wrote the commit, so it shows up next to the session's own events and evaluators, and needs no new event type.
 
-| Trigger | Event | Properties |
-|---|---|---|
-| `pull_request` closed and merged | `Commit Merged`, one per commit in the PR (attributed or not) | `commit_sha`, `merge_commit_sha`, `pr_number`, `base_branch`, `agent_session_id`, `agent_name`, `agent_authored`, `agent_attribution`, `attributed_agent`, `agent_trigger`, `repo` |
-| A merged PR containing `This reverts commit <sha>` | `Commit Reverted` for the original commit | `commit_sha`, `revert_pr_number`, `revert_merge_commit_sha`, plus the original's trailers |
-| `pull_request` closed and merged | `Pull Request Merged`, one per PR (attributed or not) | `pr_number`, `merge_commit_sha`, `base_branch`, `commit_count`, `agent_commit_count`, `unattributed_commit_count`, `agent_authored`, `agent_attributed`, `agent_names`, `agent_session_ids`, `attributed_commit_count`, `attributed_agents`, `agent_triggers`, `review_count`, `changes_requested_count`, `hours_open`, `hours_to_first_review`, `review_rounds`, `ci_passed_first_run`, `agent_setup_version`, `repo` |
-| `deployment_status` success | `Deploy Succeeded` for each commit since the previous successful deployment | `commit_sha`, `deployment_sha`, `environment`, plus trailers |
-| `deployment_status` failure or error | `Deploy Failed` for the same range | `commit_sha`, `deployment_sha`, `environment`, `deployment_state`, plus trailers |
+| Property | Value |
+|---|---|
+| `[Agent] Session ID`, `[Agent] Target ID` | The commit's `Agent-Session-Id` |
+| `[Agent] Target Type` | `session` |
+| `[Agent] Agent ID` | The commit's `Agent-Name` (`claude-code`, `codex`, `cursor`, `goose`), else the agent that signed the commit |
+| `[Agent] Evaluation Source` | `outcome` |
+| `[Agent] Score Name`, `[Agent] Score Value` | Below |
+| Event time | The commit's author date, which falls inside the session. `outcome_time` is when the outcome happened (merge, revert merge or deployment). A commit with no author date is not scored |
 
-Every event also carries `outcomes_workflow_version` (currently `2`), and every commit-level event carries `agent_setup_version`.
+| Trigger | Score Name | Value | One per | Also carries |
+|---|---|---|---|---|
+| `pull_request` closed and merged | `commit_merged` | 1 | agent commit in the PR | `merge_commit_sha`, `pr_number`, `base_branch`, `pr_session_count`, `pr_human_commit_count` |
+| A merged PR containing `This reverts commit <sha>` | `commit_reverted` | 1 | reverted agent commit, on its own session; a reverted squash or merge commit stands for its PR's commits | `revert_pr_number`, `revert_merge_commit_sha`, `pr_session_count`, `pr_human_commit_count` |
+| `deployment_status` success | `deploy_succeeded` | 1 | agent commit since the previous successful deployment; a deployed squash or merge commit stands for its PR's commits, each scored once | `deployment_sha`, `environment` |
+| `deployment_status` failure or error | `deploy_failed` | 1 | agent commit in the same range | `deployment_sha`, `environment`, `deployment_state` |
+| `pull_request` closed and merged | `ci_passed_first_run` (1 or 0), `review_rounds`, `review_count`, `changes_requested_count`, `hours_open`, `hours_to_first_review` | the measure | agent session in the PR, on its first commit there | `pr_number`, `pr_session_count`, `pr_human_commit_count`, `session_commit_count`, `agent_commit_count`, `commit_count`, `merge_commit_sha`, `base_branch` |
 
-- **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`). `Pull Request Merged` goes to the author of the PR's first agent commit, or of its first commit when no agent committed; with `login`, it falls back to the PR author when that commit has no GitHub account. Its time is the merge time.
-- **Unattributed commits** get `Commit Merged` with an empty `agent_session_id`, which gives the agent share of merged code.
-- **Dry run:** set the repository variable `AMPLITUDE_OUTCOMES_DRY_RUN=true` and the job prints events instead of sending.
+Every Score also carries `commit_sha`, `agent_session_id`, `agent_name`, `agent_trigger`, `agent_setup_version`, `repo`, `outcome_time` and `outcomes_workflow_version` (currently `3`).
+
+- **Only agent sessions are scored.** A commit without an `Agent-Session-Id` trailer sends nothing: human commits, Gemini CLI commits, commits made through the API or MCP tools, and cloud-agent commits known only by their author or `Co-authored-by` line. A PR without one also skips the reviews and CI lookups.
+- **A PR counts once per session.** When several sessions wrote one PR, each gets the PR scores, with `pr_session_count` saying how many. Count PRs with distinct `pr_number`.
+- **Mixed changes are labeled, not split.** Attribution is per commit: each agent commit goes to the session in its trailer, and human commits get no score. `pr_session_count` and `pr_human_commit_count` (merge commits aside) say how mixed the PR was; on `commit_reverted` they count the reverted commits. Filter both to keep a comparison to single-session, agent-only changes: `pr_session_count` = 1 and `pr_human_commit_count` = 0.
+- **User ID** is the commit author email (`AMPLITUDE_USER_ID_SOURCE=login` for the GitHub login). It must equal the user ID the agent sessions use (`enduser.id`, `AMPLITUDE_USER_ID`, or `git config user.email`; `coding-agents init` sets all three to the git email). The PR scores fall back to the PR author when, with `login`, the session's first commit has no GitHub account.
+- **Dry run:** set the repository variable `AMPLITUDE_OUTCOMES_DRY_RUN=true` and the job prints the scores instead of sending.
 - **EU:** set the repository variable `AMPLITUDE_REGION=eu`.
-- Insert IDs are `<event>:<repo>:<sha>` (`<event>:<repo>:<sha>:<deployment id>` for deploys, `Pull Request Merged:<repo>:<pr number>` for PRs), so a re-run within Amplitude's 7-day deduplication window doesn't double-count.
+- Insert IDs are `<score name>:<repo>:<sha>` (`<score name>:<repo>:<sha>:<deployment id>` for deploys, `<score name>:<repo>:<sha>:<revert pr number>` for reverts, `<score name>:<repo>:<pr number>:<session>` for the PR scores), so a re-run within Amplitude's 7-day deduplication window doesn't double-count.
 - **Fork PRs** (head branch in another repository) have no access to repository secrets. Their merge runs end with a notice instead of failing.
-
-#### Agents without the commit hook
-
-Many coding agents sign the commits they write, so an agent commit is recognized even where the commit hook isn't installed. Every commit-level event carries `agent_attribution` and `attributed_agent`:
-
-| `agent_attribution` | Meaning | `attributed_agent` |
-|---|---|---|
-| `session_trailer` | The commit carries `Agent-Session-Id` from the commit hook | `Agent-Name` |
-| `agent_author` | The commit author is a coding agent | The agent |
-| `co_author` | A `Co-authored-by` line names a coding agent | The agent |
-| `name_trailer` | The commit hook stamped `Agent-Name` without a session, as for Gemini CLI, whose shells carry no session ID | `Agent-Name` |
-| `none` | No agent signal | `null` |
-
-Agents are matched by email, not display name: Cursor (`cursoragent@cursor.com`, `cursor[bot]`), Claude Code (`noreply@anthropic.com`, `claude[bot]`), GitHub Copilot (the coding agent and IDE co-author accounts), Devin and Warp. `Pull Request Merged` adds `attributed_commit_count`, `attributed_agents` and `agent_attributed` (any attributed commit). Only `session_trailer` links a commit to its session (`agent_session_id`); the others say which agent wrote it, not in which session. People can delete the line and some agents let users turn it off, so read the counts as a minimum. `agent_authored` and `agent_name` keep their meaning: they come from the session trailer only, so they mean "joinable to a session". Compare agent and human PRs with `agent_attributed`.
+- **Outcomes are not feedback.** Agent Analytics reads only `user` scores as user feedback, so outcome scores never count as thumbs up or down.
 
 #### Session trigger
 
-Every commit-level event carries `agent_trigger`: how the agent's session started.
+Every Score carries `agent_trigger`: how the agent's session started.
 
 | `agent_trigger` | From |
 |---|---|
 | `interactive`, `headless`, `ci`, `scheduled`, `event` | The commit's `Agent-Trigger` trailer |
-| `event` | No trailer, and the commit author is a bot coding agent (`agent_attribution` is `agent_author`): cloud agents run from an issue or an assignment |
+| `event` | No trailer, and the commit author is a bot coding agent: cloud agents run from an issue or an assignment |
 | `null` | Neither |
 
-`Pull Request Merged` carries `agent_triggers`, the distinct values across the PR's commits, sorted (at most 5). The session side is `[Agent] Session Trigger` on `[Agent] User Message`, `[Agent] AI Response`, `[Agent] Tool Call` and `[Agent] Session End`, set from the same variable by each harness forwarder (see each harness guide). Delegation is not a trigger: a subagent keeps its session's trigger and has `[Agent] Agent Chain Depth` greater than 1.
+The session side is `[Agent] Session Trigger` on `[Agent] User Message`, `[Agent] AI Response`, `[Agent] Tool Call` and `[Agent] Session End`, set from the same variable by each harness forwarder (see each harness guide). Delegation is not a trigger: a subagent keeps its session's trigger and has `[Agent] Agent Chain Depth` greater than 1.
 
 #### Agent setup version
 
-`agent_setup_version` is the first 12 hex characters of a SHA-256 over the root-level agent setup entries in the tree the commit was written on (its parent): `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude`, `.codex`, `.cursor`, `.cursorrules`, `.gemini`, `.goosehints` and `.mcp.json` by default. Any change to those files gives a new value, so outcomes can be compared across setups. It is `null` when none of them exist. To choose the entries, set the repository variable `AMPLITUDE_AGENT_SETUP_PATHS` to comma-separated root-level names (at most 20; names containing `/` are ignored). Changing the list changes every later value. On `Pull Request Merged` it is the value for the parent of the PR's first commit.
+`agent_setup_version` is the first 12 hex characters of a SHA-256 over the root-level agent setup entries in the tree the commit was written on (its parent): `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude`, `.codex`, `.cursor`, `.cursorrules`, `.gemini`, `.goosehints` and `.mcp.json` by default. Any change to those files gives a new value, so outcomes can be compared across setups. It is `null` when none of them exist. To choose the entries, set the repository variable `AMPLITUDE_AGENT_SETUP_PATHS` to comma-separated root-level names (at most 20; names containing `/` are ignored). Changing the list changes every later value. On the PR scores it is the value for the session's first commit in the PR.
 
 #### Reviews and first-run CI
 
-- `commit_count` is the PR's commit count. The API lists at most 250 commits, so `Commit Merged` and the attribution counts cover the first 250.
-- `unattributed_commit_count` is the listed commits (the first 250) minus `attributed_commit_count`. `agent_commit_count` counts session trailers only, so commits found by author or co-author are attributed but not in it.
+- `commit_count` is the PR's commit count. The API lists at most 250 commits, so `commit_merged`, `agent_commit_count` and `session_commit_count` cover the first 250.
 - `review_count` and `changes_requested_count` count human reviews: `APPROVED`, `CHANGES_REQUESTED`, and `COMMENTED` with a body. A reply in a review thread is an empty `COMMENTED` review and doesn't count, nor do bots or the PR author. So a review with only inline comments and no summary isn't counted either.
 - `hours_open` is the time from the PR's creation to its merge, in hours (2 decimals).
-- `hours_to_first_review` is the time from the PR's creation to the first of those human reviews, in hours (2 decimals). It is `null` when there is none.
+- `hours_to_first_review` is the time from the PR's creation to the first of those human reviews, in hours (2 decimals). It is not sent when there is none.
 - `review_rounds` counts `CHANGES_REQUESTED` reviews followed by at least one PR commit (committer date after the review): change requests the author answered with code. A request with no later commit is 0 rounds.
-- When the reviews enrichment failed, `review_count`, `changes_requested_count`, `hours_to_first_review` and `review_rounds` are all omitted. With no counted review, `hours_to_first_review` is `null` and `review_rounds` is 0.
-- `ci_passed_first_run` reads the first push CI ran on: the head commit of the PR's earliest `pull_request` workflow run between open and merge, other than the outcomes workflow's own, then the earliest attempt of each check run and commit status on it. A push of several commits runs CI on its head only, so this finds the first result however many commits the PR opened with. GitHub drops a run's PR link once the PR closes, so runs are matched by the PR's commit SHAs; after a force-push, the earliest push that survived counts. Without GitHub Actions runs, it reads the first of the PR's oldest 20 commits that has CI results. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `actions: read`, `checks: read` and `statuses: read` permissions the workflow declares.
+- When the reviews enrichment failed, `review_count`, `changes_requested_count`, `hours_to_first_review` and `review_rounds` are not sent.
+- `ci_passed_first_run` reads the first push CI ran on: the head commit of the PR's earliest `pull_request` workflow run between open and merge, other than the outcomes workflow's own, then the earliest attempt of each check run and commit status on it. A push of several commits runs CI on its head only, so this finds the first result however many commits the PR opened with. GitHub drops a run's PR link once the PR closes, so runs are matched by the PR's commit SHAs; after a force-push, the earliest push that survived counts. Without GitHub Actions runs, it reads the first of the PR's oldest 20 commits that has CI results. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is not sent when the PR has no CI. This needs the `actions: read`, `checks: read` and `statuses: read` permissions the workflow declares.
 
 #### Best effort
 
-Setup version, reviews and first-run CI are enrichments. Each one is isolated and together they make at most 300 GitHub API requests per run, counting each page. When one fails or the budget runs out, its property is omitted and the events are still sent; the job log prints an `enrichments:` line with each one's status.
+Setup version, reviews, first-run CI and the PR lookups behind deploy and revert scores are enrichments. When a PR lookup fails, each deployed or reverted commit is scored on its own trailers, so a squash commit sends nothing. Each one is isolated and together they make at most 300 GitHub API requests per run, counting each page. When one fails or the budget runs out, its score or property is left out and the rest are still sent; the job log prints an `enrichments:` line with each one's status.
 
 #### Upgrading
 
-Re-run `amplitude-ai coding-agents init`. It replaces an untouched earlier version of the workflow or the commit hook without `--force`; a file you edited is reported as a conflict and kept. `coding-agents doctor` reports the workflow as `current`, `outdated` or `customized`, and a hook from an earlier release as `installed (outdated: re-run init)`. `outcomes_workflow_version` stays `2`: `agent_trigger` and the review timing fields are additions.
+Re-run `amplitude-ai coding-agents init`. It replaces an untouched earlier version of the workflow or the commit hook without `--force`; a file you edited is reported as a conflict and kept. `coding-agents doctor` reports the workflow as `current`, `outdated` or `customized`, and a hook from an earlier release as `installed (outdated: re-run init)`. Version 3 sends `[Agent] Score` in place of the `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed` events earlier versions sent; charts built on those need rebuilding on `[Agent] Score Name`.
 
 ## The join
 
-`[Agent] Session ID` equals `agent_session_id`, with `commit_sha` as the second key. Exact for Claude Code, Codex (CLI and SDK), goose, Cursor, and Buzz goose workers.
+The outcome is on the session itself: `[Agent] Score` with `[Agent] Session ID` equal to the session's. Exact for Claude Code, Codex (CLI and SDK), goose and Cursor. Within a session, `commit_sha` on the Tool Call matches `commit_sha` on the Score.
 
 ## Chart recipes
 
-- Commit-to-merge funnel: sessions with a Tool Call where `commit_sha` is set, then `Commit Merged` with `agent_authored` true, then `Deploy Succeeded`; hold `[Agent] Session ID` = `agent_session_id`.
-- Revert rate by agent: `Commit Reverted` / `Commit Merged`, grouped by `agent_name`.
-- Revert and deploy failure rate by setup: `Commit Reverted` / `Commit Merged` and `Deploy Failed` / (`Deploy Succeeded` + `Deploy Failed`), grouped by `agent_setup_version`. Did the `AGENTS.md` change help? Each deploy event is one commit in one deployment attempt, so a commit in a failed deploy that later succeeds counts in both.
-- Review load: average `changes_requested_count` and the share of `ci_passed_first_run` true on `Pull Request Merged`, split by `agent_attributed`.
-- Agent share of merged code: `Commit Merged` grouped by `agent_authored`.
-- Merged code by agent, hook or not: `Commit Merged` grouped by `attributed_agent`, split by `agent_attribution`. The `session_trailer` share is how much of it can be joined to sessions.
+Every recipe below starts from `[Agent] Score` filtered on `[Agent] Score Name`. Chart them by event time to bucket outcomes by when the work was written; use `outcome_time` for when they happened.
+
+- **Held by agent.** `commit_merged` count minus `commit_reverted` count, grouped by `[Agent] Agent ID`. Both are timed at the commit's author date, so a date range that ends 30 days ago counts the changes written at least 30 days ago that are still unreverted. Revert rate is `commit_reverted` / `commit_merged`.
+- **Revert and deploy failure rate by setup.** `commit_reverted` / `commit_merged` and `deploy_failed` / (`deploy_succeeded` + `deploy_failed`), grouped by `agent_setup_version`. Did the `AGENTS.md` change help? Each deploy score is one commit in one deployment attempt, so a commit in a failed deploy that later succeeds counts in both.
+- **First-run CI and review load.** Average `[Agent] Score Value` of `ci_passed_first_run` (the pass rate), `review_rounds` and `changes_requested_count`, grouped by `[Agent] Agent ID` or `agent_setup_version`. Each session in a PR carries them, so for PR-level rates count distinct `pr_number`.
+- **Commit-to-deploy funnel.** Sessions with a Tool Call where `commit_sha` is set, then `commit_merged`, then `deploy_succeeded`, held on `[Agent] Session ID`.
+- **Outcomes next to evaluators.** Group `commit_reverted` by an evaluator's result (for example Session shape) to see which session patterns get reverted.
 - Produced Commit versus Task Completed: does the Signal agree with the evaluator?
 - Cost per merged commit by model; tool failure rate by tool; sessions per user per week; subagent share of cost.
 
@@ -155,11 +153,11 @@ Re-run `amplitude-ai coding-agents init`. It replaces an untouched earlier versi
 
 1. **Sessions by stage.** `[Agent] User Message`, unique `[Agent] Session ID`, grouped by `[Agent] Session Trigger`. Add a filter `[Agent] Agent Chain Depth` greater than 1 for delegated work.
 2. **Grind rate by intent and model.** `[Agent] Evaluator Result` for the Session shape evaluator, grouped by its result and `[Agent] Models Used`, with the Coding intent evaluator as a second breakdown.
-3. **Review effort by stage.** `Pull Request Merged`, average `review_rounds` and average `hours_to_first_review`, grouped by `agent_triggers`.
-4. **Cost per merged change by stage, or by agent tree.** A formula: the sum of `[Agent] Cost USD` on `[Agent] AI Response` divided by the count of `Commit Merged`. Group the first by `[Agent] Session Trigger` and the second by `agent_trigger`, or the first by `[Agent] Root Agent Name` and the second by `agent_name`. It is a ratio of totals, not a join of each change to its cost.
+3. **Review effort by stage.** `[Agent] Score` where Score Name is `review_rounds` or `hours_to_first_review`, average `[Agent] Score Value`, grouped by `agent_trigger`.
+4. **Cost per merged change by stage, or by agent tree.** A formula: the sum of `[Agent] Cost USD` on `[Agent] AI Response` divided by the count of `[Agent] Score` where Score Name is `commit_merged`. Group the first by `[Agent] Session Trigger` and the second by `agent_trigger`, or the first by `[Agent] Root Agent Name` and the second by `agent_name`. It is a ratio of totals, not a join of each change to its cost.
 
 ### Measure a prompt that went viral
 
 - **A pasted prompt.** Create a Code / Regex evaluator with scan turns set to user messages that matches the prompt (sessions need `full` content mode). Then compare Session shape and Claimed done without verification on the matching sessions against the rest.
-- **Saved as a command or skill** under `.claude`, `.codex` or `.cursor`. Saving it changes `agent_setup_version`, so compare `review_rounds`, `ci_passed_first_run`, revert rate and deploy failure rate by `agent_setup_version`.
+- **Saved as a command or skill** under `.claude`, `.codex` or `.cursor`. Saving it changes `agent_setup_version`, so compare the `review_rounds` and `ci_passed_first_run` scores, revert rate and deploy failure rate by `agent_setup_version`.
 - **Across harnesses.** Group the same charts by `[Agent] Agent ID`, for example `claude-code` against `codex`.

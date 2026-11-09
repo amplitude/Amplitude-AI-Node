@@ -2,9 +2,10 @@
  * Shared commit SHA parser for coding-agent tool calls.
  *
  * Sets the plain `commit_sha` event property on `[Agent] Tool Call` events so
- * in-session commits join downstream outcomes (`Commit Merged`, `Commit
- * Reverted`, `Deploy Succeeded`). The Python SDK and the OTLP receiver
- * implement the same rules against the same golden cases
+ * in-session commits join the code outcomes the outcomes workflow scores on
+ * the session (`commit_merged`, `commit_reverted`, `deploy_succeeded`). The
+ * Python SDK and the OTLP receiver implement the same rules against the same
+ * golden cases
  * (`test/fixtures/commit-sha/commit_sha_cases.json`); keep them in sync.
  *
  * `commit_sha` is deliberately not `[Agent] Git SHA`, which is the deployed

@@ -64,7 +64,7 @@ Responses with an internal `utility_*` role (routing, summarizing) are not count
 ## Known gaps
 
 - **Receiver deploy.** The events above need the Gemini CLI profile in Amplitude's OTLP receiver ([nova#36768](https://github.com/amplitude/nova/pull/36768)). Until it is deployed, Gemini CLI sessions don't appear.
-- **No session on commits.** Gemini CLI gives its shell commands `GEMINI_CLI=1` but no session ID, so the commit hook stamps `Agent-Name: gemini-cli` without `Agent-Session-Id`. The outcomes workflow counts those commits as agent work (`agent_attribution: name_trailer`, `attributed_agent: gemini-cli`), but they can't be joined to a session.
+- **No session on commits.** Gemini CLI gives its shell commands `GEMINI_CLI=1` but no session ID, so the commit hook stamps `Agent-Name: gemini-cli` without `Agent-Session-Id`. Without a session to score, the outcomes workflow sends nothing for those commits.
 - **Metrics.** Gemini CLI also posts metrics to `/otlp/v1/metrics` every 10 seconds. Amplitude accepts and discards them.
 
 ## Verify
@@ -75,7 +75,7 @@ Responses with an internal `utility_*` role (routing, summarizing) are not count
 
 ## Connect to outcomes
 
-Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The trailer hook plus the workflow send `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed` (needs the `AMPLITUDE_API_KEY` repository secret). Gemini CLI commits show up as `attributed_agent: gemini-cli`.
+Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The workflow scores only commits with an `Agent-Session-Id` trailer, so Gemini CLI sessions get no code outcomes. The in-session outcomes (Tier 1) still apply.
 
 ## Coding-agent prompt
 

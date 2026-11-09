@@ -63,7 +63,7 @@ Insert IDs are uuid5 of `<conversation>:<generation>:<kind>:<key>` in the same n
 
 ## Commits
 
-Cursor's agent shells export `CURSOR_CONVERSATION_ID` (the hook input's `conversation_id`), so the commit hook stamps `Agent-Session-Id: <conversation>` and `Agent-Name: cursor`, and the outcomes workflow joins merges, reverts and deploys back to the session. Commits Cursor makes without the hook still count as `agent_attribution: agent_author` or `co_author` when Cursor's author or `Co-authored-by` line is present.
+Cursor's agent shells export `CURSOR_CONVERSATION_ID` (the hook input's `conversation_id`), so the commit hook stamps `Agent-Session-Id: <conversation>` and `Agent-Name: cursor`, and the outcomes workflow scores merges, reverts and deploys on the session as `[Agent] Score`. Commits without the trailer (Cursor's cloud agents, or a repo without the hook) get no outcome scores.
 
 ## Verify
 
@@ -74,7 +74,7 @@ Cursor's agent shells export `CURSOR_CONVERSATION_ID` (the hook input's `convers
 
 ## Connect to outcomes
 
-Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The trailer hook plus the workflow send `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed` (needs the `AMPLITUDE_API_KEY` repository secret).
+Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The trailer hook plus the workflow send each code outcome as an `[Agent] Score` on the conversation's session (Evaluation Source `outcome`; needs the `AMPLITUDE_API_KEY` repository secret).
 
 ## Coding-agent prompt
 

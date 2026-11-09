@@ -195,7 +195,7 @@ The structural difference is the event model. Trace-centric tools typically prod
 
 **Server-side enrichment does the evals for you.** When content is available (`contentMode: 'full'`), Amplitude's enrichment pipeline runs automatically on every session after it closes. Built-in signals (task completion, response quality, user intent, session safety, user friction, negative feedback, data quality) land as properties on one `[Agent] Session Record` event per session, alongside a one-sentence `[Agent] Topic Summary`. Custom evaluators you define in Amplitude produce `[Agent] Evaluator Result` events. No eval code to write or maintain, and everything is queryable in charts, cohorts, and funnels alongside your product events.
 
-**Your own feedback stays yours.** User thumbs up/down and your own evals produce `[Agent] Score` events through `score()` / `trackScore()` (`source: 'user'`, `'ai'`, or `'reviewer'`). Amplitude never emits Score events. Filter by `[Agent] Evaluation Source` or `[Agent] Agent ID` for per-agent quality attribution.
+**Your own feedback stays yours.** User thumbs up/down and your own evals produce `[Agent] Score` events through `score()` / `trackScore()` (`source: 'user'`, `'ai'`, or `'reviewer'`); the coding-agent outcomes workflow that runs in your GitHub repo sends `'outcome'`. Amplitude's servers never emit Score events. Filter by `[Agent] Evaluation Source` or `[Agent] Agent ID` for per-agent quality attribution.
 
 **Three content-control tiers.** `full` sends content and Amplitude runs enrichments for you. `metadata_only` sends zero content (you still get cost, latency, tokens, session grouping). `customer_enriched` sends zero content but lets you provide your own structured labels via `trackSessionEnrichment()`.
 
@@ -765,7 +765,7 @@ Base URLs, `gateway` tags, the model ID rule, and how router traffic is priced: 
 
 ## Coding agents
 
-Send the sessions of the coding agents your engineers run, and the commits they make, to Agent Analytics. `amplitude-ai coding-agents init` sets up the repo, and `amplitude-ai coding-agents doctor` checks it. The commit hook and the outcomes workflow join each session to `Commit Merged`, `Commit Reverted`, `Pull Request Merged`, `Deploy Succeeded` and `Deploy Failed`, each stamped with the `agent_setup_version` it was written with.
+Send the sessions of the coding agents your engineers run, and the commits they make, to Agent Analytics. `amplitude-ai coding-agents init` sets up the repo, and `amplitude-ai coding-agents doctor` checks it. The commit hook and the outcomes workflow score each session with what happened to its code: `[Agent] Score` events (Evaluation Source `outcome`) named `commit_merged`, `commit_reverted`, `deploy_succeeded`, `deploy_failed`, `ci_passed_first_run`, `review_rounds` and the review counts, each stamped with the `agent_setup_version` it was written with.
 
 | Harness | Path | Guide |
 | --- | --- | --- |
@@ -2498,7 +2498,7 @@ This is useful for backfilling historical conversations or importing data from e
 | `[Agent] Span`                 | SDK    | Span (e.g. RAG step, transform)                                                 |
 | `[Agent] Session End`          | SDK    | Session ended                                                                   |
 | `[Agent] Session Enrichment`   | SDK    | Session-level enrichment data                                                   |
-| `[Agent] Score`                | SDK    | Feedback your app records (thumbs, your own judge, a reviewer). Amplitude never emits it. |
+| `[Agent] Score`                | SDK    | Feedback your app records (thumbs, your own judge, a reviewer), and code outcomes from the coding-agent outcomes workflow. Amplitude's servers never emit it. |
 | `[Agent] Session Record`       | Server | Session-level summary: outcome, turn count, flags, cost. Emitted automatically. |
 | `[Agent] Evaluator Result`     | Server | One event per custom evaluator per session. Covers classifiers, detectors, scorers. |
 | `[Agent] Topic Classification` | Server | **Deprecated; no longer fires.** Topic outputs land on `[Agent] Evaluator Result` and `[Agent] Topic Summary`. |
@@ -2685,7 +2685,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Score Value` | number | Yes | Numeric score value. Binary (0/1), continuous (0.0-1.0), or rating scale (1-5). |
 | `[Agent] Target ID` | string | Yes | The message_id or session_id being scored. |
 | `[Agent] Target Type` | string | Yes | What is being scored: 'message' or 'session'. |
-| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), 'reviewer' (human expert), or 'outcome' (a code outcome of a coding-agent session, such as a merged or reverted commit, from the GitHub outcomes workflow). |
 | `[Agent] Comment` | string | No | Optional text explanation for the score (respects content_mode). |
 | `[Agent] Taxonomy Version` | string | No | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | No | Epoch milliseconds when this enrichment/evaluation was computed. |
@@ -2702,7 +2702,7 @@ Event-specific properties for `[Agent] Score` (in addition to common properties 
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
 | `[Agent] Customer Org ID` | string | No | Organization ID for multi-tenant platforms. Enables account-level group analytics. |
-| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), 'reviewer' (human expert), or 'outcome' (a code outcome of a coding-agent session, such as a merged or reverted commit, from the GitHub outcomes workflow). |
 | `[Agent] Taxonomy Version` | string | Yes | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Signal Versions` | string[] | No | Signals (Amplitude's built-in evals) that produced a result for this session, each as '<signal_id>@<version>' (e.g. 'task_completion@2'). Changes only when Amplitude updates one of those signals, unlike [Agent] Taxonomy Version, which changes on every evaluator publish in the org. Custom evaluators carry their version on [Agent] Evaluator Result. JSON array of strings. |
@@ -2761,7 +2761,7 @@ Do not send this event from your code.
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
-| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), 'reviewer' (human expert), or 'outcome' (a code outcome of a coding-agent session, such as a merged or reverted commit, from the GitHub outcomes workflow). |
 | `[Agent] Taxonomy Version` | string | Yes | ID of the evaluation configuration published for the org when this enrichment ran. It changes whenever any evaluator in the org is published, even if this agent's evaluators did not change, so it is not a per-evaluator version: use [Agent] Signal Versions on [Agent] Session Record and [Agent] Evaluator ID / [Agent] Evaluator Version on [Agent] Evaluator Result to see which evaluators changed. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
 | `[Agent] Topic` | string | Yes | Which topic model this classification is for (e.g., 'product_area', 'query_intent', 'error_domain'). |
@@ -2780,7 +2780,7 @@ Do not send this event from your code.
 | `[Agent] Session ID` | string | Yes | Unique session identifier. All events in one conversation share the same session ID. |
 | `[Agent] Agent ID` | string | Yes | Identifies which AI agent handled the interaction (e.g., 'support-bot', 'houston'). |
 | `[Agent] Org ID` | string | Yes | The Amplitude organization ID owning the project where this event is tracked. |
-| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), or 'reviewer' (human expert). |
+| `[Agent] Evaluation Source` | string | Yes | Source of the evaluation: 'user' (end-user feedback), 'ai' (automated/server pipeline), 'reviewer' (human expert), or 'outcome' (a code outcome of a coding-agent session, such as a merged or reverted commit, from the GitHub outcomes workflow). |
 | `[Agent] Evaluator ID` | string | No | Stable ID of the custom evaluator, the same across all of its versions and renames. Set together with [Agent] Evaluator Version. |
 | `[Agent] Evaluator Version` | string | No | Version of this evaluator that produced the result (1, 2, 3...), bumped each time it is edited and promoted. Set together with [Agent] Evaluator ID. Events from before evaluator versions were tracked hold an org-wide configuration ID here instead. |
 | `[Agent] Evaluated At` | number | Yes | Epoch milliseconds when this enrichment/evaluation was computed. |
