@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
  * sha256 of the shipped `agent-outcomes.yml`. The Python SDK ships the same
  * bytes and pins its own copy of this hash; keep the two equal.
  */
-export const OUTCOMES_WORKFLOW_SHA256 = '5bcb224b026ce38691304b0f6a8a7247bb589edcc8817330574a52e9dfa7601c';
+export const OUTCOMES_WORKFLOW_SHA256 = '499ac61b1162510120fc9251f39a2e76c669006cb599828cb9fa26a3435c473e';
 
 /** Earlier shipped versions. `init` replaces an untouched copy of one without `--force`. */
 export const PREVIOUS_OUTCOMES_WORKFLOW_SHA256: readonly string[] = [

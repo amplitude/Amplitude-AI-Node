@@ -43,7 +43,14 @@ Agent-Name: claude-code | codex | goose | cursor | gemini-cli
 Agent-Trigger: interactive | headless | ci | scheduled | event
 ```
 
-`Agent-Trigger` is added only when the session's trigger is known: `AMPLITUDE_SESSION_TRIGGER` when it is one of the five values, else `ci` when `GITHUB_ACTIONS=true` or `CI` is set (and not `false` or `0`). A person at the keyboard gets no trailer unless they set the variable.
+`Agent-Trigger` is added only when the session's trigger is known, resolved the way the session forwarders resolve `[Agent] Session Trigger`, so the trailer and the session events agree:
+
+1. `AMPLITUDE_SESSION_TRIGGER` in the environment, when it is one of the five values. When the variable is set, `.amplitude-ai/local.env` isn't read for it.
+2. Otherwise the same key in `.amplitude-ai/local.env` at the repo root, read as `KEY=value` text and never run.
+3. Otherwise `ci` when `GITHUB_ACTIONS=true` or `CI` is set (and not `false` or `0`).
+4. Otherwise, for Codex, the `source` of the thread's rollout under `$CODEX_HOME/sessions` (default `~/.codex`): `exec` and `mcp` are `headless`, `cli` and `vscode` are `interactive`.
+
+Other harnesses get no trailer from step 4, so a person at the keyboard in Claude Code, Cursor or goose gets none unless they set the variable.
 
 | Harness | Session ID in the shell | Equals |
 |---|---|---|
@@ -118,7 +125,7 @@ Every commit-level event carries `agent_trigger`: how the agent's session starte
 - `hours_open` is the time from the PR's creation to its merge, in hours (2 decimals).
 - `hours_to_first_review` is the time from the PR's creation to the first of those human reviews, in hours (2 decimals). It is `null` when there is none.
 - `review_rounds` counts `CHANGES_REQUESTED` reviews followed by at least one PR commit (committer date after the review): change requests the author answered with code. A request with no later commit is 0 rounds.
-- `hours_to_first_review` and `review_rounds` are `null` when the reviews enrichment failed, where `review_count` is omitted.
+- When the reviews enrichment failed, `review_count`, `changes_requested_count`, `hours_to_first_review` and `review_rounds` are all omitted. With no counted review, `hours_to_first_review` is `null` and `review_rounds` is 0.
 - `ci_passed_first_run` reads the first push CI ran on: the head commit of the PR's earliest `pull_request` workflow run between open and merge, other than the outcomes workflow's own, then the earliest attempt of each check run and commit status on it. A push of several commits runs CI on its head only, so this finds the first result however many commits the PR opened with. GitHub drops a run's PR link once the PR closes, so runs are matched by the PR's commit SHAs; after a force-push, the earliest push that survived counts. Without GitHub Actions runs, it reads the first of the PR's oldest 20 commits that has CI results. `success`, `neutral` and `skipped` pass; cancelled and unfinished runs do not count. It is omitted when the PR has no CI. This needs the `actions: read`, `checks: read` and `statuses: read` permissions the workflow declares.
 
 #### Best effort

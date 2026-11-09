@@ -358,12 +358,15 @@ jobs:
                 [...new Set(agentCommits.map((c) => trailer(c.commit.message, key)).filter(Boolean))].slice(0, 50);
               const prUser = agentCommits[0] || commits[0];
               // Review timing uses the human reviews above. A round is a change request the
-              // author answered with a later commit. Null when the reviews enrichment failed.
+              // author answered with a later commit. Omitted, like review_count, when the reviews
+              // enrichment failed; hours_to_first_review is null when no review counted.
               const submitted = (reviews || []).map((r) => r.submitted_at).filter(Boolean)
                 .sort((a, b) => Date.parse(a) - Date.parse(b));
               const committedAt = commits.map((c) => c.commit?.committer?.date).filter(Boolean);
+              const firstReviewHours = !reviews ? undefined
+                : submitted.length ? hoursBetween(pr.created_at, submitted[0]) : null;
               const reviewRounds = reviews ? reviews.filter((r) => r.state === 'CHANGES_REQUESTED' && r.submitted_at
-                && committedAt.some((d) => Date.parse(d) > Date.parse(r.submitted_at))).length : null;
+                && committedAt.some((d) => Date.parse(d) > Date.parse(r.submitted_at))).length : undefined;
               if (prUser) {
                 const prUserId = userIdFor(prUser) || (userIdSource === 'login' ? pr.user?.login : null);
                 pushEvent('Pull Request Merged', prUserId, {
@@ -386,7 +389,7 @@ jobs:
                   agent_setup_version: setupVersions.get(commits[0].sha),
                   agent_triggers: [...new Set(commits.map(agentTrigger).filter(Boolean))].sort().slice(0, 5),
                   hours_open: pr.merged_at ? hoursBetween(pr.created_at, pr.merged_at) : null,
-                  hours_to_first_review: submitted.length ? hoursBetween(pr.created_at, submitted[0]) : null,
+                  hours_to_first_review: firstReviewHours,
                   review_rounds: reviewRounds,
                 }, pr.number, pr.merged_at ? Date.parse(pr.merged_at) : Date.now());
               }

@@ -48,7 +48,7 @@ With `AMPLITUDE_AI_CONTENT_MODE=full` (the default) the spool keeps the prompt, 
 | `postToolUseFailure` `error_message`, `failure_type`, `is_interrupt` | failed `[Agent] Tool Call` with `cursor_failure_type` (`interrupt` when the user stopped it) |
 | `subagentStop` `child_conversation_id`, `subagent_type` | the subagent's events get `[Agent] Agent ID: cursor/<subagent_type>`, `[Agent] Parent Agent ID: cursor` and `cursor_parent_conversation_id` |
 | the conversation's place in the agent tree | `[Agent] Root Agent Name: cursor` and `[Agent] Agent Chain Depth`: 1 for the conversation you started, 2 for a subagent's |
-| `AMPLITUDE_SESSION_TRIGGER`, else `ci` under CI, in the environment of the hook that sends | `[Agent] Session Trigger` on every event; omitted otherwise, since Cursor's hook input doesn't say how the conversation started |
+| `AMPLITUDE_SESSION_TRIGGER`, else `ci` under CI, in the environment of the hook that sends | `[Agent] Session Trigger` on every event; omitted otherwise, since Cursor's hook input doesn't say how the conversation started. The commit hook's `Agent-Trigger` trailer resolves the same value |
 | `sessionEnd` | `[Agent] Session End` |
 
 Insert IDs are uuid5 of `<conversation>:<generation>:<kind>:<key>` in the same namespace in both SDKs, so a re-sent spool never double counts.

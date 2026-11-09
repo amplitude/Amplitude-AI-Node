@@ -78,7 +78,7 @@ Variables set in the environment win over `.amplitude-ai/local.env` (found by wa
 | `AMPLITUDE_USER_ID` | `git config user.email` | User ID; must match the commit author email the outcomes workflow uses |
 | `AMPLITUDE_AI_CONTENT_MODE` | `full` | `metadata_only` (alias `metadata`) or `customer_enriched` |
 | `AMPLITUDE_AGENT_ID` | `codex` | Root agent ID |
-| `AMPLITUDE_SESSION_TRIGGER` | `ci` under CI, else from the rollout's `source` | `interactive`, `headless`, `ci`, `scheduled` or `event`: `[Agent] Session Trigger` |
+| `AMPLITUDE_SESSION_TRIGGER` | `ci` under CI, else from the rollout's `source` | `interactive`, `headless`, `ci`, `scheduled` or `event`: `[Agent] Session Trigger`. The commit hook's `Agent-Trigger` trailer resolves the same value |
 | `AMPLITUDE_AI_HOME` | `~/.amplitude-ai` | Cursor directory (`codex/` under it) |
 | `AMPLITUDE_AI_HOOK_DRY_RUN=1` or `--dry-run` | off | Print events instead of sending |
 

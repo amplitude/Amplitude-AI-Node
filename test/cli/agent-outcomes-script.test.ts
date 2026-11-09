@@ -710,12 +710,17 @@ describe('agent-outcomes.yml script', () => {
       expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: 7.25, review_rounds: 0 });
     });
 
-    it('rounds hours to two decimals and is null when the reviews enrichment failed', async () => {
+    it('rounds hours to two decimals and omits review timing when the reviews enrichment failed', async () => {
       const world = linearWorld();
       world.reviews = [{ state: 'APPROVED', submitted_at: '2026-11-01T00:20:00Z', user: human('alice') }];
       expect((await timing(world)).hours_to_first_review).toBe(0.33);
       world.failing = new Set(['pulls.listReviews']);
-      expect(await timing(world)).toEqual({ hours_open: 48, hours_to_first_review: null, review_rounds: null });
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      const p = r.byType('Pull Request Merged')[0]!.event_properties;
+      expect(p.hours_open).toBe(48);
+      for (const key of ['review_count', 'changes_requested_count', 'hours_to_first_review', 'review_rounds']) {
+        expect(p, key).not.toHaveProperty(key);
+      }
     });
   });
 

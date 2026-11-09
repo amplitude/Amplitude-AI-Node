@@ -20,7 +20,10 @@ import {
   outcomesWorkflowState,
   sha256Hex,
 } from '../../src/cli/outcomes-workflow.js';
-import { parseLocalEnv } from '../../src/cli/hook-codex.js';
+import { parseLocalEnv, withLocalEnv } from '../../src/cli/hook-codex.js';
+import { PROP_SESSION_TRIGGER } from '../../src/core/constants.js';
+import { mapCodexRollout } from '../../src/integrations/codex-rollout.js';
+import { resolveSessionTrigger } from '../../src/integrations/session-trigger.js';
 
 const TEMPLATES = join(__dirname, '../../examples/coding-agents');
 const SHARED = join(__dirname, '../../../AA-152843-shared');
@@ -552,6 +555,108 @@ describe('coding-agents init', () => {
     const text = readFileSync(msg, 'utf8');
     expect(text.trim().split('\n').slice(2)).toEqual(trailers);
     expect(text).not.toContain('Agent-Session-Id: \n');
+  });
+
+  describe('Agent-Trigger matches the session events', () => {
+    const THREAD = '019a5f2e-7c1d-7b2a-9e44-0c1f5a6b7c8d';
+    const sessionMeta = (source: unknown, extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ type: 'session_meta', payload: { id: THREAD, ...extra, source } });
+    const writeRollout = (source: unknown, extra?: Record<string, unknown>, id = THREAD) => {
+      const dir = join(home, '.codex/sessions/2026/11/08');
+      mkdirSync(dir, { recursive: true });
+      const lines = [
+        sessionMeta(source, extra),
+        JSON.stringify({ type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.5' } }),
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] } }),
+      ];
+      writeFileSync(join(dir, `rollout-2026-11-08T12-00-00-${id}.jsonl`), `${lines.join('\n')}\n`);
+      return lines;
+    };
+    const writeLocalEnv = (text: string) => {
+      mkdirSync(join(repo, '.amplitude-ai'), { recursive: true });
+      writeFileSync(join(repo, '.amplitude-ai/local.env'), text);
+    };
+    const hookTrigger = (env: Record<string, string>) => {
+      const msg = join(repo, 'MSG');
+      writeFileSync(msg, 'feat: x\n');
+      const r = spawnSync('sh', [join(TEMPLATES, 'prepare-commit-msg'), msg], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: home, ...env },
+      });
+      expect(r.status).toBe(0);
+      return /^Agent-Trigger: (.*)$/m.exec(readFileSync(msg, 'utf8'))?.[1] ?? null;
+    };
+    const codexSessionTrigger = (lines: string[], env: Record<string, string>) => {
+      const merged = withLocalEnv(env, repo, () => {});
+      const triggers = mapCodexRollout(lines, undefined, { env: merged }).calls.map(
+        (c) => (c.opts.eventProperties as Record<string, unknown>)[PROP_SESSION_TRIGGER] ?? null,
+      );
+      expect(new Set(triggers).size).toBe(1);
+      return triggers[0];
+    };
+
+    it.each([
+      ['exec', {}, null, 'headless'],
+      ['cli', {}, null, 'interactive'],
+      ['vscode', { CI: 'false' }, null, 'interactive'],
+      ['mcp', {}, null, 'headless'],
+      ['cli', { GITHUB_ACTIONS: 'true' }, 'AMPLITUDE_SESSION_TRIGGER=interactive\n', 'interactive'],
+      ['cli', { AMPLITUDE_SESSION_TRIGGER: 'event' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'event'],
+      ['exec', { CI: 'true' }, null, 'ci'],
+      ['exec', {}, 'AMPLITUDE_SESSION_TRIGGER=cron\n', 'headless'],
+      ['cli', { AMPLITUDE_SESSION_TRIGGER: 'cron' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'interactive'],
+      ['exec', { AMPLITUDE_SESSION_TRIGGER: '' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'scheduled'],
+      ['cli', {}, '# AMPLITUDE_SESSION_TRIGGER=ci\nexport  AMPLITUDE_SESSION_TRIGGER = "headless"\r\nOTHER=1\n', 'headless'],
+      ['cli', {}, "AMPLITUDE_SESSION_TRIGGER=ci\nAMPLITUDE_SESSION_TRIGGER='event'\n", 'event'],
+      [{ subagent: { thread_spawn: { parent_thread_id: 'p', agent_path: '/root/a' } } }, {}, null, null],
+      ['app', {}, null, null],
+    ] as Array<[unknown, Record<string, string>, string | null, string | null]>)(
+      'codex source %j, env %o, local.env %j: %s',
+      (source, env, localEnv, expected) => {
+        if (localEnv !== null) writeLocalEnv(localEnv);
+        const lines = writeRollout(source);
+        expect(codexSessionTrigger(lines, env)).toBe(expected);
+        expect(hookTrigger({ CODEX_THREAD_ID: THREAD, ...env })).toBe(expected);
+      },
+    );
+
+    it('ignores a source key inside escaped text', () => {
+      const lines = writeRollout({ subagent: {} }, { instructions: 'set {"source":"exec"} in config' });
+      expect(codexSessionTrigger(lines, {})).toBeNull();
+      expect(hookTrigger({ CODEX_THREAD_ID: THREAD })).toBeNull();
+    });
+
+    it('omits the trailer without a rollout, and never searches for an unsafe thread ID', () => {
+      expect(hookTrigger({ CODEX_THREAD_ID: THREAD })).toBeNull();
+      writeRollout('exec', {}, 'abc');
+      for (const id of ['*', 'a/../abc', 'ab?', 'a\\bc']) expect(hookTrigger({ CODEX_THREAD_ID: id })).toBeNull();
+      expect(hookTrigger({ CODEX_THREAD_ID: 'abc' })).toBe('headless');
+    });
+
+    it('reads CODEX_HOME when it is set', () => {
+      const codexHome = join(home, 'elsewhere');
+      const dir = join(codexHome, 'sessions/2026/11/08');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `rollout-2026-11-08T12-00-00-${THREAD}.jsonl`), `${sessionMeta('exec')}\n`);
+      expect(hookTrigger({ CODEX_THREAD_ID: THREAD, CODEX_HOME: codexHome })).toBe('headless');
+    });
+
+    it.each([
+      [{}, 'AMPLITUDE_SESSION_TRIGGER=headless\n', 'headless'],
+      [{ GITHUB_ACTIONS: 'true' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'scheduled'],
+      [{ AMPLITUDE_SESSION_TRIGGER: 'event' }, 'AMPLITUDE_SESSION_TRIGGER=scheduled\n', 'event'],
+      [{ CI: '1' }, 'AMPLITUDE_SESSION_TRIGGER=cron\n', 'ci'],
+      [{}, null, null],
+    ] as Array<[Record<string, string>, string | null, string | null]>)(
+      'cursor env %o, local.env %j: %s',
+      (env, localEnv, expected) => {
+        if (localEnv !== null) writeLocalEnv(localEnv);
+        writeRollout('exec');
+        expect(resolveSessionTrigger({ env: withLocalEnv(env, repo, () => {}, 'cursor') })).toBe(expected);
+        expect(hookTrigger({ CURSOR_CONVERSATION_ID: 'c1', ...env })).toBe(expected);
+      },
+    );
   });
 
   it('chains onto an existing prepare script', () => {
