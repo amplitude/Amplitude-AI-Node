@@ -83,7 +83,7 @@ Commits made through the GitHub API or MCP tools carry no trailer, so they get n
 |---|---|---|---|---|
 | `pull_request` closed and merged | `commit_merged` | 1 | agent commit in the PR | `merge_commit_sha`, `pr_number`, `base_branch`, `pr_session_count`, `pr_human_commit_count` |
 | A merged PR containing `This reverts commit <sha>` | `commit_reverted` | 1 | reverted agent commit, on its own session; a reverted squash or merge commit stands for its PR's commits | `revert_pr_number`, `revert_merge_commit_sha`, `pr_session_count`, `pr_human_commit_count` |
-| `deployment_status` success | `deploy_succeeded` | 1 | agent commit since the previous successful deployment; a deployed commit from a merged PR (a squash commit, say) stands for that PR's commits, each scored once | `deployment_sha`, `environment` |
+| `deployment_status` success | `deploy_succeeded` | 1 | agent commit since the previous successful deployment; a deployed squash or merge commit stands for its PR's commits, each scored once | `deployment_sha`, `environment` |
 | `deployment_status` failure or error | `deploy_failed` | 1 | agent commit in the same range | `deployment_sha`, `environment`, `deployment_state` |
 | `pull_request` closed and merged | `ci_passed_first_run` (1 or 0), `review_rounds`, `review_count`, `changes_requested_count`, `hours_open`, `hours_to_first_review` | the measure | agent session in the PR, on its first commit there | `pr_number`, `pr_session_count`, `pr_human_commit_count`, `session_commit_count`, `agent_commit_count`, `commit_count`, `merge_commit_sha`, `base_branch` |
 

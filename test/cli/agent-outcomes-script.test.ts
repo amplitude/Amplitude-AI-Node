@@ -779,14 +779,25 @@ describe('agent-outcomes.yml script', () => {
   it("scores each deployed commit itself when its PR's commits can't be listed", async () => {
     const world = linearWorld();
     world.commits.head = commit('head', 'c2', { message: 'Merge pull request #7', email: 'human@example.com' });
-    world.associatedPrs = {
-      c1: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
-      c2: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }],
-    };
+    world.associatedPrs = { head: [{ number: 7, merge_commit_sha: 'head', merged_at: '2026-11-01T09:00:00Z' }] };
     world.failing = new Set(['pulls.listCommits']);
     deployedSince(world, 'base');
     const r = await run(world, { event: 'deployment_status', payload: deployPayload });
     expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c1:2', 'deploy_succeeded:acme/app:c2:2']);
+    expect(r.log.info.some((m) => m.includes('deployed_prs=error'))).toBe(true);
+  });
+
+  it("looks up only commits without a trailer, and only a PR's own merge commit stands for it", async () => {
+    const world = linearWorld();
+    world.commits.x9 = commit('x9', 'base', { message: agentMessage('s9') });
+    world.commits.head = commit('head', 'c3', { email: 'human@example.com' });
+    world.associatedPrs = { c3: [{ number: 9, merge_commit_sha: 'other', merged_at: '2026-10-30T00:00:00Z' }] };
+    world.prCommitsByNumber = { 9: ['x9'] };
+    deployedSince(world, 'base');
+    const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+    expect(r.events.map((e) => e.insert_id)).toEqual(['deploy_succeeded:acme/app:c1:2', 'deploy_succeeded:acme/app:c2:2']);
+    expect(r.calls.filter((c) => c === 'repos.listPullRequestsAssociatedWithCommit')).toHaveLength(2);
+    expect(r.calls).not.toContain('pulls.listCommits');
   });
 
   it('scores the deployed commits themselves when the PR lookup fails', async () => {
