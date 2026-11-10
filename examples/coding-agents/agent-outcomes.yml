@@ -307,10 +307,14 @@ jobs:
             // pull_requests once the PR closes, so runs match by the PR's commit SHAs too;
             // after a force-push, the earliest surviving push counts. `failed` counts runs
             // whose last attempt failed or timed out (cancelled runs don't count), and
-            // `reruns` the attempts after each run's first. This workflow's own runs are
-            // not CI. Undefined when the run history is too long to page.
+            // `reruns` the attempts after each run's first. This workflow's own runs and
+            // the agent-trailers check are not CI; the trailers runs' check suites go in
+            // `notCiSuites`, so their check runs aren't CI results either. Undefined when
+            // the run history is too long to page.
             const selfWorkflow = (process.env.GITHUB_WORKFLOW_REF || '')
               .replace(/^[^/]+\/[^/]+\//, '').replace(/@.*$/, '');
+            const TRAILERS_WORKFLOW = '.github/workflows/agent-trailers.yml';
+            const notCiSuites = new Set();
             const RUN_FAILED = new Set(['failure', 'timed_out']);
             const prWorkflowRuns = async (pr, commits) => {
               const prShas = new Set(commits.map((c) => c.sha));
@@ -328,7 +332,12 @@ jobs:
                   if (run.id === context.runId || (selfWorkflow && run.path === selfWorkflow)) continue;
                   const ours = prShas.has(run.head_sha)
                     || (run.pull_requests || []).some((p) => p.number === pr.number);
-                  if (ours) matched.set(run.id, run);
+                  if (!ours) continue;
+                  if (run.path === TRAILERS_WORKFLOW) {
+                    if (run.check_suite_id) notCiSuites.add(run.check_suite_id);
+                    continue;
+                  }
+                  matched.set(run.id, run);
                 }
                 if (runs.length < 100) break;
                 if (++page >= 5) return undefined;
@@ -355,7 +364,7 @@ jobs:
               };
               return [
                 ...earliest(runs, (r) => `${r.app?.id ?? ''}:${r.name}`,
-                  (r) => PASSED.has(r.conclusion) || FAILED.has(r.conclusion))
+                  (r) => !notCiSuites.has(r.check_suite?.id) && (PASSED.has(r.conclusion) || FAILED.has(r.conclusion)))
                   .map((r) => ({ name: r.name, passed: PASSED.has(r.conclusion) })),
                 ...earliest(statuses, (s) => s.context,
                   (s) => ['success', 'failure', 'error'].includes(s.state))

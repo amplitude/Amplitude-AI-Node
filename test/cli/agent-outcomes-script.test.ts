@@ -43,7 +43,10 @@ type World = {
   prCommitsByNumber?: Record<number, string[]>;
   associatedPrs?: Record<string, Array<{ number: number; merge_commit_sha: string; merged_at: string | null }>>;
   reviews?: Array<{ state: string; body?: string; submitted_at?: string; user: { login: string; type: string } }>;
-  checkRuns?: Record<string, Array<{ id: number; name: string; conclusion: string | null; app?: { id: number } }>>;
+  checkRuns?: Record<
+    string,
+    Array<{ id: number; name: string; conclusion: string | null; app?: { id: number }; check_suite?: { id: number } }>
+  >;
   statuses?: Record<string, Array<{ id: number; context: string; state: string }>>;
   deployments?: Array<{ id: number; sha: string; created_at: string; state: string }>;
   workflowRuns?: WorkflowRun[];
@@ -57,6 +60,7 @@ type WorkflowRun = {
   created_at: string;
   pull_requests: Array<{ number: number }>;
   path?: string;
+  check_suite_id?: number;
   name?: string;
   html_url?: string;
   conclusion?: string | null;
@@ -1084,6 +1088,28 @@ describe('agent-outcomes.yml script', () => {
       noRuns.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
       const none = await run(noRuns, { event: 'pull_request', payload: prPayload() });
       expect(props(forSession(none.byName('ci_passed_first_run'), 's1'))).toMatchObject({ ci_failed_checks: ['build'] });
+    });
+
+    it('does not count the agent-trailers check as CI', async () => {
+      const world = ciWorld();
+      world.workflowRuns!.unshift({
+        id: 1,
+        head_sha: 'c3',
+        created_at: '2026-11-01T00:01:00Z',
+        pull_requests: [{ number: 7 }],
+        path: '.github/workflows/agent-trailers.yml',
+        name: 'Agent trailers (Amplitude)',
+        conclusion: 'failure',
+        check_suite_id: 70,
+      });
+      world.checkRuns!.c3!.push({ id: 4, name: 'trailers', conclusion: 'failure', app: { id: 1 }, check_suite: { id: 70 } });
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('ci_passed_first_run'), 's1'))).toMatchObject({
+        '[Agent] Score Value': 1,
+        ci_run_id: 3,
+        ci_workflow_name: 'CI',
+      });
+      expect(prScore(r, 'ci_failed_runs')).toBe(2);
     });
 
     it('sends no counts or link without Actions runs, past the page cap, or when the runs cannot be read', async () => {
