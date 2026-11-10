@@ -48,6 +48,7 @@ const DEFAULT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex'
 export const HOOKS_PATH = '.githooks';
 export const PREPARE_COMMIT_MSG_PATH = '.githooks/prepare-commit-msg';
 export const OUTCOMES_WORKFLOW_PATH = '.github/workflows/agent-outcomes.yml';
+export const TRAILERS_WORKFLOW_PATH = '.github/workflows/agent-trailers.yml';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const CLAUDE_LOCAL_SETTINGS_PATH = '.claude/settings.local.json';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
@@ -135,6 +136,8 @@ export type CodingAgentsInitOptions = {
   git?: GitRunner;
   /** Defaults to `process.platform`; `win32` keeps the Cursor hooks on npx. */
   platform?: NodeJS.Platform;
+  /** Also install `agent-trailers.yml`, which flags agent commits without a session trailer. */
+  requireTrailers?: boolean;
 };
 
 export type CodingAgentsChange = {
@@ -556,6 +559,18 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     'sends code outcomes as [Agent] Score on the session that wrote each commit',
     PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
   );
+  if (options.requireTrailers) {
+    writeTemplateFile(
+      writer,
+      cwd,
+      TRAILERS_WORKFLOW_PATH,
+      readCodingAgentsTemplate('agent-trailers.yml', templatesDir),
+      undefined,
+      force,
+      warnings,
+      'warns on agent commits without a session trailer (AMPLITUDE_REQUIRE_AGENT_TRAILERS=true fails the check)',
+    );
+  }
 
   let hooksPathOk = true;
   if (!isRepo) {
@@ -1178,7 +1193,8 @@ async function readStdin(): Promise<string> {
 const USAGE = `Usage:
   amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--dry-run]
                                   [--privacy full|metadata] [--region us|eu]
-                                  [--api-key-stdin | --api-key-env NAME] [--force] [--dir PATH] [--json]
+                                  [--api-key-stdin | --api-key-env NAME] [--require-trailers] [--force]
+                                  [--dir PATH] [--json]
   amplitude-ai coding-agents doctor [--dir PATH] [--json]
 `;
 
@@ -1192,6 +1208,7 @@ export async function main(argv: string[]): Promise<number> {
   let dryRun = false;
   let json = false;
   let force = false;
+  let requireTrailers = false;
   let apiKeyStdin = false;
   let apiKeyEnv: string | undefined;
   let privacy: CodingAgentsPrivacy = 'full';
@@ -1210,6 +1227,7 @@ export async function main(argv: string[]): Promise<number> {
       else if (flag === '--dry-run') dryRun = true;
       else if (flag === '--json') json = true;
       else if (flag === '--force') force = true;
+      else if (flag === '--require-trailers') requireTrailers = true;
       else if (flag === '--api-key-stdin') apiKeyStdin = true;
       else if (flag === '--api-key-env') apiKeyEnv = value();
       else if (flag === '--dir') dir = resolve(value());
@@ -1252,6 +1270,7 @@ export async function main(argv: string[]): Promise<number> {
       region,
       apiKey,
       force,
+      requireTrailers,
     });
     if (json) {
       process.stdout.write(stringify(result));

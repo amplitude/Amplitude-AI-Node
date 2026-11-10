@@ -118,6 +118,16 @@ describe('coding-agents init', () => {
     expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
+  it('installs agent-trailers.yml only with requireTrailers', () => {
+    init();
+    expect(existsSync(join(repo, '.github/workflows/agent-trailers.yml'))).toBe(false);
+    const result = init({ requireTrailers: true });
+    expect(readFileSync(join(repo, '.github/workflows/agent-trailers.yml'), 'utf8')).toBe(template('agent-trailers.yml'));
+    expect(result.changes.find((c) => c.path === '.github/workflows/agent-trailers.yml')!.action).toBe('create');
+    writeFileSync(join(repo, '.github/workflows/agent-trailers.yml'), '# mine\n');
+    expect(init({ requireTrailers: true }).warnings.join('\n')).toContain('agent-trailers.yml already exists');
+  });
+
   it('merges Claude Code settings from the template and keeps the key in the gitignored local file', () => {
     mkdirSync(join(repo, '.claude'));
     writeFileSync(
