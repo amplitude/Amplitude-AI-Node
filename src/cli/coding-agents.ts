@@ -757,28 +757,32 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       const telemetry = isObject(merged.telemetry) ? merged.telemetry : {};
       const endpoint = typeof telemetry.otlpEndpoint === 'string' ? telemetry.otlpEndpoint : '';
       const elsewhere = (endpoint && !endpoint.includes('amplitude.com')) || telemetry.target === 'gcp';
+      const local = cursorUsesLocalBin(cwd, options.platform ?? process.platform);
+      mergeGeminiSessionHook(merged, local ? `${CURSOR_LOCAL_BIN} hook gemini` : GEMINI_HOOK_COMMAND);
       if (elsewhere && !force) {
+        // The session hook doesn't depend on where telemetry goes, so it's added either way.
         writer.conflict(GEMINI_SETTINGS_PATH, `telemetry already goes to ${endpoint || 'Google Cloud'}`);
         warnings.push(
           `${GEMINI_SETTINGS_PATH} already sends Gemini CLI telemetry to ${endpoint || 'Google Cloud'}. Gemini CLI has one OTLP destination; re-run with --force to point it at Amplitude.`,
         );
+        writer.write(
+          GEMINI_SETTINGS_PATH,
+          stringify(merged),
+          'BeforeTool hook that stamps the session on git commit; telemetry left as is (no secrets)',
+        );
       } else {
         merged.telemetry = { ...telemetry, ...geminiTelemetrySettings(privacy, region) };
-        const local = cursorUsesLocalBin(cwd, options.platform ?? process.platform);
-        mergeGeminiSessionHook(merged, local ? `${CURSOR_LOCAL_BIN} hook gemini` : GEMINI_HOOK_COMMAND);
         writer.write(
           GEMINI_SETTINGS_PATH,
           stringify(merged),
           'OpenTelemetry export to Amplitude and a BeforeTool hook that stamps the session on git commit (no secrets)',
         );
-        if (isObject(merged.hooksConfig) && merged.hooksConfig.enabled === false) {
-          warnings.push(
-            `${GEMINI_SETTINGS_PATH} sets hooksConfig.enabled to false, so Gemini CLI commits stay unstamped.`,
-          );
-        }
         if (typeof telemetry.outfile === 'string' && telemetry.outfile) {
           warnings.push(`${GEMINI_SETTINGS_PATH} sets telemetry.outfile, which Gemini CLI uses instead of OTLP; remove it.`);
         }
+      }
+      if (isObject(merged.hooksConfig) && merged.hooksConfig.enabled === false) {
+        warnings.push(`${GEMINI_SETTINGS_PATH} sets hooksConfig.enabled to false, so Gemini CLI commits stay unstamped.`);
       }
     }
 

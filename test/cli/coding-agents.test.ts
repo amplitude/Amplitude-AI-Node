@@ -430,14 +430,19 @@ describe('coding-agents init', () => {
     );
   });
 
-  it('leaves Gemini CLI telemetry pointed elsewhere alone without --force', () => {
+  it('leaves Gemini CLI telemetry pointed elsewhere alone without --force, and still adds the session hook', () => {
     mkdirSync(join(repo, '.gemini'), { recursive: true });
     const theirs = { telemetry: { enabled: true, otlpEndpoint: 'http://localhost:4317' } };
     writeFileSync(join(repo, '.gemini/settings.json'), JSON.stringify(theirs));
     const result = init({ harnesses: ['gemini'] });
     expect(result.ok).toBe(false);
-    expect(result.changes.find((c) => c.path === '.gemini/settings.json')!.action).toBe('conflict');
-    expect(readJson('.gemini/settings.json')).toEqual(theirs);
+    expect(result.changes.filter((c) => c.path === '.gemini/settings.json').map((c) => c.action)).toEqual([
+      'conflict',
+      'update',
+    ]);
+    const settings = readJson('.gemini/settings.json');
+    expect(settings.telemetry).toEqual(theirs.telemetry);
+    expect(settings.hooks.BeforeTool[0].hooks[0].name).toBe('amplitude-ai-session');
     init({ harnesses: ['gemini'], force: true });
     expect(readJson('.gemini/settings.json').telemetry.otlpEndpoint).toBe('https://api.amplitude.com/otlp');
   });
