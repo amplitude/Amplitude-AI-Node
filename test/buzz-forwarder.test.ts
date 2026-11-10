@@ -90,6 +90,19 @@ describe('buzz forwarder', () => {
     expect(tools[0]?.insert_id).toBe('buzz:goose:goose-worker:call-1');
   });
 
+  it('keys worker tool calls to their goose session, the ID worker commits are stamped with', () => {
+    const { events } = run();
+    const tools = events.filter((e) => e.event_type === '[Agent] Tool Call');
+    for (const tool of tools) {
+      expect(JSON.parse(String(tool.event_properties['[Agent] Context']))).toEqual({
+        harness: 'goose',
+        harness_session_id: 'goose-worker',
+      });
+    }
+    const thread = tools[0]?.event_properties['[Agent] Session ID'];
+    expect(events.filter((e) => e.event_properties['[Agent] Session ID'] === thread).length).toBeGreaterThan(tools.length);
+  });
+
   it('skips and counts unmapped users and invents no cost', () => {
     const { events, skipped } = run();
     expect(skipped.unmappedUser).toBe(1);

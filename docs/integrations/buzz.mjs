@@ -368,6 +368,9 @@ export function normalize(rows, mapping = {}) {
           ...(full && call.input !== undefined ? { '[Agent] Tool Input': redact(serialize(call.input)) } : {}),
           ...(full && call.output !== undefined ? { '[Agent] Tool Output': redact(call.output) } : {}),
           ...(sha ? { commit_sha: sha } : {}),
+          // The goose session is the worker's AGENT_SESSION_ID, so it joins this tool call to the
+          // outcome scores of the commits it made.
+          '[Agent] Context': JSON.stringify({ harness: payload.harness, harness_session_id: payload.sessionId }),
         });
       }
 
