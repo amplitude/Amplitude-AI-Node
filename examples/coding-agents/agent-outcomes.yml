@@ -4,7 +4,7 @@
 # session that wrote the commit, so only commits with an Agent-Session-Id trailer
 # (from the prepare-commit-msg hook) or a Copilot-Session trailer are scored. Scores carry
 # task_id and task_type from the Agent-Task trailers, and ci_passed_first_run links the CI
-# run that judged the first push. Installed by `amplitude-ai coding-agents init`.
+# run that judged the first push and names the checks that failed. Installed by `amplitude-ai coding-agents init`.
 #
 # Setup:
 #   - Repository secret AMPLITUDE_API_KEY: the Amplitude project API key.
@@ -355,16 +355,19 @@ jobs:
               };
               return [
                 ...earliest(runs, (r) => `${r.app?.id ?? ''}:${r.name}`,
-                  (r) => PASSED.has(r.conclusion) || FAILED.has(r.conclusion)).map((r) => PASSED.has(r.conclusion)),
+                  (r) => PASSED.has(r.conclusion) || FAILED.has(r.conclusion))
+                  .map((r) => ({ name: r.name, passed: PASSED.has(r.conclusion) })),
                 ...earliest(statuses, (s) => s.context,
-                  (s) => ['success', 'failure', 'error'].includes(s.state)).map((s) => s.state === 'success'),
+                  (s) => ['success', 'failure', 'error'].includes(s.state))
+                  .map((s) => ({ name: s.context, passed: s.state === 'success' })),
               ];
             };
             // The first CI result on the PR: the earliest attempt of each check and
             // status on the first push CI ran on. Without Actions runs, the first of
             // the PR's oldest 20 commits that has results. Cancelled and unfinished
             // runs do not count. `passed` is undefined when the PR has no CI; `runs`
-            // when its workflow runs can't be read.
+            // when its workflow runs can't be read. `failedChecks` names the checks and
+            // statuses that failed (distinct, sorted, at most 10).
             const ciFirstRun = (pr, commits) => enrich('ci_passed_first_run', async () => {
               let runs;
               try {
@@ -376,7 +379,11 @@ jobs:
               const shas = runs?.first ? [runs.first.head_sha] : commits.slice(0, 20).map((c) => c.sha);
               for (const sha of shas) {
                 const results = await ciResults(sha);
-                if (results.length) return { passed: results.every(Boolean), runs };
+                if (results.length) {
+                  const failedChecks = [...new Set(results.filter((r) => !r.passed).map((r) => String(r.name)))]
+                    .sort().slice(0, 10);
+                  return { passed: failedChecks.length === 0, failedChecks, runs };
+                }
               }
               return { passed: undefined, runs };
             });
@@ -490,14 +497,18 @@ jobs:
                 hours_open: pr.merged_at ? hoursBetween(pr.created_at, pr.merged_at) : undefined,
                 hours_to_first_review: submitted.length ? hoursBetween(pr.created_at, submitted[0]) : undefined,
               };
-              // The run that judged the first push, on ci_passed_first_run only.
+              // The run that judged the first push and the checks that failed on it, on
+              // ci_passed_first_run only.
               const scoreProps = {
-                ci_passed_first_run: firstRun ? {
-                  ci_run_id: firstRun.id,
-                  ci_run_url: firstRun.html_url || null,
-                  ci_workflow_name: firstRun.name || null,
-                  ci_conclusion: firstRun.conclusion || null,
-                } : {},
+                ci_passed_first_run: {
+                  ...(firstRun && {
+                    ci_run_id: firstRun.id,
+                    ci_run_url: firstRun.html_url || null,
+                    ci_workflow_name: firstRun.name || null,
+                    ci_conclusion: firstRun.conclusion || null,
+                  }),
+                  ...(ci?.passed === false && { ci_failed_checks: ci.failedChecks }),
+                },
               };
               // PR scores go on every agent session in the PR, each on its first commit.
               // Count a PR once with distinct pr_number.

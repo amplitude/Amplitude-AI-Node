@@ -1057,6 +1057,35 @@ describe('agent-outcomes.yml script', () => {
       expect(props(forSession(r.byName('ci_failed_runs'), 's1'))).not.toHaveProperty('ci_run_id');
     });
 
+    it('names the checks and statuses that failed on the first push, only when it failed', async () => {
+      const world = ciWorld();
+      world.checkRuns = {
+        c3: [
+          { id: 7, name: 'e2e', conclusion: 'failure', app: { id: 1 } },
+          { id: 5, name: 'build', conclusion: 'success', app: { id: 1 } },
+          { id: 6, name: 'unit', conclusion: 'timed_out', app: { id: 1 } },
+          { id: 9, name: 'e2e', conclusion: 'failure', app: { id: 2 } },
+          { id: 8, name: 'lint', conclusion: null, app: { id: 1 } },
+        ],
+      };
+      world.statuses = { c3: [{ id: 1, context: 'ci/legacy', state: 'error' }] };
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('ci_passed_first_run'), 's1'))).toMatchObject({
+        '[Agent] Score Value': 0,
+        ci_run_id: 3,
+        ci_failed_checks: ['ci/legacy', 'e2e', 'unit'],
+      });
+      expect(props(forSession(r.byName('ci_failed_runs'), 's1'))).not.toHaveProperty('ci_failed_checks');
+
+      const passed = await run(ciWorld(), { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(passed.byName('ci_passed_first_run'), 's1'))).not.toHaveProperty('ci_failed_checks');
+
+      const noRuns = linearWorld();
+      noRuns.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
+      const none = await run(noRuns, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(none.byName('ci_passed_first_run'), 's1'))).toMatchObject({ ci_failed_checks: ['build'] });
+    });
+
     it('sends no counts or link without Actions runs, past the page cap, or when the runs cannot be read', async () => {
       const noRuns = linearWorld();
       noRuns.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };

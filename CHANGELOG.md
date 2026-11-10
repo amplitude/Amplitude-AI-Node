@@ -9,7 +9,7 @@
 - **Session ID validation.** The hook writes a session ID only when it matches `[A-Za-z0-9._:-]{1,128}`, so a value with a newline can't add trailers.
 - **Outcomes workflow v4** (`outcomes_workflow_version: 4`).
   - Every score carries `task_id` and `task_type` from the commit's trailers. On a merged PR, a commit without them takes the branch's ticket key and prefix, else the PR title's conventional type. A revert carries the reverted commit's own task.
-  - `ci_passed_first_run` carries `ci_run_id`, `ci_run_url`, `ci_workflow_name` and `ci_conclusion` for the run that judged the first push.
+  - `ci_passed_first_run` carries `ci_run_id`, `ci_run_url`, `ci_workflow_name` and `ci_conclusion` for the run that judged the first push. When it is 0, `ci_failed_checks` lists the checks and commit statuses that failed on that push (distinct, sorted, at most 10), with no extra API call, so a failed or reverted change can be set beside the commands the agent ran in its session.
   - New PR scores: `ci_failed_runs` (runs whose last attempt failed or timed out) and `ci_rerun_attempts`. Neither is sent without workflow runs, past the page cap, or on a read error.
   - A `Copilot-Session` trailer counts as the session when there is no `Agent-Session-Id`, with Agent ID `copilot`.
   - A Buzz worker commit (author `<64 hex>@<relay host>`) takes the user from its last `Co-authored-by` that isn't a coding agent.
