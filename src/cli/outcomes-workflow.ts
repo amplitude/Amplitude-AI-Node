@@ -16,6 +16,7 @@ export const PREVIOUS_OUTCOMES_WORKFLOW_SHA256: readonly string[] = [
 /** Earlier shipped `prepare-commit-msg` hooks; the Python SDK pins the same list. */
 export const PREVIOUS_PREPARE_COMMIT_MSG_SHA256: readonly string[] = [
   '83be7394b3b6d3bf386b9e9d46830e6bde98e4a1ae2a3254e22b9bfdabeac5be', // 0.28.0, without Agent-Trigger
+  'b56b53490a089d22a18d4874079a5d1f723a2d56081ce32a42be08c4fe57e746', // 0.29.0 and 0.30.0, without Copilot or task trailers
 ];
 
 /**

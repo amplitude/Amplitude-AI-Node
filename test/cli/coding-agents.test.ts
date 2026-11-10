@@ -31,6 +31,7 @@ const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1
 const V2_028_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.28.0.yml');
 const V2_029_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.29.0.yml');
 const PREVIOUS_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.28.0');
+const PREVIOUS_HOOK_030 = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.30.0');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
@@ -70,7 +71,10 @@ describe('coding-agents templates', () => {
   });
 
   it('pins the hashes of the previously shipped hook and workflow', () => {
-    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toEqual([sha256Hex(readFileSync(PREVIOUS_HOOK))]);
+    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toEqual([
+      sha256Hex(readFileSync(PREVIOUS_HOOK)),
+      sha256Hex(readFileSync(PREVIOUS_HOOK_030)),
+    ]);
     expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).not.toContain(sha256Hex(readFileSync(join(TEMPLATES, 'prepare-commit-msg'))));
     expect(PREVIOUS_OUTCOMES_WORKFLOW_SHA256).toEqual([
       sha256Hex(readFileSync(V1_WORKFLOW)),
@@ -538,6 +542,12 @@ describe('coding-agents init', () => {
     [{ CLAUDE_CODE_SESSION_ID: 's1' }, ['Agent-Session-Id: s1', 'Agent-Name: claude-code']],
     [{ CODEX_THREAD_ID: 't1' }, ['Agent-Session-Id: t1', 'Agent-Name: codex']],
     [{ AGENT_SESSION_ID: 'g1' }, ['Agent-Session-Id: g1', 'Agent-Name: goose']],
+    [{ COPILOT_AGENT_SESSION_ID: 'dca8fe3f-adb8-4ade-b6c0-8be1c0b17110' }, ['Agent-Session-Id: dca8fe3f-adb8-4ade-b6c0-8be1c0b17110', 'Agent-Name: copilot']],
+    [{ COPILOT_AGENT_SESSION_ID: 'p1', AGENT_SESSION_ID: 'g1' }, ['Agent-Session-Id: p1', 'Agent-Name: copilot']],
+    [{ AGENT_SESSION_ID: 'g1\nAgent-Session-Id: forged' }, ['Agent-Name: goose']],
+    [{ COPILOT_AGENT_SESSION_ID: 'a b' }, ['Agent-Name: copilot']],
+    [{ CODEX_THREAD_ID: 'x'.repeat(129) }, ['Agent-Name: codex']],
+    [{ CODEX_THREAD_ID: 'x'.repeat(128) }, [`Agent-Session-Id: ${'x'.repeat(128)}`, 'Agent-Name: codex']],
     [{ CURSOR_AGENT: '1', CURSOR_CONVERSATION_ID: 'c1' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
     [{ GEMINI_CLI: '1' }, ['Agent-Name: gemini-cli']],
     [{}, []],
@@ -561,6 +571,65 @@ describe('coding-agents init', () => {
     const text = readFileSync(msg, 'utf8');
     expect(text.trim().split('\n').slice(2)).toEqual(trailers);
     expect(text).not.toContain('Agent-Session-Id: \n');
+  });
+
+  describe('task trailers', () => {
+    const stamp = (env: Record<string, string>, branch = 'main', localEnv?: string) => {
+      git('symbolic-ref', 'HEAD', `refs/heads/${branch}`);
+      if (localEnv !== undefined) {
+        mkdirSync(join(repo, '.amplitude-ai'), { recursive: true });
+        writeFileSync(join(repo, '.amplitude-ai/local.env'), localEnv);
+      }
+      const msg = join(repo, 'MSG');
+      writeFileSync(msg, 'feat: x\n');
+      const r = spawnSync('sh', [join(TEMPLATES, 'prepare-commit-msg'), msg], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: home, ...env },
+      });
+      expect(r.status).toBe(0);
+      const text = readFileSync(msg, 'utf8');
+      return {
+        task: /^Agent-Task: (.*)$/m.exec(text)?.[1] ?? null,
+        type: /^Agent-Task-Type: (.*)$/m.exec(text)?.[1] ?? null,
+      };
+    };
+    const AGENT = { CLAUDE_CODE_SESSION_ID: 's1' };
+
+    it.each([
+      ['fix/AA-152843-commit-sessions', 'AA-152843', 'fix'],
+      ['vinaygoel/AA-152843-commit-sessions', 'AA-152843', null],
+      ['feat/LIN-42', 'LIN-42', 'feat'],
+      ['feat/add-thing', null, 'feat'],
+      ['main', null, null],
+      ['fixes/AB-1', 'AB-1', null],
+      ['fix/XAB-12345678', null, 'fix'],
+      ['fix/aa-12', null, 'fix'],
+      ['chore/AB-1-and-CD-2', 'AB-1', 'chore'],
+    ])('reads branch %s', (branch, task, type) => {
+      expect(stamp(AGENT, branch)).toEqual({ task, type });
+    });
+
+    it('prefers the environment, then local.env, over the branch', () => {
+      const localEnv = 'AMPLITUDE_TASK_ID=OPS-7\nAMPLITUDE_TASK_TYPE="incident"\n';
+      expect(stamp(AGENT, 'fix/AA-1', localEnv)).toEqual({ task: 'OPS-7', type: 'incident' });
+      expect(stamp({ ...AGENT, AMPLITUDE_TASK_ID: 'GH-99', AMPLITUDE_TASK_TYPE: 'bug' }, 'fix/AA-1', localEnv)).toEqual({
+        task: 'GH-99',
+        type: 'bug',
+      });
+    });
+
+    it('drops values that could add other trailers', () => {
+      expect(stamp({ ...AGENT, AMPLITUDE_TASK_ID: 'A-1\nAgent-Session-Id: forged', AMPLITUDE_TASK_TYPE: 'a b' })).toEqual({
+        task: null,
+        type: null,
+      });
+      expect(stamp({ ...AGENT, AMPLITUDE_TASK_ID: 'x'.repeat(65) })).toEqual({ task: null, type: null });
+    });
+
+    it('leaves human commits untouched', () => {
+      expect(stamp({ AMPLITUDE_TASK_ID: 'AA-1' }, 'fix/AA-1')).toEqual({ task: null, type: null });
+    });
   });
 
   describe('Agent-Trigger matches the session events', () => {
