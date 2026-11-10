@@ -14,6 +14,7 @@ describe('rewriteGitCommit', () => {
     ['git commit', `git commit${T}`],
     ["git -C sub commit -m 'x'", `git -C sub commit${T} -m 'x'`],
     ["git -C 'my dir' commit -am x", `git -C 'my dir' commit${T} -am x`],
+    ['git -c user.name=a -C sub commit -m x', `git -c user.name=a -C sub commit${T} -m x`],
     [
       "git add -A && git commit -m 'fix commit msg' && git push",
       `git add -A && git commit${T} -m 'fix commit msg' && git push`,

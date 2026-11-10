@@ -347,8 +347,8 @@ export function parseVersion(text: string): [number, number, number] | null {
 }
 
 export function versionAtLeast(version: [number, number, number], min: string): boolean {
-  const want = parseVersion(min)!;
-  for (let i = 0; i < 3; i++) if (version[i] !== want[i]) return version[i]! > want[i]!;
+  const want = parseVersion(min) ?? [0, 0, 0];
+  for (const [i, part] of version.entries()) if (part !== want[i]) return part > (want[i] ?? 0);
   return true;
 }
 
@@ -1060,7 +1060,7 @@ export function runCodingAgentsDoctor(
       name: 'coding_agents.gemini_session_hook',
       ok: hookOk,
       detail: hookOk
-        ? `BeforeTool hook stamps the session on git commit`
+        ? 'BeforeTool hook stamps the session on git commit'
         : sessionHooks.length === 0
           ? `${GEMINI_SETTINGS_PATH} has no BeforeTool hook running amplitude-ai hook gemini, so Gemini CLI commits stay unstamped`
           : disabledBy?.enabled === false

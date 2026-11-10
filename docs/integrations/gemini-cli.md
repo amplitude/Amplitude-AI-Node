@@ -4,7 +4,7 @@
 
 Last verified: pending live capture. Pinned to Gemini CLI `google-gemini/gemini-cli@62bab5b2` (after v0.67.0). Needs Gemini CLI v0.65.0 or later, the first release that reads `GEMINI_TELEMETRY_OTLP_HEADERS` (google-gemini/gemini-cli#29641); older versions send no key and every export gets a 401. This is an Amplitude-authored guide; Gemini CLI is a Google project, and Google does not endorse it. Corrections are welcome as a pull request.
 
-**Provenance.** Settings and export behavior come from Gemini CLI source: `packages/core/src/telemetry/sdk.ts` (with `otlpProtocol: "http"` it posts `/v1/traces`, `/v1/logs` and `/v1/metrics` under `otlpEndpoint`, all with the same headers), `telemetry/config.ts` (`GEMINI_TELEMETRY_OTLP_HEADERS` takes `key=value` pairs, URL-decoded, or a JSON object), `config/settings.ts` (workspace settings and `.gemini/.env` load only in trusted folders) and `services/shellExecutionService.ts` (shell commands get `GEMINI_CLI=1`, but no session ID). Not yet checked against a live capture.
+**Provenance.** Settings and export behavior come from Gemini CLI source: `packages/core/src/telemetry/sdk.ts` (with `otlpProtocol: "http"` it posts `/v1/traces`, `/v1/logs` and `/v1/metrics` under `otlpEndpoint`, all with the same headers), `telemetry/config.ts` (`GEMINI_TELEMETRY_OTLP_HEADERS` takes `key=value` pairs, URL-decoded, or a JSON object), `config/settings.ts` (workspace settings and `.gemini/.env` load only in trusted folders) and `services/shellExecutionService.ts` (shell commands get `GEMINI_CLI=1`, but no session ID). Gemini CLI v0.67.0 also runs every shell command with `core.hooksPath` set to empty (one of seven `GIT_CONFIG_*` settings it injects), so no git hook runs; verified offline with git 2.52, where an empty `core.hooksPath` skips `.git/hooks` too. Telemetry is not yet checked against a live capture.
 
 ## Setup
 
@@ -23,9 +23,26 @@ printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-
     "otlpEndpoint": "https://api.amplitude.com/otlp",
     "otlpProtocol": "http",
     "logPrompts": true
+  },
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "name": "amplitude-ai-session",
+            "type": "command",
+            "command": "npx --yes -p @amplitude/ai amplitude-ai hook gemini",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
   }
 }
 ```
+
+When `package.json` lists `@amplitude/ai`, the hook calls `node_modules/.bin/amplitude-ai hook gemini` instead, which skips npx's startup on every shell command. Other hooks in the file are kept.
 
 - EU: `https://api.eu.amplitude.com/otlp` (`--region eu`).
 - Gemini CLI has one OTLP destination. If `telemetry` already points at another collector or at Google Cloud, `init` reports a `conflict` and changes nothing; `--force` points it at Amplitude.
@@ -39,6 +56,20 @@ printf %s "$AMPLITUDE_AI_API_KEY" | npx -y -p @amplitude/ai amplitude-ai coding-
   `init` doesn't write `.gemini/.env`: Gemini CLI loads only the first `.env` it finds, so a new one would hide a project `.env` that holds your `GEMINI_API_KEY`.
 - Trust the folder when Gemini CLI asks. In an untrusted folder it ignores `.gemini/settings.json` and sends nothing.
 - `enduser.id` must equal the commit author email the outcomes workflow uses. Without it, Amplitude falls back to the signed-in Google account's `user.email`.
+
+## Session on commits
+
+Because Gemini CLI turns git hooks off, the `amplitude-ai-session` hook stamps its commits instead. Before Gemini runs a shell command, the hook rewrites `git commit` (or `git -C <dir> commit`) to pass the trailers itself:
+
+```sh
+git commit --trailer 'Agent-Session-Id: <session.id>' --trailer 'Agent-Name: gemini-cli' -m "..."
+```
+
+- `Agent-Session-Id` is Gemini's `session.id`, the same ID its telemetry sends, plus `Agent-Trigger`, `Agent-Task` and `Agent-Task-Type` resolved like the commit hook's.
+- The rewrite is visible in the tool call Gemini shows you. Nothing else in the command changes, and git hooks stay off.
+- It leaves alone `--amend`, commands that already have `Agent-Session-Id`, `commit` inside quotes, and commands with a heredoc, `$(` or backticks. Those commits get no trailer.
+- Needs git 2.32 or later (`commit --trailer`). `doctor` checks it.
+- Gemini CLI prints a one-time warning the first time it runs new project hooks. `hooksConfig.enabled: false`, or the hook's name in `hooksConfig.disabled`, turns it off.
 
 ## Content gate
 
@@ -64,18 +95,18 @@ Responses with an internal `utility_*` role (routing, summarizing) are not count
 ## Known gaps
 
 - **Receiver deploy.** The events above need the Gemini CLI profile in Amplitude's OTLP receiver ([nova#36768](https://github.com/amplitude/nova/pull/36768)). Until it is deployed, Gemini CLI sessions don't appear.
-- **No session on commits.** Gemini CLI gives its shell commands `GEMINI_CLI=1` but no session ID, so the commit hook stamps `Agent-Name: gemini-cli` without `Agent-Session-Id`. Without a session to score, the outcomes workflow sends nothing for those commits.
+- **No cost.** Gemini CLI reports tokens but no cost, and Amplitude only passes through a reported cost, so its sessions have no `[Agent] Cost USD`.
 - **Metrics.** Gemini CLI also posts metrics to `/otlp/v1/metrics` every 10 seconds. Amplitude accepts and discards them.
 
 ## Verify
 
-1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: `gemini_otlp` and `gemini_api_key` pass (run it from the shell that loaded `local.env`, or with the key in the file).
-2. Run one Gemini CLI session that commits. Check the `Agent-Name: gemini-cli` trailer.
+1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: `gemini_otlp`, `gemini_api_key`, `gemini_session_hook` and `git_version` pass (run it from the shell that loaded `local.env`, or with the key in the file).
+2. Run one Gemini CLI session that commits. Check the `Agent-Session-Id` and `Agent-Name: gemini-cli` trailers (`git log -1 --format=%(trailers)`).
 3. In Amplitude, the session appears under your email with its turns and tool calls.
 
 ## Connect to outcomes
 
-Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The workflow scores only commits with an `Agent-Session-Id` trailer, so Gemini CLI sessions get no code outcomes. The in-session outcomes (Tier 1) still apply.
+Full recipe: [code-outcomes.md](recipes/code-outcomes.md). With the session hook, the workflow sends each code outcome as an `[Agent] Score` on the Gemini CLI session that made the commit. The in-session outcomes (Tier 1) apply too.
 
 ## Coding-agent prompt
 

@@ -61,7 +61,7 @@ export function resolveTask(env: LocalEnv, branch: string | null): { task: strin
 }
 
 /**
- * Inserts `trailerArgs` after each top-level `git [-C <dir>] commit` in a
+ * Inserts `trailerArgs` after each top-level `git [-C <dir>] [-c <key=value>] commit` in a
  * shell command. Returns null when there is nothing to stamp.
  */
 export function rewriteGitCommit(command: string, trailerArgs: string): string | null {
@@ -70,7 +70,7 @@ export function rewriteGitCommit(command: string, trailerArgs: string): string |
   const starts: number[] = [0];
   let quote: string | null = null;
   for (let i = 0; i < command.length; i++) {
-    const ch = command[i]!;
+    const ch = command.charAt(i);
     if (quote) {
       if (ch === quote) quote = null;
       else if (ch === '\\' && quote === '"') i++;
@@ -82,18 +82,18 @@ export function rewriteGitCommit(command: string, trailerArgs: string): string |
   }
   if (quote) return null;
   const invocation =
-    /^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*git(?:\s+-C\s+(?:'[^']*'|"[^"]*"|[^\s;&|()'"]+))?\s+commit)(?=\s|$)/;
+    /^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*git(?:\s+-[Cc]\s+(?:'[^']*'|"[^"]*"|[^\s;&|()'"]+))*\s+commit)(?=\s|$)/;
   let out = '';
   let last = 0;
   let changed = false;
   const uniqueStarts = [...new Set(starts)].sort((a, b) => a - b);
-  for (let k = 0; k < uniqueStarts.length; k++) {
-    const start = uniqueStarts[k]!;
-    const match = invocation.exec(command.slice(start));
-    if (!match) continue;
-    const end = k + 1 < uniqueStarts.length ? uniqueStarts[k + 1]! - 1 : command.length;
-    if (/(?:^|\s)--amend(?=\s|=|$)/.test(command.slice(start + match[1]!.length, end))) continue;
-    const at = start + match[1]!.length;
+  for (const [k, start] of uniqueStarts.entries()) {
+    const head = invocation.exec(command.slice(start))?.[1];
+    if (head === undefined) continue;
+    const next = uniqueStarts[k + 1];
+    const end = next === undefined ? command.length : next - 1;
+    const at = start + head.length;
+    if (/(?:^|\s)--amend(?=\s|=|$)/.test(command.slice(at, end))) continue;
     out += command.slice(last, at) + trailerArgs;
     last = at;
     changed = true;

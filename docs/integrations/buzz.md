@@ -38,7 +38,7 @@ scheduled job on the owner's machine (for example, every 15 minutes)
 - One session per thread, with the person's requests, the coordinator's replies and delegations, and each worker's replies.
 - `[Agent] Parent Agent ID` on each worker, plus `[Agent] Root Agent Name` and `[Agent] Agent Chain Depth`, so delegation shows as a tree.
 - Tokens, cost and model per agent reply from kind 44200. Cost is sent only when `deltaReliable` is true; Amplitude never invents cost.
-- goose workers' tool calls (name, arguments, output, success) from `sessions.db`, with `commit_sha` on `git commit` calls, so the team session records the commits it made (see [code outcomes](recipes/code-outcomes.md)).
+- goose workers' tool calls (name, arguments, output, success) from `sessions.db`, with `commit_sha` on `git commit` calls, so the team session records the commits it made (see [code outcomes](recipes/code-outcomes.md)). Each carries the worker's goose session in `[Agent] Context` (`harness_session_id`), the ID its commits are stamped with.
 
 ### What this guide does not do
 
@@ -106,7 +106,8 @@ Copy [buzz.mjs](./buzz.mjs) unchanged next to the job (it also ships in the npm 
 ### Phase 5: Ship
 
 - Run the job on the owner's machine, where the archive lives. Nothing leaves the machine except the events.
-- The [code outcomes](recipes/code-outcomes.md) workflow doesn't score Buzz team sessions: it scores the session in a commit's `Agent-Session-Id` trailer, and a goose worker's `AGENT_SESSION_ID` isn't the Buzz thread's `[Agent] Session ID`. Don't enable the commit hook (`core.hooksPath .githooks`) in worker checkouts, or merged commits get scored on the goose worker's own session ID, which Buzz doesn't report. Match `commit_sha` on the Tool Calls against GitHub instead.
+- Enable the commit hook (`core.hooksPath .githooks`, set by `coding-agents init`) in the repos workers commit to. Workers run the git CLI with goose's `AGENT_SESSION_ID` (goose v1.44.0 or later; earlier versions can pass a wrong inherited ID), so the [code outcomes](recipes/code-outcomes.md) workflow scores each merged commit on the worker's goose session. Those scores are not on the Buzz thread's `[Agent] Session ID`: join them to the thread through `harness_session_id` in `[Agent] Context` on the worker's Tool Calls, or match `commit_sha`.
+- Workers commit as `<64 hex>@<relay host>` and credit the person who asked with `Co-authored-by`. The outcomes workflow takes the user from that line, so the scores share the thread's user.
 
 ---
 
@@ -575,5 +576,5 @@ async function postBatch(
 
 ### More
 
-- [Code outcomes](recipes/code-outcomes.md): in-session outcomes from Tool Calls; the outcomes workflow does not score Buzz team sessions.
+- [Code outcomes](recipes/code-outcomes.md): in-session outcomes from Tool Calls, and outcome scores on each worker's goose session.
 - [goose](goose.md): goose on its own, over OpenTelemetry.

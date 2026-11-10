@@ -2,9 +2,9 @@
 
 **goose (CLI and desktop) exports OpenTelemetry traces. Point them at Amplitude and each goose session becomes an Agent Analytics session.**
 
-Last verified: pending live capture. Pinned to goose v1.28.0 or later. This is an Amplitude-authored guide; goose is a project of Block, Inc., which does not endorse it. Corrections are welcome as a pull request.
+Last verified: pending live capture. Telemetry pinned to goose v1.28.0 or later; commit stamping needs goose v1.44.0 or later. This is an Amplitude-authored guide; goose is a project of Block, Inc., which does not endorse it. Corrections are welcome as a pull request.
 
-**Provenance.** Span and resource attributes come from goose source at v1.28.0: `crates/goose/src/otel/otlp.rs` (OTLP exporter and `EnvResourceDetector`, so `OTEL_RESOURCE_ATTRIBUTES` is honored) and the agent's `reply_stream`, chat and tool spans. goose exports `AGENT_SESSION_ID` to the shell commands it runs; the commit hook stamps it. Not yet checked against a live capture.
+**Provenance.** Span and resource attributes come from goose source at v1.28.0: `crates/goose/src/otel/otlp.rs` (OTLP exporter and `EnvResourceDetector`, so `OTEL_RESOURCE_ATTRIBUTES` is honored) and the agent's `reply_stream`, chat and tool spans. goose v1.44.0 and later set `AGENT_SESSION_ID` to the session ID for the shell commands it runs, replacing any inherited value; the commit hook stamps it. Earlier versions pass an inherited `AGENT_SESSION_ID` through unchanged, so a goose started from another agent's shell stamps that agent's ID. Verified offline with goose v1.43.0 and v1.44.0; telemetry is not yet checked against a live capture.
 
 Building agents on goose for your own users? The same export works per process; set `enduser.id` to your user ID instead of an engineer's email. For agent teams on Buzz, see [buzz.md](buzz.md).
 
@@ -50,7 +50,7 @@ A shared `goosed` server scopes sessions per call, so desktop sessions stay sepa
 
 ## Verify
 
-1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: hook and workflow present. goose's environment can't be read by `doctor`; the workflow's unattributed commit count shows gaps.
+1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: hook and workflow present, and `goose_version` passes (v1.44.0 or later, checked when `goose` is on the `PATH`). goose's environment can't be read by `doctor`; `stamped_commits` shows whether recent commits carry a session.
 2. Run one goose session that commits. Check the `Agent-Session-Id` and `Agent-Name: goose` trailers.
 3. In Amplitude, the session appears under your email with its turns and tool calls.
 
@@ -59,7 +59,7 @@ A shared `goosed` server scopes sessions per call, so desktop sessions stay sepa
 Agent sessions join what happened to the code afterwards. Full recipe: [code-outcomes.md](recipes/code-outcomes.md).
 
 - **In-session:** "Produced Commit", "Opened PR" and "Tests Passed" evaluators read tool calls (content gate on).
-- **Downstream:** the trailer hook plus the workflow send each code outcome as an `[Agent] Score` on this session (Evaluation Source `outcome`; Score Names `commit_merged`, `commit_reverted`, `deploy_succeeded`, `deploy_failed`, and per PR `ci_passed_first_run`, `review_rounds` and the review counts), with `commit_sha` and `agent_setup_version` (needs the `AMPLITUDE_API_KEY` repository secret).
+- **Downstream:** the trailer hook plus the workflow send each code outcome as an `[Agent] Score` on this session (Evaluation Source `outcome`; Score Names `commit_merged`, `commit_reverted`, `deploy_succeeded`, `deploy_failed`, and per PR `ci_passed_first_run`, `ci_failed_runs`, `review_rounds` and the review counts), with `commit_sha`, `task_id`, `task_type` and `agent_setup_version` (needs the `AMPLITUDE_API_KEY` repository secret).
 
 ## Coding-agent prompt
 

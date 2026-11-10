@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/ai",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "private": false,
   "description": "Amplitude AI SDK - LLM usage tracking for Amplitude Analytics",
   "keywords": [
@@ -35,6 +35,7 @@
     "./cli/doctor": "./dist/cli/doctor.js",
     "./cli/hook-codex": "./dist/cli/hook-codex.js",
     "./cli/hook-cursor": "./dist/cli/hook-cursor.js",
+    "./cli/hook-gemini": "./dist/cli/hook-gemini.js",
     "./cli/local-env": "./dist/cli/local-env.js",
     "./cli/outcomes-workflow": "./dist/cli/outcomes-workflow.js",
     "./cli/providers": "./dist/cli/providers.js",
