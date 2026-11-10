@@ -30,6 +30,7 @@ const SHARED = join(__dirname, '../../../AA-152843-shared');
 const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
 const V2_028_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.28.0.yml');
 const V2_029_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.29.0.yml');
+const V3_030_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v3-0.30.0.yml');
 const PREVIOUS_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.28.0');
 const PREVIOUS_HOOK_030 = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.30.0');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
@@ -67,7 +68,7 @@ describe('coding-agents templates', () => {
 
   it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
     expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
-    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v3');
+    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v4');
   });
 
   it('pins the hashes of the previously shipped hook and workflow', () => {
@@ -80,9 +81,11 @@ describe('coding-agents templates', () => {
       sha256Hex(readFileSync(V1_WORKFLOW)),
       sha256Hex(readFileSync(V2_028_WORKFLOW)),
       sha256Hex(readFileSync(V2_029_WORKFLOW)),
+      sha256Hex(readFileSync(V3_030_WORKFLOW)),
     ]);
     expect(outcomesWorkflowState(readFileSync(V2_028_WORKFLOW))).toBe('outdated');
     expect(outcomesWorkflowState(readFileSync(V2_029_WORKFLOW))).toBe('outdated');
+    expect(outcomesWorkflowState(readFileSync(V3_030_WORKFLOW))).toBe('outdated');
   });
 
   it('lists the v1 workflow as a previous version', () => {

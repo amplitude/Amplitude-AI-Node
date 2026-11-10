@@ -1,8 +1,10 @@
-# agent-outcomes v3
+# agent-outcomes v4
 # Amplitude Agent Analytics: score coding-agent sessions with code outcomes (merged,
 # reverted, deployed, first-run CI, review). Each outcome is an [Agent] Score on the
 # session that wrote the commit, so only commits with an Agent-Session-Id trailer
-# (from the prepare-commit-msg hook) are scored. Installed by `amplitude-ai coding-agents init`.
+# (from the prepare-commit-msg hook) or a Copilot-Session trailer are scored. Scores carry
+# task_id and task_type from the Agent-Task trailers, and ci_passed_first_run links the CI
+# run that judged the first push. Installed by `amplitude-ai coding-agents init`.
 #
 # Setup:
 #   - Repository secret AMPLITUDE_API_KEY: the Amplitude project API key.
@@ -46,7 +48,7 @@ jobs:
         with:
           script: |
             const crypto = require('crypto');
-            const WORKFLOW_VERSION = 3;
+            const WORKFLOW_VERSION = 4;
             const { owner, repo } = context.repo;
             const repoName = `${owner}/${repo}`;
             const dryRun = process.env.AMPLITUDE_OUTCOMES_DRY_RUN === 'true';
@@ -71,9 +73,17 @@ jobs:
               while ((match = re.exec(message)) !== null) value = match[1];
               return value;
             };
+            // Buzz workers commit as <64 hex>@<relay host> and credit the person who asked
+            // with Co-authored-by, so that person is the user.
+            const BUZZ_AUTHOR = /^[0-9a-f]{64}@/i;
             const userIdFor = (c) => {
               if (userIdSource === 'login') return c.author?.login || null;
-              return c.commit?.author?.email || null;
+              const email = c.commit?.author?.email || null;
+              if (!email || !BUZZ_AUTHOR.test(email)) return email;
+              const people = [...(c.commit.message || '').matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)]
+                .map((m) => m[1].trim())
+                .filter((e) => !agentForEmail(e) && !BUZZ_AUTHOR.test(e));
+              return people.length ? people[people.length - 1] : email;
             };
             // Coding agents that sign the commits they write, by commit email. GitHub
             // noreply emails carry a fixed account ID, so a changed display name still matches.
@@ -88,7 +98,9 @@ jobs:
               '243557089+warp-factories[bot]@users.noreply.github.com': 'warp',
             };
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
-            const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id');
+            // Copilot-Session is the trailer Copilot adds for a synced Copilot CLI session.
+            const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id')
+              || trailer(c.commit.message, 'Copilot-Session');
             // A commit may stand for a merged PR only when it could be that PR's squash or merge
             // commit: GitHub made it (committer noreply@github.com), it has two parents, or its
             // title ends in "(#123)". Any other commit stands for itself, with no lookup to spend
@@ -125,7 +137,8 @@ jobs:
             };
             // The hook's Agent-Name values (claude-code, codex, cursor, goose) are the
             // [Agent] Agent ID each harness's own events carry.
-            const agentIdFor = (c) => trailer(c.commit.message, 'Agent-Name') || signingAgent(c).agent;
+            const agentIdFor = (c) => trailer(c.commit.message, 'Agent-Name')
+              || (trailer(c.commit.message, 'Copilot-Session') ? 'copilot' : signingAgent(c).agent);
             // How the agent's session started: the Agent-Trigger trailer, else `event` for a
             // commit a bot agent authored (cloud agents run from an issue or an assignment).
             const TRIGGERS = ['interactive', 'headless', 'ci', 'scheduled', 'event'];
@@ -134,11 +147,30 @@ jobs:
               if (TRIGGERS.includes(value)) return value;
               return signingAgent(c).authored ? 'event' : null;
             };
+            // The task a commit was for: its Agent-Task and Agent-Task-Type trailers. On a merged
+            // PR, a commit without them takes the PR's: the first ticket key in the branch name
+            // and its conventional prefix, else the PR title's conventional type.
+            const TASK_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
+            const TASK_TYPES = ['feat', 'fix', 'chore', 'refactor', 'docs', 'test', 'perf', 'ci', 'build', 'revert'];
+            const validTask = (v) => (v && TASK_VALUE.test(v) ? v : null);
+            const taskOf = (c, fallback = {}) => ({
+              task_id: validTask(trailer(c.commit.message, 'Agent-Task')) || fallback.task_id || null,
+              task_type: validTask(trailer(c.commit.message, 'Agent-Task-Type')) || fallback.task_type || null,
+            });
+            const prTask = (pr) => {
+              const branch = pr.head?.ref || '';
+              const key = /(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]{1,9}-[0-9]{1,7})(?![0-9])/.exec(branch);
+              const prefix = branch.includes('/') ? branch.slice(0, branch.indexOf('/')) : '';
+              const titleType = /^([a-z]+)(?:\([^)]*\))?!?:/i.exec(pr.title || '')?.[1]?.toLowerCase();
+              const type = [prefix, titleType].find((t) => TASK_TYPES.includes(t));
+              return { task_id: key?.[1] || null, task_type: type || null };
+            };
             const baseProps = (c) => ({
               commit_sha: c.sha,
               agent_session_id: sessionOf(c),
               agent_name: trailer(c.commit.message, 'Agent-Name'),
               agent_trigger: agentTrigger(c),
+              ...taskOf(c),
               repo: repoName,
             });
             const hoursBetween = (from, to) => Math.round(((Date.parse(to) - Date.parse(from)) / 3600000) * 100) / 100;
@@ -269,20 +301,22 @@ jobs:
 
             const PASSED = new Set(['success', 'neutral', 'skipped']);
             const FAILED = new Set(['failure', 'timed_out', 'action_required', 'startup_failure']);
-            // The head SHA of the PR's first pull_request workflow run, which is the
-            // first push CI ran on. A push of many commits runs CI on its head only, so
-            // the PR's oldest commits can have none. GitHub empties a run's
-            // pull_requests once the PR closes, so runs match by the PR's commit SHAs
-            // between open and merge; after a force-push, the earliest surviving push
-            // counts. This workflow's own runs are not CI. Undefined when no run
-            // matches or the run history is too long to page.
+            // The PR's pull_request workflow runs between open and merge. `first` is the
+            // earliest, the first push CI ran on: a push of many commits runs CI on its
+            // head only, so the PR's oldest commits can have none. GitHub empties a run's
+            // pull_requests once the PR closes, so runs match by the PR's commit SHAs too;
+            // after a force-push, the earliest surviving push counts. `failed` counts runs
+            // whose last attempt failed or timed out (cancelled runs don't count), and
+            // `reruns` the attempts after each run's first. This workflow's own runs are
+            // not CI. Undefined when the run history is too long to page.
             const selfWorkflow = (process.env.GITHUB_WORKFLOW_REF || '')
               .replace(/^[^/]+\/[^/]+\//, '').replace(/@.*$/, '');
-            const firstRunSha = async (pr, commits) => {
+            const RUN_FAILED = new Set(['failure', 'timed_out']);
+            const prWorkflowRuns = async (pr, commits) => {
               const prShas = new Set(commits.map((c) => c.sha));
               const opened = new Date(pr.created_at);
               const merged = pr.merged_at ? new Date(pr.merged_at) : new Date();
-              let first = null;
+              const matched = new Map();
               let page = 0;
               for await (const runs of pagesOf(github.rest.actions.listWorkflowRunsForRepo, {
                 owner, repo, branch: pr.head.ref, event: 'pull_request',
@@ -294,12 +328,18 @@ jobs:
                   if (run.id === context.runId || (selfWorkflow && run.path === selfWorkflow)) continue;
                   const ours = prShas.has(run.head_sha)
                     || (run.pull_requests || []).some((p) => p.number === pr.number);
-                  if (ours && (!first || created < new Date(first.created_at))) first = run;
+                  if (ours) matched.set(run.id, run);
                 }
-                if (runs.length < 100) return first?.head_sha;
+                if (runs.length < 100) break;
                 if (++page >= 5) return undefined;
               }
-              return first?.head_sha;
+              const all = [...matched.values()];
+              const first = all.reduce((a, r) => (!a || new Date(r.created_at) < new Date(a.created_at) ? r : a), null);
+              return {
+                first,
+                failed: all.filter((r) => RUN_FAILED.has(r.conclusion)).length,
+                reruns: all.reduce((n, r) => n + Math.max(0, (Number(r.run_attempt) || 1) - 1), 0),
+              };
             };
             const ciResults = async (sha) => {
               const runs = await listAll(github.rest.checks.listForRef, { owner, repo, ref: sha, filter: 'all' });
@@ -323,21 +363,22 @@ jobs:
             // The first CI result on the PR: the earliest attempt of each check and
             // status on the first push CI ran on. Without Actions runs, the first of
             // the PR's oldest 20 commits that has results. Cancelled and unfinished
-            // runs do not count. Undefined when the PR has no CI.
-            const ciPassedFirstRun = (pr, commits) => enrich('ci_passed_first_run', async () => {
-              let runSha;
+            // runs do not count. `passed` is undefined when the PR has no CI; `runs`
+            // when its workflow runs can't be read.
+            const ciFirstRun = (pr, commits) => enrich('ci_passed_first_run', async () => {
+              let runs;
               try {
-                runSha = await firstRunSha(pr, commits);
+                runs = await prWorkflowRuns(pr, commits);
               } catch (e) {
                 if (e instanceof BudgetExhausted) throw e;
                 core.warning(`ci_passed_first_run: workflow runs unavailable (${e.message}); using the PR's oldest commits`);
               }
-              const shas = runSha ? [runSha] : commits.slice(0, 20).map((c) => c.sha);
+              const shas = runs?.first ? [runs.first.head_sha] : commits.slice(0, 20).map((c) => c.sha);
               for (const sha of shas) {
                 const results = await ciResults(sha);
-                if (results.length) return results.every(Boolean);
+                if (results.length) return { passed: results.every(Boolean), runs };
               }
-              return undefined;
+              return { passed: undefined, runs };
             });
 
             if (context.eventName === 'pull_request') {
@@ -361,7 +402,7 @@ jobs:
               }
               // The PR-level enrichments are cheap, so they run before the per-commit
               // setup lookups that can use up the budget on a long PR.
-              let reviews, ciPassed;
+              let reviews, ci;
               if (sessions.size) {
                 reviews = await enrich('reviews', async () => {
                   const all = await listAll(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number });
@@ -370,13 +411,15 @@ jobs:
                     || (r.state === 'COMMENTED' && (r.body || '').trim()))
                     && r.user?.type !== 'Bot' && r.user?.login !== pr.user?.login);
                 });
-                ciPassed = await ciPassedFirstRun(pr, commits);
+                ci = await ciFirstRun(pr, commits);
               }
               const setupVersions = new Map();
               for (const c of agentCommits) setupVersions.set(c.sha, await setupVersionFor(c));
               const mergedMix = mixOf(commits);
+              const prTaskFallback = prTask(pr);
               for (const c of agentCommits) {
                 pushScore('commit_merged', 1, c, {
+                  ...taskOf(c, prTaskFallback),
                   merge_commit_sha: pr.merge_commit_sha,
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
@@ -434,14 +477,27 @@ jobs:
               const submitted = (reviews || []).map((r) => r.submitted_at).filter(Boolean)
                 .sort((a, b) => Date.parse(a) - Date.parse(b));
               const committedAt = commits.map((c) => c.commit?.committer?.date).filter(Boolean);
+              const firstRun = ci?.runs?.first;
               const prScores = {
-                ci_passed_first_run: ciPassed === undefined ? undefined : Number(ciPassed),
+                ci_passed_first_run: ci?.passed === undefined ? undefined : Number(ci.passed),
+                // Only for a PR with Actions runs: a repo without them has no count to report.
+                ci_failed_runs: firstRun ? ci.runs.failed : undefined,
+                ci_rerun_attempts: firstRun ? ci.runs.reruns : undefined,
                 review_rounds: reviews ? reviews.filter((r) => r.state === 'CHANGES_REQUESTED' && r.submitted_at
                   && committedAt.some((d) => Date.parse(d) > Date.parse(r.submitted_at))).length : undefined,
                 review_count: reviews?.length,
                 changes_requested_count: reviews?.filter((r) => r.state === 'CHANGES_REQUESTED').length,
                 hours_open: pr.merged_at ? hoursBetween(pr.created_at, pr.merged_at) : undefined,
                 hours_to_first_review: submitted.length ? hoursBetween(pr.created_at, submitted[0]) : undefined,
+              };
+              // The run that judged the first push, on ci_passed_first_run only.
+              const scoreProps = {
+                ci_passed_first_run: firstRun ? {
+                  ci_run_id: firstRun.id,
+                  ci_run_url: firstRun.html_url || null,
+                  ci_workflow_name: firstRun.name || null,
+                  ci_conclusion: firstRun.conclusion || null,
+                } : {},
               };
               // PR scores go on every agent session in the PR, each on its first commit.
               // Count a PR once with distinct pr_number.
@@ -456,10 +512,11 @@ jobs:
                   agent_commit_count: agentCommits.length,
                   session_commit_count: own.length,
                   ...mergedMix,
+                  ...taskOf(first, prTaskFallback),
                   agent_setup_version: setupVersions.get(first.sha),
                 };
                 for (const [name, value] of Object.entries(prScores)) {
-                  pushScore(name, value, first, props, `${pr.number}:${sessionId}`, mergedAt, userId);
+                  pushScore(name, value, first, { ...props, ...scoreProps[name] }, `${pr.number}:${sessionId}`, mergedAt, userId);
                 }
               }
             } else {
