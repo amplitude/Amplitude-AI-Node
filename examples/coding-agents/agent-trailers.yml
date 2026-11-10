@@ -1,0 +1,88 @@
+# agent-trailers v1
+# Amplitude Agent Analytics: flag agent commits in a pull request that carry no session
+# trailer (Agent-Session-Id, or Copilot-Session), because agent-outcomes.yml can't score
+# them. A commit is an agent commit when it has an Agent-Name trailer, a coding agent as
+# co-author, or a Buzz worker as author. Commits a cloud agent authored (Copilot, Cursor,
+# Claude, Devin or Warp on GitHub) are skipped: they don't run this repo's git hooks.
+# Installed by `amplitude-ai coding-agents init --require-trailers`. Reads commits only:
+# no secrets, nothing is sent.
+#
+# Setup:
+#   - Optional variable AMPLITUDE_REQUIRE_AGENT_TRAILERS: "true" fails the check on an
+#     unstamped agent commit. By default it only warns.
+name: Agent trailers (Amplitude)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  trailers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          AMPLITUDE_REQUIRE_AGENT_TRAILERS: ${{ vars.AMPLITUDE_REQUIRE_AGENT_TRAILERS }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const enforce = process.env.AMPLITUDE_REQUIRE_AGENT_TRAILERS === 'true';
+            // The same list as agent-outcomes.yml.
+            const AGENT_EMAILS = {
+              'cursoragent@cursor.com': 'cursor',
+              '206951365+cursor[bot]@users.noreply.github.com': 'cursor',
+              'noreply@anthropic.com': 'claude-code',
+              '209825114+claude[bot]@users.noreply.github.com': 'claude-code',
+              '198982749+copilot@users.noreply.github.com': 'copilot',
+              '223556219+copilot@users.noreply.github.com': 'copilot',
+              '158243242+devin-ai-integration[bot]@users.noreply.github.com': 'devin',
+              '243557089+warp-factories[bot]@users.noreply.github.com': 'warp',
+            };
+            const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
+            const BUZZ_AUTHOR = /^[0-9a-f]{64}@/i;
+            const trailer = (message, key) => {
+              const re = new RegExp(`^${key}:\\s*(\\S+)\\s*$`, 'gim');
+              let match, value = null;
+              while ((match = re.exec(message)) !== null) value = match[1];
+              return value;
+            };
+            const agentOf = (c) => {
+              const message = c.commit.message || '';
+              const name = trailer(message, 'Agent-Name');
+              if (name) return name;
+              if (BUZZ_AUTHOR.test(c.commit.author?.email || '')) return 'goose (Buzz)';
+              for (const m of message.matchAll(/^co-authored-by:.*<([^>]+)>\s*$/gim)) {
+                const agent = agentForEmail(m[1]);
+                if (agent) return agent;
+              }
+              return null;
+            };
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            const missing = [];
+            for (const c of commits) {
+              if ((c.parents?.length || 0) > 1) continue;
+              if (agentForEmail(c.commit.author?.email)) continue;
+              const message = c.commit.message || '';
+              if (trailer(message, 'Agent-Session-Id') || trailer(message, 'Copilot-Session')) continue;
+              const agent = agentOf(c);
+              if (agent) missing.push({ sha: c.sha, agent, subject: message.split('\n')[0] });
+            }
+            if (missing.length === 0) {
+              core.info(`${commits.length} commits checked; every agent commit has a session trailer.`);
+              return;
+            }
+            for (const m of missing) {
+              core.warning(`${m.sha.slice(0, 12)} (${m.agent}) has no Agent-Session-Id: ${m.subject}`);
+            }
+            const summary = `${missing.length} agent commit(s) have no session trailer, so agent-outcomes.yml can't score them. `
+              + 'Run `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor` where the agent runs.';
+            if (enforce) core.setFailed(summary);
+            else core.warning(summary);

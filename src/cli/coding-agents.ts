@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { codexHookDir } from './hook-codex.js';
 import { cursorSpoolDir, pendingConversations } from './hook-cursor.js';
@@ -48,6 +48,7 @@ const DEFAULT_HARNESSES: readonly CodingAgentHarness[] = ['claude-code', 'codex'
 export const HOOKS_PATH = '.githooks';
 export const PREPARE_COMMIT_MSG_PATH = '.githooks/prepare-commit-msg';
 export const OUTCOMES_WORKFLOW_PATH = '.github/workflows/agent-outcomes.yml';
+export const TRAILERS_WORKFLOW_PATH = '.github/workflows/agent-trailers.yml';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const CLAUDE_LOCAL_SETTINGS_PATH = '.claude/settings.local.json';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
@@ -67,6 +68,19 @@ export const CURSOR_HOOK_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook
 const CURSOR_HOOK_SUFFIX = 'amplitude-ai hook cursor';
 /** Project hooks run from the repo root, so this skips npx's startup on every hook when the repo depends on @amplitude/ai. */
 const CURSOR_LOCAL_BIN = 'node_modules/.bin/amplitude-ai';
+/**
+ * The Gemini CLI `BeforeTool` hook that adds the session trailers to `git commit`
+ * (Gemini CLI turns git hooks off). Gemini runs project hooks from the project directory.
+ */
+export const GEMINI_HOOK_COMMAND = 'npx --yes -p @amplitude/ai amplitude-ai hook gemini';
+export const GEMINI_HOOK_NAME = 'amplitude-ai-session';
+const GEMINI_HOOK_MATCHER = 'run_shell_command';
+/** Milliseconds. Long enough for a cold npx; Gemini runs the command unchanged if the hook times out. */
+const GEMINI_HOOK_TIMEOUT = 30000;
+/** `git commit --trailer`. */
+export const MIN_GIT_VERSION = '2.32.0';
+/** goose sets AGENT_SESSION_ID for its shell commands from 1.44.0. */
+export const MIN_GOOSE_VERSION = '1.44.0';
 
 /**
  * The committed hooks call the local bin only when `package.json` declares `@amplitude/ai`, so every
@@ -122,6 +136,8 @@ export type CodingAgentsInitOptions = {
   git?: GitRunner;
   /** Defaults to `process.platform`; `win32` keeps the Cursor hooks on npx. */
   platform?: NodeJS.Platform;
+  /** Also install `agent-trailers.yml`, which flags agent commits without a session trailer. */
+  requireTrailers?: boolean;
 };
 
 export type CodingAgentsChange = {
@@ -276,6 +292,65 @@ function cursorHookCommands(entries: unknown): string[] {
 }
 
 const isCursorForwarder = (command: string) => /amplitude-ai(?:\.exe)? hook cursor$/.test(command.trim());
+
+const isGeminiSessionHook = (command: string) => /amplitude-ai(?:\.exe)? hook gemini$/.test(command.trim());
+
+/** The `BeforeTool` hook entries in Gemini CLI settings that run `amplitude-ai hook gemini` on shell commands. */
+function geminiSessionHooks(settings: JsonObject | null): JsonObject[] {
+  const hooks = settings && isObject(settings.hooks) ? settings.hooks : {};
+  const groups = Array.isArray(hooks.BeforeTool) ? hooks.BeforeTool : [];
+  const matchesShell = (matcher: unknown) => {
+    if (matcher === undefined || matcher === '' || matcher === '*') return true;
+    if (typeof matcher !== 'string') return false;
+    try {
+      return new RegExp(`^(?:${matcher})$`).test(GEMINI_HOOK_MATCHER);
+    } catch {
+      return matcher === GEMINI_HOOK_MATCHER;
+    }
+  };
+  return groups
+    .filter(isObject)
+    .filter((g) => matchesShell(g.matcher))
+    .flatMap((g) => (Array.isArray(g.hooks) ? g.hooks.filter(isObject) : []))
+    .filter((h) => typeof h.command === 'string' && isGeminiSessionHook(h.command));
+}
+
+/** Adds the session hook to `settings.hooks.BeforeTool`, or points an existing one at `command`. Keeps every other hook. */
+export function mergeGeminiSessionHook(settings: JsonObject, command: string): void {
+  const hooks = isObject(settings.hooks) ? settings.hooks : {};
+  const groups = Array.isArray(hooks.BeforeTool) ? hooks.BeforeTool : [];
+  let found = false;
+  for (const g of groups) {
+    if (!isObject(g) || !Array.isArray(g.hooks)) continue;
+    for (const h of g.hooks) {
+      if (isObject(h) && typeof h.command === 'string' && isGeminiSessionHook(h.command)) {
+        // A local bin replaces the npx launcher; anything else the user wrote stays.
+        if (h.command === GEMINI_HOOK_COMMAND || h.command === `${CURSOR_LOCAL_BIN} hook gemini`) h.command = command;
+        found = true;
+      }
+    }
+  }
+  if (!found) {
+    groups.push({
+      matcher: GEMINI_HOOK_MATCHER,
+      hooks: [{ name: GEMINI_HOOK_NAME, type: 'command', command, timeout: GEMINI_HOOK_TIMEOUT }],
+    });
+  }
+  hooks.BeforeTool = groups;
+  settings.hooks = hooks;
+}
+
+/** `[major, minor, patch]` from the first `x.y[.z]` in `text`, or null. */
+export function parseVersion(text: string): [number, number, number] | null {
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(text);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)] : null;
+}
+
+export function versionAtLeast(version: [number, number, number], min: string): boolean {
+  const want = parseVersion(min) ?? [0, 0, 0];
+  for (const [i, part] of version.entries()) if (part !== want[i]) return part > (want[i] ?? 0);
+  return true;
+}
 
 /** Launchers init writes when no local binary exists; a later init with one replaces them. */
 const CURSOR_FALLBACK_COMMANDS = [CURSOR_HOOK_COMMAND, CURSOR_HOOK_SUFFIX];
@@ -484,6 +559,18 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
     'sends code outcomes as [Agent] Score on the session that wrote each commit',
     PREVIOUS_OUTCOMES_WORKFLOW_SHA256,
   );
+  if (options.requireTrailers) {
+    writeTemplateFile(
+      writer,
+      cwd,
+      TRAILERS_WORKFLOW_PATH,
+      readCodingAgentsTemplate('agent-trailers.yml', templatesDir),
+      undefined,
+      force,
+      warnings,
+      'warns on agent commits without a session trailer (AMPLITUDE_REQUIRE_AGENT_TRAILERS=true fails the check)',
+    );
+  }
 
   let hooksPathOk = true;
   if (!isRepo) {
@@ -670,17 +757,32 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
       const telemetry = isObject(merged.telemetry) ? merged.telemetry : {};
       const endpoint = typeof telemetry.otlpEndpoint === 'string' ? telemetry.otlpEndpoint : '';
       const elsewhere = (endpoint && !endpoint.includes('amplitude.com')) || telemetry.target === 'gcp';
+      const local = cursorUsesLocalBin(cwd, options.platform ?? process.platform);
+      mergeGeminiSessionHook(merged, local ? `${CURSOR_LOCAL_BIN} hook gemini` : GEMINI_HOOK_COMMAND);
       if (elsewhere && !force) {
+        // The session hook doesn't depend on where telemetry goes, so it's added either way.
         writer.conflict(GEMINI_SETTINGS_PATH, `telemetry already goes to ${endpoint || 'Google Cloud'}`);
         warnings.push(
           `${GEMINI_SETTINGS_PATH} already sends Gemini CLI telemetry to ${endpoint || 'Google Cloud'}. Gemini CLI has one OTLP destination; re-run with --force to point it at Amplitude.`,
         );
+        writer.write(
+          GEMINI_SETTINGS_PATH,
+          stringify(merged),
+          'BeforeTool hook that stamps the session on git commit; telemetry left as is (no secrets)',
+        );
       } else {
         merged.telemetry = { ...telemetry, ...geminiTelemetrySettings(privacy, region) };
-        writer.write(GEMINI_SETTINGS_PATH, stringify(merged), 'OpenTelemetry export to Amplitude (no secrets)');
+        writer.write(
+          GEMINI_SETTINGS_PATH,
+          stringify(merged),
+          'OpenTelemetry export to Amplitude and a BeforeTool hook that stamps the session on git commit (no secrets)',
+        );
         if (typeof telemetry.outfile === 'string' && telemetry.outfile) {
           warnings.push(`${GEMINI_SETTINGS_PATH} sets telemetry.outfile, which Gemini CLI uses instead of OTLP; remove it.`);
         }
+      }
+      if (isObject(merged.hooksConfig) && merged.hooksConfig.enabled === false) {
+        warnings.push(`${GEMINI_SETTINGS_PATH} sets hooksConfig.enabled to false, so Gemini CLI commits stay unstamped.`);
       }
     }
 
@@ -694,6 +796,7 @@ export function runCodingAgentsInit(options: CodingAgentsInitOptions): CodingAge
         ? `Gemini CLI: start gemini from a shell that loads the header: set -a; . ./${LOCAL_ENV_PATH}; set +a`
         : `Gemini CLI: export GEMINI_TELEMETRY_OTLP_HEADERS="Authorization=Bearer%20<AMPLITUDE_AI_API_KEY>" in the shell that starts gemini (or re-run with --api-key-stdin to keep it in ${LOCAL_ENV_PATH}).`,
       'Gemini CLI: trust this folder when gemini asks; it ignores .gemini/settings.json in untrusted folders.',
+      `Gemini CLI turns git hooks off, so the ${GEMINI_HOOK_NAME} hook adds --trailer flags to the git commit commands it runs (shown in the tool call; needs git ${MIN_GIT_VERSION}+). Gemini prints a one-time warning when it first runs new project hooks.`,
     );
   }
 
@@ -944,7 +1047,66 @@ export function runCodingAgentsDoctor(
         ...(!hasHeader && { fix: `${fixInit} --harness gemini --api-key-stdin` }),
       });
     }
+
+    const userGemini = readJsonFile(join(home, GEMINI_SETTINGS_PATH));
+    const sessionHooks = geminiSessionHooks(gemini.ok ? gemini.value : null);
+    const disabledBy = [gemini.ok ? gemini.value : null, userGemini.ok ? userGemini.value : null]
+      .map((s) => (s && isObject(s.hooksConfig) ? s.hooksConfig : null))
+      .find(
+        (c) =>
+          c &&
+          (c.enabled === false ||
+            (Array.isArray(c.disabled) &&
+              c.disabled.some((d) => d === GEMINI_HOOK_NAME || sessionHooks.some((h) => h.command === d)))),
+      );
+    const hookOk = sessionHooks.length > 0 && !disabledBy;
+    checks.push({
+      name: 'coding_agents.gemini_session_hook',
+      ok: hookOk,
+      detail: hookOk
+        ? 'BeforeTool hook stamps the session on git commit'
+        : sessionHooks.length === 0
+          ? `${GEMINI_SETTINGS_PATH} has no BeforeTool hook running amplitude-ai hook gemini, so Gemini CLI commits stay unstamped`
+          : disabledBy?.enabled === false
+            ? 'hooksConfig.enabled is false, so Gemini CLI runs no hooks'
+            : `hooksConfig.disabled turns off ${GEMINI_HOOK_NAME}`,
+      ...(!hookOk && {
+        fix:
+          sessionHooks.length === 0
+            ? `${fixInit} --harness gemini`
+            : 'Remove the hooksConfig setting that turns the hook off',
+      }),
+    });
+
+    const gitVersion = parseVersion(git(['--version'], cwd).stdout);
+    const gitOk = gitVersion !== null && versionAtLeast(gitVersion, MIN_GIT_VERSION);
+    checks.push({
+      name: 'coding_agents.git_version',
+      ok: gitOk,
+      detail: gitVersion
+        ? `git ${gitVersion.join('.')}${gitOk ? '' : `; Gemini CLI commits need ${MIN_GIT_VERSION}+ for --trailer`}`
+        : 'git --version failed',
+      ...(!gitOk && { fix: `Upgrade git to ${MIN_GIT_VERSION} or later` }),
+    });
   }
+
+  // Only when goose is on this shell's PATH: doctor can't tell otherwise whether goose is in use.
+  const goose = findOnPath('goose', env.PATH);
+  if (goose) {
+    const r = spawnSync(goose, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    const version = r.status === 0 ? parseVersion(r.stdout ?? '') : null;
+    const ok = version !== null && versionAtLeast(version, MIN_GOOSE_VERSION);
+    checks.push({
+      name: 'coding_agents.goose_version',
+      ok,
+      detail: version
+        ? `goose ${version.join('.')}${ok ? '' : `; goose sets AGENT_SESSION_ID for commits from ${MIN_GOOSE_VERSION}`}`
+        : `${goose} --version failed`,
+      ...(!ok && { fix: 'goose update' }),
+    });
+  }
+
+  if (hookExists) checks.push(firstCommitCheck(git, cwd));
 
   // Copilot is configured by environment only, so this reads the shell doctor runs in.
   const copilotEnabled = (env.COPILOT_OTEL_ENABLED ?? '').toLowerCase() === 'true';
@@ -969,6 +1131,50 @@ export function runCodingAgentsDoctor(
   return { ok: checks.every((c) => c.ok), checks };
 }
 
+function findOnPath(name: string, path: string | undefined): string | null {
+  for (const dir of (path ?? '').split(delimiter)) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Not in this directory.
+    }
+  }
+  return null;
+}
+
+const FIRST_COMMIT_WINDOW = 20;
+
+/** Whether the last commits carry session trailers, per harness. Informational: a new repo has none yet. */
+function firstCommitCheck(git: GitRunner, cwd: string): CodingAgentsCheck {
+  const log = git(
+    [
+      'log',
+      `-${FIRST_COMMIT_WINDOW}`,
+      '--format=%(trailers:key=Agent-Name,valueonly,separator=%x2C)%x1f%(trailers:key=Agent-Session-Id,valueonly,separator=%x2C)%x1f%(trailers:key=Copilot-Session,valueonly,separator=%x2C)%x1e',
+    ],
+    cwd,
+  );
+  const counts = new Map<string, number>();
+  if (log.status === 0) {
+    for (const record of log.stdout.split('\x1e')) {
+      const [name = '', session = '', copilot = ''] = record.trim().split('\x1f');
+      if (!session.trim() && !copilot.trim()) continue;
+      const harness = name.trim().split(',')[0] || (copilot.trim() ? 'copilot' : 'unknown');
+      counts.set(harness, (counts.get(harness) ?? 0) + 1);
+    }
+  }
+  return {
+    name: 'coding_agents.stamped_commits',
+    ok: true,
+    detail:
+      counts.size > 0
+        ? `stamped commits in the last ${FIRST_COMMIT_WINDOW}: ${[...counts].map(([h, n]) => `${h} (${n})`).join(', ')}. Each session gets [Agent] Score events when its PR merges.`
+        : `no stamped commits in the last ${FIRST_COMMIT_WINDOW} yet. The next agent commit should carry Agent-Session-Id; its session's first [Agent] Score (ci_passed_first_run) arrives when the PR merges.`,
+  };
+}
+
 function parseHarnesses(values: string[]): CodingAgentHarness[] {
   const out: CodingAgentHarness[] = [];
   for (const v of values.flatMap((s) => s.split(','))) {
@@ -991,7 +1197,8 @@ async function readStdin(): Promise<string> {
 const USAGE = `Usage:
   amplitude-ai coding-agents init [--harness claude-code|codex|goose|cursor|gemini|copilot] [--dry-run]
                                   [--privacy full|metadata] [--region us|eu]
-                                  [--api-key-stdin | --api-key-env NAME] [--force] [--dir PATH] [--json]
+                                  [--api-key-stdin | --api-key-env NAME] [--require-trailers] [--force]
+                                  [--dir PATH] [--json]
   amplitude-ai coding-agents doctor [--dir PATH] [--json]
 `;
 
@@ -1005,6 +1212,7 @@ export async function main(argv: string[]): Promise<number> {
   let dryRun = false;
   let json = false;
   let force = false;
+  let requireTrailers = false;
   let apiKeyStdin = false;
   let apiKeyEnv: string | undefined;
   let privacy: CodingAgentsPrivacy = 'full';
@@ -1023,6 +1231,7 @@ export async function main(argv: string[]): Promise<number> {
       else if (flag === '--dry-run') dryRun = true;
       else if (flag === '--json') json = true;
       else if (flag === '--force') force = true;
+      else if (flag === '--require-trailers') requireTrailers = true;
       else if (flag === '--api-key-stdin') apiKeyStdin = true;
       else if (flag === '--api-key-env') apiKeyEnv = value();
       else if (flag === '--dir') dir = resolve(value());
@@ -1065,6 +1274,7 @@ export async function main(argv: string[]): Promise<number> {
       region,
       apiKey,
       force,
+      requireTrailers,
     });
     if (json) {
       process.stdout.write(stringify(result));

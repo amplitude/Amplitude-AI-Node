@@ -4,7 +4,7 @@
 
 Last verified: pending live capture. Pinned to Copilot CLI 1.0.4 or later (the first release with OpenTelemetry) and the VS Code Copilot extension's `github.copilot.chat.otel.*` settings. This is an Amplitude-authored guide; GitHub does not endorse it. Corrections are welcome as a pull request.
 
-**Provenance.** Variables, spans and attributes come from GitHub's [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference) ("OpenTelemetry monitoring") and the VS Code extension source (`extensions/copilot/docs/monitoring/agent_monitoring.md`, `src/platform/otel/common/agentOTelEnv.ts` in `microsoft/vscode`). The endpoint is a base URL, `/v1/traces` is appended, and the wire format is OTLP over HTTP. Not yet checked against a live capture.
+**Provenance.** Variables, spans and attributes come from GitHub's [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference) ("OpenTelemetry monitoring") and the VS Code extension source (`extensions/copilot/docs/monitoring/agent_monitoring.md`, `src/platform/otel/common/agentOTelEnv.ts` in `microsoft/vscode`). The endpoint is a base URL, `/v1/traces` is appended, and the wire format is OTLP over HTTP. Copilot CLI exports `COPILOT_AGENT_SESSION_ID` to the shell commands it runs, equal to `gen_ai.conversation.id` and the `--resume` ID; verified offline with Copilot CLI 1.0.108. Telemetry is not yet checked against a live capture.
 
 ## Setup
 
@@ -68,7 +68,8 @@ These are the standard OpenTelemetry variables, so exporting them from the profi
 
 ## Known gaps
 
-- **No session on commits.** Copilot gives its shell commands no session ID, so the commit hook adds nothing. Copilot's commits (its noreply address as author or in `Co-authored-by`) can't be joined to a session, so the outcomes workflow sends nothing for them.
+- **Copilot Chat in VS Code commits.** Only Copilot CLI is known to export a session ID to its shell commands, so commits from VS Code agent mode get no `Agent-Session-Id`. A synced session's `Copilot-Session` trailer is scored when present.
+- **No cost.** Copilot reports tokens but no cost, and Amplitude only passes through a reported cost, so its sessions have no `[Agent] Cost USD`.
 - **Copilot coding agent.** It runs in GitHub's sandbox, where your environment doesn't reach, so it sends no sessions; its commits are attributed by author.
 - **Metrics.** Copilot also posts metrics to `/otlp/v1/metrics`. Amplitude accepts and discards them.
 - **Policy.** Enterprise policy can block telemetry or content capture.
@@ -76,12 +77,12 @@ These are the standard OpenTelemetry variables, so exporting them from the profi
 ## Verify
 
 1. `npx -y -p @amplitude/ai amplitude-ai coding-agents doctor`: `copilot_otlp` reads only exported variables, so with the function it reports them as not exported, which is expected. `type copilot` shows the function is loaded. VS Code settings can't be read by `doctor`.
-2. Run one Copilot session in this repo.
+2. Run one Copilot CLI session in this repo that commits. Check the `Agent-Session-Id` and `Agent-Name: copilot` trailers.
 3. In Amplitude, the session appears under your email with its model calls and tool calls.
 
 ## Connect to outcomes
 
-Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The workflow scores only commits with an `Agent-Session-Id` trailer, so Copilot sessions get no code outcomes. The in-session outcomes (Tier 1) still apply.
+Full recipe: [code-outcomes.md](recipes/code-outcomes.md). The commit hook stamps Copilot CLI commits with `COPILOT_AGENT_SESSION_ID`, so the workflow sends each code outcome as an `[Agent] Score` on that session; a `Copilot-Session` trailer is read when there is no `Agent-Session-Id`. The in-session outcomes (Tier 1) apply too.
 
 ## Coding-agent prompt
 

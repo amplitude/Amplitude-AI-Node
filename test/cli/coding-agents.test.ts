@@ -30,7 +30,9 @@ const SHARED = join(__dirname, '../../../AA-152843-shared');
 const V1_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v1.yml');
 const V2_028_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.28.0.yml');
 const V2_029_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v2-0.29.0.yml');
+const V3_030_WORKFLOW = join(__dirname, '../fixtures/coding-agents/agent-outcomes-v3-0.30.0.yml');
 const PREVIOUS_HOOK = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.28.0');
+const PREVIOUS_HOOK_030 = join(__dirname, '../fixtures/coding-agents/prepare-commit-msg-0.30.0');
 const WORKFLOW = '.github/workflows/agent-outcomes.yml';
 const SECRET = 'init-test-key-never-printed';
 const template = (name: string) => readFileSync(join(TEMPLATES, name), 'utf8');
@@ -66,19 +68,24 @@ describe('coding-agents templates', () => {
 
   it('ships the outcomes workflow whose hash the Python SDK pins too', () => {
     expect(sha256Hex(readFileSync(join(TEMPLATES, 'agent-outcomes.yml')))).toBe(OUTCOMES_WORKFLOW_SHA256);
-    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v3');
+    expect(template('agent-outcomes.yml').split('\n')[0]).toBe('# agent-outcomes v4');
   });
 
   it('pins the hashes of the previously shipped hook and workflow', () => {
-    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toEqual([sha256Hex(readFileSync(PREVIOUS_HOOK))]);
+    expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).toEqual([
+      sha256Hex(readFileSync(PREVIOUS_HOOK)),
+      sha256Hex(readFileSync(PREVIOUS_HOOK_030)),
+    ]);
     expect(PREVIOUS_PREPARE_COMMIT_MSG_SHA256).not.toContain(sha256Hex(readFileSync(join(TEMPLATES, 'prepare-commit-msg'))));
     expect(PREVIOUS_OUTCOMES_WORKFLOW_SHA256).toEqual([
       sha256Hex(readFileSync(V1_WORKFLOW)),
       sha256Hex(readFileSync(V2_028_WORKFLOW)),
       sha256Hex(readFileSync(V2_029_WORKFLOW)),
+      sha256Hex(readFileSync(V3_030_WORKFLOW)),
     ]);
     expect(outcomesWorkflowState(readFileSync(V2_028_WORKFLOW))).toBe('outdated');
     expect(outcomesWorkflowState(readFileSync(V2_029_WORKFLOW))).toBe('outdated');
+    expect(outcomesWorkflowState(readFileSync(V3_030_WORKFLOW))).toBe('outdated');
   });
 
   it('lists the v1 workflow as a previous version', () => {
@@ -109,6 +116,16 @@ describe('coding-agents init', () => {
     expect(pkgText).toContain('\n    "scripts"');
     expect(JSON.parse(pkgText).scripts).toEqual({ build: 'tsc', prepare: 'git config core.hooksPath .githooks || true' });
     expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it('installs agent-trailers.yml only with requireTrailers', () => {
+    init();
+    expect(existsSync(join(repo, '.github/workflows/agent-trailers.yml'))).toBe(false);
+    const result = init({ requireTrailers: true });
+    expect(readFileSync(join(repo, '.github/workflows/agent-trailers.yml'), 'utf8')).toBe(template('agent-trailers.yml'));
+    expect(result.changes.find((c) => c.path === '.github/workflows/agent-trailers.yml')!.action).toBe('create');
+    writeFileSync(join(repo, '.github/workflows/agent-trailers.yml'), '# mine\n');
+    expect(init({ requireTrailers: true }).warnings.join('\n')).toContain('agent-trailers.yml already exists');
   });
 
   it('merges Claude Code settings from the template and keeps the key in the gitignored local file', () => {
@@ -373,6 +390,21 @@ describe('coding-agents init', () => {
         otlpProtocol: 'http',
         logPrompts: true,
       },
+      hooks: {
+        BeforeTool: [
+          {
+            matcher: 'run_shell_command',
+            hooks: [
+              {
+                name: 'amplitude-ai-session',
+                type: 'command',
+                command: 'npx --yes -p @amplitude/ai amplitude-ai hook gemini',
+                timeout: 30000,
+              },
+            ],
+          },
+        ],
+      },
     });
     expect(readFileSync(join(repo, '.gemini/settings.json'), 'utf8')).not.toContain(SECRET);
     const local = parseLocalEnv(readFileSync(join(repo, '.amplitude-ai/local.env'), 'utf8'));
@@ -398,14 +430,19 @@ describe('coding-agents init', () => {
     );
   });
 
-  it('leaves Gemini CLI telemetry pointed elsewhere alone without --force', () => {
+  it('leaves Gemini CLI telemetry pointed elsewhere alone without --force, and still adds the session hook', () => {
     mkdirSync(join(repo, '.gemini'), { recursive: true });
     const theirs = { telemetry: { enabled: true, otlpEndpoint: 'http://localhost:4317' } };
     writeFileSync(join(repo, '.gemini/settings.json'), JSON.stringify(theirs));
     const result = init({ harnesses: ['gemini'] });
     expect(result.ok).toBe(false);
-    expect(result.changes.find((c) => c.path === '.gemini/settings.json')!.action).toBe('conflict');
-    expect(readJson('.gemini/settings.json')).toEqual(theirs);
+    expect(result.changes.filter((c) => c.path === '.gemini/settings.json').map((c) => c.action)).toEqual([
+      'conflict',
+      'update',
+    ]);
+    const settings = readJson('.gemini/settings.json');
+    expect(settings.telemetry).toEqual(theirs.telemetry);
+    expect(settings.hooks.BeforeTool[0].hooks[0].name).toBe('amplitude-ai-session');
     init({ harnesses: ['gemini'], force: true });
     expect(readJson('.gemini/settings.json').telemetry.otlpEndpoint).toBe('https://api.amplitude.com/otlp');
   });
@@ -538,6 +575,12 @@ describe('coding-agents init', () => {
     [{ CLAUDE_CODE_SESSION_ID: 's1' }, ['Agent-Session-Id: s1', 'Agent-Name: claude-code']],
     [{ CODEX_THREAD_ID: 't1' }, ['Agent-Session-Id: t1', 'Agent-Name: codex']],
     [{ AGENT_SESSION_ID: 'g1' }, ['Agent-Session-Id: g1', 'Agent-Name: goose']],
+    [{ COPILOT_AGENT_SESSION_ID: 'dca8fe3f-adb8-4ade-b6c0-8be1c0b17110' }, ['Agent-Session-Id: dca8fe3f-adb8-4ade-b6c0-8be1c0b17110', 'Agent-Name: copilot']],
+    [{ COPILOT_AGENT_SESSION_ID: 'p1', AGENT_SESSION_ID: 'g1' }, ['Agent-Session-Id: p1', 'Agent-Name: copilot']],
+    [{ AGENT_SESSION_ID: 'g1\nAgent-Session-Id: forged' }, ['Agent-Name: goose']],
+    [{ COPILOT_AGENT_SESSION_ID: 'a b' }, ['Agent-Name: copilot']],
+    [{ CODEX_THREAD_ID: 'x'.repeat(129) }, ['Agent-Name: codex']],
+    [{ CODEX_THREAD_ID: 'x'.repeat(128) }, [`Agent-Session-Id: ${'x'.repeat(128)}`, 'Agent-Name: codex']],
     [{ CURSOR_AGENT: '1', CURSOR_CONVERSATION_ID: 'c1' }, ['Agent-Session-Id: c1', 'Agent-Name: cursor']],
     [{ GEMINI_CLI: '1' }, ['Agent-Name: gemini-cli']],
     [{}, []],
@@ -561,6 +604,65 @@ describe('coding-agents init', () => {
     const text = readFileSync(msg, 'utf8');
     expect(text.trim().split('\n').slice(2)).toEqual(trailers);
     expect(text).not.toContain('Agent-Session-Id: \n');
+  });
+
+  describe('task trailers', () => {
+    const stamp = (env: Record<string, string>, branch = 'main', localEnv?: string) => {
+      git('symbolic-ref', 'HEAD', `refs/heads/${branch}`);
+      if (localEnv !== undefined) {
+        mkdirSync(join(repo, '.amplitude-ai'), { recursive: true });
+        writeFileSync(join(repo, '.amplitude-ai/local.env'), localEnv);
+      }
+      const msg = join(repo, 'MSG');
+      writeFileSync(msg, 'feat: x\n');
+      const r = spawnSync('sh', [join(TEMPLATES, 'prepare-commit-msg'), msg], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: home, ...env },
+      });
+      expect(r.status).toBe(0);
+      const text = readFileSync(msg, 'utf8');
+      return {
+        task: /^Agent-Task: (.*)$/m.exec(text)?.[1] ?? null,
+        type: /^Agent-Task-Type: (.*)$/m.exec(text)?.[1] ?? null,
+      };
+    };
+    const AGENT = { CLAUDE_CODE_SESSION_ID: 's1' };
+
+    it.each([
+      ['fix/AA-152843-commit-sessions', 'AA-152843', 'fix'],
+      ['vinaygoel/AA-152843-commit-sessions', 'AA-152843', null],
+      ['feat/LIN-42', 'LIN-42', 'feat'],
+      ['feat/add-thing', null, 'feat'],
+      ['main', null, null],
+      ['fixes/AB-1', 'AB-1', null],
+      ['fix/XAB-12345678', null, 'fix'],
+      ['fix/aa-12', null, 'fix'],
+      ['chore/AB-1-and-CD-2', 'AB-1', 'chore'],
+    ])('reads branch %s', (branch, task, type) => {
+      expect(stamp(AGENT, branch)).toEqual({ task, type });
+    });
+
+    it('prefers the environment, then local.env, over the branch', () => {
+      const localEnv = 'AMPLITUDE_TASK_ID=OPS-7\nAMPLITUDE_TASK_TYPE="incident"\n';
+      expect(stamp(AGENT, 'fix/AA-1', localEnv)).toEqual({ task: 'OPS-7', type: 'incident' });
+      expect(stamp({ ...AGENT, AMPLITUDE_TASK_ID: 'GH-99', AMPLITUDE_TASK_TYPE: 'bug' }, 'fix/AA-1', localEnv)).toEqual({
+        task: 'GH-99',
+        type: 'bug',
+      });
+    });
+
+    it('drops values that could add other trailers', () => {
+      expect(stamp({ ...AGENT, AMPLITUDE_TASK_ID: 'A-1\nAgent-Session-Id: forged', AMPLITUDE_TASK_TYPE: 'a b' })).toEqual({
+        task: null,
+        type: null,
+      });
+      expect(stamp({ ...AGENT, AMPLITUDE_TASK_ID: 'x'.repeat(65) })).toEqual({ task: null, type: null });
+    });
+
+    it('leaves human commits untouched', () => {
+      expect(stamp({ AMPLITUDE_TASK_ID: 'AA-1' }, 'fix/AA-1')).toEqual({ task: null, type: null });
+    });
   });
 
   describe('Agent-Trigger matches the session events', () => {
@@ -758,8 +860,105 @@ describe('coding-agents doctor', () => {
     );
     init({ harnesses: ['gemini'], apiKey: SECRET });
     expect(byName({})['coding_agents.gemini_api_key']!.ok).toBe(true);
+    expect(byName({})['coding_agents.gemini_session_hook']!.ok).toBe(true);
+    expect(byName({})['coding_agents.git_version']!.ok).toBe(true);
     writeFileSync(join(repo, '.gemini/settings.json'), JSON.stringify({ telemetry: { enabled: false } }));
     expect(byName({})['coding_agents.gemini_otlp']).toMatchObject({ ok: false });
+    expect(byName({})['coding_agents.gemini_session_hook']).toMatchObject({
+      ok: false,
+      fix: expect.stringContaining('--harness gemini'),
+    });
+  });
+
+  it('keeps user Gemini hooks, upgrades the launcher in place and reports hooks turned off', () => {
+    mkdirSync(join(repo, '.gemini'), { recursive: true });
+    const mine = { matcher: 'write_file', hooks: [{ name: 'mine', type: 'command', command: './lint.sh' }] };
+    writeFileSync(join(repo, '.gemini/settings.json'), JSON.stringify({ hooks: { BeforeTool: [mine] } }));
+    init({ harnesses: ['gemini'] });
+    init({ harnesses: ['gemini'] });
+    let before = readJson('.gemini/settings.json').hooks.BeforeTool;
+    expect(before).toHaveLength(2);
+    expect(before[0]).toEqual(mine);
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ devDependencies: { '@amplitude/ai': '*' } }));
+    init({ harnesses: ['gemini'], platform: 'darwin' });
+    before = readJson('.gemini/settings.json').hooks.BeforeTool;
+    expect(before).toHaveLength(2);
+    expect(before[1].hooks[0].command).toBe('node_modules/.bin/amplitude-ai hook gemini');
+
+    const check = () =>
+      runCodingAgentsDoctor(repo, { env: {}, home }).checks.find(
+        (c) => c.name === 'coding_agents.gemini_session_hook',
+      )!;
+    expect(check().ok).toBe(true);
+    mkdirSync(join(home, '.gemini'), { recursive: true });
+    writeFileSync(
+      join(home, '.gemini/settings.json'),
+      JSON.stringify({ hooksConfig: { disabled: ['amplitude-ai-session'] } }),
+    );
+    expect(check()).toMatchObject({ ok: false, detail: 'hooksConfig.disabled turns off amplitude-ai-session' });
+    writeFileSync(join(home, '.gemini/settings.json'), JSON.stringify({ hooksConfig: { enabled: false } }));
+    expect(check()).toMatchObject({ ok: false, detail: 'hooksConfig.enabled is false, so Gemini CLI runs no hooks' });
+  });
+
+  it('flags git older than 2.32 for Gemini CLI commits', () => {
+    init({ harnesses: ['gemini'] });
+    const fakeGit = (args: string[], cwd: string) =>
+      args[0] === '--version'
+        ? { status: 0, stdout: 'git version 2.31.1' }
+        : (({ status, stdout }) => ({ status: status ?? 1, stdout: stdout.trim() }))(
+            spawnSync('git', args, { cwd, encoding: 'utf8' }),
+          );
+    const check = runCodingAgentsDoctor(repo, { env: {}, home, git: fakeGit }).checks.find(
+      (c) => c.name === 'coding_agents.git_version',
+    )!;
+    expect(check).toMatchObject({ ok: false, detail: 'git 2.31.1; Gemini CLI commits need 2.32.0+ for --trailer' });
+  });
+
+  it.each([
+    ['1.43.0', false],
+    ['1.44.0', true],
+    ['2.0.1', true],
+  ])('checks goose %s on PATH', (version, ok) => {
+    init({ harnesses: ['goose'] });
+    const bin = join(home, 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'goose'), `#!/bin/sh\necho " ${version}"\n`, { mode: 0o755 });
+    const checks = (env: NodeJS.ProcessEnv) => runCodingAgentsDoctor(repo, { env, home }).checks;
+    expect(checks({}).find((c) => c.name === 'coding_agents.goose_version')).toBeUndefined();
+    expect(checks({ PATH: bin }).find((c) => c.name === 'coding_agents.goose_version')).toMatchObject({ ok });
+  });
+
+  it('reports stamped commits per harness in the last 20', () => {
+    init({ harnesses: ['goose'] });
+    const check = () =>
+      runCodingAgentsDoctor(repo, { env: {}, home }).checks.find((c) => c.name === 'coding_agents.stamped_commits')!;
+    expect(check()).toMatchObject({
+      ok: true,
+      detail: expect.stringMatching(/^no stamped commits in the last 20 yet/),
+    });
+    const commit = (msg: string) =>
+      spawnSync(
+        'git',
+        [
+          '-c',
+          'core.hooksPath=/dev/null',
+          '-c',
+          'user.name=t',
+          '-c',
+          'user.email=t@e.com',
+          'commit',
+          '-q',
+          '--allow-empty',
+          '-m',
+          msg,
+        ],
+        { cwd: repo },
+      );
+    commit('a\n\nAgent-Session-Id: s1\nAgent-Name: claude-code');
+    commit('b\n\nAgent-Session-Id: s2\nAgent-Name: claude-code');
+    commit('c\n\nCopilot-Session: 0b5a1c2d');
+    commit('human');
+    expect(check().detail).toMatch(/^stamped commits in the last 20: copilot \(1\), claude-code \(2\)\./);
   });
 
   it('checks the Copilot environment only where Copilot telemetry is turned on', () => {

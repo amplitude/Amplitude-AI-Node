@@ -7,10 +7,14 @@ case "$2" in
   merge|squash) exit 0 ;;
 esac
 
+# Copilot CLI comes before goose: a Copilot shell started from a goose terminal
+# inherits goose's AGENT_SESSION_ID.
 if [ -n "$CLAUDE_CODE_SESSION_ID" ]; then
   id="$CLAUDE_CODE_SESSION_ID"; name="claude-code"
 elif [ -n "$CODEX_THREAD_ID" ]; then
   id="$CODEX_THREAD_ID"; name="codex"
+elif [ -n "$COPILOT_AGENT_SESSION_ID" ]; then
+  id="$COPILOT_AGENT_SESSION_ID"; name="copilot"
 elif [ -n "$AGENT_SESSION_ID" ]; then
   id="$AGENT_SESSION_ID"; name="goose"
 elif [ -n "$CURSOR_CONVERSATION_ID" ]; then
@@ -22,31 +26,40 @@ else
   exit 0
 fi
 
+# A trailer value is one line of plain characters, so a hostile value can't add trailers.
+valid_value() {
+  case "$1" in ""|*[!A-Za-z0-9._:-]*) return 1 ;; esac
+  [ "${#1}" -le "$2" ]
+}
+valid_value "$id" 128 || id=""
+
+# KEY=value text from .amplitude-ai/local.env, never run as a script.
+local_env="$(git rev-parse --show-toplevel 2>/dev/null)/.amplitude-ai/local.env"
+local_value() {
+  [ -f "$local_env" ] || return 0
+  awk -v want="$1" -v q="'" '
+    { sub(/\r$/, ""); line = $0; gsub(/^[ \t]+|[ \t]+$/, "", line) }
+    line == "" || substr(line, 1, 1) == "#" || index(line, "=") == 0 { next }
+    {
+      eq = index(line, "="); key = substr(line, 1, eq - 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", key); sub(/^export[ \t]+/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", key)
+      if (key != want) next
+      val = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", val); n = length(val)
+      if (n >= 2 && substr(val, 1, 1) == substr(val, n, 1) && (substr(val, 1, 1) == "\"" || substr(val, 1, 1) == q)) val = substr(val, 2, n - 2)
+      found = val
+    }
+    END { print found }' "$local_env" 2>/dev/null
+}
+
 # How the session started, resolved as the session hooks resolve [Agent] Session Trigger:
-# AMPLITUDE_SESSION_TRIGGER from the environment, else from .amplitude-ai/local.env (read as
-# KEY=value text, never run), else ci under CI, else for Codex the rollout's session source.
+# AMPLITUDE_SESSION_TRIGGER from the environment, else from local.env, else ci under CI,
+# else for Codex the rollout's session source.
 valid_trigger() {
   case "$1" in interactive|headless|ci|scheduled|event) return 0 ;; esac
   return 1
 }
 requested="$AMPLITUDE_SESSION_TRIGGER"
-if [ -z "$requested" ]; then
-  local_env="$(git rev-parse --show-toplevel 2>/dev/null)/.amplitude-ai/local.env"
-  if [ -f "$local_env" ]; then
-    requested=$(awk -v q="'" '
-      { sub(/\r$/, ""); line = $0; gsub(/^[ \t]+|[ \t]+$/, "", line) }
-      line == "" || substr(line, 1, 1) == "#" || index(line, "=") == 0 { next }
-      {
-        eq = index(line, "="); key = substr(line, 1, eq - 1)
-        gsub(/^[ \t]+|[ \t]+$/, "", key); sub(/^export[ \t]+/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", key)
-        if (key != "AMPLITUDE_SESSION_TRIGGER") next
-        val = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", val); n = length(val)
-        if (n >= 2 && substr(val, 1, 1) == substr(val, n, 1) && (substr(val, 1, 1) == "\"" || substr(val, 1, 1) == q)) val = substr(val, 2, n - 2)
-        found = val
-      }
-      END { print found }' "$local_env" 2>/dev/null)
-  fi
-fi
+if [ -z "$requested" ]; then requested=$(local_value AMPLITUDE_SESSION_TRIGGER); fi
 trigger=""
 if valid_trigger "$requested"; then trigger="$requested"
 elif [ "$GITHUB_ACTIONS" = "true" ]; then trigger="ci"
@@ -67,9 +80,34 @@ elif [ "$name" = "codex" ]; then
   esac
 fi
 
+# The task the session works on: AMPLITUDE_TASK_ID / AMPLITUDE_TASK_TYPE from the
+# environment, else from local.env, else the branch's ticket key (AA-123) and its
+# conventional prefix (fix/...). Only the key and the prefix leave the branch name.
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
+task="$AMPLITUDE_TASK_ID"
+if [ -z "$task" ]; then task=$(local_value AMPLITUDE_TASK_ID); fi
+if [ -z "$task" ]; then
+  task=$(printf '%s\n' "$branch" | grep -o -E '(^|[^A-Za-z0-9])[A-Z][A-Z0-9]{1,9}-[0-9]{1,7}([^0-9]|$)' | head -n 1 | grep -o -E '[A-Z][A-Z0-9]{1,9}-[0-9]{1,7}')
+fi
+valid_value "$task" 64 || task=""
+task_type="$AMPLITUDE_TASK_TYPE"
+if [ -z "$task_type" ]; then task_type=$(local_value AMPLITUDE_TASK_TYPE); fi
+if [ -z "$task_type" ]; then
+  case "$branch" in
+    */*)
+      case "${branch%%/*}" in
+        feat|fix|chore|refactor|docs|test|perf|ci|build|revert) task_type="${branch%%/*}" ;;
+      esac
+      ;;
+  esac
+fi
+valid_value "$task_type" 64 || task_type=""
+
 msg="$1"
 set --
 if [ -n "$id" ]; then set -- --trailer "Agent-Session-Id: $id"; fi
 set -- "$@" --trailer "Agent-Name: $name"
 if [ -n "$trigger" ]; then set -- "$@" --trailer "Agent-Trigger: $trigger"; fi
+if [ -n "$task" ]; then set -- "$@" --trailer "Agent-Task: $task"; fi
+if [ -n "$task_type" ]; then set -- "$@" --trailer "Agent-Task-Type: $task_type"; fi
 git interpret-trailers --in-place --if-exists addIfDifferent "$@" "$msg"

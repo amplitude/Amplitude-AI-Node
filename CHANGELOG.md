@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.31.0
+
+### Added
+- **Copilot CLI sessions on commits.** The `prepare-commit-msg` hook stamps `Agent-Session-Id` from `COPILOT_AGENT_SESSION_ID` with `Agent-Name: copilot`. Copilot CLI exports it to its shell commands, and it equals the `gen_ai.conversation.id` its telemetry sends. It is checked before goose's `AGENT_SESSION_ID`, which a Copilot shell can inherit.
+- **Gemini CLI sessions on commits.** Gemini CLI runs shell commands with `core.hooksPath` set to empty, so no git hook runs. `amplitude-ai hook gemini` is a `BeforeTool` hook that rewrites `git commit` and `git -C <dir> commit` to pass `--trailer 'Agent-Session-Id: <session.id>' --trailer 'Agent-Name: gemini-cli'`, plus `Agent-Trigger` and the task trailers. It leaves `--amend`, already-stamped commands, `commit` inside quotes, and commands with a heredoc, `$(` or backticks alone, prints nothing when it changes nothing, and always exits 0. `coding-agents init --harness gemini` merges it into `.gemini/settings.json` as `amplitude-ai-session` (matcher `run_shell_command`), keeping other hooks, and uses `node_modules/.bin/amplitude-ai` when `package.json` lists `@amplitude/ai`. Needs git 2.32 or later.
+- **Task trailers.** Agent commits carry `Agent-Task` (from `AMPLITUDE_TASK_ID`, else `.amplitude-ai/local.env`, else the first ticket key in the branch name) and `Agent-Task-Type` (from `AMPLITUDE_TASK_TYPE`, else `local.env`, else the branch's conventional prefix such as `fix/`). Values outside `[A-Za-z0-9._:-]{1,64}` are dropped.
+- **Session ID validation.** The hook writes a session ID only when it matches `[A-Za-z0-9._:-]{1,128}`, so a value with a newline can't add trailers.
+- **Outcomes workflow v4** (`outcomes_workflow_version: 4`).
+  - Every score carries `task_id` and `task_type` from the commit's trailers. On a merged PR, a commit without them takes the branch's ticket key and prefix, else the PR title's conventional type. A revert carries the reverted commit's own task.
+  - `ci_passed_first_run` carries `ci_run_id`, `ci_run_url`, `ci_workflow_name` and `ci_conclusion` for the run that judged the first push. When it is 0, `ci_failed_checks` lists the checks and commit statuses that failed on that push (distinct, sorted, at most 10), with no extra API call, so a failed or reverted change can be set beside the commands the agent ran in its session.
+  - New PR scores: `ci_failed_runs` (runs whose last attempt failed or timed out) and `ci_rerun_attempts`. Neither is sent without workflow runs, past the page cap, or on a read error.
+  - A `Copilot-Session` trailer counts as the session when there is no `Agent-Session-Id`, with Agent ID `copilot`.
+  - A Buzz worker commit (author `<64 hex>@<relay host>`) takes the user from its last `Co-authored-by` that isn't a coding agent.
+  - `init` upgrades an untouched 0.30.0 workflow and hook in place.
+- **`coding-agents init --require-trailers`** installs `agent-trailers.yml`. On each PR it warns about agent commits without a session trailer, and fails the check only when the repository variable `AMPLITUDE_REQUIRE_AGENT_TRAILERS` is `true`. It reads commits only and needs no secret.
+- **`coding-agents doctor` checks:** `gemini_session_hook` (installed and not turned off by `hooksConfig`), `git_version` (2.32 or later, with Gemini CLI), `goose_version` (1.44.0 or later, when `goose` is on the `PATH`) and `stamped_commits` (which harnesses stamped the last 20 commits).
+- **Buzz:** worker Tool Calls carry the worker's goose session in `[Agent] Context` (`harness_session_id`), the ID its commits are stamped with, so outcome scores join the thread.
+
+### Changed
+- **Docs.** goose commit stamping needs goose 1.44.0 or later; earlier versions pass an inherited `AGENT_SESSION_ID` through. The Buzz guide now says to enable the commit hook in worker checkouts. The Gemini CLI and Copilot guides describe the session on commits and that neither reports cost. The `code-outcomes` recipe adds a setup prompt for your coding agent, the harness table, task trailers, the CI fields, the trailer check, a "confirm the fix" monitor by `task_type` and a cost note.
+
 ## 0.30.0
 
 ### Changed

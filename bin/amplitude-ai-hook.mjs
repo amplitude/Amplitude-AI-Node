@@ -3,7 +3,7 @@
 // Coding-agent hook forwarders. Always exits 0 so a failure never blocks the agent.
 const [harness, ...rest] = process.argv.slice(2);
 
-if (harness === 'codex' || harness === 'cursor') {
+if (harness === 'codex' || harness === 'cursor' || harness === 'gemini') {
   try {
     const { main } = await import(`../dist/cli/hook-${harness}.js`);
     await main(rest);
@@ -13,6 +13,6 @@ if (harness === 'codex' || harness === 'cursor') {
     );
   }
 } else {
-  process.stderr.write(`Usage: amplitude-ai hook <codex|cursor> [--dry-run]\n`);
+  process.stderr.write(`Usage: amplitude-ai hook <codex|cursor|gemini> [--dry-run]\n`);
 }
 process.exit(0);

@@ -43,11 +43,16 @@ type World = {
   prCommitsByNumber?: Record<number, string[]>;
   associatedPrs?: Record<string, Array<{ number: number; merge_commit_sha: string; merged_at: string | null }>>;
   reviews?: Array<{ state: string; body?: string; submitted_at?: string; user: { login: string; type: string } }>;
-  checkRuns?: Record<string, Array<{ id: number; name: string; conclusion: string | null; app?: { id: number } }>>;
+  checkRuns?: Record<
+    string,
+    Array<{ id: number; name: string; conclusion: string | null; app?: { id: number }; check_suite?: { id: number } }>
+  >;
   statuses?: Record<string, Array<{ id: number; context: string; state: string }>>;
   deployments?: Array<{ id: number; sha: string; created_at: string; state: string }>;
   workflowRuns?: WorkflowRun[];
   failing?: Set<string>;
+  /** The PR head branch the workflow-run lookup expects; `feature` by default. */
+  branch?: string;
 };
 type WorkflowRun = {
   id: number;
@@ -55,6 +60,11 @@ type WorkflowRun = {
   created_at: string;
   pull_requests: Array<{ number: number }>;
   path?: string;
+  check_suite_id?: number;
+  name?: string;
+  html_url?: string;
+  conclusion?: string | null;
+  run_attempt?: number;
 };
 const RUN_ID = 4242;
 
@@ -158,7 +168,7 @@ function fakeGitHub(world: World) {
     actions: {
       listWorkflowRunsForRepo: async ({ branch, event, created }: { branch: string; event: string; created: string }) => {
         record('actions.listWorkflowRunsForRepo');
-        expect([branch, event]).toEqual(['feature', 'pull_request']);
+        expect([branch, event]).toEqual([world.branch ?? 'feature', 'pull_request']);
         expect(created).toBe('2026-11-01T00:00:00.000Z..2026-11-03T00:00:00.000Z');
         const runs = [...(world.workflowRuns ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
         return { data: runs };
@@ -291,6 +301,8 @@ describe('agent-outcomes.yml script', () => {
         agent_session_id: 's1',
         agent_name: 'claude-code',
         agent_trigger: null,
+        task_id: null,
+        task_type: null,
         repo: 'acme/app',
         merge_commit_sha: 'merge7',
         pr_number: 7,
@@ -299,7 +311,7 @@ describe('agent-outcomes.yml script', () => {
         base_branch: 'main',
         agent_setup_version: setupHash(['AGENTS.md:blob-a']),
         outcome_time: '2026-11-03T00:00:00.000Z',
-        outcomes_workflow_version: 3,
+        outcomes_workflow_version: 4,
       },
     });
     expect(props(merged[1])).toMatchObject({ '[Agent] Session ID': 's2', '[Agent] Agent ID': 'codex' });
@@ -1004,6 +1016,218 @@ describe('agent-outcomes.yml script', () => {
       for (const name of ['review_count', 'changes_requested_count', 'hours_to_first_review', 'review_rounds']) {
         expect(r.byName(name), name).toEqual([]);
       }
+    });
+  });
+
+  describe('CI run links and counts', () => {
+    const ciWorld = () => {
+      const world = linearWorld();
+      world.checkRuns = { c3: [{ id: 5, name: 'build', conclusion: 'success', app: { id: 1 } }] };
+      world.workflowRuns = [
+        { id: 2, head_sha: 'x9', created_at: '2026-11-01T00:05:00Z', pull_requests: [{ number: 9 }], conclusion: 'failure' },
+        {
+          id: 3,
+          head_sha: 'c3',
+          created_at: '2026-11-01T00:10:00Z',
+          pull_requests: [{ number: 7 }],
+          name: 'CI',
+          html_url: 'https://github.com/acme/app/actions/runs/3',
+          conclusion: 'success',
+          run_attempt: 2,
+        },
+        { id: 4, head_sha: 'c2', created_at: '2026-11-02T00:00:00Z', pull_requests: [], conclusion: 'failure', run_attempt: 1 },
+        { id: 5, head_sha: 'c2', created_at: '2026-11-02T01:00:00Z', pull_requests: [], conclusion: 'timed_out', run_attempt: 3 },
+        { id: 6, head_sha: 'c1', created_at: '2026-11-02T02:00:00Z', pull_requests: [], conclusion: 'cancelled' },
+      ];
+      return world;
+    };
+
+    it('links the run that judged the first push on ci_passed_first_run, and counts failed runs and reruns', async () => {
+      const r = await run(ciWorld(), { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('ci_passed_first_run'), 's1'))).toMatchObject({
+        '[Agent] Score Value': 1,
+        ci_run_id: 3,
+        ci_run_url: 'https://github.com/acme/app/actions/runs/3',
+        ci_workflow_name: 'CI',
+        ci_conclusion: 'success',
+      });
+      expect(prScore(r, 'ci_failed_runs')).toBe(2);
+      expect(prScore(r, 'ci_rerun_attempts', 's2')).toBe(3);
+      expect(r.byName('ci_failed_runs').map((e) => e.insert_id)).toEqual([
+        'ci_failed_runs:acme/app:7:s1',
+        'ci_failed_runs:acme/app:7:s2',
+      ]);
+      expect(props(forSession(r.byName('review_count'), 's1'))).not.toHaveProperty('ci_run_id');
+      expect(props(forSession(r.byName('ci_failed_runs'), 's1'))).not.toHaveProperty('ci_run_id');
+    });
+
+    it('names the checks and statuses that failed on the first push, only when it failed', async () => {
+      const world = ciWorld();
+      world.checkRuns = {
+        c3: [
+          { id: 7, name: 'e2e', conclusion: 'failure', app: { id: 1 } },
+          { id: 5, name: 'build', conclusion: 'success', app: { id: 1 } },
+          { id: 6, name: 'unit', conclusion: 'timed_out', app: { id: 1 } },
+          { id: 9, name: 'e2e', conclusion: 'failure', app: { id: 2 } },
+          { id: 8, name: 'lint', conclusion: null, app: { id: 1 } },
+        ],
+      };
+      world.statuses = { c3: [{ id: 1, context: 'ci/legacy', state: 'error' }] };
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('ci_passed_first_run'), 's1'))).toMatchObject({
+        '[Agent] Score Value': 0,
+        ci_run_id: 3,
+        ci_failed_checks: ['ci/legacy', 'e2e', 'unit'],
+      });
+      expect(props(forSession(r.byName('ci_failed_runs'), 's1'))).not.toHaveProperty('ci_failed_checks');
+
+      const passed = await run(ciWorld(), { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(passed.byName('ci_passed_first_run'), 's1'))).not.toHaveProperty('ci_failed_checks');
+
+      const noRuns = linearWorld();
+      noRuns.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
+      const none = await run(noRuns, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(none.byName('ci_passed_first_run'), 's1'))).toMatchObject({ ci_failed_checks: ['build'] });
+    });
+
+    it('does not count the agent-trailers check as CI', async () => {
+      const world = ciWorld();
+      world.workflowRuns!.unshift({
+        id: 1,
+        head_sha: 'c3',
+        created_at: '2026-11-01T00:01:00Z',
+        pull_requests: [{ number: 7 }],
+        path: '.github/workflows/agent-trailers.yml',
+        name: 'Agent trailers (Amplitude)',
+        conclusion: 'failure',
+        check_suite_id: 70,
+      });
+      world.checkRuns!.c3!.push({ id: 4, name: 'trailers', conclusion: 'failure', app: { id: 1 }, check_suite: { id: 70 } });
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('ci_passed_first_run'), 's1'))).toMatchObject({
+        '[Agent] Score Value': 1,
+        ci_run_id: 3,
+        ci_workflow_name: 'CI',
+      });
+      expect(prScore(r, 'ci_failed_runs')).toBe(2);
+    });
+
+    it('sends no counts or link without Actions runs, past the page cap, or when the runs cannot be read', async () => {
+      const noRuns = linearWorld();
+      noRuns.checkRuns = { c1: [{ id: 1, name: 'build', conclusion: 'failure', app: { id: 1 } }] };
+      const none = await run(noRuns, { event: 'pull_request', payload: prPayload() });
+      expect(prScore(none, 'ci_passed_first_run')).toBe(0);
+      expect(props(forSession(none.byName('ci_passed_first_run'), 's1'))).not.toHaveProperty('ci_run_id');
+      expect(none.byName('ci_failed_runs')).toEqual([]);
+      expect(none.byName('ci_rerun_attempts')).toEqual([]);
+
+      const capped = ciWorld();
+      const at = (i: number) => new Date(Date.parse('2026-11-01T01:00:00Z') + i * 1000).toISOString();
+      capped.workflowRuns!.push(
+        ...Array.from({ length: 500 }, (_, i) => ({ id: 100 + i, head_sha: 'x9', created_at: at(i), pull_requests: [] })),
+      );
+      const cap = await run(capped, { event: 'pull_request', payload: prPayload() });
+      expect(cap.byName('ci_failed_runs')).toEqual([]);
+      expect(props(forSession(cap.byName('ci_passed_first_run'), 's1'))).not.toHaveProperty('ci_run_id');
+
+      const failing = ciWorld();
+      failing.failing = new Set(['actions.listWorkflowRunsForRepo']);
+      const failed = await run(failing, { event: 'pull_request', payload: prPayload() });
+      expect(failed.byName('ci_failed_runs')).toEqual([]);
+    });
+  });
+
+  it('scores a Copilot-Session commit on that session, as copilot', async () => {
+    const world = linearWorld();
+    const id = '0b5a1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d';
+    world.commits.cp = commit('cp', 'c3', {
+      message: `fix: y\n\nCopilot-Session: ${id}\n`,
+      email: '198982749+Copilot@users.noreply.github.com',
+    });
+    world.prCommits = ['c3', 'cp'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(props(r.byName('commit_merged')[0])).toMatchObject({
+      '[Agent] Session ID': id,
+      '[Agent] Agent ID': 'copilot',
+      agent_session_id: id,
+      agent_name: null,
+    });
+  });
+
+  it('takes the Buzz worker commit user from its last human Co-authored-by', async () => {
+    const world = linearWorld();
+    const worker = `${'a1'.repeat(32)}@relay.example.com`;
+    const msg = (coAuthors: string) => `feat: y\n\n${agentMessage('b1', 'goose').split('\n\n')[1]}${coAuthors}`;
+    world.commits.bz = commit('bz', 'c3', {
+      email: worker,
+      message: msg(
+        'Co-authored-by: Ann <ann@example.com>\nCo-authored-by: Max <max@example.com>\nCo-authored-by: Claude <noreply@anthropic.com>\n',
+      ),
+    });
+    world.commits.bz2 = commit('bz2', 'bz', { email: worker, message: msg('').replace('b1', 'b2') });
+    world.prCommits = ['bz', 'bz2'];
+    const r = await run(world, { event: 'pull_request', payload: prPayload() });
+    expect(r.byName('commit_merged').map((e) => e.user_id)).toEqual(['max@example.com', worker]);
+    const login = await run(world, { event: 'pull_request', payload: prPayload(), env: { AMPLITUDE_USER_ID_SOURCE: 'login' } });
+    expect(login.byName('commit_merged').map((e) => e.user_id)).toEqual(['dev', 'dev']);
+  });
+
+  describe('task properties', () => {
+    const tasked = (session: string, task: string, type?: string) =>
+      `${agentMessage(session)}Agent-Task: ${task}\n${type ? `Agent-Task-Type: ${type}\n` : ''}`;
+
+    it('come from the commit trailers, on commit_merged and on the PR scores of each session', async () => {
+      const world = linearWorld();
+      world.commits.c1 = commit('c1', 'base', { message: tasked('s1', 'AA-1', 'feat'), authored: '2026-11-01T00:10:00Z' });
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('commit_merged'), 's1'))).toMatchObject({ task_id: 'AA-1', task_type: 'feat' });
+      expect(props(forSession(r.byName('hours_open'), 's1'))).toMatchObject({ task_id: 'AA-1', task_type: 'feat' });
+      expect(props(forSession(r.byName('hours_open'), 's2'))).toMatchObject({ task_id: null, task_type: null });
+    });
+
+    it.each([
+      ['fix/AA-7-thing', 'Speed up checkout', 'AA-7', 'fix'],
+      ['vinay/LIN-42', 'feat(ui): new chart', 'LIN-42', 'feat'],
+      ['feature', 'chore: bump deps', null, 'chore'],
+      ['feature', 'Update README', null, null],
+      ['bugfix/x', 'oops: thing', null, null],
+    ])('fall back on a PR to branch %s and title %j', async (branch, title, task, type) => {
+      const world = linearWorld();
+      world.branch = branch;
+      const payload = prPayload({ title, head: { ref: branch, repo: { fork: false, full_name: 'acme/app' } } });
+      const r = await run(world, { event: 'pull_request', payload });
+      for (const name of ['commit_merged', 'hours_open']) {
+        expect(props(forSession(r.byName(name), 's2')), name).toMatchObject({ task_id: task, task_type: type });
+      }
+    });
+
+    it("keep a commit's own trailer over the PR fallback, and a revert carries the reverted commit's task", async () => {
+      const world = linearWorld();
+      world.branch = 'fix/NEW-2';
+      world.commits.c1 = commit('c1', 'base', { message: tasked('s1', 'OLD-1'), authored: '2026-11-01T00:10:00Z' });
+      world.commits.abcdef1234 = commit('abcdef1234', null, {
+        message: tasked('s0', 'OLD-9', 'perf'),
+        authored: '2026-10-20T08:00:00Z',
+      });
+      world.commits.beef5678 = commit('beef5678', null, { message: agentMessage('s5'), authored: '2026-10-21T08:00:00Z' });
+      const payload = prPayload({
+        body: 'This reverts commit abcdef1234.\nThis reverts commit beef5678.',
+        head: { ref: 'fix/NEW-2', repo: { fork: false, full_name: 'acme/app' } },
+      });
+      const r = await run(world, { event: 'pull_request', payload });
+      expect(props(forSession(r.byName('commit_merged'), 's1'))).toMatchObject({ task_id: 'OLD-1', task_type: 'fix' });
+      expect(props(forSession(r.byName('commit_reverted'), 's0'))).toMatchObject({ task_id: 'OLD-9', task_type: 'perf' });
+      expect(props(forSession(r.byName('commit_reverted'), 's5'))).toMatchObject({ task_id: null, task_type: null });
+    });
+
+    it('drop trailer values that are not task IDs', async () => {
+      const world = linearWorld();
+      world.commits.c1 = commit('c1', 'base', {
+        message: `${agentMessage('s1')}Agent-Task: ${'x'.repeat(65)}\nAgent-Task-Type: a/b\n`,
+        authored: '2026-11-01T00:10:00Z',
+      });
+      const r = await run(world, { event: 'pull_request', payload: prPayload() });
+      expect(props(forSession(r.byName('commit_merged'), 's1'))).toMatchObject({ task_id: null, task_type: null });
     });
   });
 
