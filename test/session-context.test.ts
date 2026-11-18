@@ -192,6 +192,37 @@ describe('Full session flows', () => {
   });
 });
 
+describe('Nested session parent agent', () => {
+  it('a nested session of another agent inherits the enclosing agent as parent', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const orchestrator = mock.agent('orchestrator');
+    const worker = mock.agent('worker');
+    let parentAgentId: string | null | undefined;
+
+    await orchestrator.session({ sessionId: 's1' }).run(async () => {
+      await worker.session({ sessionId: 's2' }).run(async () => {
+        parentAgentId = getActiveContext()?.parentAgentId;
+      });
+    });
+
+    expect(parentAgentId).toBe('orchestrator');
+  });
+
+  it('a nested session of the same agent has no parent', async (): Promise<void> => {
+    const mock = new MockAmplitudeAI();
+    const agent = mock.agent('orchestrator');
+    let parentAgentId: string | null | undefined;
+
+    await agent.session({ sessionId: 's1' }).run(async () => {
+      await agent.session({ sessionId: 's2' }).run(async () => {
+        parentAgentId = getActiveContext()?.parentAgentId;
+      });
+    });
+
+    expect(parentAgentId).toBeNull();
+  });
+});
+
 describe('Idle timeout', () => {
   it('idle timeout is present on session end when set', async (): Promise<void> => {
     const mock = new MockAmplitudeAI();

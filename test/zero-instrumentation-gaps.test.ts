@@ -74,6 +74,26 @@ describe('Gap C: SessionContext parentAgentId auto-inheritance', () => {
     });
   });
 
+  it('keeps an explicit null parentAgentId as no parent', () => {
+    const outer = new SessionContext({ sessionId: 's1', agentId: 'orch' });
+    runWithContext(outer, () => {
+      const inner = new SessionContext({
+        sessionId: 's1',
+        agentId: 'child',
+        parentAgentId: null,
+      });
+      expect(inner.parentAgentId).toBeNull();
+    });
+  });
+
+  it('does not make an agent its own parent when nested in its own context', () => {
+    const outer = new SessionContext({ sessionId: 's1', agentId: 'orch' });
+    runWithContext(outer, () => {
+      const inner = new SessionContext({ sessionId: 's2', agentId: 'orch' });
+      expect(inner.parentAgentId).toBeNull();
+    });
+  });
+
   it('inherits nothing when the enclosing session has no agentId', () => {
     const outer = new SessionContext({ sessionId: 's1' });
     runWithContext(outer, () => {

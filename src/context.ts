@@ -102,17 +102,15 @@ export class SessionContext {
     this.traceId = options.traceId ?? null;
     this.userId = options.userId ?? null;
     this.agentId = options.agentId ?? null;
-    // Auto-inherit parentAgentId from the enclosing session context
-    // when not set explicitly. Enables nested sessions (and middleware
-    // that constructs SessionContext directly) to preserve the
-    // caller-chain identity without passing parentAgentId through
-    // every layer.
+    // An omitted parentAgentId inherits the enclosing session's agentId, so
+    // nested sessions (and middleware that constructs SessionContext
+    // directly) keep the caller-chain identity without passing it through
+    // every layer. An explicit null means no parent, and an agent is never
+    // its own parent.
     let parentAgentId = options.parentAgentId ?? null;
-    if (parentAgentId == null) {
-      const enclosing = _sessionStorage.getStore();
-      if (enclosing != null && enclosing.agentId != null) {
-        parentAgentId = enclosing.agentId;
-      }
+    if (options.parentAgentId === undefined) {
+      const enclosingAgentId = _sessionStorage.getStore()?.agentId ?? null;
+      if (enclosingAgentId !== this.agentId) parentAgentId = enclosingAgentId;
     }
     this.parentAgentId = parentAgentId;
     this.env = options.env ?? null;

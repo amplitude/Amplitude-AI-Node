@@ -209,7 +209,7 @@ export class Session {
       traceId: this.traceId,
       userId: (this.userId ?? defaults.userId) as string | null,
       agentId: defaults.agentId as string | null,
-      parentAgentId: this._parentAgentId ?? (defaults.parentAgentId as string | null),
+      parentAgentId: this._parentAgentId ?? (defaults.parentAgentId as string | null) ?? undefined,
       env: defaults.env as string | null,
       customerOrgId: defaults.customerOrgId as string | null,
       agentVersion: defaults.agentVersion as string | null,

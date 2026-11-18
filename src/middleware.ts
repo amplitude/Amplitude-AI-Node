@@ -117,7 +117,7 @@ export function createAmplitudeAIMiddleware(options: MiddlewareOptions) {
     const userId = userIdResolver(req) ?? inbound?.userId ?? null;
     const deviceId = deviceIdResolver?.(req) ?? null;
     const sessionId = inbound?.sessionId ?? sessionIdResolver?.(req) ?? randomUUID();
-    const parentAgentId = inbound?.parentAgentId ?? null;
+    const parentAgentId = inbound?.parentAgentId ?? undefined;
 
     const traceId =
       inbound != null && inbound.verifyResult != null
