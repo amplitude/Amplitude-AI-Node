@@ -14,7 +14,7 @@ Last verified: pending live capture. Pinned to `block/buzz@7e7ec73` (Buzz deskto
 - goose `messages` (`session_id`, `role`, `content_json`, `created_timestamp`): `crates/goose/src/session/session_manager.rs`;
 - `toolRequest` and `toolResponse` blocks: `crates/goose-provider-types/src/conversation/message.rs` and `tool_result_serde.rs`.
 
-It has not yet been checked against a live Buzz capture. The adapter fails closed: a row or payload shape it doesn't recognize throws `BuzzSchemaError` instead of guessing.
+It has not yet been checked against a live `archived_events` table, so this guide stays at pending live capture. On 2026-11-19, kind 9 messages from Buzz desktop carried an integer `ms` tag. Those messages were in the app's webview cache, not in `archive.db`, so they did not go through this forwarder. The adapter fails closed: a row or payload shape it doesn't recognize throws `BuzzSchemaError` instead of guessing.
 
 ---
 
@@ -46,6 +46,7 @@ scheduled job on the owner's machine (for example, every 15 minutes)
 - It doesn't read tool calls for workers on other harnesses. A Claude Code or Codex worker reports its own tool calls through [claude-code.md](claude-code.md) or [codex.md](codex.md), and joins the team through `[Agent] Parent Agent ID`.
 - Remote mode (a dedicated member key invited to channels) sees messages only. Archive mode is the documented path.
 - Cloud-run agents. Builderlab cloud execution does not write the desktop archive, so this forwarder does not see those agents. Buzz's relay OpenTelemetry (`crates/buzz-relay/src/telemetry.rs`) is infrastructure tracing over OTLP gRPC, not agent spans, and Amplitude accepts OTLP over HTTP. Covering cloud-run agents needs either OTLP/HTTP GenAI spans carrying session, user, agent, parent agent, tokens, and cost, or a server-side feed of kind 0, 9, and 44200 events that this forwarder normalizes unchanged.
+- A hosted community open in the desktop app. On 2026-11-19, Buzz desktop joined a community at `*.communities.buzz.xyz` and wrote no `archive.db` under Application Support. The kind 9 events, including the `ms` tag, were in the app's webview cache, which this forwarder does not read. Local save (`save_subscriptions`) is what fills `archived_events`.
 
 ### What the archive must already contain
 

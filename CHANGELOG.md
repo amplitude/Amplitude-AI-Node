@@ -5,6 +5,7 @@
 ### Changed
 - **Buzz forwarder orders same-second messages by Buzz's `ms` tag.** `docs/integrations/buzz.mjs` adds the sub-second `ms` tag (0-999, added to kind 9 in block/buzz#9548) to a message's time, so messages in one second keep Buzz's order and a delegation and its reply no longer swap. A missing or invalid `ms` counts as 0, so archives from before the tag behave as before. Covered by `test/buzz-forwarder.test.ts`.
 - **Buzz guide re-pinned to `block/buzz@7e7ec73`** (source re-checked 2026-11-19). The goose `sessions.db` columns and the `toolRequest` / `toolResponse` JSON shapes that the forwarder reads are unchanged between goose v1.28.0 and v1.60.1. On 2026-11-19 a goose 1.60.1 run wrote a real `sessions.db`: the Developer shell set `AGENT_SESSION_ID` to that session id, and `gooseToolCalls` read the tool call and its `commit_sha`. The guide now states that Builderlab cloud-run agents are not covered by the desktop-archive forwarder.
+- **Buzz guide: a hosted community is not the archive.** On 2026-11-19 Buzz desktop on a `*.communities.buzz.xyz` community wrote no `archive.db`. Kind 9 events in the app's webview cache carried the `ms` tag. The forwarder still reads `archived_events` only, and the guide stays at pending live capture.
 
 ## 0.33.0
 
