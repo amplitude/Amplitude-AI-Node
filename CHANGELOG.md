@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.32.0
+
+### Added
+- **Outcomes workflow v5: Devin pull requests** (`outcomes_workflow_version: 5`).
+  - **Session:** in a PR that Devin opened (author `devin-ai-integration[bot]`), each commit Devin signed is scored on the session its description links (`app.devin.ai/sessions/<id>`, or a `devinenterprise.com` tenant), as Session ID `devin-<id>` with Agent ID `devin`. This works on merge, revert and deploy, and the workflow makes no extra API calls for it. Human commits in the PR still get nothing.
+  - **User:** the commit's last `Co-authored-by` person, else the email on the `Requested by:` line, or with `AMPLITUDE_USER_ID_SOURCE=login`, the `@login` on that line. Devin is never the user: a Devin commit with no person gets no score, and the PR scores don't fall back to the PR author.
+  - `init` upgrades an untouched 0.31.0 workflow in place.
+
+### Changed
+- **Docs.** The `code-outcomes` recipe describes Devin, and says outcome scores are chart events that never create or change Agent Analytics sessions.
+
 ## 0.31.0
 
 ### Added
