@@ -230,7 +230,7 @@
         "id": "buzz",
         "name": "Buzz",
         "category": "coding_agent",
-        "pinned_version": "block/buzz@12f3d51",
+        "pinned_version": "block/buzz@7e7ec73",
         "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/buzz.md",
         "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/buzz.md",
         "paths": ["archive_forwarder", "goose_sessions_db"],
