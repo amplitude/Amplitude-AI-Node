@@ -1,11 +1,13 @@
 // Maps a Buzz desktop archive (archive.db) and goose workers' sessions.db to Amplitude [Agent] events.
 // No network, no keys: the desktop stores kind 44200 already decrypted, and kind 24200 is never read.
 //
-// Pinned to block/buzz@12f3d51 (desktop/src-tauri/src/archive/store.rs) and goose v1.28.0
-// (crates/goose/src/session/session_manager.rs). Unknown shapes throw BuzzSchemaError instead of guessing.
+// Pinned to block/buzz@7e7ec73 (desktop/src-tauri/src/archive/store.rs, pipeline.rs; the `ms` tag from
+// crates/buzz-sdk/src/builders.rs, checked 2026-11-19) and goose v1.28.0 (crates/goose/src/session/session_manager.rs).
+// Unknown shapes throw BuzzSchemaError instead of guessing.
 //
 // rows: archived_events rows { id, kind, pubkey, created_at, raw_json }
-//   kind 9      raw_json is the Nostr event: channel in the `h` tag, thread in `e` tags, mentions in `p` tags
+//   kind 9      raw_json is the Nostr event: channel in the `h` tag, thread in `e` tags, mentions in `p` tags,
+//               and an optional `ms` tag (0-999) that orders messages within the same second
 //   kind 0      raw_json is the profile event; an `auth` tag (NIP-OA) marks the author as an agent
 //   kind 44200  raw_json is the decrypted NIP-AM payload { harness, model, channelId, sessionId, turnId, timestamp, turn, deltaReliable, stopReason }
 // mapping: { users: { <pubkey>: <user id> }, agents?: { <pubkey>: { id?, name? } }, gooseMessages?: sessions.db rows,
@@ -148,6 +150,13 @@ function tagValues(event, name) {
   return (Array.isArray(event.tags) ? event.tags : []).filter((tag) => Array.isArray(tag) && tag[0] === name);
 }
 
+// Sub-second offset from the `ms` tag. Anything other than an integer 0-999 (including a missing tag)
+// counts as 0, so messages from before the tag was added keep second precision.
+function subSecondMs(event) {
+  const ms = Number(tagValues(event, 'ms')[0]?.[1]);
+  return Number.isInteger(ms) && ms >= 0 && ms < 1000 ? ms : 0;
+}
+
 function threadRoot(event) {
   const eTags = tagValues(event, 'e');
   const root = eTags.find((tag) => tag[3] === 'root') ?? eTags.find((tag) => tag[3] === 'reply');
@@ -192,7 +201,7 @@ export function normalize(rows, mapping = {}) {
       messages.push({
         id: row.id,
         pubkey: row.pubkey,
-        time: Number(row.created_at) * 1000,
+        time: Number(row.created_at) * 1000 + subSecondMs(event),
         text: event.content,
         channel: tagValues(event, 'h')[0]?.[1] ?? '',
         root: threadRoot(event),

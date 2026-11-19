@@ -2,14 +2,14 @@
 
 **Amplitude Agent Analytics can ingest Buzz agent teams (a person, a coordinator agent and its workers in one channel thread) from the owner's local Buzz archive, with no SDK and no private key.**
 
-Last verified: pending live capture. Pinned to `block/buzz@12f3d51` (Buzz desktop archive) and goose v1.28.0 (`sessions.db`). This is an Amplitude-authored guide. Buzz and goose are projects of Block, Inc.; this guide is not affiliated with or endorsed by Block. Corrections are welcome as a pull request.
+Last verified: pending live capture. Pinned to `block/buzz@7e7ec73` (Buzz desktop archive, source re-checked 2026-11-19) and goose v1.28.0 (`sessions.db`). This is an Amplitude-authored guide. Buzz and goose are projects of Block, Inc.; this guide is not affiliated with or endorsed by Block. Corrections are welcome as a pull request.
 
 **Provenance of Buzz details.** Every table and field below comes from Buzz and goose source at the pinned commits:
 
 - the archive schema: `desktop/src-tauri/src/archive/store.rs` (`archived_events`);
 - kind 44200 decrypted at ingest and stored as plaintext JSON: `desktop/src-tauri/src/archive/pipeline.rs`;
 - the kind 44200 payload: `docs/nips/NIP-AM.md`;
-- thread tags (`["e", root, "", "root"]`, `["e", parent, "", "reply"]`): `crates/buzz-sdk/src/builders.rs`;
+- thread tags (`["e", root, "", "root"]`, `["e", parent, "", "reply"]`) and the sub-second `ms` tag (added in commit `051dd2d`, #9548): `crates/buzz-sdk/src/builders.rs`;
 - NIP-OA owner attestation (`["auth", owner, conditions, sig]`): `crates/buzz-sdk/src/nip_oa.rs`;
 - goose `messages` (`session_id`, `role`, `content_json`, `created_timestamp`): `crates/goose/src/session/session_manager.rs`;
 - `toolRequest` and `toolResponse` blocks: `crates/goose-provider-types/src/conversation/message.rs` and `tool_result_serde.rs`.
@@ -45,6 +45,7 @@ scheduled job on the owner's machine (for example, every 15 minutes)
 - It never reads kind 24200 frames and never needs a private key. The desktop already stored kind 44200 as plaintext.
 - It doesn't read tool calls for workers on other harnesses. A Claude Code or Codex worker reports its own tool calls through [claude-code.md](claude-code.md) or [codex.md](codex.md), and joins the team through `[Agent] Parent Agent ID`.
 - Remote mode (a dedicated member key invited to channels) sees messages only. Archive mode is the documented path.
+- Cloud-run agents. Builderlab cloud execution does not write the desktop archive, so this forwarder does not see those agents. Buzz's relay OpenTelemetry (`crates/buzz-relay/src/telemetry.rs`) is infrastructure tracing over OTLP gRPC, not agent spans, and Amplitude accepts OTLP over HTTP. Covering cloud-run agents needs either OTLP/HTTP GenAI spans carrying session, user, agent, parent agent, tokens, and cost, or a server-side feed of kind 0, 9, and 44200 events that this forwarder normalizes unchanged.
 
 ### What the archive must already contain
 
@@ -118,6 +119,7 @@ Copy [buzz.mjs](./buzz.mjs) unchanged next to the job (it also ships in the npm 
 | Buzz or goose | Agent Analytics |
 |---|---|
 | Thread root event (`e` tag marked `root`, else `reply`) | `[Agent] Session ID`; a message with no thread uses the channel plus the idle window |
+| Kind 9 `ms` tag (0-999) | Sub-second offset added to the message's time, so messages in the same second keep Buzz's order. A missing or invalid value counts as 0 |
 | A person's message | `[Agent] User Message` to the agent it mentions (`p` tag), else the thread's first agent |
 | An agent's message | `[Agent] AI Response` from that agent |
 | An agent's message that mentions another agent | the next input to that agent: a `[Agent] User Message` to the worker when it replies, with `[Agent] Parent Agent ID` set to the sender |

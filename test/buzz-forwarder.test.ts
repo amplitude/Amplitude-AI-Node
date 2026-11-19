@@ -145,6 +145,74 @@ describe('buzz forwarder', () => {
     for (const c of golden.cases) expect([c.name, parseCommitSha(c.tool_name, c.input, c.output)]).toEqual([c.name, c.expected]);
   });
 
+  describe('same-second ordering from the ms tag', () => {
+    const profiles = fixture.archive.filter((row) => row.kind === 0);
+    const message = (id: string, pubkey: string, createdAt: number, content: string, tags: string[][]) => ({
+      id,
+      kind: 9,
+      pubkey,
+      created_at: createdAt,
+      raw_json: JSON.stringify({ kind: 9, content, tags }),
+    });
+    const SECOND = 1767000100;
+
+    it('orders two messages in the same second by ms, even when event IDs sort the other way', () => {
+      // 'aa-reply' sorts before 'zz-root' by event ID, but its ms offset (900) puts it after the root (100).
+      const rows = [
+        ...profiles,
+        message('zz-root', 'human-alice', SECOND, '@coordinator quick one', [
+          ['h', 'chan-3'],
+          ['p', 'agent-coordinator'],
+          ['ms', '100'],
+        ]),
+        message('aa-reply', 'agent-coordinator', SECOND, 'On it', [
+          ['h', 'chan-3'],
+          ['e', 'zz-root', '', 'root'],
+          ['ms', '900'],
+        ]),
+      ];
+      const { events } = normalize(rows, mapping) as { events: Event[] };
+      const thread = events.filter((e) => e.event_properties['[Agent] Session ID'] === 'zz-root');
+      expect(thread.map((e) => e.event_type)).toEqual(['[Agent] User Message', '[Agent] AI Response']);
+      expect(thread[0]?.time).toBe(SECOND * 1000 + 100);
+      expect(thread[1]?.time).toBe(SECOND * 1000 + 900);
+      expect(thread.map((e) => e.event_properties['[Agent] Turn ID'])).toEqual([1, 2]);
+      expect(checkAgentEvents(thread).errors).toEqual([]);
+    });
+
+    it('keeps second precision when ms is not an integer from 0 to 999', () => {
+      const rows = [
+        ...profiles,
+        message('zz-root', 'human-alice', SECOND, '@coordinator bad offsets', [
+          ['h', 'chan-3'],
+          ['p', 'agent-coordinator'],
+          ['ms', '1200'],
+        ]),
+        message('aa-reply', 'agent-coordinator', SECOND, 'Noted', [
+          ['h', 'chan-3'],
+          ['e', 'zz-root', '', 'root'],
+          ['ms', 'x'],
+        ]),
+      ];
+      const { events } = normalize(rows, mapping) as { events: Event[] };
+      const thread = events.filter((e) => e.event_properties['[Agent] Session ID'] === 'zz-root');
+      expect(thread.map((e) => e.time)).toEqual([SECOND * 1000, SECOND * 1000]);
+    });
+
+    it('still binds a kind 44200 metric to its reply when the reply carries an ms offset', () => {
+      // Shift the worker reply (m3) to 900 ms. Its metric is 500 ms into the second, so binding must still hold.
+      const archive = fixture.archive.map((row) => {
+        if (row.id !== 'm3') return row;
+        const event = JSON.parse(String(row.raw_json));
+        return { ...row, raw_json: JSON.stringify({ ...event, tags: [...event.tags, ['ms', '900']] }) };
+      });
+      const { events } = normalize(archive, mapping) as { events: Event[] };
+      const reply = events.find((e) => e.insert_id === 'buzz:m3:reply')?.event_properties ?? {};
+      expect(reply).toMatchObject({ '[Agent] Input Tokens': 1200, '[Agent] Cost USD': 0.012 });
+      expect(checkAgentEvents(events).errors).toEqual([]);
+    });
+  });
+
   it('carries the forwarder core byte-for-byte from sierra.md', () => {
     expect(coreOf('buzz.md')).toBe(coreOf('sierra.md'));
   });

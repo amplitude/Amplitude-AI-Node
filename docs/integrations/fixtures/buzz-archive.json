@@ -1,5 +1,5 @@
 {
-  "description": "Synthetic Buzz archive.db archived_events rows and a goose worker's sessions.db messages rows, shaped after block/buzz@12f3d51 and goose v1.28.0. Replace with a scrubbed live capture when one exists.",
+  "description": "Synthetic Buzz archive.db archived_events rows and a goose worker's sessions.db messages rows, shaped after block/buzz@7e7ec73 (same message shape; ms tag as in 051dd2d) and goose v1.28.0. Replace with a scrubbed live capture when one exists.",
   "archive": [
     { "id": "p-coord", "kind": 0, "pubkey": "agent-coordinator", "created_at": 1767000000, "raw_json": "{\"kind\":0,\"content\":\"{\\\"name\\\":\\\"coordinator\\\"}\",\"tags\":[[\"auth\",\"owner-alice\",\"\",\"sig\"]]}" },
     { "id": "p-worker", "kind": 0, "pubkey": "agent-worker", "created_at": 1767000000, "raw_json": "{\"kind\":0,\"content\":\"{\\\"name\\\":\\\"worker\\\"}\",\"tags\":[[\"auth\",\"owner-alice\",\"\",\"sig\"]]}" },
