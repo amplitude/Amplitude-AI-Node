@@ -2,7 +2,7 @@
 
 **goose (CLI and desktop) exports OpenTelemetry traces. Point them at Amplitude and each goose session becomes an Agent Analytics session.**
 
-Last verified: pending live capture. Telemetry pinned to goose v1.28.0 or later; commit stamping needs goose v1.44.0 or later. This is an Amplitude-authored guide; goose is a project of Block, Inc., which does not endorse it. Corrections are welcome as a pull request.
+Last verified: pending live capture. Telemetry pinned to goose v1.28.0 or later; commit stamping needs goose v1.44.0 or later. On 2026-11-19, goose 1.60.1's Developer shell set `AGENT_SESSION_ID` to the `sessions.db` session id, and that database parsed through the Buzz forwarder, including `commit_sha`. This is an Amplitude-authored guide; goose is a project of Block, Inc., which does not endorse it. Corrections are welcome as a pull request.
 
 **Provenance.** Span and resource attributes come from goose source at v1.28.0: `crates/goose/src/otel/otlp.rs` (OTLP exporter and `EnvResourceDetector`, so `OTEL_RESOURCE_ATTRIBUTES` is honored) and the agent's `reply_stream`, chat and tool spans. goose v1.44.0 and later set `AGENT_SESSION_ID` to the session ID for the shell commands it runs, replacing any inherited value; the commit hook stamps it. Earlier versions pass an inherited `AGENT_SESSION_ID` through unchanged, so a goose started from another agent's shell stamps that agent's ID. Verified offline with goose v1.43.0 and v1.44.0; telemetry is not yet checked against a live capture.
 
