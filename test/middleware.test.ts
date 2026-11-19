@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getActiveContext } from '../src/context.js';
+import { getActiveContext, runWithContext, SessionContext } from '../src/context.js';
 import { createAmplitudeAIMiddleware } from '../src/middleware.js';
 import { MockAmplitudeAI } from '../src/testing.js';
 
@@ -312,5 +312,29 @@ describe('createAmplitudeAIMiddleware', () => {
       );
       expect(trackSessionEndSpy).not.toHaveBeenCalled();
     });
+  });
+
+  it('inherits the enclosing agent as parent when no inbound context is accepted', (): void => {
+    const mock = new MockAmplitudeAI();
+    const middleware = createAmplitudeAIMiddleware({
+      amplitudeAI: mock,
+      userIdResolver: () => 'u1',
+      agentId: 'api',
+      trackSessionEvents: false,
+      flushOnResponse: false,
+    });
+    let parentAgentId: string | null | undefined;
+
+    runWithContext(new SessionContext({ sessionId: 'outer', agentId: 'gateway' }), () => {
+      middleware(
+        { headers: {} } as Parameters<typeof middleware>[0],
+        { on: () => {} } as Parameters<typeof middleware>[1],
+        () => {
+          parentAgentId = getActiveContext()?.parentAgentId;
+        },
+      );
+    });
+
+    expect(parentAgentId).toBe('gateway');
   });
 });
