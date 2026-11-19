@@ -113,6 +113,7 @@ import {
   STATSIG_PROMPT_NAME,
   STATSIG_PROMPT_VERSION,
   STATSIG_PROMPT_VERSION_NAME,
+  STATSIG_USER_ID,
   statsigSessionId,
 } from './conventions.js';
 
@@ -809,6 +810,9 @@ export class SpanEventMapper {
     if (ctx?.userId) return ctx.userId;
     const enduser = attrs[GENAI_ENDUSER_ID];
     if (enduser) return String(enduser);
+    // A Statsig AI SDK span carries the user as statsig.user_id and no enduser.id.
+    const statsigUser = strOrNull(attrs[STATSIG_USER_ID]);
+    if (statsigUser) return statsigUser;
     return this._defaultUserId;
   }
 

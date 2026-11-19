@@ -232,14 +232,28 @@ describe('Statsig AI SDK spans through the OTel mapper', () => {
     };
   }
 
-  function track(attrs: Record<string, unknown>) {
+  function track(attrs: Record<string, unknown>, defaultUserId: string | undefined = 'default-user') {
     const amplitude = { track: vi.fn(), flush: vi.fn() };
-    const mapper = new SpanEventMapper({ amplitude: amplitude as never, defaultUserId: 'default-user' });
+    const mapper = new SpanEventMapper({ amplitude: amplitude as never, defaultUserId });
     mapper.mapAndTrack(makeSpan(attrs));
     return amplitude.track.mock.calls.map(
-      (call) => call[0] as { event_type: string; session_id?: unknown; event_properties?: Record<string, unknown> },
+      (call) =>
+        call[0] as {
+          event_type: string;
+          user_id?: string;
+          session_id?: unknown;
+          event_properties?: Record<string, unknown>;
+        },
     );
   }
+
+  it('identifies the user from statsig.user_id when the span has no enduser.id and there is no default', () => {
+    const events = track(fixture.span.attributes, undefined);
+    const response = events.find((e) => e.event_type === '[Agent] AI Response');
+    expect(response?.user_id).toBe(fixture.span.attributes['statsig.user_id']);
+    const withEnduser = track({ ...fixture.span.attributes, 'enduser.id': 'end-user-1' }, undefined);
+    expect(withEnduser.find((e) => e.event_type === '[Agent] AI Response')?.user_id).toBe('end-user-1');
+  });
 
   it('reads the version, prompt id and session id from statsig.llm.* and statsig.custom_ids', () => {
     const events = track(fixture.span.attributes);

@@ -12,7 +12,7 @@ Statsig's spans follow the OpenTelemetry GenAI conventions, so they replay like 
 | `statsig.llm.prompt_version` (older releases: `statsig.llm.prompt_version_name`) | `[Agent] Agent Version` | The served config version, for example `v4-empathetic`. `amplitude.agent.version` wins when both are present; resource `service.version` is the fallback when neither is |
 | `statsig.llm.prompt_version_id` | Kept as a span attribute | The version id is not a variant and is not recorded as one |
 | `statsig.custom_ids` | `[Agent] Session ID` | A JSON object of the Statsig user's custom IDs. `agentSessionID` is read first, then Statsig's own `statsig.activity_id` conversation key. `gen_ai.conversation.id` and the other session attributes win when present |
-| `statsig.user_id` | Kept as a span attribute | Set the user with `enduser.id` or `user.id` in your export if `gen_ai`-style identity is missing |
+| `statsig.user_id` | user id | The Statsig user's `userID`. `enduser.id` wins when both are present |
 | `gen_ai.request.model`, `gen_ai.usage.*`, `gen_ai.input.messages`, `gen_ai.output.messages` | As on [otel-genai.md](./otel-genai.md) | Standard GenAI attributes |
 
 The replay script reports a trace with `statsig.custom_ids` as having a session; a trace with neither that nor a session attribute is one session per trace, and the script warns. Set `customIDs.agentSessionID` on the Statsig user in the application so every span in a conversation shares it.

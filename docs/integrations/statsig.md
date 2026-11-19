@@ -77,6 +77,7 @@ Statsig's AI SDK emits GenAI spans with `statsig.llm.prompt_name`, `statsig.llm.
 | `amplitude.agent.version`, then `statsig.llm.prompt_version`, then `statsig.llm.prompt_version_name`, then resource `service.version` | `[Agent] Agent Version` |
 | `statsig.llm.prompt_name` | `[Agent] Prompt ID` |
 | `gen_ai.conversation.id` and the other session attributes, then `statsig.custom_ids.agentSessionID`, then `statsig.custom_ids["statsig.activity_id"]` | `[Agent] Session ID` |
+| `enduser.id`, then `statsig.user_id` | user id |
 
 Without a session id a trace is one session, so set `customIDs.agentSessionID` on the Statsig user (or let Statsig's `activityID` group the conversation). The in-process `@amplitude/ai` span processor applies the same rules.
 

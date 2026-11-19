@@ -125,6 +125,8 @@ export const STATSIG_PROMPT_NAME = 'statsig.llm.prompt_name';
 export const STATSIG_PROMPT_VERSION = 'statsig.llm.prompt_version';
 export const STATSIG_PROMPT_VERSION_NAME = 'statsig.llm.prompt_version_name';
 export const STATSIG_CUSTOM_IDS = 'statsig.custom_ids';
+/** The Statsig user's `userID`; a Statsig AI SDK span carries it instead of `enduser.id`. */
+export const STATSIG_USER_ID = 'statsig.user_id';
 export const STATSIG_ACTIVITY_ID = 'statsig.activity_id';
 export const STATSIG_AGENT_SESSION_ID = 'agentSessionID';
 
