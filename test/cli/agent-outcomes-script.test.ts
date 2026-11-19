@@ -424,6 +424,52 @@ describe('agent-outcomes.yml script', () => {
         ['deploy_succeeded:acme/app:d1:2', `devin-${HEX}`, 'ada@example.com'],
       ]);
     });
+
+    /** A rebase-merged Devin PR 7 (d1, d2): copies dead0001 and `head`, which GitHub committed. */
+    const rebasedDevinWorld = (head = 'dead0002') => {
+      const world = devinWorld();
+      world.commits.d2 = devinCommit('d2', 'd1');
+      const copy = (sha: string, of: string, parent: string, byGitHub = false) => {
+        const original = world.commits[of]!;
+        return {
+          ...original,
+          sha,
+          commit: { ...original.commit, ...(byGitHub && { committer: { email: 'noreply@github.com' } as { date: string } }) },
+          parents: [{ sha: parent }],
+        };
+      };
+      world.commits.dead0001 = copy('dead0001', 'd1', 'base');
+      world.commits[head] = copy(head, 'd2', 'dead0001', true);
+      const pr = {
+        number: 7, merge_commit_sha: head, merged_at: '2026-11-01T09:00:00Z', body: linked,
+        user: { login: 'devin-ai-integration[bot]' },
+      };
+      world.associatedPrs = { dead0001: [pr], [head]: [pr] };
+      world.prCommitsByNumber = { 7: ['d1', 'd2'] };
+      return world;
+    };
+
+    it('scores each deployed rebased copy of a Devin PR on the session its PR links', async () => {
+      const world = rebasedDevinWorld('head');
+      deployedSince(world, 'base');
+      const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+      expect(r.events.map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.user_id])).toEqual([
+        ['deploy_succeeded:acme/app:dead0001:2', `devin-${HEX}`, 'ada@example.com'],
+        ['deploy_succeeded:acme/app:head:2', `devin-${HEX}`, 'ada@example.com'],
+      ]);
+    });
+
+    it.each([
+      ['the rebased head', 'dead0002'],
+      ['a rebased copy before the head', 'dead0001'],
+    ])('scores a revert of %s of a Devin PR on the session its PR links', async (_, sha) => {
+      const world = rebasedDevinWorld();
+      world.prCommits = ['c3'];
+      const r = await run(world, { event: 'pull_request', payload: prPayload({ body: `This reverts commit ${sha}.` }) });
+      expect(r.byName('commit_reverted').map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.user_id])).toEqual([
+        [`commit_reverted:acme/app:${sha}:7`, `devin-${HEX}`, 'ada@example.com'],
+      ]);
+    });
   });
 
   it('scores no commit without a session trailer, and skips the PR lookups when none has one', async () => {

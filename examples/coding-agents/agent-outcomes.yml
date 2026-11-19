@@ -86,7 +86,7 @@ jobs:
             // A Devin commit's author is Devin, so its user is the person who asked: the last
             // Co-authored-by person, else the PR description's "Requested by" line.
             const userIdFor = (c) => {
-              const devin = devinSessions.get(c.sha);
+              const devin = devinOf(c);
               if (devin) {
                 return userIdSource === 'login' ? devin.login : lastCoAuthorPerson(c) || devin.email;
               }
@@ -110,12 +110,19 @@ jobs:
             const agentForEmail = (email) => AGENT_EMAILS[(email || '').trim().toLowerCase()] || null;
             // Devin writes no trailer. A PR Devin opened links its session in the description
             // (app.devin.ai or an enterprise devinenterprise.com host), and each commit Devin
-            // signed in that PR is scored on it. Human commits in the PR are not.
+            // signed in that PR is scored on it. Human commits in the PR are not. A rebase-and-merge
+            // copies each commit with its author and message, so the session follows the copy.
             const DEVIN_PR_AUTHOR = 'devin-ai-integration[bot]';
             const DEVIN_SESSION_URL = /https:\/\/(?:app\.devin\.ai|[a-z0-9-]+\.devinenterprise\.com)\/sessions\/([0-9a-f]{32})(?![0-9a-z])/i;
             const devinSessions = new Map();
+            const devinPrsNoted = new Set();
+            const commitIdentity = (c) => [
+              (c.commit?.author?.email || '').toLowerCase(), c.commit?.author?.date || '', c.commit?.message || '',
+            ].join('\n');
+            const devinOf = (c) => devinSessions.get(commitIdentity(c));
             const notePrSession = (pr, prCommits) => {
               if (pr?.user?.login !== DEVIN_PR_AUTHOR) return;
+              devinPrsNoted.add(pr.number);
               const body = pr.body || '';
               const session = DEVIN_SESSION_URL.exec(body);
               if (!session) return;
@@ -126,13 +133,20 @@ jobs:
                 email: (requested.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/) || [])[0] || null,
               };
               for (const c of prCommits) {
-                if (signingAgent(c).agent === 'devin' && !devinSessions.has(c.sha)) devinSessions.set(c.sha, entry);
+                if (signingAgent(c).agent === 'devin' && !devinOf(c)) devinSessions.set(commitIdentity(c), entry);
               }
+            };
+            // A Devin commit that is a rebased copy, not its PR's merge commit, still gets the
+            // session of the Devin PR it came from.
+            const noteDevinCopy = async (c, prs) => {
+              const pr = prs.find((p) => p.merged_at && p.user?.login === DEVIN_PR_AUTHOR);
+              if (!pr || devinPrsNoted.has(pr.number) || signingAgent(c).agent !== 'devin') return;
+              notePrSession(pr, await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number }));
             };
             // Copilot-Session is the trailer Copilot adds for a synced Copilot CLI session.
             const sessionOf = (c) => trailer(c.commit.message, 'Agent-Session-Id')
               || trailer(c.commit.message, 'Copilot-Session')
-              || devinSessions.get(c.sha)?.session
+              || devinOf(c)?.session
               || null;
             // A commit may stand for a merged PR only when it could be that PR's squash or merge
             // commit: GitHub made it (committer noreply@github.com), it has two parents, or its
@@ -141,6 +155,8 @@ jobs:
             const mayStandForPr = (c) => isMerge(c)
               || (c.commit.committer?.email || '').toLowerCase() === 'noreply@github.com'
               || /\(#\d+\)\s*$/.test((c.commit.message || '').split('\n')[0]);
+            // A Devin commit with no session yet is looked up too, for the Devin PR it came from.
+            const needsPrLookup = (c) => mayStandForPr(c) || (signingAgent(c).agent === 'devin' && !sessionOf(c));
             // On rebase-and-merge, the PR's merge_commit_sha is a copy of its last commit, with
             // that commit's message and author date. Such a commit stands only for itself.
             const isRebasedHead = (c, prCommits) => {
@@ -490,16 +506,19 @@ jobs:
                   continue;
                 }
                 remember(original);
-                const fromPr = !mayStandForPr(original) ? null : await enrich('reverted_prs', async () => {
+                const fromPr = !needsPrLookup(original) ? null : await enrich('reverted_prs', async () => {
                   const { data: prs } = await call(() => github.rest.repos.listPullRequestsAssociatedWithCommit({
                     owner, repo, commit_sha: original.sha,
                   }));
                   const source = prs.find((p) => p.merged_at && p.merge_commit_sha === original.sha);
-                  if (!source) return null;
+                  if (!source) {
+                    await noteDevinCopy(original, prs);
+                    return null;
+                  }
                   if (revertedPrs.has(source.number)) return [];
                   const prCommits = await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: source.number });
-                  if (isRebasedHead(original, prCommits)) return null;
                   notePrSession(source, prCommits);
+                  if (isRebasedHead(original, prCommits)) return null;
                   revertedPrs.add(source.number);
                   return prCommits;
                 });
@@ -560,7 +579,7 @@ jobs:
                 const first = own[0];
                 // A Devin PR's author is Devin, so it is no fallback user.
                 const userId = userIdFor(first)
-                  || (userIdSource === 'login' && !devinSessions.has(first.sha) ? pr.user?.login : null);
+                  || (userIdSource === 'login' && !devinOf(first) ? pr.user?.login : null);
                 const props = {
                   pr_number: pr.number,
                   base_branch: pr.base.ref,
@@ -618,16 +637,19 @@ jobs:
               for (const c of commits) {
                 if (seen.has(c.sha)) continue;
                 seen.add(c.sha);
-                const fromPr = !mayStandForPr(c) ? null : await enrich('deployed_prs', async () => {
+                const fromPr = !needsPrLookup(c) ? null : await enrich('deployed_prs', async () => {
                   const { data: prs } = await call(() => github.rest.repos.listPullRequestsAssociatedWithCommit({
                     owner, repo, commit_sha: c.sha,
                   }));
                   const pr = prs.find((p) => p.merged_at && p.merge_commit_sha === c.sha);
-                  if (!pr) return null;
+                  if (!pr) {
+                    await noteDevinCopy(c, prs);
+                    return null;
+                  }
                   if (listedPrs.has(pr.number)) return [];
                   const prCommits = await listAll(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number });
-                  if (isRebasedHead(c, prCommits)) return null;
                   notePrSession(pr, prCommits);
+                  if (isRebasedHead(c, prCommits)) return null;
                   listedPrs.add(pr.number);
                   return prCommits;
                 });
