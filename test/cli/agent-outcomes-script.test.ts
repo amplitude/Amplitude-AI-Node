@@ -41,7 +41,10 @@ type World = {
   trees: Record<string, TreeEntry[]>;
   prCommits?: string[];
   prCommitsByNumber?: Record<number, string[]>;
-  associatedPrs?: Record<string, Array<{ number: number; merge_commit_sha: string; merged_at: string | null }>>;
+  associatedPrs?: Record<
+    string,
+    Array<{ number: number; merge_commit_sha: string; merged_at: string | null; body?: string; user?: { login: string } }>
+  >;
   reviews?: Array<{ state: string; body?: string; submitted_at?: string; user: { login: string; type: string } }>;
   checkRuns?: Record<
     string,
@@ -311,10 +314,162 @@ describe('agent-outcomes.yml script', () => {
         base_branch: 'main',
         agent_setup_version: setupHash(['AGENTS.md:blob-a']),
         outcome_time: '2026-11-03T00:00:00.000Z',
-        outcomes_workflow_version: 4,
+        outcomes_workflow_version: 5,
       },
     });
     expect(props(merged[1])).toMatchObject({ '[Agent] Session ID': 's2', '[Agent] Agent ID': 'codex' });
+  });
+
+  describe('Devin pull requests', () => {
+    const DEVIN_EMAIL = '158243242+devin-ai-integration[bot]@users.noreply.github.com';
+    const HEX = '0123456789abcdef0123456789abcdef';
+    const devinCommit = (sha: string, parent: string, coAuthor: string | null = 'Ada <ada@example.com>') => ({
+      ...commit(sha, parent, {
+        message: `feat: ${sha}${coAuthor ? `\n\nCo-Authored-By: ${coAuthor}\n` : '\n'}`,
+        email: DEVIN_EMAIL,
+        authored: '2026-11-01T01:00:00Z',
+      }),
+      author: { login: 'devin-ai-integration[bot]' },
+    });
+    const devinWorld = (coAuthor?: string | null) => {
+      const world = linearWorld();
+      world.commits.d1 = devinCommit('d1', 'base', coAuthor);
+      world.commits.h1 = commit('h1', 'd1', { email: 'human@example.com' });
+      world.prCommits = ['d1', 'h1'];
+      return world;
+    };
+    const devinPr = (body: string, login = 'devin-ai-integration[bot]') => prPayload({ body, user: { login } });
+    const linked = `Link to Devin session: https://app.devin.ai/sessions/${HEX}\nRequested by: @ada-l`;
+
+    it('scores the commits Devin signed on the session its PR links, as the co-author', async () => {
+      const r = await run(devinWorld(), { event: 'pull_request', payload: devinPr(linked) });
+      const merged = r.byName('commit_merged');
+      expect(merged.map((e) => e.event_properties.commit_sha)).toEqual(['d1']);
+      expect(merged[0]!.user_id).toBe('ada@example.com');
+      expect(props(merged[0])).toMatchObject({
+        '[Agent] Session ID': `devin-${HEX}`,
+        '[Agent] Agent ID': 'devin',
+        agent_trigger: 'event',
+        pr_session_count: 1,
+        pr_human_commit_count: 1,
+      });
+      const review = forSession(r.byName('review_count'), `devin-${HEX}`);
+      expect(review?.user_id).toBe('ada@example.com');
+    });
+
+    it('takes the requester login, never the Devin bot, with AMPLITUDE_USER_ID_SOURCE=login', async () => {
+      const r = await run(devinWorld(), {
+        event: 'pull_request',
+        payload: devinPr(linked),
+        env: { AMPLITUDE_USER_ID_SOURCE: 'login' },
+      });
+      expect(new Set(r.events.map((e) => e.user_id))).toEqual(new Set(['ada-l']));
+
+      const unnamed = await run(devinWorld(), {
+        event: 'pull_request',
+        payload: devinPr(`Link to Devin run: https://app.devin.ai/sessions/${HEX}`),
+        env: { AMPLITUDE_USER_ID_SOURCE: 'login' },
+      });
+      expect(unnamed.events).toEqual([]);
+    });
+
+    it('reads an enterprise session link, and the requester email when there is no co-author', async () => {
+      const r = await run(devinWorld(null), {
+        event: 'pull_request',
+        payload: devinPr(`Link to Devin run: https://acme.devinenterprise.com/sessions/${HEX.toUpperCase()}\nRequested by: Ada (ada@acme.com)`),
+      });
+      const merged = r.byName('commit_merged');
+      expect(merged).toHaveLength(1);
+      expect(merged[0]!.user_id).toBe('ada@acme.com');
+      expect(props(merged[0])['[Agent] Session ID']).toBe(`devin-${HEX}`);
+    });
+
+    it('sends nothing without a session link, a person, or Devin as the PR author', async () => {
+      const noLink = await run(devinWorld(), { event: 'pull_request', payload: devinPr('Requested by: @ada-l') });
+      expect(noLink.events).toEqual([]);
+      const noPerson = await run(devinWorld(null), {
+        event: 'pull_request',
+        payload: devinPr(`https://app.devin.ai/sessions/${HEX}`),
+      });
+      expect(noPerson.events).toEqual([]);
+      const humanPr = await run(devinWorld(), { event: 'pull_request', payload: devinPr(linked, 'ada-l') });
+      expect(humanPr.events).toEqual([]);
+      const shortId = await run(devinWorld(), {
+        event: 'pull_request',
+        payload: devinPr(`https://app.devin.ai/sessions/${HEX}ff`),
+      });
+      expect(shortId.events).toEqual([]);
+    });
+
+    it('scores a deployed Devin squash commit on the session its PR links', async () => {
+      const world = devinWorld();
+      world.commits.head = commit('head', 'base', {
+        message: 'Add search (#7)\n\nCo-Authored-By: Ada <ada@example.com>\n',
+        email: DEVIN_EMAIL,
+        authored: '2026-11-01T09:00:00Z',
+      });
+      world.associatedPrs = {
+        head: [{
+          number: 7,
+          merge_commit_sha: 'head',
+          merged_at: '2026-11-01T09:00:00Z',
+          body: linked,
+          user: { login: 'devin-ai-integration[bot]' },
+        }],
+      };
+      world.prCommitsByNumber = { 7: ['d1', 'h1'] };
+      deployedSince(world, 'base');
+      const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+      expect(r.events.map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.user_id])).toEqual([
+        ['deploy_succeeded:acme/app:d1:2', `devin-${HEX}`, 'ada@example.com'],
+      ]);
+    });
+
+    /** A rebase-merged Devin PR 7 (d1, d2): copies dead0001 and `head`, which GitHub committed. */
+    const rebasedDevinWorld = (head = 'dead0002') => {
+      const world = devinWorld();
+      world.commits.d2 = devinCommit('d2', 'd1');
+      const copy = (sha: string, of: string, parent: string, byGitHub = false) => {
+        const original = world.commits[of]!;
+        return {
+          ...original,
+          sha,
+          commit: { ...original.commit, ...(byGitHub && { committer: { email: 'noreply@github.com' } as { date: string } }) },
+          parents: [{ sha: parent }],
+        };
+      };
+      world.commits.dead0001 = copy('dead0001', 'd1', 'base');
+      world.commits[head] = copy(head, 'd2', 'dead0001', true);
+      const pr = {
+        number: 7, merge_commit_sha: head, merged_at: '2026-11-01T09:00:00Z', body: linked,
+        user: { login: 'devin-ai-integration[bot]' },
+      };
+      world.associatedPrs = { dead0001: [pr], [head]: [pr] };
+      world.prCommitsByNumber = { 7: ['d1', 'd2'] };
+      return world;
+    };
+
+    it('scores each deployed rebased copy of a Devin PR on the session its PR links', async () => {
+      const world = rebasedDevinWorld('head');
+      deployedSince(world, 'base');
+      const r = await run(world, { event: 'deployment_status', payload: deployPayload });
+      expect(r.events.map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.user_id])).toEqual([
+        ['deploy_succeeded:acme/app:dead0001:2', `devin-${HEX}`, 'ada@example.com'],
+        ['deploy_succeeded:acme/app:head:2', `devin-${HEX}`, 'ada@example.com'],
+      ]);
+    });
+
+    it.each([
+      ['the rebased head', 'dead0002'],
+      ['a rebased copy before the head', 'dead0001'],
+    ])('scores a revert of %s of a Devin PR on the session its PR links', async (_, sha) => {
+      const world = rebasedDevinWorld();
+      world.prCommits = ['c3'];
+      const r = await run(world, { event: 'pull_request', payload: prPayload({ body: `This reverts commit ${sha}.` }) });
+      expect(r.byName('commit_reverted').map((e) => [e.insert_id, e.event_properties['[Agent] Session ID'], e.user_id])).toEqual([
+        [`commit_reverted:acme/app:${sha}:7`, `devin-${HEX}`, 'ada@example.com'],
+      ]);
+    });
   });
 
   it('scores no commit without a session trailer, and skips the PR lookups when none has one', async () => {

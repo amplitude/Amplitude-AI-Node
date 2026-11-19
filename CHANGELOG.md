@@ -1,11 +1,22 @@
 # Changelog
 
-## 0.32.0
+## 0.33.0
 
 ### Added
 - **Statsig Agent Experimentation.** `@amplitude/ai/integrations/statsig` maps a Statsig config onto Agent Analytics: `statsigPromptContext(statsig, user, prompt)` returns `{ agentVersion, experiments }` for `ai.agent()` or `child()`, with the served config version's name as `agentVersion` and, when an experiment runs on the config, `{ key: allocatedExperimentName, variant: groupName, provider: 'statsig' }` from the layer named after the config. No experiment records no entry. It reads `groupName` and `allocatedExperimentName` only, so it never logs a Statsig exposure, and accepts both `@statsig/statsig-node-core` fields and legacy `statsig-node` getters. `experimentsFromStatsig(statsig, user, names)` records named experiments from `getExperiment`, `agentVersionFromPrompt(prompt)` returns the live version name, and `statsigUser(user, sessionId)` sets `customIDs.agentSessionID` so Statsig's exposures and spans join the agent session. `unit` defaults to `agent_session` when that custom ID is set.
 - **Statsig span attributes in the OTel mapper.** `[Agent] Agent Version` falls back from `amplitude.agent.version` to `statsig.llm.prompt_version`, then `statsig.llm.prompt_version_name`; `statsig.llm.prompt_name` becomes `[Agent] Prompt ID`; and without `gen_ai.conversation.id`, the session ID is read from `statsig.custom_ids` (`agentSessionID`, then Statsig's `statsig.activity_id`); `statsig.user_id` identifies the user when `enduser.id` is absent. `otlp-replay.mjs` counts a trace with `statsig.custom_ids` as having a session and keeps that attribute as one JSON string.
 - **Docs.** [docs/integrations/statsig.md](docs/integrations/statsig.md) (the mapping, the helpers, and the span path) and [docs/integrations/warehouses/statsig.md](docs/integrations/warehouses/statsig.md) (stored Statsig spans, and joining `statsig::layer_exposure` events to record the arm).
+
+## 0.32.0
+
+### Added
+- **Outcomes workflow v5: Devin pull requests** (`outcomes_workflow_version: 5`).
+  - **Session:** in a PR that Devin opened (author `devin-ai-integration[bot]`), each commit Devin signed is scored on the session its description links (`app.devin.ai/sessions/<id>`, or a `devinenterprise.com` tenant), as Session ID `devin-<id>` with Agent ID `devin`. This works on merge, revert and deploy, and the workflow makes no extra API calls for it. Human commits in the PR still get nothing.
+  - **User:** the commit's last `Co-authored-by` person, else the email on the `Requested by:` line, or with `AMPLITUDE_USER_ID_SOURCE=login`, the `@login` on that line. Devin is never the user: a Devin commit with no person gets no score, and the PR scores don't fall back to the PR author.
+  - `init` upgrades an untouched 0.31.0 workflow in place.
+
+### Changed
+- **Docs.** The `code-outcomes` recipe describes Devin, and says outcome scores are chart events that never create or change Agent Analytics sessions.
 
 ## 0.31.0
 

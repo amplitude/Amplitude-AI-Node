@@ -739,7 +739,7 @@ await agent.session({ userId: 'u1' }).run(async (s) => {
 });
 ```
 
-For a Statsig [Agent Experimentation](https://docs.statsig.com/agent-experimentation/overview) config, the served version is the agent version and the experiment group is the variant (requires `@amplitude/ai` 0.32.0 or later):
+For a Statsig [Agent Experimentation](https://docs.statsig.com/agent-experimentation/overview) config, the served version is the agent version and the experiment group is the variant (requires `@amplitude/ai` 0.33.0 or later):
 
 ```typescript
 import { statsigPromptContext, statsigUser } from '@amplitude/ai/integrations/statsig';

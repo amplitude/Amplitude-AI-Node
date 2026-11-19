@@ -22,7 +22,7 @@ Never record the version id or the version name as the variant: a version is not
 
 ## With the Amplitude AI SDK
 
-`@amplitude/ai/integrations/statsig` (Node, `@amplitude/ai` 0.32.0 or later) and `amplitude_ai.integrations.statsig` (Python, `amplitude-ai` 1.29.0 or later) export four helpers. None of them logs a Statsig exposure: an exposure fires when a layer or experiment parameter is read with `get`, and the helpers read only `allocatedExperimentName` and `groupName`.
+`@amplitude/ai/integrations/statsig` (Node, `@amplitude/ai` 0.33.0 or later) and `amplitude_ai.integrations.statsig` (Python, `amplitude-ai` 1.29.0 or later) export four helpers. None of them logs a Statsig exposure: an exposure fires when a layer or experiment parameter is read with `get`, and the helpers read only `allocatedExperimentName` and `groupName`.
 
 | Helper | Reads | Returns |
 |---|---|---|
