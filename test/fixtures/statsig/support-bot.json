@@ -1,0 +1,120 @@
+{
+  "$comment": "Synthetic Statsig Agent Experimentation shapes shared by the @amplitude/ai Statsig plugin tests (Node), the amplitude-ai Python tests, and the Nova OTLP translator tests. Not customer data. Field names come from @statsig/statsig-node-core 0.24.2 (Layer, Experiment), @statsig/statsig-ai 1.0.0 (Prompt, PromptVersion, otel/conventions.ts) and Statsig's Native Amplitude integration mapper (amplitude-event-mapper). Keep the three copies byte-identical.",
+  "config": {
+    "name": "support-bot",
+    "versions": [
+      { "id": "ver_3c0n", "name": "v3-concise" },
+      { "id": "ver_4emp", "name": "v4-empathetic" }
+    ],
+    "liveVersion": "v3-concise"
+  },
+  "experiment": {
+    "name": "support-bot-tone",
+    "layer": "support-bot",
+    "groups": [
+      { "name": "Control", "live": "ver_3c0n" },
+      { "name": "Test 1", "live": "ver_4emp" }
+    ]
+  },
+  "user": {
+    "userID": "user-42",
+    "customIDs": { "agentSessionID": "sess-123", "orgID": "org-7" }
+  },
+  "promptForUser": {
+    "name": "support-bot",
+    "live": { "id": "ver_4emp", "name": "v4-empathetic" }
+  },
+  "promptWithEmptyVersionName": {
+    "name": "support-bot",
+    "live": { "id": "ver_blank", "name": "" }
+  },
+  "layerForUser": {
+    "name": "support-bot",
+    "allocatedExperimentName": "support-bot-tone",
+    "groupName": "Test 1",
+    "ruleID": "rule-1",
+    "idType": "userID"
+  },
+  "layerWithoutExperiment": {
+    "name": "support-bot",
+    "allocatedExperimentName": null,
+    "groupName": null,
+    "ruleID": "default",
+    "idType": "userID"
+  },
+  "experimentsForUser": {
+    "checkout-copy": { "name": "checkout-copy", "groupName": "Test 2", "ruleID": "rule-9", "idType": "userID" },
+    "unallocated": { "name": "unallocated", "groupName": null, "ruleID": "default", "idType": "userID" }
+  },
+  "span": {
+    "name": "chat gpt-4o-mini",
+    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "spanId": "00f067aa0ba902b7",
+    "kind": "CLIENT",
+    "startTimeUnixNano": "1763510400000000000",
+    "endTimeUnixNano": "1763510401800000000",
+    "resource": {
+      "service.name": "support-bot-api",
+      "service.version": "2026.11.18",
+      "deployment.environment.name": "production"
+    },
+    "attributes": {
+      "statsig.span.type": "gen_ai",
+      "statsig.span.gen_ai.type": "chat",
+      "statsig.span.llm_root": true,
+      "statsig.llm.prompt_name": "support-bot",
+      "statsig.llm.prompt_version": "v4-empathetic",
+      "statsig.llm.prompt_version_id": "ver_4emp",
+      "statsig.llm.prompt_template_variables": "{\"customer_tier\":\"pro\"}",
+      "statsig.user_id": "user-42",
+      "statsig.custom_ids": "{\"statsig.activity_id\":\"conv-123\",\"agentSessionID\":\"sess-123\",\"orgID\":\"org-7\"}",
+      "statsig.environment": "production",
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "openai",
+      "gen_ai.request.model": "gpt-4o-mini",
+      "gen_ai.response.model": "gpt-4o-mini-2024-07-18",
+      "gen_ai.agent.name": "support-bot",
+      "gen_ai.input.messages": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"My invoice is wrong\"}]}]",
+      "gen_ai.output.messages": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"I am sorry about that. Let me look at the invoice.\"}],\"finish_reason\":\"stop\"}]",
+      "gen_ai.usage.input_tokens": 120,
+      "gen_ai.usage.output_tokens": 48
+    }
+  },
+  "spanLegacyVersionAttribute": {
+    "$comment": "Older Statsig AI SDKs emit statsig.llm.prompt_version_name instead of statsig.llm.prompt_version; receivers accept both.",
+    "attributes": {
+      "statsig.llm.prompt_name": "support-bot",
+      "statsig.llm.prompt_version_name": "v3-concise",
+      "statsig.llm.prompt_version_id": "ver_3c0n",
+      "statsig.custom_ids": "{\"statsig.activity_id\":\"conv-456\"}",
+      "gen_ai.request.model": "gpt-4o-mini"
+    }
+  },
+  "layerExposureEvent": {
+    "$comment": "What the Native Amplitude integration forwards for a prompt experiment: event name kept, allocatedExperiment promoted into statsig::config, layer name in statsig::layer.",
+    "event_type": "statsig::layer_exposure",
+    "user_id": "user-42",
+    "event_properties": {
+      "statsig::layer": "support-bot",
+      "statsig::config": "support-bot-tone",
+      "statsig::groupName": "Test 1",
+      "statsig::groupID": "rule-1",
+      "statsig::ruleID": "rule-1",
+      "statsig::idType": "userID",
+      "statsig::reason": "Network:Recognized"
+    }
+  },
+  "expected": {
+    "agentVersion": "v4-empathetic",
+    "promptId": "support-bot",
+    "experiments": [
+      { "key": "support-bot-tone", "variant": "Test 1", "provider": "statsig", "unit": "agent_session" }
+    ],
+    "experimentsFromNamed": [
+      { "key": "checkout-copy", "variant": "Test 2", "provider": "statsig" }
+    ],
+    "sessionIdFromSpan": "sess-123",
+    "sessionIdFromSpanWithoutAgentSessionID": "conv-456",
+    "agentVersionFromLegacySpan": "v3-concise"
+  }
+}

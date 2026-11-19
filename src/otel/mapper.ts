@@ -19,6 +19,7 @@ import {
   PROP_ENV,
   PROP_PARENT_AGENT_ID,
   PROP_PARENT_SPAN_ID,
+  PROP_PROMPT_ID,
   PROP_SPAN_ID,
   PROP_TOOL_OWNER,
   PROP_TOOL_TYPE,
@@ -108,6 +109,12 @@ import {
   SPAN_KIND_LLM,
   SPAN_KIND_SESSION,
   SPAN_KIND_TOOL,
+  STATSIG_CUSTOM_IDS,
+  STATSIG_PROMPT_NAME,
+  STATSIG_PROMPT_VERSION,
+  STATSIG_PROMPT_VERSION_NAME,
+  STATSIG_USER_ID,
+  statsigSessionId,
 } from './conventions.js';
 
 const logger = getLogger();
@@ -216,7 +223,10 @@ export class SpanEventMapper {
       return;
     }
 
-    const sessionId = ctx?.sessionId ?? strOrNull(attrs[GENAI_CONVERSATION_ID]);
+    const sessionId =
+      ctx?.sessionId ??
+      strOrNull(attrs[GENAI_CONVERSATION_ID]) ??
+      statsigSessionId(attrs[STATSIG_CUSTOM_IDS]);
     let traceId = ctx?.traceId ?? null;
     if (!traceId) traceId = this._extractOtelTraceId(span);
     const turnId = ctx?.nextTurnId() ?? null;
@@ -224,7 +234,13 @@ export class SpanEventMapper {
     const parentAgentId = ctx?.parentAgentId ?? strOrNull(attrs[AMP_PARENT_AGENT_ID]);
     const env = ctx?.env ?? strOrNull(attrs[AMP_ENV]);
     const customerOrgId = ctx?.customerOrgId ?? strOrNull(attrs[AMP_CUSTOMER_ORG_ID]);
-    const agentVersion = ctx?.agentVersion ?? strOrNull(attrs[AMP_AGENT_VERSION]);
+    // Span-level version first; a Statsig config version is a release, so the
+    // Statsig AI SDK's prompt version attributes are the vendor fallback.
+    const agentVersion =
+      ctx?.agentVersion ??
+      strOrNull(attrs[AMP_AGENT_VERSION]) ??
+      strOrNull(attrs[STATSIG_PROMPT_VERSION]) ??
+      strOrNull(attrs[STATSIG_PROMPT_VERSION_NAME]);
     const contextDict = ctx?.context ?? this._parseContextAttr(attrs[AMP_CONTEXT]);
     const groups = ctx?.groups ?? null;
     const description = ctx?.description ?? strOrNull(attrs[AMP_AGENT_DESCRIPTION]);
@@ -653,6 +669,8 @@ export class SpanEventMapper {
     if (opts.customerOrgId) extra[PROP_CUSTOMER_ORG_ID] = opts.customerOrgId;
     if (opts.agentVersion) extra[PROP_AGENT_VERSION] = opts.agentVersion;
     if (opts.otelAgentName) extra['[Agent] Agent Name'] = opts.otelAgentName;
+    const statsigPromptName = strOrNull(attrs[STATSIG_PROMPT_NAME]);
+    if (statsigPromptName) extra[PROP_PROMPT_ID] = statsigPromptName;
     Object.assign(
       extra,
       opts.sessionContext?.contextTrust != null
@@ -792,6 +810,9 @@ export class SpanEventMapper {
     if (ctx?.userId) return ctx.userId;
     const enduser = attrs[GENAI_ENDUSER_ID];
     if (enduser) return String(enduser);
+    // A Statsig AI SDK span carries the user as statsig.user_id and no enduser.id.
+    const statsigUser = strOrNull(attrs[STATSIG_USER_ID]);
+    if (statsigUser) return statsigUser;
     return this._defaultUserId;
   }
 

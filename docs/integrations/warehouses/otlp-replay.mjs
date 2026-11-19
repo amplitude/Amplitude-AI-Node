@@ -40,6 +40,9 @@ const JSON_TEXT_KEYS = new Set([
   'input.value',
   'output.value',
   'tool.parameters',
+  // Statsig's AI SDK writes the user's custom IDs as one JSON string; the
+  // endpoint parses it, so an export that expanded it is folded back.
+  'statsig.custom_ids',
 ]);
 const isJsonText = (name) => JSON_TEXT_KEYS.has(name) || name.endsWith('tool_call.function.arguments');
 // OpenInference "list of objects" attributes travel flattened with indexed
@@ -82,6 +85,24 @@ const SESSION_KEYS = [
   'traceloop.association.properties.thread',
   'traceloop.association.properties.conversation',
 ];
+// Statsig's AI SDK stamps the user's custom IDs on every span as JSON; the
+// endpoint reads `agentSessionID`, then Statsig's own `statsig.activity_id`.
+const STATSIG_CUSTOM_IDS = 'statsig.custom_ids';
+const STATSIG_SESSION_KEYS = ['agentSessionID', 'statsig.activity_id'];
+
+/** True when a Statsig span carries a session id in `statsig.custom_ids`. */
+export function hasStatsigSession(attrs) {
+  let ids = attrs?.[STATSIG_CUSTOM_IDS];
+  if (typeof ids === 'string') {
+    try {
+      ids = JSON.parse(ids);
+    } catch {
+      return false;
+    }
+  }
+  if (ids == null || typeof ids !== 'object' || Array.isArray(ids)) return false;
+  return STATSIG_SESSION_KEYS.some((k) => typeof ids[k] === 'string' && ids[k].trim() !== '');
+}
 
 // ---------------------------------------------------------------------------
 // Input parsing
@@ -500,7 +521,10 @@ export function toOtlpRequests(rows, options = {}) {
   const traces = new Set(items.map(({ span }) => span.traceId));
   const traceHasSession = new Set(
     items
-      .filter(({ span, resource }) => SESSION_KEYS.some((k) => k in span.attributes || k in resource))
+      .filter(
+        ({ span, resource }) =>
+          SESSION_KEYS.some((k) => k in span.attributes || k in resource) || hasStatsigSession(span.attributes),
+      )
       .map(({ span }) => span.traceId),
   );
   const missing = [...traces].filter((t) => !traceHasSession.has(t)).length;

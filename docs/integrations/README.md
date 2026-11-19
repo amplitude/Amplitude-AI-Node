@@ -74,6 +74,14 @@ Scrub content before it leaves your infrastructure. Amplitude does not scrub aft
 
 Requests go through a router or gateway that picks the model. Wrap the client with the SDK, have the router export OpenTelemetry GenAI spans with the identity your application passes on each request, or post events over the HTTP API. See [routers.md](./routers.md) and the identity contract in [analytics-metadata.schema.json](./analytics-metadata.schema.json).
 
+## Prompt registries and experimentation tools
+
+The registry serves the prompt version and runs the experiment; Agent Analytics records which version and group each session ran under.
+
+| Tool | Guide | What is recorded | Last verified |
+|---|---|---|---|
+| Statsig Agent Experimentation | [statsig.md](./statsig.md) | Served config version as `[Agent] Agent Version`, config name as `[Agent] Prompt ID`, experiment group as `[Agent] Experiments`; from the SDK helpers or from `statsig.llm.*` span attributes | 2026-11-18 |
+
 ## Agents that call other agents
 
 When your agent calls another agent over A2A, the Agent Client Protocol or HTTP, including an agent another company runs, the SDK links the two sessions with agent context. Pass the extracted context to `session({ context })`. A context signed with a key both sides share joins the caller's session; any other context starts a new session linked by `[Agent] Peer Agent ID`, `[Agent] Peer Session ID` and `[Agent] Peer Trace ID`, with `[Agent] Context Trust` and `[Agent] Context Verify Result` recording why. See "Context Propagation" in the [Node README](../../README.md#context-propagation); the Python SDK uses the same wire format and signing.
@@ -115,6 +123,7 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 - Braintrust: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md`
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
 - Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
+- Statsig Agent Experimentation: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/statsig.md`
 - AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md`
 - Google ADK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/google-adk.md`
 - Vercel AI SDK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vercel-ai-sdk.md`
