@@ -739,6 +739,23 @@ await agent.session({ userId: 'u1' }).run(async (s) => {
 });
 ```
 
+For a Statsig [Agent Experimentation](https://docs.statsig.com/agent-experimentation/overview) config, the served version is the agent version and the experiment group is the variant (requires `@amplitude/ai` 0.32.0 or later):
+
+```typescript
+import { statsigPromptContext, statsigUser } from '@amplitude/ai/integrations/statsig';
+
+const user = statsigUser({ userID: 'u1' }, sessionId); // sets customIDs.agentSessionID
+const prompt = statsig.getPrompt(user, 'support-bot');
+const agent = ai.agent('support-bot', { userId: 'u1', ...statsigPromptContext(statsig, user, prompt) });
+// agentVersion: prompt.getLive().getName(), e.g. 'v4-empathetic'
+// experiments: [{ key: 'support-bot-tone', variant: 'Test 1', provider: 'statsig' }] when an experiment runs on the config
+await agent.session({ sessionId }).run(async (s) => {
+  // ...
+});
+```
+
+`statsigPromptContext` reads the layer named after the config (where Statsig puts an experiment created from a config) and records `allocatedExperimentName:groupName`; with no experiment it records none, since a version served to everyone is a rollout. It never logs a Statsig exposure. `experimentsFromStatsig(statsig, user, ['checkout-copy'])` names experiments that are not on a config. Pass `promptId: prompt.getName()` on responses you track by hand. See [docs/integrations/statsig.md](docs/integrations/statsig.md).
+
 Name the experiment flags with `keys` / `flags`: a project's flag result also holds configuration flags that are not experiments, and an event carries at most 32 entries. Without `keys`, `experimentsFromAmplitude` records every non-fallback flag and warns when more than 32 would not fit. It sets `provider: 'amplitude'`. The OpenFeature hook records every flag evaluated inside a session with the provider's name lowercased (a `provider` you pass is stored as given); pass `unit: 'turn'` when flags are evaluated per turn, `includeDefaults: true` to keep evaluations that returned the caller's default, and `variantOf: (key, value) => ...` to name the arm for object-valued flags whose provider sets no variant (Statsig experiments and dynamic configs return their parameters). An assignment learned after the session was entered can be recorded with `s.addExperiments([...])` or the module-level `addExperiments([...])`; events tracked from then on carry it, and a session shares one list with its `runAs()` children. Neither helper sends an exposure event: your flag tool keeps doing that.
 
 ## Works with

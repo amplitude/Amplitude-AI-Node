@@ -163,6 +163,31 @@ describe('otlp-replay conversion', () => {
     expect(toOtlpRequests(rows).warnings[0]).toContain('1 of 1 traces have no session attribute');
   });
 
+  it('counts statsig.custom_ids as a session and keeps it as one JSON string (AA-152586)', () => {
+    const fixture = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/statsig/support-bot.json'), 'utf8')) as {
+      span: { attributes: Record<string, unknown> };
+    };
+    const rows = otelRows.map(({ session_id: _, ...row }) => ({
+      ...row,
+      attributes: { ...(row.attributes as Record<string, unknown>), ...fixture.span.attributes },
+    }));
+    const { requests, warnings } = toOtlpRequests(rows);
+    expect(warnings.some((w) => w.includes('no session attribute'))).toBe(false);
+    const attrs = spansOf(requests[0] as Request)[0]?.attributes ?? [];
+    const customIds = attrs.find((a) => a.key === 'statsig.custom_ids')?.value as { stringValue?: string };
+    expect(JSON.parse(customIds.stringValue ?? '{}')).toMatchObject({ agentSessionID: 'sess-123' });
+    expect(attrs.some((a) => a.key.startsWith('statsig.custom_ids.'))).toBe(false);
+
+    // An export that expanded the JSON object into a nested object folds back.
+    const expanded = rows.map((row) => ({
+      ...row,
+      attributes: { ...row.attributes, 'statsig.custom_ids': { 'statsig.activity_id': 'conv-9' } },
+    }));
+    expect(toOtlpRequests(expanded).warnings.some((w) => w.includes('no session attribute'))).toBe(false);
+    const empty = rows.map((row) => ({ ...row, attributes: { ...row.attributes, 'statsig.custom_ids': '{}' } }));
+    expect(toOtlpRequests(empty).warnings[0]).toContain('no session attribute');
+  });
+
   it('reads the Phoenix OpenInference export columns', () => {
     const [request] = toOtlpRequests(
       [

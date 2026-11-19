@@ -340,6 +340,19 @@ export type {
   ExperimentsFromAmplitudeOptions,
   FlagEvaluation,
 } from './core/experiments.js';
+export {
+  agentVersionFromPrompt,
+  experimentsFromStatsig,
+  statsigPromptContext,
+  statsigUser,
+} from './integrations/statsig.js';
+export type {
+  StatsigClientLike,
+  StatsigExperimentOptions,
+  StatsigPromptContext,
+  StatsigPromptLike,
+  StatsigUserLike,
+} from './integrations/statsig.js';
 
 // Patching
 export {

@@ -115,6 +115,43 @@ export const AMP_AGENT_DESCRIPTION = 'amplitude.agent.description';
 export const AMP_CONTEXT = 'amplitude.context';
 
 // ---------------------------------------------------------------------------
+// Statsig AI SDK span attributes (vendor adapter, read as fallbacks only).
+// The served config version is the agent version; the config name is the
+// prompt id; `statsig.custom_ids` is a JSON object of the user's custom IDs
+// and carries `agentSessionID` (ours) or `statsig.activity_id` (Statsig's
+// conversation key). Older Statsig SDKs send `prompt_version_name`.
+// ---------------------------------------------------------------------------
+export const STATSIG_PROMPT_NAME = 'statsig.llm.prompt_name';
+export const STATSIG_PROMPT_VERSION = 'statsig.llm.prompt_version';
+export const STATSIG_PROMPT_VERSION_NAME = 'statsig.llm.prompt_version_name';
+export const STATSIG_CUSTOM_IDS = 'statsig.custom_ids';
+export const STATSIG_ACTIVITY_ID = 'statsig.activity_id';
+export const STATSIG_AGENT_SESSION_ID = 'agentSessionID';
+
+/**
+ * The session id a Statsig AI SDK span carries in `statsig.custom_ids`:
+ * `agentSessionID` first, then Statsig's `statsig.activity_id`. Null when the
+ * attribute is absent, not JSON, or has neither key.
+ */
+export function statsigSessionId(customIds: unknown): string | null {
+  let parsed: unknown = customIds;
+  if (typeof customIds === 'string') {
+    try {
+      parsed = JSON.parse(customIds);
+    } catch {
+      return null;
+    }
+  }
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  for (const key of [STATSIG_AGENT_SESSION_ID, STATSIG_ACTIVITY_ID]) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Span kind values (for AMP_SPAN_KIND)
 // ---------------------------------------------------------------------------
 export const SPAN_KIND_AGENT = 'agent';
