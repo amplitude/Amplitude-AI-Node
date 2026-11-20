@@ -37,7 +37,7 @@ Your agent runs in your own code. A user's personal agent, an AI acting for the 
 
 | Protocol | Guide | What is recorded | Last verified |
 |---|---|---|---|
-| Personal Agent Protocol | [personal-agent-protocol.md](./personal-agent-protocol.md) | `[Agent] Message Source` = `personal_agent` or `user` per user turn, the personal agent as `poppy_personal_agent` context, and a person's replies after a handoff as `human_agent` | 2026-11-19, public 1.0 spec |
+| Personal Agent Protocol | [personal-agent-protocol.md](./personal-agent-protocol.md) | `[Agent] Message Source` = `personal_agent` or `user` per user turn, the personal agent as `poppy_personal_agent` and the Session JWT `sid` as `poppy_session_id` context, one session per conversation, and a person's replies after a handoff as `human_agent` | 2026-11-19, public 1.0 spec |
 
 ## LLM tracing tools
 

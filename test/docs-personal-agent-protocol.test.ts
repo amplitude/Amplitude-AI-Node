@@ -20,6 +20,12 @@ type TrackPoppyTurn = (
   reply: { text: string; model: string; provider: string; latencyMs: number },
 ) => void;
 
+type EndPoppyConversation = (
+  claims: { sid: string; sub: string; iss: string; agent_id?: string },
+  conversationId: string,
+  signedInUserId: string | null,
+) => void;
+
 function readPage(name: string): string {
   return readFileSync(join(DOCS_DIR, name), 'utf8');
 }
@@ -76,8 +82,10 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
     vi.stubEnv('AMPLITUDE_AI_API_KEY', 'test-key');
     const userMessage = vi.spyOn(AmplitudeAI.prototype, 'trackUserMessage').mockReturnValue('m');
     const aiMessage = vi.spyOn(AmplitudeAI.prototype, 'trackAiMessage').mockReturnValue('m');
-    const { trackPoppyTurn, poppyDeviceId } = (await import(examplePath)) as {
+    const sessionEnd = vi.spyOn(AmplitudeAI.prototype, 'trackSessionEnd').mockReturnValue(undefined);
+    const { trackPoppyTurn, endPoppyConversation, poppyDeviceId } = (await import(examplePath)) as {
       trackPoppyTurn: TrackPoppyTurn;
+      endPoppyConversation: EndPoppyConversation;
       poppyDeviceId: (claims: { iss: string; sub: string }) => string;
     };
     const deviceId = `poppy-sha256:${createHash('sha256').update('https://pa.example/client\npairwise-sub-1').digest('hex')}`;
@@ -118,6 +126,37 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
     expect(second?.context).toEqual({ poppy_personal_agent: 'https://pa.example/client', poppy_session_id: 'sess-2' });
     expect(aiMessage).toHaveBeenCalledTimes(2);
     expect(aiMessage.mock.calls[0]?.[0]).toMatchObject({ sessionId: 'cnv_1', content: 'Done.' });
+    expect(sessionEnd).not.toHaveBeenCalled();
+
+    endPoppyConversation({ sid: 'sess-2', sub: 'pairwise-sub-1', iss: 'https://pa.example/client' }, 'cnv_1', 'account-42');
+    expect(sessionEnd).toHaveBeenCalledTimes(1);
+    expect(sessionEnd.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: 'cnv_1',
+      deviceId,
+      userId: 'account-42',
+      agentId: 'support-agent',
+    });
+  });
+
+  it('has the sibling-guide sections and the session-close and product-event rules', () => {
+    const page = readPage(GUIDE);
+    for (const heading of [
+      '## Part 1: Overview',
+      '## Session close',
+      '## Product events',
+      '## Part 2: Coding agent procedure',
+      '## Verify in Live Events',
+    ]) {
+      expect(page).toContain(`\n${heading}\n`);
+    }
+    expect(page).toContain('track_session_end=False');
+    expect(extractFencedBlockAfter(page, '### Example: tracking a turn', 'ts')).not.toContain('.run(');
+    expect(page).toContain('`trackSessionEvents: false`');
+    expect(page).toContain('`track_session_events=False`');
+    expect(page).toContain('Exactly one `[Agent] Session End` arrives');
+    const productEvents = page.slice(page.indexOf('## Product events'), page.indexOf('## OpenTelemetry'));
+    expect(productEvents).toContain('poppy_session_id');
+    expect(productEvents).toContain('produce no `[Agent]` events');
   });
 
   it('never uses the agent Message Source for personal agent traffic, and says the SDK never verifies the JWT', () => {
