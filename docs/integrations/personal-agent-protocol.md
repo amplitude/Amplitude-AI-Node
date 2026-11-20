@@ -37,7 +37,7 @@ A conversation can mix both kinds of user turn: the personal agent writes some m
 | Personal Agent Protocol | Agent Analytics |
 |---|---|
 | Session JWT `sid` | `[Agent] Session ID` = `poppy-` + `sid` |
-| Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | `user_id` until the user signs in. After sign-in, the user ID your product analytics already uses |
+| Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | `device_id` = `poppy-` + `sub` on every event. After sign-in, also set `user_id` to the user ID your product analytics already uses |
 | Session JWT `iss` (the personal agent's `client_id` URL) | `poppy_personal_agent` key in `[Agent] Context` |
 | Session JWT `agent_id` (optional) | `poppy_agent_id` key in `[Agent] Context` |
 | Message `author.type: "human"` | `[Agent] Message Source` = `user` on `[Agent] User Message` |
@@ -76,7 +76,8 @@ export function trackPoppyTurn(
   });
   const session = agent.session({
     sessionId: `poppy-${claims.sid}`,
-    userId: signedInUserId ?? claims.sub,
+    deviceId: `poppy-${claims.sub}`,
+    userId: signedInUserId,
   });
 
   session.trackUserMessage(message.text, {
@@ -90,7 +91,9 @@ export function trackPoppyTurn(
 
 ## Identity after sign-in
 
-Before sign-in, `sub` is the only user ID, and it is pairwise: the same person has a different `sub` at every company. When the user signs in, switch `userId` to the account's own user ID for the rest of the session, and link the two IDs in Amplitude (identify the account's user ID on the device or session that used `sub`) so the earlier turns join the account's product analytics.
+Amplitude resolves each event to a user from its `user_id` or `device_id`. `sub` is pairwise: the same person has a different `sub` at every company, but the same `sub` every time they come back to yours. So send `poppy-` + `sub` as the `device_id` on every event, and leave `user_id` unset until the user signs in. Repeat visits then resolve to one anonymous user.
+
+When the user signs in, keep the same `device_id` and set `userId` to the account's own user ID. Amplitude merges the anonymous user into that account, so the turns before sign-in join the account's history. Do not send `sub` as the `user_id`: Amplitude does not merge two different user IDs.
 
 ## Funnel product events
 
@@ -111,7 +114,7 @@ When the user moves from the personal agent to your website, use the same user I
 
 ## OpenTelemetry
 
-If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid` and `enduser.id` to `sub` (or the signed-in user ID). Amplitude's OTLP receiver already maps both, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
+If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid`, `amplitude.device_id` to `poppy-` + `sub`, and `enduser.id` to the account's user ID only after sign-in. Amplitude's OTLP receiver maps all three, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
 
 ## Chart recipes
 

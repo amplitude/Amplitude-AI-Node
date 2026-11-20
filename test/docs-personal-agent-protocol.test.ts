@@ -91,10 +91,16 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
       content: 'Book it',
       messageSource: 'personal_agent',
       sessionId: 'poppy-sess-1',
-      userId: 'pairwise-sub-1',
+      deviceId: 'poppy-pairwise-sub-1',
       context: { poppy_personal_agent: 'https://pa.example/client', poppy_agent_id: 'pa-7' },
     });
-    expect(second).toMatchObject({ messageSource: 'user', sessionId: 'poppy-sess-1', userId: 'account-42' });
+    expect(first?.userId ?? null).toBeNull();
+    expect(second).toMatchObject({
+      messageSource: 'user',
+      sessionId: 'poppy-sess-1',
+      deviceId: 'poppy-pairwise-sub-1',
+      userId: 'account-42',
+    });
     expect(second?.context).toEqual({ poppy_personal_agent: 'https://pa.example/client' });
     expect(aiMessage).toHaveBeenCalledTimes(2);
     expect(aiMessage.mock.calls[0]?.[0]).toMatchObject({ sessionId: 'poppy-sess-1', content: 'Done.' });
