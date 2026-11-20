@@ -2567,7 +2567,7 @@ Event-specific properties for `[Agent] User Message` (in addition to common prop
 | `[Agent] Total Attachment Size Bytes` | number | No | Total size of all attachments in bytes. |
 | `[Agent] Attachments` | string | No | Serialized JSON array of attachment metadata (type, name, size_bytes, mime_type). Only metadata, never file content. |
 | `[Agent] Message Labels` | string | No | Serialized JSON array of MessageLabel objects (key-value pairs with optional confidence). Used for routing tags, classifier output, business context. |
-| `[Agent] Message Source` | string | No | Origin of the user message: 'user' for real end-user input, 'agent' for inter-agent delegation (parent agent sending instructions to a child agent). Automatically set by provider wrappers based on parent_agent_id context. |
+| `[Agent] Message Source` | string | No | Who wrote the user message: 'user' for the end user's own words, 'agent' for inter-agent delegation (a parent agent sending instructions to a child agent; set automatically by provider wrappers from parent_agent_id context), or 'personal_agent' for text an AI wrote on the end user's behalf, such as a personal agent connecting through Personal Agent Protocol. |
 
 ### AI Response Properties
 

@@ -576,6 +576,12 @@ export class AmplitudeAI {
     traceId?: string | null;
     turnId?: number | null;
     messageId?: string | null;
+    /**
+     * Who wrote the message: `'user'` (the end user), `'agent'` (a parent
+     * agent delegating to a child agent; the default when `parentAgentId` is
+     * set), or `'personal_agent'` (an AI writing on the end user's behalf,
+     * such as a Personal Agent Protocol personal agent).
+     */
     messageSource?: string | null;
     agentId?: string | null;
     parentAgentId?: string | null;

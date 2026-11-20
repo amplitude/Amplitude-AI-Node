@@ -232,6 +232,7 @@ export interface TrackUserMessageOptions {
   isEdit?: boolean;
   editedMessageId?: string | null;
   attachments?: Attachment[] | null;
+  /** `'user'`, `'agent'` (inter-agent delegation) or `'personal_agent'` (an AI writing on the end user's behalf). */
   messageSource?: string | null;
   labels?: MessageLabel[] | null;
   /**

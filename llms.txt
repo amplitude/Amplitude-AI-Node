@@ -48,6 +48,7 @@ bland=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/in
 langfuse=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langfuse.md
 langsmith=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/langsmith.md
 braintrust=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/braintrust.md
+personal-agent-protocol=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/personal-agent-protocol.md
 warehouses=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md
 claude-code=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/claude-code.md
 codex=https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/codex.md
