@@ -111,7 +111,7 @@ When the user moves from the personal agent to your website, use the same user I
 
 ## OpenTelemetry
 
-If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid` and `enduser.id` to `sub` (or the signed-in user ID). Amplitude's OTLP receiver already maps both. Put `poppy_personal_agent` and `poppy_agent_id` in the agent context, the same keys as the SDK example; with the SDK's `AmplitudeAgentExporter`, that is the `amplitude.context` span attribute as a JSON object string.
+If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid` and `enduser.id` to `sub` (or the signed-in user ID). Amplitude's OTLP receiver already maps both, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
 
 ## Chart recipes
 
