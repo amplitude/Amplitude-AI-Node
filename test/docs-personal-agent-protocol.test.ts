@@ -14,6 +14,7 @@ const MESSAGE_SOURCE_DESCRIPTION =
 
 type TrackPoppyTurn = (
   claims: { sid: string; sub: string; iss: string; agent_id?: string },
+  conversationId: string,
   message: { text: string; author: { type: 'human' | 'agent' } },
   signedInUserId: string | null,
   reply: { text: string; model: string; provider: string; latencyMs: number },
@@ -85,9 +86,11 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
     const claims = { sid: 'sess-1', sub: 'pairwise-sub-1', iss: 'https://pa.example/client', agent_id: 'pa-7' };
     const reply = { text: 'Done.', model: 'gpt-x', provider: 'openai', latencyMs: 10 };
 
-    trackPoppyTurn(claims, { text: 'Book it', author: { type: 'agent' } }, null, reply);
+    trackPoppyTurn(claims, 'cnv_1', { text: 'Book it', author: { type: 'agent' } }, null, reply);
+    // The conversation continues in a new Personal Agent Protocol Session after sign-in.
     trackPoppyTurn(
-      { sid: 'sess-1', sub: 'pairwise-sub-1', iss: 'https://pa.example/client' },
+      { sid: 'sess-2', sub: 'pairwise-sub-1', iss: 'https://pa.example/client' },
+      'cnv_1',
       { text: 'Actually, wait', author: { type: 'human' } },
       'account-42',
       reply,
@@ -97,20 +100,24 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
     expect(first).toMatchObject({
       content: 'Book it',
       messageSource: 'personal_agent',
-      sessionId: 'poppy-sess-1',
+      sessionId: 'cnv_1',
       deviceId,
-      context: { poppy_personal_agent: 'https://pa.example/client', poppy_agent_id: 'pa-7' },
+      context: {
+        poppy_personal_agent: 'https://pa.example/client',
+        poppy_session_id: 'sess-1',
+        poppy_agent_id: 'pa-7',
+      },
     });
     expect(first?.userId ?? null).toBeNull();
     expect(second).toMatchObject({
       messageSource: 'user',
-      sessionId: 'poppy-sess-1',
+      sessionId: 'cnv_1',
       deviceId,
       userId: 'account-42',
     });
-    expect(second?.context).toEqual({ poppy_personal_agent: 'https://pa.example/client' });
+    expect(second?.context).toEqual({ poppy_personal_agent: 'https://pa.example/client', poppy_session_id: 'sess-2' });
     expect(aiMessage).toHaveBeenCalledTimes(2);
-    expect(aiMessage.mock.calls[0]?.[0]).toMatchObject({ sessionId: 'poppy-sess-1', content: 'Done.' });
+    expect(aiMessage.mock.calls[0]?.[0]).toMatchObject({ sessionId: 'cnv_1', content: 'Done.' });
   });
 
   it('never uses the agent Message Source for personal agent traffic, and says the SDK never verifies the JWT', () => {

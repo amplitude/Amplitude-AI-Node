@@ -36,7 +36,8 @@ A conversation can mix both kinds of user turn: the personal agent writes some m
 
 | Personal Agent Protocol | Agent Analytics |
 |---|---|
-| Session JWT `sid` | `[Agent] Session ID` = `poppy-` + `sid` |
+| Conversation ID, which your company chooses (spec 8.2) | `[Agent] Session ID`. Use the ID your chat system already uses for the conversation |
+| Session JWT `sid` | `poppy_session_id` key in `[Agent] Context`. A Personal Agent Protocol Session is not a conversation: it spans browsing, API calls and several conversations, and one conversation can continue in a new Session (spec 5.5) |
 | Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | With `iss`: `device_id` = `poppy-` + SHA-256 of `iss` and `sub` on every event. After sign-in, also set `user_id` to the user ID your product analytics already uses |
 | Session JWT `iss` (the personal agent's `client_id` URL) | `poppy_personal_agent` key in `[Agent] Context` |
 | Session JWT `agent_id` (optional) | `poppy_agent_id` key in `[Agent] Context` |
@@ -50,7 +51,7 @@ Do not use `agent` for Personal Agent Protocol traffic. `agent` means delegation
 
 ## Example
 
-Track each turn with the SDK's existing API. `claims` holds the Session JWT claims your server already verified.
+Track each turn with the SDK's existing API. `claims` holds the Session JWT claims your server already verified, and `conversationId` is the Conversation ID in the request URL.
 
 ### Example: tracking a turn
 
@@ -70,6 +71,7 @@ export function poppyDeviceId(claims: Pick<PoppyClaims, 'iss' | 'sub'>): string 
 
 export function trackPoppyTurn(
   claims: PoppyClaims,
+  conversationId: string,
   message: PoppyMessage,
   signedInUserId: string | null,
   reply: { text: string; model: string; provider: string; latencyMs: number },
@@ -77,11 +79,12 @@ export function trackPoppyTurn(
   const agent = ai.agent('support-agent', {
     context: {
       poppy_personal_agent: claims.iss,
+      poppy_session_id: claims.sid,
       ...(claims.agent_id ? { poppy_agent_id: claims.agent_id } : {}),
     },
   });
   const session = agent.session({
-    sessionId: `poppy-${claims.sid}`,
+    sessionId: conversationId,
     deviceId: poppyDeviceId(claims),
     userId: signedInUserId,
   });
@@ -112,7 +115,7 @@ Track the Personal Agent Protocol steps as regular product events with your Ampl
 | `Poppy Browser Joined` | The user opened your website from the session |
 | `Poppy Operation Approved` | The user approved an operation the personal agent requested |
 
-Add `poppy_session_id` (the `sid`) and `poppy_personal_agent` as event properties so each step joins back to its session.
+Add `poppy_session_id` (the `sid`) and `poppy_personal_agent` as event properties. They match the `[Agent] Context` keys on the agent events, so each step joins back to the conversations in that Personal Agent Protocol Session.
 
 ## Website join
 
@@ -120,7 +123,7 @@ When the user moves from the personal agent to your website, use the same user I
 
 ## OpenTelemetry
 
-If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid`, `amplitude.device_id` to the same value as `poppyDeviceId(claims)`, and `enduser.id` to the account's user ID only after sign-in. Amplitude's OTLP receiver maps all three, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
+If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to the Conversation ID, `amplitude.device_id` to the same value as `poppyDeviceId(claims)`, and `enduser.id` to the account's user ID only after sign-in. Amplitude's OTLP receiver maps all three, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent`, `poppy_session_id` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
 
 ## Chart recipes
 
