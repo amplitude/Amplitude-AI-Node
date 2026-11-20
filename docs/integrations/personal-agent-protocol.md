@@ -38,7 +38,7 @@ A conversation can mix both kinds of user turn: the personal agent writes some m
 |---|---|
 | Conversation ID, which your company chooses (spec 8.2) | `[Agent] Session ID`. Use the ID your chat system already uses for the conversation |
 | Session JWT `sid` | `poppy_session_id` key in `[Agent] Context`. A Personal Agent Protocol Session is not a conversation: it spans browsing, API calls and several conversations, and one conversation can continue in a new Session (spec 5.5) |
-| Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | With `iss`: `device_id` = `poppy-` + SHA-256 of `iss` and `sub` on every event. After sign-in, also set `user_id` to the user ID your product analytics already uses |
+| Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | With `iss`: `device_id` = `poppy-sha256:` + SHA-256 hex of `iss` and `sub`, on every event. After sign-in, also set `user_id` to the user ID your product analytics already uses |
 | Session JWT `iss` (the personal agent's `client_id` URL) | `poppy_personal_agent` key in `[Agent] Context` |
 | Session JWT `agent_id` (optional) | `poppy_agent_id` key in `[Agent] Context` |
 | Message `author.type: "human"` | `[Agent] Message Source` = `user` on `[Agent] User Message` |
@@ -66,7 +66,7 @@ const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY ?? '' });
 
 // sub is unique only within one personal agent, so the device ID includes iss.
 export function poppyDeviceId(claims: Pick<PoppyClaims, 'iss' | 'sub'>): string {
-  return `poppy-${createHash('sha256').update(`${claims.iss}\n${claims.sub}`).digest('hex')}`;
+  return `poppy-sha256:${createHash('sha256').update(`${claims.iss}\n${claims.sub}`).digest('hex')}`;
 }
 
 export function trackPoppyTurn(
@@ -100,9 +100,11 @@ export function trackPoppyTurn(
 
 ## Identity after sign-in
 
-Amplitude resolves each event to a user from its `user_id` or `device_id`. The personal agent assigns `sub` (spec 5.1). It is stable for each pair of user and company: the same person on the same personal agent gets the same `sub` every time they come back to you. It is unique only within that personal agent, so two personal agents can send the same `sub` for different people. Send `poppyDeviceId(claims)`, `poppy-` + the SHA-256 hex of `iss`, a newline and `sub`, as the `device_id` on every event, and leave `user_id` unset until the user signs in. Repeat visits through the same personal agent then resolve to one anonymous user. The same person on a second personal agent gets a second anonymous user until they sign in.
+Send user identity on every event. Without `user_id` or `device_id`, the session lands under `unknown` and cannot join to product analytics.
 
-When the user signs in, keep the same `device_id` and set `userId` to the account's own user ID. Amplitude merges the anonymous user into that account, so the turns before sign-in join the account's history. Do not send `sub` as the `user_id`: Amplitude does not merge two different user IDs.
+Before sign-in there is no product user ID, only the Session JWT `sub`. The personal agent assigns it (spec 5.1). It is stable for each pair of user and company, so the same person on the same personal agent gets the same `sub` every time they come back to you. It contains no personal information, but it is unique only within that personal agent: two personal agents can send the same `sub` for different people. So the `device_id` must combine `iss` and `sub`. You choose the device ID, and no algorithm is required. `poppyDeviceId(claims)` above is one optional helper: `poppy-sha256:` + the SHA-256 hex of `iss`, a newline and `sub`, the same shape as `callerDeviceId` in [voice-forwarder.mjs](./voice-forwarder.mjs). It needs no pepper, because `sub` is not personal information. Leave `user_id` unset until the user signs in. Repeat visits through the same personal agent then group under one anonymous user. A personal agent may instead send a new `sub` for each anonymous browsing session (spec 5.1); those visits do not group.
+
+When the user signs in, keep the same `device_id` and set `userId` to the user ID your product analytics already uses. Amplitude merges the anonymous device's events into that user ([Merged users](https://amplitude.com/docs/data/sources/instrument-track-unique-users#merged-users)). Do not send `sub` as the `user_id`: Amplitude does not merge two different user IDs automatically.
 
 ## Funnel product events
 
@@ -115,11 +117,11 @@ Track the Personal Agent Protocol steps as regular product events with your Ampl
 | `Poppy Browser Joined` | The user opened your website from the session |
 | `Poppy Operation Approved` | The user approved an operation the personal agent requested |
 
-Add `poppy_session_id` (the `sid`) and `poppy_personal_agent` as event properties. They match the `[Agent] Context` keys on the agent events, so each step joins back to the conversations in that Personal Agent Protocol Session.
+Send them with the same `device_id`, and after sign-in the same `user_id`, as the agent events. Add `poppy_session_id` (the `sid`) and `poppy_personal_agent` as event properties. They match the `[Agent] Context` keys on the agent events, so each step joins back to the conversations in that Personal Agent Protocol Session.
 
 ## Website join
 
-When the user moves from the personal agent to your website, use the same user ID in the Browser SDK as in the agent session, and send `poppy_session_id` as an event property on the events you want to join back. Charts can then follow the user from the agent session to the site.
+When the user moves from the personal agent to your website, send `poppy_session_id` as an event property on the events you want to join back. The browser has its own device ID, so its events join the agent sessions by `poppy_session_id` until the user signs in; after sign-in, use the same user ID in the Browser SDK as on the agent events.
 
 ## OpenTelemetry
 

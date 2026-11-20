@@ -147,7 +147,7 @@ Copy the forwarder core below verbatim into `amplitude-agent-forwarder.ts` (or p
 
 ## Personal agent traffic
 
-If a conversation came from a user's personal agent through Personal Agent Protocol, add `[Agent] Message Source` = `personal_agent` to each `[Agent] User Message` the personal agent wrote (`user` for the user's own words), and add the personal agent's `client_id` URL as `poppy_personal_agent` in `[Agent] Context`. The forwarder core does not set either; add them in your adapter. Whether Agentforce's export exposes the Personal Agent Protocol fields is unverified, so check with Agentforce. Field mapping and chart recipes: [personal-agent-protocol.md](./personal-agent-protocol.md).
+If a conversation came from a user's personal agent through Personal Agent Protocol, add `[Agent] Message Source` = `personal_agent` to each `[Agent] User Message` the personal agent wrote (`user` for the user's own words). Put the personal agent's `client_id` URL as `poppy_personal_agent`, and the Session JWT `sid` as `poppy_session_id`, in the conversation's `context`, which the forwarder core sends as `[Agent] Context`. The forwarder core does not set `[Agent] Message Source`; add it in your adapter. Whether Agentforce's export exposes the Personal Agent Protocol fields is unverified, so check with Agentforce. Field mapping and chart recipes: [personal-agent-protocol.md](./personal-agent-protocol.md).
 
 ---
 

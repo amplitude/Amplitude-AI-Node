@@ -80,7 +80,7 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
       trackPoppyTurn: TrackPoppyTurn;
       poppyDeviceId: (claims: { iss: string; sub: string }) => string;
     };
-    const deviceId = `poppy-${createHash('sha256').update('https://pa.example/client\npairwise-sub-1').digest('hex')}`;
+    const deviceId = `poppy-sha256:${createHash('sha256').update('https://pa.example/client\npairwise-sub-1').digest('hex')}`;
     expect(poppyDeviceId({ iss: 'https://pa.example/client', sub: 'pairwise-sub-1' })).toBe(deviceId);
     expect(poppyDeviceId({ iss: 'https://other-pa.example/client', sub: 'pairwise-sub-1' })).not.toBe(deviceId);
     const claims = { sid: 'sess-1', sub: 'pairwise-sub-1', iss: 'https://pa.example/client', agent_id: 'pa-7' };
