@@ -37,7 +37,7 @@ A conversation can mix both kinds of user turn: the personal agent writes some m
 | Personal Agent Protocol | Agent Analytics |
 |---|---|
 | Session JWT `sid` | `[Agent] Session ID` = `poppy-` + `sid` |
-| Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | `device_id` = `poppy-` + `sub` on every event. After sign-in, also set `user_id` to the user ID your product analytics already uses |
+| Session JWT `sub` (pairwise per-company user ID with no personal information, spec 5.1) | With `iss`: `device_id` = `poppy-` + SHA-256 of `iss` and `sub` on every event. After sign-in, also set `user_id` to the user ID your product analytics already uses |
 | Session JWT `iss` (the personal agent's `client_id` URL) | `poppy_personal_agent` key in `[Agent] Context` |
 | Session JWT `agent_id` (optional) | `poppy_agent_id` key in `[Agent] Context` |
 | Message `author.type: "human"` | `[Agent] Message Source` = `user` on `[Agent] User Message` |
@@ -55,12 +55,18 @@ Track each turn with the SDK's existing API. `claims` holds the Session JWT clai
 ### Example: tracking a turn
 
 ```ts
+import { createHash } from 'node:crypto';
 import { AmplitudeAI } from '@amplitude/ai';
 
 type PoppyClaims = { sid: string; sub: string; iss: string; agent_id?: string };
 type PoppyMessage = { text: string; author: { type: 'human' | 'agent' } };
 
 const ai = new AmplitudeAI({ apiKey: process.env.AMPLITUDE_AI_API_KEY ?? '' });
+
+// sub is unique only within one personal agent, so the device ID includes iss.
+export function poppyDeviceId(claims: Pick<PoppyClaims, 'iss' | 'sub'>): string {
+  return `poppy-${createHash('sha256').update(`${claims.iss}\n${claims.sub}`).digest('hex')}`;
+}
 
 export function trackPoppyTurn(
   claims: PoppyClaims,
@@ -76,7 +82,7 @@ export function trackPoppyTurn(
   });
   const session = agent.session({
     sessionId: `poppy-${claims.sid}`,
-    deviceId: `poppy-${claims.sub}`,
+    deviceId: poppyDeviceId(claims),
     userId: signedInUserId,
   });
 
@@ -91,7 +97,7 @@ export function trackPoppyTurn(
 
 ## Identity after sign-in
 
-Amplitude resolves each event to a user from its `user_id` or `device_id`. `sub` is pairwise: the same person has a different `sub` at every company, but the same `sub` every time they come back to yours. So send `poppy-` + `sub` as the `device_id` on every event, and leave `user_id` unset until the user signs in. Repeat visits then resolve to one anonymous user.
+Amplitude resolves each event to a user from its `user_id` or `device_id`. The personal agent assigns `sub` (spec 5.1). It is stable for each pair of user and company: the same person on the same personal agent gets the same `sub` every time they come back to you. It is unique only within that personal agent, so two personal agents can send the same `sub` for different people. Send `poppyDeviceId(claims)`, `poppy-` + the SHA-256 hex of `iss`, a newline and `sub`, as the `device_id` on every event, and leave `user_id` unset until the user signs in. Repeat visits through the same personal agent then resolve to one anonymous user. The same person on a second personal agent gets a second anonymous user until they sign in.
 
 When the user signs in, keep the same `device_id` and set `userId` to the account's own user ID. Amplitude merges the anonymous user into that account, so the turns before sign-in join the account's history. Do not send `sub` as the `user_id`: Amplitude does not merge two different user IDs.
 
@@ -114,7 +120,7 @@ When the user moves from the personal agent to your website, use the same user I
 
 ## OpenTelemetry
 
-If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid`, `amplitude.device_id` to `poppy-` + `sub`, and `enduser.id` to the account's user ID only after sign-in. Amplitude's OTLP receiver maps all three, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
+If your agent exports OpenTelemetry instead of using the SDK, set the span or resource attribute `session.id` to `poppy-` + `sid`, `amplitude.device_id` to the same value as `poppyDeviceId(claims)`, and `enduser.id` to the account's user ID only after sign-in. Amplitude's OTLP receiver maps all three, and it reads `amplitude.message.source` (`user` or `personal_agent`) on the span. The receiver does not map agent context. To filter by `poppy_personal_agent`, export through the SDK's `AmplitudeAgentExporter` and put `poppy_personal_agent` and `poppy_agent_id` in the `amplitude.context` span attribute as a JSON object string; the exporter sends them as `[Agent] Context`.
 
 ## Chart recipes
 

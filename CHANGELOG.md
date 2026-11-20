@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- **Personal Agent Protocol guide.** [docs/integrations/personal-agent-protocol.md](docs/integrations/personal-agent-protocol.md) covers traffic from a user's personal agent through Personal Agent Protocol: `[Agent] Message Source` = `personal_agent` for user turns an AI wrote and `user` for the user's own words, the personal agent's `client_id` as `poppy_personal_agent` context, `poppy-` + `sid` as the session ID, `poppy-` + `sub` as the device ID so Amplitude merges pre-sign-in turns into the account at sign-in, and chart recipes. Listed in `manifest.json` under a new `protocols` key, the integrations README, `AGENTS.md` and `llms.txt`. The Sierra, Fin and Agentforce guides link to it. No new SDK API.
+- **Personal Agent Protocol guide.** [docs/integrations/personal-agent-protocol.md](docs/integrations/personal-agent-protocol.md) covers traffic from a user's personal agent through Personal Agent Protocol: `[Agent] Message Source` = `personal_agent` for user turns an AI wrote and `user` for the user's own words, the personal agent's `client_id` as `poppy_personal_agent` context, `poppy-` + `sid` as the session ID, a device ID hashed from `iss` and `sub` (`sub` is unique only within one personal agent) so Amplitude merges pre-sign-in turns into the account at sign-in, and chart recipes. Listed in `manifest.json` under a new `protocols` key, the integrations README, `AGENTS.md` and `llms.txt`. The Sierra, Fin and Agentforce guides link to it. No new SDK API.
 - **`personal_agent` Message Source.** The `[Agent] Message Source` catalog description and the `messageSource` JSDoc now list `personal_agent`: text an AI wrote on the end user's behalf. `agent` still means delegation inside your own system.
 
 ### Changed

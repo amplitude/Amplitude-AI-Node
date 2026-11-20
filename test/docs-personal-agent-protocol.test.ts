@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -74,7 +75,13 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
     vi.stubEnv('AMPLITUDE_AI_API_KEY', 'test-key');
     const userMessage = vi.spyOn(AmplitudeAI.prototype, 'trackUserMessage').mockReturnValue('m');
     const aiMessage = vi.spyOn(AmplitudeAI.prototype, 'trackAiMessage').mockReturnValue('m');
-    const { trackPoppyTurn } = (await import(examplePath)) as { trackPoppyTurn: TrackPoppyTurn };
+    const { trackPoppyTurn, poppyDeviceId } = (await import(examplePath)) as {
+      trackPoppyTurn: TrackPoppyTurn;
+      poppyDeviceId: (claims: { iss: string; sub: string }) => string;
+    };
+    const deviceId = `poppy-${createHash('sha256').update('https://pa.example/client\npairwise-sub-1').digest('hex')}`;
+    expect(poppyDeviceId({ iss: 'https://pa.example/client', sub: 'pairwise-sub-1' })).toBe(deviceId);
+    expect(poppyDeviceId({ iss: 'https://other-pa.example/client', sub: 'pairwise-sub-1' })).not.toBe(deviceId);
     const claims = { sid: 'sess-1', sub: 'pairwise-sub-1', iss: 'https://pa.example/client', agent_id: 'pa-7' };
     const reply = { text: 'Done.', model: 'gpt-x', provider: 'openai', latencyMs: 10 };
 
@@ -91,14 +98,14 @@ describe('docs/integrations/personal-agent-protocol.md', () => {
       content: 'Book it',
       messageSource: 'personal_agent',
       sessionId: 'poppy-sess-1',
-      deviceId: 'poppy-pairwise-sub-1',
+      deviceId,
       context: { poppy_personal_agent: 'https://pa.example/client', poppy_agent_id: 'pa-7' },
     });
     expect(first?.userId ?? null).toBeNull();
     expect(second).toMatchObject({
       messageSource: 'user',
       sessionId: 'poppy-sess-1',
-      deviceId: 'poppy-pairwise-sub-1',
+      deviceId,
       userId: 'account-42',
     });
     expect(second?.context).toEqual({ poppy_personal_agent: 'https://pa.example/client' });
