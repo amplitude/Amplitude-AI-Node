@@ -369,6 +369,12 @@ export class BoundAgent {
       tags?: string[] | null;
       experiments?: ExperimentInput[] | null;
       /**
+       * Emit `[Agent] Session End` when `run()` finishes (default `true`).
+       * Pass `false` when one session spans many `run()` calls and you end
+       * it yourself with `trackSessionEnd`.
+       */
+      trackSessionEnd?: boolean;
+      /**
        * The inbound context from an `extract*` helper. Trusted context adopts
        * the caller's session, user, parent agent and trace; untrusted context
        * is recorded as peer properties only.
