@@ -31,6 +31,7 @@ const integrations = JSON.parse(
 );
 const platforms = integrations.platforms;
 const runtimes = integrations.runtimes ?? [];
+const protocols = integrations.protocols ?? [];
 const hostedPlatforms = platforms.filter((p) => p.category === 'hosted_agent_platform');
 const tracingTools = platforms.filter((p) => p.category === 'tracing_tool');
 const warehouses = integrations.warehouses;
@@ -151,6 +152,7 @@ ${runtimes.map((r) => `- Agent built on the ${r.name}: the runtime owns the mode
 - Developers use Claude Code, Codex, goose, Cursor, Gemini CLI or GitHub Copilot and you want those sessions and their commits in Agent Analytics: run \`amplitude-ai coding-agents init\`, then \`amplitude-ai coding-agents doctor\`, and follow \`docs/integrations/<harness>.md\` (${codingAgents.harnesses.filter((h) => h.id !== 'buzz').map((h) => h.id).join(', ')}). The key is \`AMPLITUDE_AI_API_KEY\`, falling back to \`AMPLITUDE_API_KEY\`; the outcomes workflow reads the \`AMPLITUDE_API_KEY\` repository secret. Set \`AMPLITUDE_SESSION_TRIGGER\` (\`interactive\`, \`headless\`, \`ci\`, \`scheduled\`, \`event\`) where the harness can't tell how a session started; it becomes \`[Agent] Session Trigger\` and the commit's \`Agent-Trigger\` trailer (CI runs are \`ci\` without it). The outcomes workflow sends each code outcome as \`[Agent] Score\` (Evaluation Source \`outcome\`) on the session that wrote the commit; chart them by \`[Agent] Score Name\` with \`docs/integrations/recipes/code-outcomes.md\`.
 - Agent built on the Claude Agent SDK or the Codex SDK in your own app: use \`ClaudeAgentSDKTracker\` from \`@amplitude/ai/integrations/claude-agent-sdk\` or \`CodexSDKTracker\` from \`@amplitude/ai/integrations/codex-sdk\` inside \`ai.agent(...).session(...).run(...)\` (Path 1 of \`docs/integrations/claude-code.md\` and \`docs/integrations/codex.md\`).
 - Agents talk in Buzz (block/buzz): read the relay archive and forward with \`docs/integrations/buzz.md\`.
+${protocols.map((p) => `- Users reach your agent through their own personal agent over ${p.name}: set \`messageSource: 'personal_agent'\` on user turns an AI wrote and \`'user'\` on the user's own words, and put the personal agent in \`context\`; follow \`docs/integrations/${p.id}.md\`.`).join('\n')}
 - Agents call each other over A2A, ACP or HTTP, including agents another company runs: send context with \`injectA2aMetadata\` / \`injectAcpMeta\` / \`injectContext\`, and on the receiver pass the extracted context to \`agent.session({ context })\` (never spread its fields into session options). A context signed with a shared \`AMPLITUDE_AI_CONTEXT_KEYS\` joins the caller's session; anything else starts a new session linked by \`[Agent] Peer Agent ID\`. Reply with \`injectA2aResponseMetadata\` / \`injectAcpResultMeta\` / \`injectResponseHeaders\`, attach replies to the call with \`trackToolCall(..., { peer })\`, and spread \`contextProperties()\` into business events such as a checkout. See "Agents in other processes" in \`amplitude-ai.md\`.
 - Conversations already traced in ${tracingTools.map((p) => p.name).join(', ')}: forward them, including history, over HTTP by following \`docs/integrations/<tool>.md\`.
 - Conversations or traces already in a warehouse (${warehouses.sources.join(', ')}), including Google ADK's BigQuery Agent Analytics table (\`docs/integrations/warehouses/adk-bigquery-agent-analytics.md\`): follow \`docs/integrations/warehouses/README.md\`; check output with \`docs/integrations/check-agent-events.mjs\`.
@@ -230,6 +232,7 @@ Fetch the public guide for the job. These URLs track \`main\`.
 - \`llms-full.txt\` — Extended API reference with MCP tools and patterns
 ${runtimes.map((r) => `- \`docs/integrations/${r.id}.md\` — ${r.name} live sessions over the HTTP API, from a hook (no SDK)`).join('\n')}
 ${platforms.map((p) => `- \`docs/integrations/${p.id}.md\` — ${platformGuideLabel(p)}`).join('\n')}
+${protocols.map((p) => `- \`docs/integrations/${p.id}.md\` — ${p.name} traffic: who wrote each message, a person or an AI`).join('\n')}
 - \`docs/integrations/warehouses/README.md\` — ${warehouses.sources.join(', ')} ingestion through a SQL view and warehouse import (no SDK)
 ${codingAgents.harnesses.map((h) => `- \`docs/integrations/${h.id}.md\` — ${h.name} ${h.id === 'buzz' ? 'conversations from the relay archive (no SDK)' : 'sessions and commit outcomes'}`).join('\n')}
 ${codingAgents.recipes.map((r) => `- \`docs/integrations/recipes/${r.id}.md\` — Join coding-agent sessions to commits, PRs, and CI`).join('\n')}
@@ -264,6 +267,7 @@ ${events.join('\n')}
 
 [integrations]
 ${platforms.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
+${protocols.map((p) => `${p.id}=${p.raw_url}`).join('\n')}
 warehouses=${warehouses.raw_url}
 ${codingAgents.harnesses.map((h) => `${h.id}=${h.raw_url}`).join('\n')}
 ${codingAgents.recipes.map((r) => `${r.id}=${r.raw_url}`).join('\n')}

@@ -156,6 +156,19 @@
       "last_verified": "2026-10-26"
     }
   ],
+  "protocols": [
+    {
+      "id": "personal-agent-protocol",
+      "name": "Personal Agent Protocol",
+      "category": "agent_protocol",
+      "url": "https://github.com/amplitude/Amplitude-AI-Node/blob/main/docs/integrations/personal-agent-protocol.md",
+      "raw_url": "https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/personal-agent-protocol.md",
+      "extraction_methods": ["sdk"],
+      "ingestion_paths": ["sdk", "http_v2", "otlp"],
+      "vendor_format_source": "vendor_public_spec_1_0",
+      "last_verified": "2026-11-19"
+    }
+  ],
   "coding_agents": {
     "description": "Coding agents engineers run on a repo, and agents built on their SDKs. Sessions go to Amplitude; agent commits carry Agent-Session-Id trailers so merged, reverted and deployed outcomes join back.",
     "harnesses": [

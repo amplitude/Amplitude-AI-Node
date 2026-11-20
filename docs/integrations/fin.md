@@ -127,6 +127,12 @@ Both recipes remove a job when `syncFin` takes it, before it is forwarded. A job
 
 ---
 
+## Personal agent traffic
+
+If a conversation came from a user's personal agent through Personal Agent Protocol, add `[Agent] Message Source` = `personal_agent` to each `[Agent] User Message` the personal agent wrote (`user` for the user's own words), and add the personal agent's `client_id` URL as `poppy_personal_agent` in `[Agent] Context`. The forwarder core does not set either; add them in your adapter. Whether Fin's export exposes the Personal Agent Protocol fields is unverified, so check with Fin. Field mapping and chart recipes: [personal-agent-protocol.md](./personal-agent-protocol.md).
+
+---
+
 ## Reference
 
 ### Rules

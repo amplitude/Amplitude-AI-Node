@@ -31,6 +31,14 @@ The runtime owns the model loop. A hook in the agent posts each live turn.
 
 Cursor's built-in evals stay in Cursor. The hook drops eval and dry-run sessions. The user id has to be the one product analytics already uses.
 
+## Personal agents
+
+Your agent runs in your own code. A user's personal agent, an AI acting for the user, talks to it through a protocol. Agent Analytics records whether a person or an AI wrote each message.
+
+| Protocol | Guide | What is recorded | Last verified |
+|---|---|---|---|
+| Personal Agent Protocol | [personal-agent-protocol.md](./personal-agent-protocol.md) | `[Agent] Message Source` = `personal_agent` or `user` per user turn, the personal agent as `poppy_personal_agent` context, and a person's replies after a handoff as `human_agent` | 2026-11-19, public 1.0 spec |
+
 ## LLM tracing tools
 
 Your agent runs in your own code and is already traced; the forwarder reads sessions or threads from the tracing tool's API.
@@ -124,6 +132,7 @@ These URLs track `main`. Fetch the raw page for the source and follow "Part 2: C
 - Warehouses: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/warehouses/README.md`
 - Routers and gateways: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/routers.md`
 - Statsig Agent Experimentation: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/statsig.md`
+- Personal Agent Protocol: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/personal-agent-protocol.md`
 - AWS Strands: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/strands.md`
 - Google ADK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/google-adk.md`
 - Vercel AI SDK: `https://raw.githubusercontent.com/amplitude/Amplitude-AI-Node/main/docs/integrations/vercel-ai-sdk.md`
