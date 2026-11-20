@@ -397,5 +397,20 @@ describe('BoundAgent', () => {
       );
       expect(sessionEndEvents).toHaveLength(1);
     });
+
+    it('trackSessionEnd: false keeps one session open across run() calls', async (): Promise<void> => {
+      const mock = createMock();
+      const agent = mock.agent('bot', { userId: 'u1' });
+      const turn = () => agent.session({ sessionId: 'conv-1', trackSessionEnd: false });
+
+      await turn().run((s) => s.trackUserMessage('First'));
+      await turn().run((s) => s.trackUserMessage('Second'));
+      expect(mock.events.filter((e) => e.event_type === EVENT_SESSION_END)).toHaveLength(0);
+
+      agent.trackSessionEnd({ sessionId: 'conv-1' });
+      const ends = mock.events.filter((e) => e.event_type === EVENT_SESSION_END);
+      expect(ends).toHaveLength(1);
+      expect(ends[0]?.event_properties?.[PROP_SESSION_ID]).toBe('conv-1');
+    });
   });
 });
