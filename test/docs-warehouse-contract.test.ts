@@ -319,6 +319,40 @@ describe('adk-bigquery-agent-analytics query on DuckDB', () => {
     expect([...byId.values()].some((e) => e.event_properties['[Agent] Session ID'] === 'adk_s2')).toBe(false);
   });
 
+  it('reads adk-python rows: text_summary, AGENT_RESPONSE text, and only final streamed rows', async () => {
+    const events = (await runDuckDb(adkQuery())).filter((e) => e.event_properties['[Agent] Session ID'] === 'adk_py');
+    const byId = new Map(events.map((e) => [e.insert_id, e]));
+
+    expect(byId.get('adk_py:pp0:user')?.event_properties.$llm_message).toEqual({ text: 'How do I save for a bike?' });
+
+    const streamed = byId.get('adk_py:pp1:reply')?.event_properties;
+    expect(streamed?.$llm_message).toEqual({ text: 'Start by setting a weekly goal.' });
+    expect(streamed?.['[Agent] Input Tokens']).toBe(50);
+    expect(streamed?.['[Agent] Output Tokens']).toBe(9);
+    expect(streamed?.['[Agent] Latency Ms']).toBe(900);
+    expect(streamed?.['[Agent] Model Name']).toBe('gemini-2.5-flash');
+
+    const unwrapped = byId.get('adk_py:pp6:reply')?.event_properties;
+    expect(unwrapped?.$llm_message).toEqual({ text: 'You have 12 pounds.' });
+    expect(unwrapped?.['[Agent] Input Tokens']).toBe(160);
+    expect(byId.has('adk_py:pp4:reply')).toBe(false);
+
+    expect(events.filter((e) => e.event_type === '[Agent] AI Response')).toHaveLength(2);
+    expect(events.filter((e) => e.event_type === '[Agent] Session End')).toHaveLength(1);
+  });
+
+  it('keeps no text for a formatted response with a non-text part or a sentinel', async () => {
+    const source = renderAdkSample(DIALECTS.duckdb)
+      .replace("text: ''You have 12 pounds.''", "text: ''Checking.'' | call: get_balance")
+      .replace('"text_summary":"What is my balance?"', '"text_summary":"[REDACTED]"');
+    expect(source).toContain('| call: get_balance');
+    expect(source).toContain('"text_summary":"[REDACTED]"');
+    const events = await runDuckDb(renderMessageQuery(ADK_BIGQUERY, 'duckdb', { source }));
+    const byId = new Map(events.map((e) => [e.insert_id, e]));
+    expect(byId.get('adk_py:pp6:reply')?.event_properties.$llm_message).toEqual({ text: '[No text output]' });
+    expect(byId.has('adk_py:pp3:user')).toBe(false);
+  });
+
   it('drops all content when include_content is FALSE', async () => {
     const events = await runDuckDb(adkQuery().replace('TRUE AS include_content', 'FALSE AS include_content'));
     expect(events.length).toBeGreaterThan(0);
