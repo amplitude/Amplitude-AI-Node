@@ -203,5 +203,157 @@
       }
     },
     "import_cursor": "2026-01-15 14:00:34"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_678",
+    "time": 1768478490000,
+    "insert_id": "adk_py:pp0:user",
+    "event_properties": {
+      "[Agent] Session ID": "adk_py",
+      "[Agent] Agent ID": "coach",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"coach\",\"invocation_id\":\"inv_p1\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_py:trace-1",
+      "[Agent] Turn ID": 1,
+      "[Agent] Message ID": "adk_py:pp0:user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "How do I save for a bike?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:02:03"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_678",
+    "time": 1768478492000,
+    "insert_id": "adk_py:pp1:reply",
+    "event_properties": {
+      "[Agent] Session ID": "adk_py",
+      "[Agent] Agent ID": "coach",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"coach\",\"invocation_id\":\"inv_p1\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_py:trace-1",
+      "[Agent] Turn ID": 2,
+      "[Agent] Message ID": "adk_py:pp1:reply",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 900,
+      "[Agent] Model Name": "gemini-2.5-flash",
+      "[Agent] Input Tokens": 50,
+      "[Agent] Output Tokens": 9,
+      "$llm_message": {
+        "text": "Start by setting a weekly goal."
+      }
+    },
+    "import_cursor": "2026-01-15 14:02:03"
+  },
+  {
+    "event_type": "[Agent] User Message",
+    "user_id": "user_678",
+    "time": 1768478520000,
+    "insert_id": "adk_py:pp3:user",
+    "event_properties": {
+      "[Agent] Session ID": "adk_py",
+      "[Agent] Agent ID": "coach",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"coach\",\"invocation_id\":\"inv_p2\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_py:trace-2",
+      "[Agent] Turn ID": 3,
+      "[Agent] Message ID": "adk_py:pp3:user",
+      "[Agent] Component Type": "user_input",
+      "$llm_message": {
+        "text": "What is my balance?"
+      }
+    },
+    "import_cursor": "2026-01-15 14:02:03"
+  },
+  {
+    "event_type": "[Agent] Tool Call",
+    "user_id": "user_678",
+    "time": 1768478522000,
+    "insert_id": "adk_py:pp5:tool",
+    "event_properties": {
+      "[Agent] Session ID": "adk_py",
+      "[Agent] Agent ID": "coach",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"coach\",\"invocation_id\":\"inv_p2\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_py:trace-2",
+      "[Agent] Turn ID": 4,
+      "[Agent] Invocation ID": "adk_py:pp5:tool",
+      "[Agent] Component Type": "tool",
+      "[Agent] Tool Name": "get_balance",
+      "[Agent] Tool Success": true,
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 90,
+      "[Agent] Parent Message ID": "adk_py:pp3:user",
+      "[Agent] Tool Input": "{}",
+      "[Agent] Tool Output": "{\"gbp\":12}"
+    },
+    "import_cursor": "2026-01-15 14:02:03"
+  },
+  {
+    "event_type": "[Agent] AI Response",
+    "user_id": "user_678",
+    "time": 1768478523000,
+    "insert_id": "adk_py:pp6:reply",
+    "event_properties": {
+      "[Agent] Session ID": "adk_py",
+      "[Agent] Agent ID": "coach",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"coach\",\"invocation_id\":\"inv_p2\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_py:trace-2",
+      "[Agent] Turn ID": 5,
+      "[Agent] Message ID": "adk_py:pp6:reply",
+      "[Agent] Component Type": "llm",
+      "[Agent] Is Error": false,
+      "[Agent] Latency Ms": 500,
+      "[Agent] Model Name": "gemini-2.5-flash",
+      "[Agent] Input Tokens": 160,
+      "[Agent] Output Tokens": 10,
+      "$llm_message": {
+        "text": "You have 12 pounds."
+      }
+    },
+    "import_cursor": "2026-01-15 14:02:03"
+  },
+  {
+    "event_type": "[Agent] Session End",
+    "user_id": "user_678",
+    "time": 1768478523000,
+    "insert_id": "adk_py:session-end",
+    "event_properties": {
+      "[Agent] Session ID": "adk_py",
+      "[Agent] Agent ID": "coach",
+      "[Agent] Runtime": "custom",
+      "[Agent] SDK Version": "warehouse-sql/1.0",
+      "[Agent] Ingestion Path": "warehouse_import",
+      "[Agent] Source": "warehouse-sql",
+      "[Agent] Content Mode": "full",
+      "[Agent] Context": "{\"root_agent_name\":\"coach\",\"invocation_id\":\"inv_p2\",\"content_uri\":null}",
+      "[Agent] Trace ID": "adk_py:trace-2"
+    },
+    "import_cursor": "2026-01-15 14:02:03"
   }
 ]

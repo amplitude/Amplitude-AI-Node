@@ -1,14 +1,27 @@
-// Stage 1 for Google ADK's BigQuery Agent Analytics table (adk-go
-// plugin/agentanalytics). BigQuery only, so it is not one of the three-warehouse
-// MESSAGE_FORMATS; DuckDB renders it for the tests.
+// Stage 1 for Google ADK's BigQuery Agent Analytics table, as written by adk-go
+// (plugin/agentanalytics) and adk-python (plugins/bigquery_agent_analytics_plugin.py).
+// BigQuery only, so it is not one of the three-warehouse MESSAGE_FORMATS;
+// DuckDB renders it for the tests.
 //
 // Rows kept: USER_MESSAGE_RECEIVED (user), LLM_RESPONSE and LLM_ERROR
-// (assistant), TOOL_COMPLETED and TOOL_ERROR (tool). Everything else is dropped.
+// (assistant), TOOL_COMPLETED and TOOL_ERROR (tool). AGENT_RESPONSE supplies
+// reply text. Everything else is dropped.
 // - LLM_ERROR is a failed model call with no response, on the LLM_REQUEST span
 //   (trace_manager.go): each one is an errored AI Response, outside the
 //   one-reply-per-agent ranking so a retry that succeeds doesn't hide it.
 // - Text is the content_parts text/plain parts. A GCS_REFERENCE part keeps its
 //   inline preview (json_formatter.go addText); its object_ref.uri goes in context.
+// - adk-python writes no content_parts on LLM_RESPONSE or AGENT_RESPONSE, and
+//   none at all with log_multi_modal_content=False. Then user text is
+//   content.text_summary, and reply text is content.response unwrapped from
+//   _format_content's "text: '...' | ..." form, the way the plugin's own
+//   eval_view_ctes_v1.sql does it. A response with a call, resp, code or
+//   "other" part has no text.
+// - A reply's text prefers the agent's last AGENT_RESPONSE in the invocation:
+//   adk-python drops thought parts there but keeps them in LLM_RESPONSE.
+// - adk-python logs an LLM_RESPONSE per streamed chunk on the request's span.
+//   Only the final row has attributes.finish_reason or cache_type, so when an
+//   agent's invocation has such rows, the others are skipped.
 // - The model is on LLM_REQUEST (attributes.model), joined by span_id; else
 //   the response's attributes.model_version.
 // - Tokens of every LLM_RESPONSE of one agent in one invocation go on that
@@ -16,6 +29,7 @@
 // - Tool arguments are on TOOL_STARTING (content.args), joined by span_id.
 // - A row without user_id takes the session's first non-null user_id.
 
+import { DIALECTS } from './dialects.mjs';
 import { renderSample } from './formats.mjs';
 
 const nullOf = (d, type) => `CAST(NULL AS ${d.types[type]})`;
@@ -28,6 +42,9 @@ const json = {
       `(SELECT NULLIF(STRING_AGG(p.text, '\\n' ORDER BY p.part_index), '') FROM UNNEST(${col}) AS p WHERE p.mime_type = 'text/plain')`,
     gcsUri: (col) =>
       `(SELECT MIN(p.object_ref.uri) FROM UNNEST(${col}) AS p WHERE p.storage_mode = 'GCS_REFERENCE')`,
+    matches: (expr, pattern) => `REGEXP_CONTAINS(${expr}, ${DIALECTS.bigquery.quote(pattern)})`,
+    replace: (expr, pattern, replacement) =>
+      `REGEXP_REPLACE(${expr}, ${DIALECTS.bigquery.quote(pattern)}, ${replacement})`,
   },
   duckdb: {
     value: (col, path) => `json_extract_string(${col}, '${path}')`,
@@ -35,7 +52,31 @@ const json = {
     partsText: (col) =>
       `NULLIF(array_to_string([p.text FOR p IN list_sort(${col}) IF p.mime_type = 'text/plain'], chr(10)), '')`,
     gcsUri: (col) => `list_min([p.object_ref.uri FOR p IN ${col} IF p.storage_mode = 'GCS_REFERENCE'])`,
+    matches: (expr, pattern) => `regexp_matches(${expr}, ${DIALECTS.duckdb.quote(pattern)})`,
+    replace: (expr, pattern, replacement) =>
+      `regexp_replace(${expr}, ${DIALECTS.duckdb.quote(pattern)}, ${replacement}, 'g')`,
   },
+};
+
+// adk-python's _RESPONSE_TEXT_SENTINELS: placeholders, not model text.
+const SENTINELS = [
+  '[FORMATTER_FAILED]',
+  '[FORMATTING FAILED]',
+  '[REDACTED]',
+  '[CONTENT_PARSE_FAILED]',
+  '[UNPARSEABLE_JSON_BLOB]',
+  '[UNSUPPORTED_OBJECT]',
+  '[REDACTED_SENSITIVE_TEXT]',
+];
+
+/** `expr` when it is real text: not blank and not a sentinel. */
+const realText = (d, expr) =>
+  `CASE WHEN TRIM(${expr}) <> '' AND ${expr} NOT IN (${SENTINELS.map((s) => d.quote(s)).join(', ')}) THEN ${expr} END`;
+
+/** The text of a _format_content string whose parts are all text parts, else NULL. */
+const unwrapFormatted = (d, j, expr) => {
+  const inner = j.replace(j.replace(expr, "^text: '|'$", "''"), "' [|] text: '", 'CHR(10)');
+  return `CASE WHEN ${j.matches(expr, "(?s)^text: '.*'$")} AND NOT ${j.matches(expr, "' [|] (?:call: |resp: |Executable code |Code execution result |other(?: [|] |$))")} THEN ${inner} END`;
 };
 
 const at = (seconds) => new Date(Date.UTC(2026, 0, 15, 12, 0, seconds)).toISOString().replace('T', ' ').replace('.000Z', '');
@@ -61,6 +102,7 @@ const call = (name, index = 0) => ({ mime_type: 'application/json', text: `Funct
 const offloaded = (preview, uri, index = 0) => ({ mime_type: 'text/plain', text: preview, part_index: index, storage_mode: 'GCS_REFERENCE', uri });
 
 const ROOT = { root_agent_name: 'support_root' };
+const PY_ROOT = { root_agent_name: 'coach' };
 // [seconds, event_type, agent, session, invocation, user, span, parent, content, attributes, latency, status, error, parts]
 const SAMPLE = [
   [0, 'INVOCATION_STARTING', 'support_root', 'adk_s1', 'inv_1', 'user_12345', 'sp0', null, null, ROOT, null, 'OK', null, []],
@@ -82,6 +124,21 @@ const SAMPLE = [
   [34, 'LLM_RESPONSE', 'billing_agent', 'adk_s1', 'inv_2', null, 'sp7', 'sp4', { response: "text: 'It already shipped...'" }, { ...ROOT, model_version: 'gemini-2.5-pro-002', usage_metadata: { prompt_token_count: 240, candidates_token_count: 30 } }, { total_ms: 1200 }, 'OK', null, [offloaded('It already shipped, so I started a return', 'gs://adk-bucket/sessions/adk_s1/sp7.txt')]],
   [60, 'USER_MESSAGE_RECEIVED', 'support_root', 'adk_s2', 'inv_3', null, 'sp8', null, { text_summary: 'hello?' }, ROOT, null, 'OK', null, [text('hello?')]],
   [61, 'LLM_RESPONSE', 'support_root', 'adk_s2', 'inv_3', null, 'sp9', 'sp8', { response: "text: 'Hi'" }, ROOT, null, 'OK', null, [text('Hi')]],
+  // adk-python, streaming a thinking model with log_multi_modal_content=False:
+  // no content_parts, a row per streamed chunk, thoughts in LLM_RESPONSE only.
+  [90, 'USER_MESSAGE_RECEIVED', 'coach', 'adk_py', 'inv_p1', 'user_678', 'pp0', null, { text_summary: 'How do I save for a bike?' }, PY_ROOT, null, 'OK', null, []],
+  [90, 'LLM_REQUEST', 'coach', 'adk_py', 'inv_p1', 'user_678', 'pp1', 'pp0', { prompt: [] }, { ...PY_ROOT, model: 'gemini-2.5-flash' }, null, 'OK', null, []],
+  [91, 'LLM_RESPONSE', 'coach', 'adk_py', 'inv_p1', 'user_678', 'pp1', 'pp0', { response: "text: 'Start by'", usage: { prompt: 50, completion: 3 } }, { ...PY_ROOT, usage_metadata: { prompt_token_count: 50, candidates_token_count: 3 } }, { total_ms: 200, time_to_first_token_ms: 200 }, 'OK', null, []],
+  [91, 'LLM_RESPONSE', 'coach', 'adk_py', 'inv_p1', 'user_678', 'pp1', 'pp0', { response: "text: 'Start by setting'", usage: { prompt: 50, completion: 5 } }, { ...PY_ROOT, usage_metadata: { prompt_token_count: 50, candidates_token_count: 5 } }, { total_ms: 300, time_to_first_token_ms: 200 }, 'OK', null, []],
+  [92, 'LLM_RESPONSE', 'coach', 'adk_py', 'inv_p1', 'user_678', 'pp1', 'pp0', { response: "text: 'They want a savings plan.' | text: 'Start by setting a weekly goal.'", usage: { prompt: 50, completion: 9 } }, { ...PY_ROOT, model_version: 'gemini-2.5-flash-001', usage_metadata: { prompt_token_count: 50, candidates_token_count: 9 }, cache_type: 'none', finish_reason: 'STOP' }, { total_ms: 900, time_to_first_token_ms: 200 }, 'OK', null, []],
+  [92, 'AGENT_RESPONSE', 'coach', 'adk_py', 'inv_p1', 'user_678', 'pp2', 'pp0', { response: "text: 'Start by setting a weekly goal.'" }, PY_ROOT, null, 'OK', null, []],
+  [120, 'USER_MESSAGE_RECEIVED', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp3', null, { text_summary: 'What is my balance?' }, PY_ROOT, null, 'OK', null, []],
+  [120, 'LLM_REQUEST', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp4', 'pp3', { prompt: [] }, { ...PY_ROOT, model: 'gemini-2.5-flash' }, null, 'OK', null, []],
+  [121, 'LLM_RESPONSE', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp4', 'pp3', { response: 'call: get_balance', usage: { prompt: 70, completion: 4 } }, { ...PY_ROOT, usage_metadata: { prompt_token_count: 70, candidates_token_count: 4 }, cache_type: 'none', finish_reason: 'STOP' }, { total_ms: 400 }, 'OK', null, []],
+  [121, 'TOOL_STARTING', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp5', 'pp4', { tool: 'get_balance', args: {}, tool_origin: 'LOCAL' }, PY_ROOT, null, 'OK', null, []],
+  [122, 'TOOL_COMPLETED', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp5', 'pp4', { tool: 'get_balance', result: { gbp: 12 }, tool_origin: 'LOCAL' }, PY_ROOT, { total_ms: 90 }, 'OK', null, []],
+  [122, 'LLM_REQUEST', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp6', 'pp3', { prompt: [] }, { ...PY_ROOT, model: 'gemini-2.5-flash' }, null, 'OK', null, []],
+  [123, 'LLM_RESPONSE', 'coach', 'adk_py', 'inv_p2', 'user_678', 'pp6', 'pp3', { response: "text: 'You have 12 pounds.'", usage: { prompt: 90, completion: 6 } }, { ...PY_ROOT, model_version: 'gemini-2.5-flash-001', usage_metadata: { prompt_token_count: 90, candidates_token_count: 6 }, cache_type: 'none', finish_reason: 'STOP' }, { total_ms: 500 }, 'OK', null, []],
 ];
 
 function partsLiteral(d, parts) {
@@ -113,15 +170,52 @@ export const ADK_BIGQUERY = {
   dialects: ['bigquery', 'duckdb'],
   ctes: (d) => {
     const j = json[d.id];
-    return `adk AS (
+    return `adk_rows AS (
   SELECT
     s.*,
     FIRST_VALUE(s.user_id IGNORE NULLS) OVER (
       PARTITION BY s.session_id ORDER BY s.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS session_user_id,
     ${j.partsText('s.content_parts')} AS part_text,
-    ${j.gcsUri('s.content_parts')} AS gcs_uri
+    ${j.gcsUri('s.content_parts')} AS gcs_uri,
+    ${j.value('s.content', '$.text_summary')} AS text_summary,
+    ${j.value('s.content', '$.response')} AS formatted_response,
+    s.event_type = 'LLM_RESPONSE' AND (
+      ${j.value('s.attributes', '$.finish_reason')} IS NOT NULL OR ${j.value('s.attributes', '$.cache_type')} IS NOT NULL
+    ) AS is_final_response
   FROM source s
+),
+adk_unwrapped AS (
+  SELECT r.*, ${unwrapFormatted(d, j, 'r.formatted_response')} AS unwrapped_response
+  FROM adk_rows r
+),
+adk AS (
+  SELECT
+    u.*,
+    COALESCE(u.part_text, ${realText(d, 'u.text_summary')}) AS user_text,
+    COALESCE(u.part_text, ${realText(d, 'u.unwrapped_response')}) AS response_text
+  FROM adk_unwrapped u
+),
+agent_replies AS (
+  SELECT session_id, invocation_id, agent, reply_text
+  FROM (
+    SELECT
+      a.session_id,
+      a.invocation_id,
+      a.agent,
+      COALESCE(${realText(d, 'a.text_summary')}, a.response_text) AS reply_text,
+      ROW_NUMBER() OVER (PARTITION BY a.session_id, a.invocation_id, a.agent ORDER BY a.timestamp DESC, a.span_id DESC) AS agent_reply_rank
+    FROM adk a
+    WHERE a.event_type = 'AGENT_RESPONSE' AND COALESCE(${realText(d, 'a.text_summary')}, a.response_text) IS NOT NULL
+  ) ranked
+  WHERE agent_reply_rank = 1
+),
+model_responses AS (
+  SELECT
+    a.*,
+    COUNT(CASE WHEN a.is_final_response THEN 1 END) OVER (PARTITION BY a.session_id, a.invocation_id, a.agent) AS final_responses
+  FROM adk a
+  WHERE a.event_type = 'LLM_RESPONSE'
 ),
 requests AS (
   SELECT span_id, MAX(${j.value('attributes', '$.model')}) AS request_model
@@ -144,10 +238,10 @@ responses AS (
       OVER (PARTITION BY a.session_id, a.invocation_id, a.agent) AS invocation_output_tokens,
     ROW_NUMBER() OVER (
       PARTITION BY a.session_id, a.invocation_id, a.agent
-      ORDER BY CASE WHEN a.part_text IS NOT NULL OR a.status = 'ERROR' THEN 0 ELSE 1 END, a.timestamp DESC, a.span_id DESC
+      ORDER BY CASE WHEN a.response_text IS NOT NULL OR a.status = 'ERROR' THEN 0 ELSE 1 END, a.timestamp DESC, a.span_id DESC
     ) AS reply_rank
-  FROM adk a
-  WHERE a.event_type = 'LLM_RESPONSE'
+  FROM model_responses a
+  WHERE a.final_responses = 0 OR a.is_final_response
 )`;
   },
   normalize: (d) => {
@@ -166,7 +260,7 @@ responses AS (
     a.agent AS agent_id,
     a.session_user_id AS user_id,
     ${nullOf(d, 'string')} AS device_id,
-    a.part_text AS content,
+    a.user_text AS content,
     ${nullOf(d, 'string')} AS tool_name,
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
@@ -187,7 +281,7 @@ responses AS (
     ${nullOf(d, 'bool')} AS is_error,
     ${nullOf(d, 'string')} AS error_message
   FROM adk a
-  WHERE a.event_type = 'USER_MESSAGE_RECEIVED' AND a.part_text IS NOT NULL
+  WHERE a.event_type = 'USER_MESSAGE_RECEIVED' AND a.user_text IS NOT NULL
   UNION ALL
   SELECT
     r.session_id,
@@ -197,7 +291,7 @@ responses AS (
     r.agent AS agent_id,
     r.session_user_id AS user_id,
     ${nullOf(d, 'string')} AS device_id,
-    CASE WHEN r.status = 'ERROR' THEN r.part_text ELSE COALESCE(r.part_text, '[No text output]') END AS content,
+    CASE WHEN r.status = 'ERROR' THEN r.response_text ELSE COALESCE(g.reply_text, r.response_text, '[No text output]') END AS content,
     ${nullOf(d, 'string')} AS tool_name,
     ${nullOf(d, 'string')} AS tool_input,
     ${nullOf(d, 'string')} AS tool_output,
@@ -219,6 +313,7 @@ responses AS (
     CASE WHEN r.status = 'ERROR' THEN COALESCE(r.error_message, 'model error') END AS error_message
   FROM responses r
   LEFT JOIN requests q ON q.span_id = r.span_id
+  LEFT JOIN agent_replies g ON g.session_id = r.session_id AND g.invocation_id = r.invocation_id AND g.agent = r.agent
   WHERE r.reply_rank = 1
   UNION ALL
   SELECT
